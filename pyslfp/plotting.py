@@ -8,12 +8,12 @@ if __name__ == "__main__":
 
 def plot_SHGrid(grid, /, *, cmap="RdBu", symmetric=True,
                 colorbar=False, show=True,  file=None,
-                clim=None, contour=False):
+                clim=None, contour=False, levels=10):
 
     ax = plt.axes(projection=ccrs.PlateCarree())
     ax.coastlines()
     if contour:
-        plt.contourf(grid.lons(), grid.lats(), grid.data,cmap = cmap)
+        plt.contourf(grid.lons(), grid.lats(), grid.data,cmap = cmap, levels=levels)
     else:
         plt.pcolor(grid.lons(), grid.lats(), grid.data,cmap = cmap)
 

@@ -60,11 +60,11 @@ class IceNG:
 
     
     # Reads in a date file and interpolates ice thickness and sea level onto a SHGrid. 
-    def _get_time_slice(self,file, lmax, /, *,  grid = "DH", sampling = 1, extend = True):        
+    def _get_time_slice(self,file, lmax, /, *,  grid="DH", sampling=1, extend=True):        
 
-        data = xr.open_dataset(file)                
-        ice_thickness = sh.SHGrid.from_zeros(lmax, grid = grid, sampling = sampling, extend = extend)  
-        topography = sh.SHGrid.from_zeros(lmax, grid = grid, sampling = sampling, extend = extend)        
+        data = xr.open_dataset(file)                        
+        ice_thickness = sh.SHGrid.from_zeros(lmax, grid=grid, sampling=sampling, extend=extend)  
+        topography = sh.SHGrid.from_zeros(lmax, grid=grid, sampling=sampling, extend=extend)      
 
         if self._version == 5:
             ice_thickness_function = RegularGridInterpolator((data.lat.values, data.long.values), data.sftgit.values, bounds_error= False, fill_value=None) 
@@ -82,13 +82,13 @@ class IceNG:
     # Returns the ice thickness and sea level at a given date interpolated onto a SHGrid. If the date 
     # does not exist within the data set, linear interpolation is used between the two closest times. 
     # If the date is out of range, constant extrapolation is applied from the boundary values. 
-    def get_time_slice(self, date, lmax, /, *,  grid = "DH", sampling = 1, extend = True):
+    def get_time_slice(self, date, lmax, /, *,  grid = "DH", sampling=1, extend = True):
         file1, file2, fraction = self._find_files(date)        
         if file1 == file2:
-            ice_thickness, topography = self._get_time_slice(file1, lmax, grid = grid, sampling = sampling, extend = extend)
+            ice_thickness, topography = self._get_time_slice(file1, lmax, grid = grid, sampling=sampling, extend = extend)
         else:
-            ice_thickness1, topography1 = self._get_time_slice(file1, lmax, grid = grid, sampling = sampling, extend = extend)
-            ice_thickness2, topography2 = self._get_time_slice(file2, lmax, grid = grid, sampling = sampling, extend = extend)
+            ice_thickness1, topography1 = self._get_time_slice(file1, lmax, grid = grid, sampling=sampling, extend = extend)
+            ice_thickness2, topography2 = self._get_time_slice(file2, lmax, grid = grid, sampling=sampling, extend = extend)
             ice_thickness = fraction * ice_thickness1 + (1 - fraction) * ice_thickness2
             topography = fraction * topography1 + (1 - fraction) * topography2        
         return ice_thickness, topography

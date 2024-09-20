@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "pyslfp"
+version = "0.1.2"
+description = "Library for computing elastic sea level fingerprints"
+authors = ["David Al-Attar"]
+readme = "README.md"
+license = "MIT"
+
+
+[tool.poetry.dependencies]
+python = "^3.12"
+numpy = "^2.1.1"
+scipy = "^1.14.1"
+Cartopy = "^0.23.0"
+pyshtools = "^4.13.1"
+xarray = "^2024.9.0"
+matplotlib = "^3.9.2"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

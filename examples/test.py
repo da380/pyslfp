@@ -3,7 +3,7 @@ from pyslfp import Solver, plot_SHGrid
 
 
 # Set up the fingerprint solver. 
-solver = Solver()
+solver = Solver(256)
 
 # Set the background sea level and ice thickness. 
 solver.set_background_state_from_ice_ng()
@@ -16,7 +16,7 @@ zeta = -solver.ice_density * solver.one_minus_ocean_function \
 response = solver(zeta, verbose=True)
 
 # Plot the sea level change over the oceans. 
-plot_SHGrid(response.sl * solver.ocean_mask(), contour=True, levels=60, colorbar=True)
+plot_SHGrid(response.sl , contour=True, levels=60, colorbar=True)
 
 
 

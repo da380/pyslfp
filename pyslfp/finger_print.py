@@ -10,12 +10,21 @@ if __name__ == "__main__":
     pass
 
 
-class Solver:
+class FingerPrint:
 
 
     def __init__(self, lmax=256, /,*, length_scale=1, mass_scale=1, time_scale=1,
                  grid = "DH", love_number_file=DATADIR + "/love_numbers/PREM_4096.dat"):
-        
+        """
+        Args:
+            lmax (int): Truncation degree for spherical harmonic expansions. 
+            length_scale (float): Length used for non-dimensionalisation. 
+            mass_scale (float): Mass used for non-dimensionalisation. 
+            time_scale (float): Time used for non-dimensionalisation. 
+            grid (str): pyshtools grid option. 
+            love_number_file (str): Path to file containing the Love numbers. 
+        """
+
         # Set the base units. 
         self._length_scale = length_scale        
         self._mass_scale = mass_scale
@@ -60,8 +69,8 @@ class Solver:
         self._read_love_numbers(love_number_file)
 
         # Pre-compute some constants.
-        self._rotation_factor =  np.sqrt((4*np.pi)/15.) * self.rotation_frequency *  self.mean_sea_floor_radius**2
         self._integration_factor =  np.sqrt((4*np.pi)) * self._mean_sea_floor_radius**2
+        self._rotation_factor =  np.sqrt((4*np.pi)/15.) * self.rotation_frequency *  self.mean_sea_floor_radius**2        
         self._inertia_factor = (np.sqrt(5/(12*np.pi))  * self.rotation_frequency * self.mean_sea_floor_radius**3 / 
                                (self.gravitational_constant   * (self.polar_moment_of_inertia - self.equatorial_moment_of_inertia)))        
 
@@ -233,7 +242,7 @@ class Solver:
             return self._sea_level                
 
     @sea_level.setter
-    def sea_level(self, value):
+    def sea_level(self, value):        
         self._check_field(value)
         self._sea_level = value
 
@@ -368,6 +377,7 @@ class Solver:
         sl.data[:,:] += sl_uniform - sl_average        
 
         return ResponseFields(u, phi, omega, sl)
+
         
     #--------------------------------------------------------#
     #                       Public methods                   #
@@ -383,7 +393,6 @@ class Solver:
         return self.integrate(self.ocean_function * f) / self.ocean_area
 
     
-
     def set_background_state_from_ice_ng(self,  /, *, version = 7, date=0):
         """
         Sets background state from ice_7g, ice_6g, or ice_5g.
@@ -417,9 +426,8 @@ class Solver:
         self.sea_level = sea_level
         self.ice_thickness = ice_thickness
     
-
     
-    def __call__(self, zeta, /, *, rotational_feedbacks=True, rtol = 1.e-6, verbose = False):
+    def solver(self, zeta, /, *, rotational_feedbacks=True, rtol = 1.e-6, verbose = False):
         """
         Returns the solution to the fingerprint problem for a given direct load.
 
@@ -456,6 +464,9 @@ class Solver:
 
         return response
 
+    def generalised_solver(self, generalised_load, /, *, rotational_feedbacks=True, rtol = 1.e-6, verbose = False):
+        pass
+
     def gravity_potential_to_gravitational_potential(self, response):
         """Converts the gravity potential within a ResponseField to the gravitational potential."""    
         phi_lm = self._expand_field(response.phi)
@@ -488,11 +499,27 @@ class Solver:
         lats, _ = np.meshgrid(self.ice_thickness.lats(), self.ice_thickness.lons(), indexing="ij")
         return SHGrid.from_array(np.where(lats < 0, 1, value), grid = self.grid)        
 
-
     def disk_load(self, delta, latitutude, longitude, amplitude):
         """Return a disk load."""
         return amplitude * SHGrid.from_cap(delta, latitutude, longitude, lmax = self.lmax, grid=self.grid,
                                extend = self._extend, sampling = self._sampling)
+
+    def load_from_ice_thickness_change(self, ice_thickness_change):
+        """Converts an ice thickness change into the associated load."""
+        self._check_field(ice_thickness_change)
+        return self.ice_density * self.one_minus_ocean_function * ice_thickness_change
+    
+    def northern_hemisphere_load(self, fraction = 1):
+        """Returns a load associated with melting the given fraction of ice in the northern hemisphere."""
+        ice_thickness_change = -fraction * self.ice_thickness * self.northern_hemisphere_mask(0)
+        return self.load_from_ice_thickness_change(ice_thickness_change)
+
+    def southern_hemisphere_load(self, fraction = 1):
+        """Returns a load associated with melting the given fraction of ice in the northern hemisphere."""
+        ice_thickness_change = -fraction * self.ice_thickness * self.southern_hemisphere_mask(0)
+        return self.load_from_ice_thickness_change(ice_thickness_change)
+
+    
 
 
 

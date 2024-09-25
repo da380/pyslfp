@@ -377,6 +377,56 @@ class FingerPrint:
         sl.data[:,:] += sl_uniform - sl_average        
 
         return ResponseFields(u, phi, omega, sl)
+    
+    def _iterate_generalised_solver(self, generalised_load, sl_uniform, /, *, rotational_feedbacks=True):
+        # Given a generalised load, returns the response.
+
+        sigma = generalised_load._sl
+        zeta_u = generalised_load._u
+        zeta_phi = generalised_load._phi
+        kk = generalised_load._omega
+
+        assert self._check_field(sigma)
+        assert self._check_field(zeta_u)
+        assert self._check_field(zeta_phi)
+
+        sigma_lm = self._expand_field(sigma)
+        zeta_u_lm = self._expand_field(zeta_u)
+        zeta_phi_lm = self._expand_field(zeta_phi)
+        u_lm = sigma_lm.copy()
+        phi_lm = sigma_lm.copy()
+        for l in range(self.lmax+1):
+            u_lm.coeffs[:,l,:] = self._h[l] * sigma_lm.coeffs[:,l,:]    \
+                                + self._h_u[l] * zeta_u_lm.coeffs[:,l,:]    \
+                                + self._h_phi[l] * zeta_phi_lm.coeffs[:,l,:]
+            phi_lm.coeffs[:,l,:] = self._k[l] * sigma_lm.coeffs[:,l,:]    \
+                                + self._k_u[l] * zeta_u_lm.coeffs[:,l,:]    \
+                                + self._k_phi[l] * zeta_phi_lm.coeffs[:,l,:]
+            
+        if rotational_feedbacks:
+            r = self._rotation_factor
+            i = self._inertia_factor
+            kt = self._kt[2]
+            ht = self._ht[2]
+            g = r /(1 - r * i * kt)
+            h = 1 /(self.polar_moment_of_inertia - self.equatorial_moment_of_inertia)
+            u_lm.coeffs[:,2,1] += ht * g * i * phi_lm.coeffs[:,2,1]     \
+                                + ht * r * h * kk[:]    \
+                                + kt * g * h * kk[:]
+            phi_lm.coeffs[:,2,1] += kt * g * i * phi_lm.coeffs[:,2,1]    \
+                                + kt * g * h * kk[:]
+            omega = i * phi_lm.coeffs[:,2,1] + h * kk[:]
+        else:
+            omega = np.zeros(2)
+
+        g = self.gravitational_acceleration
+        u = self._expand_coefficient(u_lm)
+        phi = self._expand_coefficient(phi_lm)
+        sl = (-1/g) * (g * u + phi)
+        sl_average = self.ocean_average(sl)
+        sl.data[:,:] += sl_uniform - sl_average
+
+        return ResponseFields(u, phi, omega, sl)
 
         
     #--------------------------------------------------------#
@@ -463,9 +513,48 @@ class FingerPrint:
                 print(f'Iteration = {count}, relative error = {err:6.4e}')
 
         return response
-
+    
     def generalised_solver(self, generalised_load, /, *, rotational_feedbacks=True, rtol = 1.e-6, verbose = False):
-        pass
+        """
+        Returns the solution to the generalised fingerprint problem for a given generalised load.
+
+        Args:
+            generalised_load (ResponseFields object): The generalised load. 
+            rotational_feedbacks (bool): If true, rotational feedbacks included.
+            rtol (float): Relative tolerance used in assessing convergence of iterations. 
+            verbose (bool): If true, information on iterations printed. 
+
+        Returns:
+            ResponseField: Instance of the class containing the displacement, 
+                gravitaty potential perturbation, rotational perturbation, and 
+                sea level change. 
+
+        Notes:
+            If rotational feedbacks are included, the potential perturbation 
+            is that of gravity, this being a sum of the gravitational and 
+            centrifugal perturbations. 
+        """
+        assert self._check_field(generalised_load._sl)
+        assert self._check_field(generalised_load._u)
+        assert self._check_field(generalised_load._phi)
+
+        zeta = generalised_load._sl
+        sl_uniform = -self.integrate(zeta) / (self.water_density * self.ocean_area)            
+        sigma = zeta + self.water_density * self.ocean_function * sl_uniform
+        generalised_load._sl = sigma
+
+        err = 1
+        count = 0
+        while err > rtol:
+            response = self._iterate_generalised_solver(generalised_load, sl_uniform, rotational_feedbacks=rotational_feedbacks)
+            sigma_new = zeta + self.water_density * self.ocean_function * response.sl
+            err = np.max(np.abs((sigma_new - sigma).data)) / np.max(np.abs(sigma.data))
+            generalised_load._sl = sigma_new
+            if verbose:
+                count += 1
+                print(f'Iteration = {count}, relative error = {err:6.4e}')
+
+        return response
 
     def gravity_potential_to_gravitational_potential(self, response):
         """Converts the gravity potential within a ResponseField to the gravitational potential."""    

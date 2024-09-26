@@ -381,10 +381,10 @@ class FingerPrint:
     def _iterate_generalised_solver(self, generalised_load, sl_uniform, /, *, rotational_feedbacks=True):
         # Given a generalised load, returns the response.
 
-        sigma = generalised_load._sl
-        zeta_u = generalised_load._u
-        zeta_phi = generalised_load._phi
-        kk = generalised_load._omega
+        sigma = generalised_load.sl
+        zeta_u = generalised_load.u
+        zeta_phi = generalised_load.phi
+        kk = generalised_load.omega
 
         assert self._check_field(sigma)
         assert self._check_field(zeta_u)
@@ -416,6 +416,7 @@ class FingerPrint:
             phi_lm.coeffs[:,2,1] += kt * g * i * phi_lm.coeffs[:,2,1]    \
                                 + kt * g * h * kk[:]
             omega = i * phi_lm.coeffs[:,2,1] + h * kk[:]
+            phi_lm.coeffs[:,2,1] += r * omega
         else:
             omega = np.zeros(2)
 
@@ -519,7 +520,7 @@ class FingerPrint:
         Returns the solution to the generalised fingerprint problem for a given generalised load.
 
         Args:
-            generalised_load (ResponseFields object): The generalised load. 
+            generalised_load (ResponseFields object): The generalised load as an instance of ResponseFields (for now)
             rotational_feedbacks (bool): If true, rotational feedbacks included.
             rtol (float): Relative tolerance used in assessing convergence of iterations. 
             verbose (bool): If true, information on iterations printed. 
@@ -534,22 +535,23 @@ class FingerPrint:
             is that of gravity, this being a sum of the gravitational and 
             centrifugal perturbations. 
         """
-        assert self._check_field(generalised_load._sl)
-        assert self._check_field(generalised_load._u)
-        assert self._check_field(generalised_load._phi)
+        assert self._check_field(generalised_load.sl)
+        assert self._check_field(generalised_load.u)
+        assert self._check_field(generalised_load.phi)
 
-        zeta = generalised_load._sl
+        load = generalised_load
+        zeta = load.sl
         sl_uniform = -self.integrate(zeta) / (self.water_density * self.ocean_area)            
         sigma = zeta + self.water_density * self.ocean_function * sl_uniform
-        generalised_load._sl = sigma
+        load.sl = sigma
 
         err = 1
         count = 0
         while err > rtol:
-            response = self._iterate_generalised_solver(generalised_load, sl_uniform, rotational_feedbacks=rotational_feedbacks)
+            response = self._iterate_generalised_solver(load, sl_uniform, rotational_feedbacks=rotational_feedbacks)
             sigma_new = zeta + self.water_density * self.ocean_function * response.sl
-            err = np.max(np.abs((sigma_new - sigma).data)) / np.max(np.abs(sigma.data))
-            generalised_load._sl = sigma_new
+            err = np.max(np.abs((sigma_new - load.sl).data)) / np.max(np.abs(load.sl.data))
+            load.sl = sigma_new
             if verbose:
                 count += 1
                 print(f'Iteration = {count}, relative error = {err:6.4e}')

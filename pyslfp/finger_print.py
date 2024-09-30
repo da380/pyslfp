@@ -436,7 +436,14 @@ class FingerPrint:
 
 
     def integrate(self, f):        
-        """ Integrate function over the surface."""
+        """ Integrate function over the surface.
+
+        Args:
+            f (SHGrid): Function to integrate.
+
+        Returns:
+            float: Integral of the function over the surface.
+        """
         return self._integration_factor * self._expand_field(f).coeffs[0,0,0]
 
     def ocean_average(self,f):        
@@ -559,57 +566,159 @@ class FingerPrint:
         return response
 
     def gravity_potential_to_gravitational_potential(self, response):
-        """Converts the gravity potential within a ResponseField to the gravitational potential."""    
+        """Converts the gravity potential within a ResponseField to the gravitational potential.
+        
+        Args:
+            response (ResponseField): The response field to convert.
+            
+        Returns:
+            ResponseField: The response field with the gravitational potential converted to the gravity potential.
+        """    
         phi_lm = self._expand_field(response.phi)
         phi_lm[:,2,1] -= self._rotation_factor * response.omega
         response.phi = self._expand_coefficient(phi_lm)
         return response
 
     def gravitational_potential_to_gravity_potential(self, response):
-        """Converts the gravitational potential within a ResponseField to the gravity potential."""    
+        """Converts the gravitational potential within a ResponseField to the gravity potential.
+        
+        Args:
+            response (ResponseField): The response field to convert.
+            
+        Returns:
+            ResponseField: The response field with the gravitational potential converted to the gravity potential.
+        """    
         phi_lm = self._expand_field(response.phi)
         phi_lm[:,2,1] += self._rotation_factor * response.omega
         response.phi = self._expand_coefficient(phi_lm)
         return response
 
     def ocean_mask(self, value = np.nan):
-        """Return a mask over the oceans."""
+        """Return a mask over the oceans.
+
+        Args:
+            value (float): Value to set the mask over the oceans.
+
+        Returns:
+            SHGrid: Mask over the oceans.
+        """
         return SHGrid.from_array(np.where(self.ocean_function.data > 0, 1, value), grid = self.grid)        
 
     def land_mask(self, value = np.nan):
-        """Return mask over the land."""
+        """Return mask over the land.
+        
+        Args:
+            value (float): Value to set the mask over the land.
+        
+        Returns:
+            SHGrid: Mask over the land.
+        """
         return SHGrid.from_array(np.where(self._ocean_function.data == 0, 1, value), grid = self.grid)        
 
     def northern_hemisphere_mask(self, value = np.nan):
-        """Return mask over the northern hemisphere."""
+        """Return mask over the northern hemisphere.
+        
+        Args:
+            value (float): Value to set the mask over the northern hemisphere.
+        
+        Returns:
+            SHGrid: Mask over the northern hemisphere.
+        """
         lats, _ = np.meshgrid(self.ice_thickness.lats(), self.ice_thickness.lons(), indexing="ij")
         return SHGrid.from_array(np.where(lats > 0, 1, value), grid = self.grid)
 
     def southern_hemisphere_mask(self, value = np.nan):
-        """Return mask over the southern hemisphere."""
+        """Return mask over the southern hemisphere.
+            
+        Args:
+            value (float): Value to set the mask over the southern hemisphere.
+        
+        Returns:
+            SHGrid: Mask over the southern hemisphere.
+        """
         lats, _ = np.meshgrid(self.ice_thickness.lats(), self.ice_thickness.lons(), indexing="ij")
-        return SHGrid.from_array(np.where(lats < 0, 1, value), grid = self.grid)        
+        return SHGrid.from_array(np.where(lats < 0, 1, value), grid = self.grid)      
 
     def disk_load(self, delta, latitutude, longitude, amplitude):
-        """Return a disk load."""
+        """Return a disk load.
+
+        Args:
+            delta (float): Radius of the disk.
+            latitutude (float): Latitude of the centre of the disk.
+            longitude (float): Longitude of the centre of the disk.
+            amplitude (float): Amplitude of the load.
+
+        Returns:
+            SHGrid: Load associated with the disk.
+        """
         return amplitude * SHGrid.from_cap(delta, latitutude, longitude, lmax = self.lmax, grid=self.grid,
                                extend = self._extend, sampling = self._sampling)
+    
+    def point_load(self, delta, latitude, longitude, amplitude):
+        """Return a point load with optional inverse Laplacian smoothing.
+
+        """
+        th = 0.4 * delta * self.pi /180
+        t  = th*th
+        
+        theta = 90.- latitude
+        phi = longitude + 180.
+                
+        pl_lm = SHGrid.from_zeros(lmax=self.lmax, normalization = 'ortho')
+            
+
+        ylm = pysh.expand.spharm(pl_lm.lmax,ths[isource],phs[isource],normalization = 'ortho')
+        
+        for l in range(0,pl_lm.lmax+1):
+            fac = np.exp(-l*(l+1)*t)
+            pl_lm.coeffs[0,l,0] +=  w[isource]*ylm[0,l,0]*fac
+            for m in range(1,l+1):
+                pl_lm.coeffs[0,l,m] += w[isource]*ylm[0,l,m]*fac
+                pl_lm.coeffs[1,l,m] += w[isource]*ylm[1,l,m]*fac
+
+
+        pl_lm = (1/b**2)*pl_lm
+        pl = pl_lm.expand(grid = 'GLQ')
+               
+    return pl
 
     def load_from_ice_thickness_change(self, ice_thickness_change):
-        """Converts an ice thickness change into the associated load."""
+        """Converts an ice thickness change into the associated load.
+        
+        Args:
+            ice_thickness_change (SHGrid): Ice thickness change.
+            
+        Returns:
+            SHGrid: Load associated with the ice thickness change.
+        """
         self._check_field(ice_thickness_change)
         return self.ice_density * self.one_minus_ocean_function * ice_thickness_change
     
     def northern_hemisphere_load(self, fraction = 1):
-        """Returns a load associated with melting the given fraction of ice in the northern hemisphere."""
+        """Returns a load associated with melting the given fraction of ice in the northern hemisphere.
+        
+        Args:
+            fraction (float): Fraction of ice to melt.
+        
+        Returns:
+            SHGrid: Load associated with melting the given fraction of ice in the northern hemisphere.
+        """
         ice_thickness_change = -fraction * self.ice_thickness * self.northern_hemisphere_mask(0)
         return self.load_from_ice_thickness_change(ice_thickness_change)
 
     def southern_hemisphere_load(self, fraction = 1):
-        """Returns a load associated with melting the given fraction of ice in the northern hemisphere."""
+        """Returns a load associated with melting the given fraction of ice in the northern hemisphere.
+        
+        Args:
+            fraction (float): Fraction of ice to melt.
+            
+        Returns:
+            SHGrid: Load associated with melting the given fraction of ice in the northern hemisphere.
+        """
         ice_thickness_change = -fraction * self.ice_thickness * self.southern_hemisphere_mask(0)
         return self.load_from_ice_thickness_change(ice_thickness_change)
 
+    def sea_level_load(self)
     
 
 

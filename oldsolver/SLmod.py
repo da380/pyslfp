@@ -122,7 +122,7 @@ def get_sl_ice_data(L):
     sl = pysh.SHGrid.from_zeros(lmax=L,grid = 'GLQ')
     ice = sl.copy()
     
-    dat = np.loadtxt('data/ice6g0.dat')
+    dat = np.loadtxt('../oldsolver/data/ice6g0.dat')
 
     nlat = int(dat[0,0])
     nlon = int(dat[0,1])
@@ -465,7 +465,7 @@ def centrifugal_perturbation_vector(om,lat,lon):
 ################################################
 # reads in and returns love numbers from a file
 def love_numbers(L):
-    data = np.loadtxt('data/love.dat')
+    data = np.loadtxt('../oldsolver/data/love.dat')
     h = data[:L+1,1] + data[:L+1,3]
     k = data[:L+1,2] + data[:L+1,4]
     ht = data[2,5]
@@ -476,7 +476,7 @@ def love_numbers(L):
 ################################################
 # reads in and returns love numbers from a file
 def generalised_love_numbers(L):
-    data = np.loadtxt('data/love.dat')
+    data = np.loadtxt('../oldsolver/data/love.dat')
     h_u   = data[:L+1,1]
     k_u   = data[:L+1,2]
     h_phi = data[:L+1,3]

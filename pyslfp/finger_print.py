@@ -451,6 +451,20 @@ class FingerPrint:
             float: Integral of the function over the surface.
         """
         return self._integration_factor * self._expand_field(f).coeffs[0,0,0]
+    
+    def evaluate_point(self, f, latitude, longitude):
+        """Evaluate a function at a given point.
+
+        Args:
+            f (SHGrid): Function to evaluate.
+            latitude (float): Latitude of the point.
+            longitude (float): Longitude of the point.
+
+        Returns:
+            float: Value of the function at the point.
+        """
+        f_lm = f.expand()
+        return pysh.expand.MakeGridPoint(f_lm.coeffs,latitude,longitude+180).flatten()[0]
 
     def ocean_average(self,f):        
         """Return average of a function over the oceans."""
@@ -608,7 +622,18 @@ class FingerPrint:
         Returns:
             SHGrid: Mask over the oceans.
         """
-        return SHGrid.from_array(np.where(self.ocean_function.data > 0, 1, value), grid = self.grid)        
+        return SHGrid.from_array(np.where(self.ocean_function.data > 0, 1, value), grid = self.grid)      
+
+    def ice_mask(self, value = np.nan):
+        """Return a mask over the ice.
+        
+        Args:
+            value (float): Value to set the mask over the ice.
+            
+        Returns:
+            SHGrid: Mask over the ice.
+        """
+        return SHGrid.from_array(np.where(self.ice_thickness.data > 0, 1, value), grid = self.grid)
 
     def land_mask(self, value = np.nan):
         """Return mask over the land.

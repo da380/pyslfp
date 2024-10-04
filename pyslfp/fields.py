@@ -78,8 +78,6 @@ class ResponseFields(ResponseBase):
         self._omega = omega
         self._sl = sl
         
-
-
     @staticmethod
     def from_zeros(lmax, /, *, grid = "DH", extend=True):
         u = SHGrid.from_zeros(lmax, grid=grid, extend=extend)

@@ -52,7 +52,7 @@ class FingerPrint:
         self._rotation_frequency = 7.27220521664304e-05 / self.frequency_scale
         self._water_density = 1000 / self.density_scale
         self._ice_density = 917 / self.density_scale
-        self._solid_earth_surface_density = 2600.0 / self.density_scale #todo: check this value
+        self._solid_earth_surface_density = 2600.0 / self.density_scale
 
         # Set some options. 
         self._lmax = lmax        
@@ -321,7 +321,7 @@ class FingerPrint:
                 and f.csphase == self.csphase)            
     
     def _expand_field(self, f, /, *, lmax_calc = None):
-        # Expand a SHGrid object using stored parameters. 
+        # Expand a SHGrid object using stored parameters. todo: replace expansions with this method.
         assert self._check_field(f)
         if lmax_calc is None:
             return f.expand(normalization = self.normalization, csphase = self.csphase)
@@ -336,6 +336,9 @@ class FingerPrint:
         else:
             grid = self.grid
         return f.expand(grid=grid, extend=self.extend)
+    
+    def _zero_grid(self): #todo: replace zeros with this method.
+        return SHGrid.from_zeros(lmax=self.lmax, grid=self.grid, sampling=self._sampling, extend=self.extend)
 
     def _compute_ocean_function(self):
         # Copmutes and stores the ocean function. 
@@ -498,7 +501,7 @@ class FingerPrint:
                                                 ice_thickness.data,0),grid = self.grid)
         sea_level = SHGrid.from_array(np.where(topography.data < 0, -topography.data, -topography.data + ice_thickness.data),
                                                grid = self.grid)
-        sea_level += self.water_density * ice_shelf_thickness / self.ice_density
+        sea_level += self.ice_density * ice_shelf_thickness / self.water_density
 
         # Set the values. 
         self.sea_level = sea_level
@@ -585,7 +588,7 @@ class FingerPrint:
 
         return response
 
-    def gravity_potential_to_gravitational_potential(self, response):
+    def gravity_potential_to_gravitational_potential(self, response): #todo: should this just return phi?
         """Converts the gravity potential within a ResponseField to the gravitational potential.
         
         Args:
@@ -599,7 +602,7 @@ class FingerPrint:
         response.phi = self._expand_coefficient(phi_lm)
         return response
 
-    def gravitational_potential_to_gravity_potential(self, response):
+    def gravitational_potential_to_gravity_potential(self, response): #todo: should this just return gamma?
         """Converts the gravitational potential within a ResponseField to the gravity potential.
         
         Args:
@@ -699,11 +702,10 @@ class FingerPrint:
         return amplitude * SHGrid.from_cap(delta, latitutude, longitude, lmax = self.lmax, grid=self.grid,
                                extend = self._extend, sampling = self._sampling)
     
-    def point_load(self, latitude, longitude, delta, amplitude=1):
+    def point_load(self, latitude, longitude, amplitude=1):
         """Return a point load with inverse Laplacian smoothing.
         
         Args:
-            delta (float): Length scale of the smoothing.
             latitude (float): Latitude of the point load.
             longitude (float): Longitude of the point load.
             amplitude (float): Amplitude of the load.
@@ -711,19 +713,16 @@ class FingerPrint:
         Returns:
             SHGrid: Load associated with the point load.
         """
-        th = 0.4 * delta * np.pi /180
-        t  = th*th
         theta = 90.- latitude
         phi = longitude + 180.
         point_load_lm = SHCoeffs.from_zeros(lmax=self.lmax, normalization = self.normalization)
         ylm = pysh.expand.spharm(point_load_lm.lmax,theta,phi,normalization = self.normalization)
         
         for l in range(0,point_load_lm.lmax+1):
-            fac = np.exp(-l*(l+1)*t)
-            point_load_lm.coeffs[0,l,0] +=  ylm[0,l,0]*fac
+            point_load_lm.coeffs[0,l,0] +=  ylm[0,l,0]
             for m in range(1,l+1):
-                point_load_lm.coeffs[0,l,m] += ylm[0,l,m]*fac
-                point_load_lm.coeffs[1,l,m] += ylm[1,l,m]*fac
+                point_load_lm.coeffs[0,l,m] += ylm[0,l,m]
+                point_load_lm.coeffs[1,l,m] += ylm[1,l,m]
 
         point_load_lm = (1/self.mean_sea_floor_radius**2)*point_load_lm
         point_load = amplitude * point_load_lm.expand(grid = 'GLQ')
@@ -766,43 +765,41 @@ class FingerPrint:
         ice_thickness_change = -fraction * self.ice_thickness * self.southern_hemisphere_mask(0)
         return self.load_from_ice_thickness_change(ice_thickness_change)
 
-    def sea_level_load(self, latitude, longitude, delta = 1.):
+    def sea_level_adjoint_load(self, latitude, longitude):
         """Returns the adjoint loads for a sea level measurement at a given location.
         
         Args:
             latitude (float): Latitude of the measurement.
             longitude (float): Longitude of the measurement.
-            delta (float): [todo].
             
         Returns:
             ResponseFields: Adjoint loads for the sea level measurement.
         """
-        zeta = self.point_load(latitude, longitude, delta)
+        zeta = self.point_load(latitude, longitude)
         zeta_u = SHGrid.from_zeros(lmax=self.lmax, grid = self.grid)
         zeta_phi = SHGrid.from_zeros(lmax=self.lmax, grid = self.grid)
         kk = np.zeros(2)
         return ResponseFields(zeta_u, zeta_phi, kk, zeta)
     
-    def displacement_load(self, latitude, longitude, delta = 1.):
+    def displacement_load(self, latitude, longitude):
         """Returns the adjoint loads for a displacement measurement at a given location.
 
         Args:
             latitude (float): Latitude of the measurement.
             longitude (float): Longitude of the measurement.
-            delta (float): [todo].
 
         Returns:
             ResponseFields: Adjoint loads for the displacement measurement.
         """
         zeta = SHGrid.from_zeros(lmax=self.lmax, grid = self.grid)
-        zeta_u = -1*self.point_load(latitude, longitude, delta)
+        zeta_u = -1*self.point_load(latitude, longitude)
         zeta_phi = SHGrid.from_zeros(lmax=self.lmax, grid = self.grid)
         kk = np.zeros(2)
         return ResponseFields(zeta_u, zeta_phi, kk, zeta)
 
-    def absolute_gravity_load(self, latitude, longitude, delta = 1., remove_psi = True):
+    def absolute_gravity_load(self, latitude, longitude, remove_psi = True):
         zeta = SHGrid.from_zeros(lmax=self.lmax, grid = self.grid)
-        pl = self.point_load(latitude, longitude, delta)
+        pl = self.point_load(latitude, longitude)
         zeta_u   =  (self.gravitational_acceleration /self.mean_sea_floor_radius - 4 * np.pi * self.gravitational_constant * self.solid_earth_surface_density) * pl
         zeta_phi = -self.gravitational_acceleration * pl
         zeta_phi_lm = zeta_phi.expand

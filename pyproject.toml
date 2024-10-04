@@ -1,15 +1,15 @@
 [tool.poetry]
 name = "pyslfp"
-version = "0.1.3"
+version = "0.1.5"
 description = "Library for computing elastic sea level fingerprints"
-authors = ["David Al-Attar"]
+authors = ["David Al-Attar and Dan Heathcote"]
 readme = "README.md"
 license = "MIT"
 
 
 [tool.poetry.dependencies]
-python = "^3.12"
-numpy = "^2.1.1"
+python = "^3.10"
+numpy = "^2.0.0"
 scipy = "^1.14.1"
 Cartopy = "^0.23.0"
 pyshtools = "^4.13.1"

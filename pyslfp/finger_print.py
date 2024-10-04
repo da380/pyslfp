@@ -602,9 +602,9 @@ class FingerPrint:
         Returns:
             phi (SHGrid): The gravitational potential.
         """    
-        phi_lm = self._expand_field(response.phi)
+        phi_lm = self._expand_field(response.phi).coeffs
         phi_lm[:,2,1] -= self._rotation_factor * response.omega
-        phi = self._expand_coefficient(phi_lm)
+        phi = self._expand_coefficient(SHCoeffs.from_array(phi_lm, normalization = self.normalization, csphase = self.csphase))
         return phi
 
     def gravitational_potential_to_gravity_potential(self, response):
@@ -616,9 +616,9 @@ class FingerPrint:
         Returns:
             gamma (SHGrid): The gravity potential.
         """    
-        phi_lm = self._expand_field(response.phi)
+        phi_lm = self._expand_field(response.phi).coeffs
         phi_lm[:,2,1] += self._rotation_factor * response.omega
-        gamma = self._expand_coefficient(phi_lm)
+        gamma = self._expand_coefficient(SHCoeffs.from_array(phi_lm, normalization = self.normalization, csphase = self.csphase))
         return gamma
 
     def ocean_mask(self, value = np.nan):

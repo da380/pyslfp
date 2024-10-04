@@ -120,9 +120,18 @@ class ResponseCoefficients(ResponseBase):
         return f.expand(grid=grid, extend=extend)
 
     def expand(self, /, *, grid="DH", extend="True"):
-        u = self._expand(self.u, grid=grid, extend=extend)
-        phi = self._expand(self.phi, grid=grid, extend=extend)
-        sl = self._expand(self.sl, grid=grid, extend=extend)
-        return ResponseFields(u, phi, self.omega, sl)
+            """Expands the field variables in the specified grid.
+
+            Args:
+                grid (str, optional): The grid to expand the field variables on. Defaults to "DH".
+                extend (str, optional): Determines whether to extend the field variables or not. Defaults to "True".
+
+            Returns:
+                ResponseFields: The expanded field variables.
+            """
+            u = self._expand(self.u, grid=grid, extend=extend)
+            phi = self._expand(self.phi, grid=grid, extend=extend)
+            sl = self._expand(self.sl, grid=grid, extend=extend)
+            return ResponseFields(u, phi, self.omega, sl)
 
     

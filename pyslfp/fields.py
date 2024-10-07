@@ -67,8 +67,11 @@ class ResponseBase:
         return self * s
 
     def __div__(self, s):
-        return self * (1/s)
-
+        u = self.u / s
+        phi = self.phi / s
+        omega = self.omega / s
+        sl = self.sl / s
+        return type(self)(u, phi, omega, sl)
 
 class ResponseFields(ResponseBase):
 

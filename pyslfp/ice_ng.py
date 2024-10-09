@@ -1,5 +1,6 @@
 import xarray as xr
 import pyshtools as sh
+from pyshtools import SHGrid, SHCoeffs
 import numpy as np
 import bisect
 from scipy.interpolate import RegularGridInterpolator
@@ -17,6 +18,9 @@ class IceNG:
             self._version = version
         else:
             raise ValueError("chosen version not implemented")
+        # Set the densities of ice and water.
+        self.ice_density = 917.0
+        self.water_density = 1028.0 #todo: add density scale?
 
     # Convert a date into the appropriate file name.     
     def _date_to_file(self,date):
@@ -78,11 +82,13 @@ class IceNG:
         topography.data = topography_function((lats,lons))        
 
         return ice_thickness, topography
-
-    # Returns the ice thickness and sea level at a given date interpolated onto a SHGrid. If the date 
-    # does not exist within the data set, linear interpolation is used between the two closest times. 
-    # If the date is out of range, constant extrapolation is applied from the boundary values. 
-    def get_time_slice(self, date, lmax, /, *,  grid = "DH", sampling=1, extend = True):
+    
+    def get_ice_thickness_and_topography(self, date, lmax, /, *, grid = "DH", sampling=1, extend = True):
+        """
+        Returns the ice thickness and topography at a given date interpolated onto a SHGrid. If the date 
+        does not exist within the data set, linear interpolation is used between the two closest times. 
+        If the date is out of range, constant extrapolation is applied from the boundary values. 
+        """
         file1, file2, fraction = self._find_files(date)        
         if file1 == file2:
             ice_thickness, topography = self._get_time_slice(file1, lmax, grid = grid, sampling=sampling, extend = extend)
@@ -93,6 +99,46 @@ class IceNG:
             topography = fraction * topography1 + (1 - fraction) * topography2        
         return ice_thickness, topography
 
+    def get_ice_thickness_and_sea_level(self, date, lmax, /, *, grid = "DH", sampling=1, extend = True):
+        """
+        Returns the ice thickness and sea level at a given date interpolated onto a SHGrid. If the date 
+        does not exist within the data set, linear interpolation is used between the two closest times. 
+        If the date is out of range, constant extrapolation is applied from the boundary values. 
+        """
+        # Get the ice thickness and topography.
+        ice_thickness, topography = self.get_ice_thickness_and_topography(date, lmax, grid = grid, sampling = sampling, extend = extend)
+        # Compute the sea level using isostatic balance within ice shelves. 
+        ice_shelf_thickness = SHGrid.from_array(np.where(np.logical_and(topography.data < 0, ice_thickness.data > 0), ice_thickness.data,0),grid = grid)
+        sea_level = SHGrid.from_array(np.where(topography.data < 0, -topography.data, -topography.data + ice_thickness.data), grid = grid)
+        sea_level += self.ice_density * ice_shelf_thickness / self.water_density
+        return ice_thickness, sea_level
+
+    def get_ice_thickness(self, date, lmax, /, *, grid = "DH", sampling=1, extend = True):
+        """
+        Returns the ice thickness at a given date interpolated onto a SHGrid. If the date
+        does not exist within the data set, linear interpolation is used between the two closest times.
+        If the date is out of range, constant extrapolation is applied from the boundary values.
+        """
+        ice_thickness, _ = self.get_ice_thickness_and_topography(date, lmax, grid = grid, sampling = sampling, extend = extend)
+        return ice_thickness
+
+    def get_sea_level(self, date, lmax, /, *, grid = "DH", sampling=1, extend = True):
+        """
+        Returns the sea level at a given date interpolated onto a SHGrid. If the date
+        does not exist within the data set, linear interpolation is used between the two closest times.
+        If the date is out of range, constant extrapolation is applied from the boundary values.
+        """
+        _, sea_level = self.get_ice_thickness_and_sea_level(date, lmax, grid = grid, sampling = sampling, extend = extend)
+        return sea_level
+
+    def get_topography(self, date, lmax, /, *, grid = "DH", sampling=1, extend = True):
+        """
+        Returns the topography at a given date interpolated onto a SHGrid. If the date
+        does not exist within the data set, linear interpolation is used between the two closest times.
+        If the date is out of range, constant extrapolation is applied from the boundary values.
+        """
+        _, topography = self.get_ice_thickness_and_topography(date, lmax, grid = grid, sampling = sampling, extend = extend)
+        return topography
    
 
 

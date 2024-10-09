@@ -492,25 +492,11 @@ class FingerPrint:
             model values is applied. If the date is out of range, 
             constant extrapolation of the boundary values is used. 
         """
-        # Read and interpolate the data.
         ice_ng = IceNG(version = version)
-        ice_thickness, topography = ice_ng.get_time_slice(date, self.lmax, grid = self.grid,                                                          
-                                                          sampling=self._sampling, extend = self.extend)
-
-        # Non-dimensionalise the values. 
-        ice_thickness /= self.length_scale
-        topography /= self.length_scale
-
-        # Compute the sea level using isostatic balance within ice shelves. 
-        ice_shelf_thickness = SHGrid.from_array(np.where(np.logical_and(topography.data < 0, ice_thickness.data > 0), 
-                                                ice_thickness.data,0),grid = self.grid)
-        sea_level = SHGrid.from_array(np.where(topography.data < 0, -topography.data, -topography.data + ice_thickness.data),
-                                               grid = self.grid)
-        sea_level += self.ice_density * ice_shelf_thickness / self.water_density
-
-        # Set the values. 
-        self.sea_level = sea_level
-        self.ice_thickness = ice_thickness
+        ice_thickness, sea_level = ice_ng.get_ice_thickness_and_sea_level(date, self.lmax, grid = self.grid, 
+                                                                          sampling=self._sampling, extend = self.extend)
+        self.ice_thickness = ice_thickness / self.length_scale
+        self.sea_level = sea_level / self.length_scale
     
     
     def solver(self, zeta, /, *, rotational_feedbacks=True, rtol = 1.e-6, verbose = False):
@@ -835,6 +821,9 @@ class FingerPrint:
             w = self._expand_coefficient(w_lm)
         return w
     
+    def gaussian_averaging_function_components(self, r, latitude, longitude, cut = False):
+
+        pass
 
 
 

@@ -12,7 +12,7 @@ class TestFingerPrint:
         fp.set_background_state_from_ice_ng()
         return fp
     
-    def inner_product(self, fp, f1, f2):
+    def bilinear_form(self, fp, f1, f2):
         g = fp.gravitational_acceleration
         return fp.integrate(f1.sl * f2.sl)  \
             - (1 /g) * fp.integrate((g * f1.u * f2.u + f1.phi * f2.phi))  \
@@ -47,8 +47,8 @@ class TestFingerPrint:
         response1 = fp.generalised_solver(generalised_load1, rotational_feedbacks=True)
         response2 = fp.generalised_solver(generalised_load2, rotational_feedbacks=True)
         # Check to see if the two inner products are equal
-        lhs = self.inner_product(fp, generalised_load1, response2)
-        rhs = self.inner_product(fp, generalised_load2, response1)
+        lhs = self.bilinear_form(fp, generalised_load1, response2)
+        rhs = self.bilinear_form(fp, generalised_load2, response1)
         print(lhs)
         print(rhs)
         assert np.isclose(lhs, rhs, rtol=1e-3)
@@ -82,8 +82,8 @@ class TestFingerPrint:
         response1 = fp.generalised_solver(generalised_load1, rotational_feedbacks=False)
         response2 = fp.generalised_solver(generalised_load2, rotational_feedbacks=False)
         # Check to see if the two inner products are equal
-        lhs = self.inner_product(fp, generalised_load1, response2)
-        rhs = self.inner_product(fp, generalised_load2, response1)
+        lhs = self.bilinear_form(fp, generalised_load1, response2)
+        rhs = self.bilinear_form(fp, generalised_load2, response1)
         print(lhs)
         print(rhs)
         assert np.isclose(lhs, rhs, rtol=1e-3)

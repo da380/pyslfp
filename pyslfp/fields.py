@@ -66,7 +66,7 @@ class ResponseBase:
     def __rmul__(self,s):
         return self * s
 
-    def __div__(self, s):
+    def __truediv__(self, s):
         u = self.u / s
         phi = self.phi / s
         omega = self.omega / s

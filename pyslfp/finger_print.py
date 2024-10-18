@@ -349,7 +349,24 @@ class FingerPrint:
         # Computes and stores the ocean area. 
         if self._ocean_function is None:
             self._compute_ocean_function()
-        self._ocean_area = self.integrate(self._ocean_function)                
+        self._ocean_area = self.integrate(self._ocean_function)            
+
+    def _centrifugal_perturbation_coefficients(self, om):
+        # returns the centrifugal potential perturbation in spherical harmonic
+        # domain given the rotation vector perturbation
+        psi_2m = np.zeros([2,3])
+        psi_2m[:,1] = self._rotation_factor * om
+        return psi_2m
+
+    def _rotation_vector_from_zeta_phi(self, zeta_phi):
+        zeta_phi_lm = zeta_phi.expand(normalization=self.normalization, csphase=self.csphase)
+        kk = np.zeros(2)
+        for i in range(2):
+            om = np.zeros(2)
+            om[i] = 1.
+            phi_2m = self._centrifugal_perturbation_coefficients(om)
+            kk[i] = np.sum(phi_2m[:,:3]*zeta_phi_lm.coeffs[:,2,:3]) * self._mean_sea_floor_radius**2
+        return kk     
 
     def _iterate_solver(self, sigma, sl_uniform, /, *, rotational_feedbacks=True):
         # Given a load, returns the response.

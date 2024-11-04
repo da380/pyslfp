@@ -596,7 +596,7 @@ class FingerPrint:
 
         return response
 
-    def gravity_potential_to_gravitational_potential(self, response):
+    def gravity_potential_to_gravitational_potential(self, response, rotational_feedbacks=True):
         """Converts the gravity potential within a ResponseField to the gravitational potential.
         
         Args:
@@ -604,13 +604,15 @@ class FingerPrint:
             
         Returns:
             phi (SHGrid): The gravitational potential.
-        """    
+        """
+        if not rotational_feedbacks:
+            return response.phi    
         phi_lm = self._expand_field(response.phi).coeffs
         phi_lm[:,2,1] -= self._rotation_factor * response.omega
         phi = self._expand_coefficient(SHCoeffs.from_array(phi_lm, normalization = self.normalization, csphase = self.csphase))
         return phi
 
-    def gravitational_potential_to_gravity_potential(self, response):
+    def gravitational_potential_to_gravity_potential(self, response, rotational_feedbacks=True):
         """Converts the gravitational potential within a ResponseField to the gravity potential.
         
         Args:
@@ -619,6 +621,8 @@ class FingerPrint:
         Returns:
             gamma (SHGrid): The gravity potential.
         """    
+        if not rotational_feedbacks:
+            return response.phi
         phi_lm = self._expand_field(response.phi).coeffs
         phi_lm[:,2,1] += self._rotation_factor * response.omega
         gamma = self._expand_coefficient(SHCoeffs.from_array(phi_lm, normalization = self.normalization, csphase = self.csphase))

@@ -52,7 +52,7 @@ class FingerPrint:
         self._rotation_frequency = 7.27220521664304e-05 / self.frequency_scale
         self._water_density = 1000 / self.density_scale
         self._ice_density = 917 / self.density_scale
-        self._solid_earth_surface_density = 2600.0 / self.density_scale #todo: check this value
+        self._solid_earth_surface_density = 2600.0 / self.density_scale
 
         # Set some options. 
         self._lmax = lmax        
@@ -321,7 +321,7 @@ class FingerPrint:
                 and f.csphase == self.csphase)            
     
     def _expand_field(self, f, /, *, lmax_calc = None):
-        # Expand a SHGrid object using stored parameters. 
+        # Expand a SHGrid object using stored parameters. todo: replace expansions with this method.
         assert self._check_field(f)
         if lmax_calc is None:
             return f.expand(normalization = self.normalization, csphase = self.csphase)
@@ -349,7 +349,24 @@ class FingerPrint:
         # Computes and stores the ocean area. 
         if self._ocean_function is None:
             self._compute_ocean_function()
-        self._ocean_area = self.integrate(self._ocean_function)                
+        self._ocean_area = self.integrate(self._ocean_function)            
+
+    def _centrifugal_perturbation_coefficients(self, om):
+        # returns the centrifugal potential perturbation in spherical harmonic
+        # domain given the rotation vector perturbation
+        psi_2m = np.zeros([2,3])
+        psi_2m[:,1] = self._rotation_factor * om
+        return psi_2m
+
+    def _rotation_vector_from_zeta_phi(self, zeta_phi):
+        zeta_phi_lm = zeta_phi.expand(normalization=self.normalization, csphase=self.csphase)
+        kk = np.zeros(2)
+        for i in range(2):
+            om = np.zeros(2)
+            om[i] = 1.
+            phi_2m = self._centrifugal_perturbation_coefficients(om)
+            kk[i] = np.sum(phi_2m[:,:3]*zeta_phi_lm.coeffs[:,2,:3]) * self._mean_sea_floor_radius**2
+        return kk     
 
     def _iterate_solver(self, sigma, sl_uniform, /, *, rotational_feedbacks=True):
         # Given a load, returns the response.
@@ -463,8 +480,16 @@ class FingerPrint:
         Returns:
             float: Value of the function at the point.
         """
-        f_lm = f.expand()
+        f_lm = self._expand_field(f)
         return pysh.expand.MakeGridPoint(f_lm.coeffs,latitude,longitude+180).flatten()[0]
+    
+    def zero_grid(self):
+        """Return a grid of zeros."""
+        return SHGrid.from_zeros(lmax=self.lmax, grid=self.grid, sampling=self._sampling, extend=self.extend)
+    
+    def zero_coefficients(self):
+        """Return coefficients of zeros."""
+        return SHCoeffs.from_zeros(lmax=self.lmax, normalization=self.normalization, csphase=self.csphase)
 
     def ocean_average(self,f):        
         """Return average of a function over the oceans."""
@@ -484,25 +509,11 @@ class FingerPrint:
             model values is applied. If the date is out of range, 
             constant extrapolation of the boundary values is used. 
         """
-        # Read and interpolate the data.
         ice_ng = IceNG(version = version)
-        ice_thickness, topography = ice_ng.get_time_slice(date, self.lmax, grid = self.grid,                                                          
-                                                          sampling=self._sampling, extend = self.extend)
-
-        # Non-dimensionalise the values. 
-        ice_thickness /= self.length_scale
-        topography /= self.length_scale
-
-        # Compute the sea level using isostatic balance within ice shelves. 
-        ice_shelf_thickness = SHGrid.from_array(np.where(np.logical_and(topography.data < 0, ice_thickness.data > 0), 
-                                                ice_thickness.data,0),grid = self.grid)
-        sea_level = SHGrid.from_array(np.where(topography.data < 0, -topography.data, -topography.data + ice_thickness.data),
-                                               grid = self.grid)
-        sea_level += self.water_density * ice_shelf_thickness / self.ice_density
-
-        # Set the values. 
-        self.sea_level = sea_level
-        self.ice_thickness = ice_thickness
+        ice_thickness, sea_level = ice_ng.get_ice_thickness_and_sea_level(date, self.lmax, grid = self.grid, 
+                                                                          sampling=self._sampling, extend = self.extend)
+        self.ice_thickness = ice_thickness / self.length_scale
+        self.sea_level = sea_level / self.length_scale
     
     
     def solver(self, zeta, /, *, rotational_feedbacks=True, rtol = 1.e-6, verbose = False):
@@ -585,33 +596,37 @@ class FingerPrint:
 
         return response
 
-    def gravity_potential_to_gravitational_potential(self, response):
+    def gravity_potential_to_gravitational_potential(self, response, rotational_feedbacks=True):
         """Converts the gravity potential within a ResponseField to the gravitational potential.
         
         Args:
             response (ResponseField): The response field to convert.
             
         Returns:
-            ResponseField: The response field with the gravitational potential converted to the gravity potential.
-        """    
-        phi_lm = self._expand_field(response.phi)
+            phi (SHGrid): The gravitational potential.
+        """
+        if not rotational_feedbacks:
+            return response.phi    
+        phi_lm = self._expand_field(response.phi).coeffs
         phi_lm[:,2,1] -= self._rotation_factor * response.omega
-        response.phi = self._expand_coefficient(phi_lm)
-        return response
+        phi = self._expand_coefficient(SHCoeffs.from_array(phi_lm, normalization = self.normalization, csphase = self.csphase))
+        return phi
 
-    def gravitational_potential_to_gravity_potential(self, response):
+    def gravitational_potential_to_gravity_potential(self, response, rotational_feedbacks=True):
         """Converts the gravitational potential within a ResponseField to the gravity potential.
         
         Args:
             response (ResponseField): The response field to convert.
             
         Returns:
-            ResponseField: The response field with the gravitational potential converted to the gravity potential.
+            gamma (SHGrid): The gravity potential.
         """    
-        phi_lm = self._expand_field(response.phi)
+        if not rotational_feedbacks:
+            return response.phi
+        phi_lm = self._expand_field(response.phi).coeffs
         phi_lm[:,2,1] += self._rotation_factor * response.omega
-        response.phi = self._expand_coefficient(phi_lm)
-        return response
+        gamma = self._expand_coefficient(SHCoeffs.from_array(phi_lm, normalization = self.normalization, csphase = self.csphase))
+        return gamma
 
     def ocean_mask(self, value = np.nan):
         """Return a mask over the oceans.
@@ -699,11 +714,10 @@ class FingerPrint:
         return amplitude * SHGrid.from_cap(delta, latitutude, longitude, lmax = self.lmax, grid=self.grid,
                                extend = self._extend, sampling = self._sampling)
     
-    def point_load(self, latitude, longitude, delta, amplitude=1):
+    def point_load(self, latitude, longitude, amplitude=1):
         """Return a point load with inverse Laplacian smoothing.
         
         Args:
-            delta (float): Length scale of the smoothing.
             latitude (float): Latitude of the point load.
             longitude (float): Longitude of the point load.
             amplitude (float): Amplitude of the load.
@@ -711,22 +725,19 @@ class FingerPrint:
         Returns:
             SHGrid: Load associated with the point load.
         """
-        th = 0.4 * delta * np.pi /180
-        t  = th*th
         theta = 90.- latitude
         phi = longitude + 180.
-        point_load_lm = SHCoeffs.from_zeros(lmax=self.lmax, normalization = self.normalization)
+        point_load_lm = self.zero_coefficients()
         ylm = pysh.expand.spharm(point_load_lm.lmax,theta,phi,normalization = self.normalization)
         
         for l in range(0,point_load_lm.lmax+1):
-            fac = np.exp(-l*(l+1)*t)
-            point_load_lm.coeffs[0,l,0] +=  ylm[0,l,0]*fac
+            point_load_lm.coeffs[0,l,0] +=  ylm[0,l,0]
             for m in range(1,l+1):
-                point_load_lm.coeffs[0,l,m] += ylm[0,l,m]*fac
-                point_load_lm.coeffs[1,l,m] += ylm[1,l,m]*fac
+                point_load_lm.coeffs[0,l,m] += ylm[0,l,m]
+                point_load_lm.coeffs[1,l,m] += ylm[1,l,m]
 
         point_load_lm = (1/self.mean_sea_floor_radius**2)*point_load_lm
-        point_load = amplitude * point_load_lm.expand(grid = 'GLQ')
+        point_load = amplitude * self._expand_coefficient(point_load_lm)
                
         return point_load
 
@@ -766,80 +777,36 @@ class FingerPrint:
         ice_thickness_change = -fraction * self.ice_thickness * self.southern_hemisphere_mask(0)
         return self.load_from_ice_thickness_change(ice_thickness_change)
 
-    def sea_level_load(self, latitude, longitude, delta = 1.):
+    def sea_level_adjoint_load(self, latitude, longitude):
         """Returns the adjoint loads for a sea level measurement at a given location.
         
         Args:
             latitude (float): Latitude of the measurement.
             longitude (float): Longitude of the measurement.
-            delta (float): [todo].
             
         Returns:
             ResponseFields: Adjoint loads for the sea level measurement.
         """
-        zeta = self.point_load(latitude, longitude, delta)
-        zeta_u = SHGrid.from_zeros(lmax=self.lmax, grid = self.grid)
-        zeta_phi = SHGrid.from_zeros(lmax=self.lmax, grid = self.grid)
+        zeta = self.point_load(latitude, longitude)
+        zeta_u = self.zero_grid()
+        zeta_phi = self.zero_grid()
         kk = np.zeros(2)
         return ResponseFields(zeta_u, zeta_phi, kk, zeta)
     
-    def displacement_load(self, latitude, longitude, delta = 1.):
+    def displacement_load(self, latitude, longitude):
         """Returns the adjoint loads for a displacement measurement at a given location.
 
         Args:
             latitude (float): Latitude of the measurement.
             longitude (float): Longitude of the measurement.
-            delta (float): [todo].
 
         Returns:
             ResponseFields: Adjoint loads for the displacement measurement.
         """
-        zeta = SHGrid.from_zeros(lmax=self.lmax, grid = self.grid)
-        zeta_u = -1*self.point_load(latitude, longitude, delta)
-        zeta_phi = SHGrid.from_zeros(lmax=self.lmax, grid = self.grid)
+        zeta = self.zero_grid()
+        zeta_u = -1*self.point_load(latitude, longitude)
+        zeta_phi = self.zero_grid()
         kk = np.zeros(2)
-        return ResponseFields(zeta_u, zeta_phi, kk, zeta)
-
-    def absolute_gravity_load(self, latitude, longitude, delta = 1., remove_psi = True):
-        zeta = SHGrid.from_zeros(lmax=self.lmax, grid = self.grid)
-        pl = self.point_load(latitude, longitude, delta)
-        zeta_u   =  (self.gravitational_acceleration /self.mean_sea_floor_radius - 4 * np.pi * self.gravitational_constant * self.solid_earth_surface_density) * pl
-        zeta_phi = -self.gravitational_acceleration * pl
-        zeta_phi_lm = zeta_phi.expand
-        for l in range(self.lmax + 1):
-            zeta_phi_lm.coeffs[:,l,:] *= (l+1) /self.mean_sea_floor_radius;
-        zeta_phi = zeta_phi_lm.expand(grid = self.grid)
-        if(remove_psi):
-            kk = -rotation_vector_from_zeta_phi(zeta_phi) #todo: do we need to redo this or is it simpler?
-        else:
-            kk = np.zeros(2)
-        return ResponseFields(zeta_u, zeta_phi, kk, zeta)
-
-    def potential_coefficient_load(self, l, m, remove_psi = True):
-        zeta   = SHGrid.from_zeros(lmax=self.lmax, grid = self.grid) #todo: make property called null which does this
-        zeta_u = SHGrid.from_zeros(lmax=self.lmax, grid = self.grid)
-        zeta_phi_lm =  SHGrid.from_zeros(lmax=self.lmax, grid = self.grid)
-        if(m >= 0):
-            zeta_phi_lm.coeffs[0,l,m]  = -self.gravitational_acceleration /self.mean_sea_floor_radius ** 2
-        else:
-            zeta_phi_lm.coeffs[1,l,-m] = -self.gravitational_acceleration /self.mean_sea_floor_radius ** 2
-        zeta_phi = zeta_phi_lm.expand(grid = self.grid)
-        if(remove_psi):
-            kk = -rotation_vector_from_zeta_phi(zeta_phi) #todo: as above
-        else:
-            kk = np.zeros(2)
-        return ResponseFields(zeta_u, zeta_phi, kk, zeta)
-
-    def sea_altimetery_load(self, latitude1 = -66, latitude2 = 66, remove_psi = True):
-        zeta = self.altimetery_mask(latitude1=latitude1, latitude2=latitude2)
-        A = self.integrate(zeta)
-        zeta = zeta/A
-        zeta_u   = -1 * zeta.copy()
-        zeta_phi = pysh.SHGrid.from_zeros(lmax = self.lmax, grid = self.grid)
-        if(remove_psi):
-            kk = -rotation_vector_from_zeta_phi(zeta) #todo: as above
-        else:
-            kk = np.zeros(2)
         return ResponseFields(zeta_u, zeta_phi, kk, zeta)
 
     def gaussian_averaging_function(self, r, latitude, longitude, cut = False):
@@ -860,7 +827,7 @@ class FingerPrint:
         c = np.log(2) /(1 - np.cos(1000 * r /self.mean_sea_floor_radius))
         fac = 2 * np.pi * (1 - np.exp(-2 * c))
         fac = c /(self.mean_sea_floor_radius ** 2 * fac)
-        w = pysh.SHGrid.from_zeros(lmax = self.lmax, grid = self.grid)
+        w = self.zero_grid()
         for ilat, lat in enumerate(w.lats()):
             th = (90 - lat) * np.pi /180
             fac1 = np.cos(th) * np.cos(th0)
@@ -872,9 +839,12 @@ class FingerPrint:
         if(cut):
             w_lm = w.expand()
             w_lm.coeffs[:,:2,:] = 0.
-            w = w_lm.expand(grid = 'GLQ')
+            w = self._expand_coefficient(w_lm)
         return w
     
+    def gaussian_averaging_function_components(self, r, latitude, longitude, cut = False):
+
+        pass
 
 
 

@@ -15,6 +15,7 @@ Cartopy = "^0.23.0"
 pyshtools = "^4.13.1"
 xarray = "^2024.9.0"
 matplotlib = "^3.9.2"
+pytest = "^8.3.3"
 
 
 [build-system]

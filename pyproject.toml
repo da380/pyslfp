@@ -16,6 +16,8 @@ pyshtools = "^4.13.1"
 xarray = "^2024.9.0"
 matplotlib = "^3.9.2"
 pytest = "^8.3.3"
+jupyter = "^1.1.1"
+pyqt6 = "^6.9.0"
 
 
 [build-system]

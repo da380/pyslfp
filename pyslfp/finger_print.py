@@ -223,8 +223,8 @@ class FingerPrint(EarthModelParamters):
             / self.gravitational_potential_scale
         )
 
-        self._displacement_love_number = self._h_u + self._h_phi
-        self._gravitational_potential_love_number = self._k_u + self._k_phi
+        self._h = self._h_u + self._h_phi
+        self._k = self._k_u + self._k_phi
 
         self._ht = (
             data[: self.lmax + 1, 5]
@@ -295,13 +295,11 @@ class FingerPrint(EarthModelParamters):
         *,
         displacement_load=None,
         gravitational_potential_load=None,
-        angular_momentum_jump=None,
+        angular_momentum_change=None,
         rotational_feedbacks=True,
     ):
         # Given a set of generalised loads, returns the solid earth deformation
         # and associated sea level change.
-
-        load_coefficient = self._expand_field(load)
 
         if displacement_load is not None:
             displacement_load_coefficient = self._expand_field(displacement_load)
@@ -310,15 +308,13 @@ class FingerPrint(EarthModelParamters):
                 gravitational_potential_load
             )
 
-        displacement_lm = load_coefficient.copy()
-        gravity_potential_change_lm = load_coefficient.copy()
+        displacement_lm = self._expand_field(load)
+        gravity_potential_change_lm = displacement_lm.copy()
 
         for l in range(self.lmax + 1):
 
-            displacement_lm.coeffs[:, l, :] *= self._displacement_love_number[l]
-            gravity_potential_change_lm.coeffs[
-                :, l, :
-            ] *= self._gravitational_potential_love_number[l]
+            displacement_lm.coeffs[:, l, :] *= self._h[l]
+            gravity_potential_change_lm.coeffs[:, l, :] *= self._k[l]
 
             if displacement_load is not None:
                 displacement_lm.coeffs[:, l, :] += (
@@ -351,25 +347,25 @@ class FingerPrint(EarthModelParamters):
                 ht * g * i * gravity_potential_change_lm.coeffs[:, 2, 1]
             )
 
-            if angular_momentum_jump is not None:
+            if angular_momentum_change is not None:
                 displacement_lm.coeffs[:, 2, 1] += (
-                    ht * r * h * angular_momentum_jump[:]
-                    + kt * g * h * angular_momentum_jump[:]
+                    ht * r * h * angular_momentum_change[:]
+                    + kt * g * h * angular_momentum_change[:]
                 )
 
             gravity_potential_change_lm.coeffs[:, 2, 1] += (
                 kt * g * i * gravity_potential_change_lm.coeffs[:, 2, 1]
             )
 
-            if angular_momentum_jump is not None:
+            if angular_momentum_change is not None:
                 gravity_potential_change_lm.coeffs[:, 2, 1] += (
-                    kt * g * h * angular_momentum_jump[:]
+                    kt * g * h * angular_momentum_change[:]
                 )
 
             angular_velocity_change = i * gravity_potential_change_lm.coeffs[:, 2, 1]
 
-            if angular_momentum_jump is not None:
-                angular_velocity_change += h * angular_momentum_jump[:]
+            if angular_momentum_change is not None:
+                angular_velocity_change += h * angular_momentum_change[:]
 
             gravity_potential_change_lm.coeffs[:, 2, 1] += r * angular_velocity_change
         else:
@@ -626,7 +622,7 @@ class FingerPrint(EarthModelParamters):
         direct_load=None,
         displacement_load=None,
         gravitational_potential_load=None,
-        angular_momentum_jump=None,
+        angular_momentum_change=None,
         rotational_feedbacks=True,
         rtol=1.0e-6,
         verbose=False,
@@ -639,7 +635,7 @@ class FingerPrint(EarthModelParamters):
             displacement_load (SHGrid): The displacement load applied in the problem. Default is None.
             gravitational_potential_load (SHGrid): The gravitational potential load applied in the
                  problem. The default is None.
-            angular_momentum_jump (numpy vector): The angular velocity
+            angular_momentum_change (numpy vector): The angular velocity
 
         Returns:
 
@@ -670,7 +666,7 @@ class FingerPrint(EarthModelParamters):
             loads_present = True
             assert self._check_field(gravitational_potential_load)
 
-        if angular_momentum_jump is not None and rotational_feedbacks:
+        if angular_momentum_change is not None and rotational_feedbacks:
             loads_present = True
 
         if loads_present is False:
@@ -696,7 +692,7 @@ class FingerPrint(EarthModelParamters):
                 mean_sea_level_change,
                 displacement_load=displacement_load,
                 gravitational_potential_load=gravitational_potential_load,
-                angular_momentum_jump=angular_momentum_jump,
+                angular_momentum_change=angular_momentum_change,
                 rotational_feedbacks=rotational_feedbacks,
             )
             load_new = (

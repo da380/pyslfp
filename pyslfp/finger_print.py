@@ -160,8 +160,7 @@ class FingerPrint(EarthModelParamters):
     def sea_level(self, value):
         self._check_field(value)
         self._sea_level = value
-        if self._ice_thickness is not None:
-            self._compute_ocean_function()
+        self._ocean_function = None
 
     @property
     def ice_thickness(self):
@@ -175,8 +174,7 @@ class FingerPrint(EarthModelParamters):
     def ice_thickness(self, value):
         self._check_field(value)
         self._ice_thickness = value
-        if self._sea_level is not None:
-            self._compute_ocean_function()
+        self._ocean_function = None
 
     @property
     def ocean_function(self):
@@ -410,10 +408,8 @@ class FingerPrint(EarthModelParamters):
         ocean_projection=False,
         land_projection=False,
         ice_projection=False,
-        colorbar=False,
         gridlines=True,
         symmetric=False,
-        title=None,
         **kwargs,
     ):
         """
@@ -430,11 +426,9 @@ class FingerPrint(EarthModelParamters):
             ocean_projection (bool): If True, values plotted only in oceans. Default is False.
             land_projection (bool): If True, values plotted only on land. Default is False.
             ice_projection (bool): If True, values plotted only over ice sheets. Default is False.
-            colorbar (bool): If True, colorbar included. Default is False, Default orientation is "horizontal"
             gridlines (bool): If True, gridlines are included. Default is True.
             symmetric (bool): If True, clim values set symmetrically based on the fields maximum absolute value.
                 Option overridden if vmin or vmax are set.
-            title (string): Title for the plot. Default is None.
             kwargs: Keyword arguments for forwarding to the plotting functions.
 
 
@@ -478,10 +472,6 @@ class FingerPrint(EarthModelParamters):
         lat_interval = kwargs.pop("lat_interval", 30)
         lon_interval = kwargs.pop("lon_interval", 30)
 
-        orientation = kwargs.pop("orientation", "horizontal")
-        shrink = kwargs.pop("shrink", 0.7)
-        cbar_label = kwargs.pop("cbar_label", None)
-
         if symmetric:
             data_max = 1.2 * np.nanmax(np.abs(data))
             kwargs.setdefault("vmin", -data_max)
@@ -510,15 +500,6 @@ class FingerPrint(EarthModelParamters):
                 **kwargs,
             )
 
-        if colorbar:
-            cbar = fig.colorbar(
-                im, ax=ax, orientation=orientation, shrink=shrink, label=cbar_label
-            )
-        else:
-            cbar = None
-
-        ax.set_title(title)
-
         if gridlines:
             gl = ax.gridlines(
                 linestyle="--",
@@ -532,10 +513,8 @@ class FingerPrint(EarthModelParamters):
             gl.ylocator = mticker.MultipleLocator(lat_interval)
             gl.xformatter = LongitudeFormatter()
             gl.yformatter = LatitudeFormatter()
-            # gl.top_labels = False
-            # gl.right_labels = False
 
-        return fig, cbar
+        return fig, ax, im
 
     def lats(self):
         """

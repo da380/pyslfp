@@ -542,7 +542,7 @@ class FingerPrint(EarthModelParamters):
             * self._expand_field(f, lmax_calc=0).coeffs[0, 0, 0]
         )
 
-    def evaluate_point(self, f, latitude, longitude, degrees=True):
+    def point_evaulation(self, f, latitude, longitude, degrees=True):
         """Evaluate a function at a given point.
 
         Args:
@@ -554,7 +554,7 @@ class FingerPrint(EarthModelParamters):
             float: Value of the function at the point.
         """
         f_lm = self._expand_field(f)
-        return f_lm.expand(lat=[latitude], lon=[longitude], degrees=degrees).flatten[0]
+        return f_lm.expand(lat=[latitude], lon=[longitude], degrees=degrees)[0]
 
     def zero_grid(self):
         """Return a grid of zeros."""
@@ -874,13 +874,15 @@ class FingerPrint(EarthModelParamters):
             sampling=self._sampling,
         )
 
-    def point_load(self, latitude, longitude, amplitude=1):
+    def point_load(self, latitude, longitude, amplitude=1, smoothing_angle=None):
         """Return a point load.
 
         Args:
-            latitude (float): Latitude of the point load.
-            longitude (float): Longitude of the point load.
+            latitude (float): Latitude of the point load in degrees.
+            longitude (float): Longitude of the point load in degrees.
             amplitude (float): Amplitude of the load.
+            smoothing_angle (float): Angle over which point load
+                 is smoothed. Default is None
 
         Returns:
             SHGrid: Load associated with the point load.
@@ -897,6 +899,13 @@ class FingerPrint(EarthModelParamters):
             for m in range(1, l + 1):
                 point_load_lm.coeffs[0, l, m] += ylm[0, l, m]
                 point_load_lm.coeffs[1, l, m] += ylm[1, l, m]
+
+        if smoothing_angle is not None:
+            th = 0.5 * smoothing_angle * np.pi / 180
+            t = th * th
+            for l in range(0, point_load_lm.lmax + 1):
+                fac = np.exp(-l * (l + 1) * t)
+                point_load_lm.coeffs[:, l, :] *= fac
 
         point_load_lm = (1 / self.mean_sea_floor_radius**2) * point_load_lm
         point_load = amplitude * self._expand_coefficient(point_load_lm)

@@ -89,16 +89,19 @@ class FingerPrint(EarthModelParamters):
         self._normalization = "ortho"
         self._csphase = 1
 
-        # Read in the Love numbers.
-        self._read_love_numbers(love_number_file)
-
-        # Pre-compute some constants.
+        # Scaling of degree-zero coefficient to set surface integral.
         self._integration_factor = np.sqrt((4 * np.pi)) * self._mean_sea_floor_radius**2
+
+        # Scaling of angular velocity perturbtion to get (2,\pm 1)-coefficients for
+        # centrifugal potential.
         self._rotation_factor = (
             np.sqrt((4 * np.pi) / 15.0)
             * self.rotation_frequency
             * self.mean_sea_floor_radius**2
         )
+
+        # Scaling of gravitational potential (2,\pm 1)-coefficients to get
+        # angular velocity perturbations.
         self._inertia_factor = (
             np.sqrt(5 / (12 * np.pi))
             * self.rotation_frequency
@@ -108,6 +111,10 @@ class FingerPrint(EarthModelParamters):
                 * (self.polar_moment_of_inertia - self.equatorial_moment_of_inertia)
             )
         )
+
+        # Read in the Love numbers.
+        self._love_number_file = love_number_file
+        self._read_love_numbers(love_number_file)
 
         # Background model not set.
         self._sea_level = None
@@ -287,105 +294,6 @@ class FingerPrint(EarthModelParamters):
             self._compute_ocean_function()
         self._ocean_area = self.integrate(self._ocean_function)
 
-    def _iterate_solver(
-        self,
-        load,
-        mean_sea_level_change,
-        /,
-        *,
-        displacement_load=None,
-        gravitational_potential_load=None,
-        angular_momentum_change=None,
-        rotational_feedbacks=True,
-    ):
-        # Given a set of generalised loads, returns the solid earth deformation
-        # and associated sea level change.
-
-        if displacement_load is not None:
-            displacement_load_coefficient = self._expand_field(displacement_load)
-        if gravitational_potential_load is not None:
-            gravitational_potential_load_coefficient = self._expand_field(
-                gravitational_potential_load
-            )
-
-        displacement_lm = self._expand_field(load)
-        gravity_potential_change_lm = displacement_lm.copy()
-
-        for l in range(self.lmax + 1):
-
-            displacement_lm.coeffs[:, l, :] *= self._h[l]
-            gravity_potential_change_lm.coeffs[:, l, :] *= self._k[l]
-
-            if displacement_load is not None:
-                displacement_lm.coeffs[:, l, :] += (
-                    self._h_u[l] * displacement_load_coefficient.coeffs[:, l, :]
-                )
-
-                gravity_potential_change_lm.coeffs[:, l, :] += (
-                    self._k_u[l] * displacement_load_coefficient.coeffs[:, l, :]
-                )
-
-            if gravitational_potential_load is not None:
-                displacement_lm.coeffs[:, l, :] += (
-                    self._h_phi[l]
-                    * gravitational_potential_load_coefficient.coeffs[:, l, :]
-                )
-
-                gravity_potential_change_lm.coeffs[:, l, :] += (
-                    self._k_phi[l]
-                    * gravitational_potential_load_coefficient.coeffs[:, l, :]
-                )
-
-        if rotational_feedbacks:
-            r = self._rotation_factor
-            i = self._inertia_factor
-            kt = self._kt[2]
-            ht = self._ht[2]
-            g = r / (1 - r * i * kt)
-            h = 1 / (self.polar_moment_of_inertia - self.equatorial_moment_of_inertia)
-            displacement_lm.coeffs[:, 2, 1] += (
-                ht * g * i * gravity_potential_change_lm.coeffs[:, 2, 1]
-            )
-
-            if angular_momentum_change is not None:
-                displacement_lm.coeffs[:, 2, 1] += (
-                    ht * r * h * angular_momentum_change[:]
-                    + kt * g * h * angular_momentum_change[:]
-                )
-
-            gravity_potential_change_lm.coeffs[:, 2, 1] += (
-                kt * g * i * gravity_potential_change_lm.coeffs[:, 2, 1]
-            )
-
-            if angular_momentum_change is not None:
-                gravity_potential_change_lm.coeffs[:, 2, 1] += (
-                    kt * g * h * angular_momentum_change[:]
-                )
-
-            angular_velocity_change = i * gravity_potential_change_lm.coeffs[:, 2, 1]
-
-            if angular_momentum_change is not None:
-                angular_velocity_change += h * angular_momentum_change[:]
-
-            gravity_potential_change_lm.coeffs[:, 2, 1] += r * angular_velocity_change
-        else:
-            angular_velocity_change = np.zeros(2)
-
-        g = self.gravitational_acceleration
-        displacement = self._expand_coefficient(displacement_lm)
-        gravity_potential_change = self._expand_coefficient(gravity_potential_change_lm)
-        sea_level_change = (-1 / g) * (g * displacement + gravity_potential_change)
-        sea_level_change.data[:, :] += mean_sea_level_change - self.ocean_average(
-            sea_level_change
-        )
-
-        return (
-            sea_level_change,
-            displacement,
-            gravity_potential_change,
-            angular_velocity_change,
-        )
-
     # --------------------------------------------------------#
     #                       Public methods                    #
     # --------------------------------------------------------#
@@ -401,6 +309,7 @@ class FingerPrint(EarthModelParamters):
         coasts=True,
         rivers=False,
         borders=False,
+        map_extent=None,
         ocean_projection=False,
         land_projection=False,
         ice_projection=False,
@@ -419,6 +328,8 @@ class FingerPrint(EarthModelParamters):
             coasts (bool): If True, coast lines plotted. Default is True.
             rivers (bool): If True, major rivers plotted. Default is False.
             borders (bool): If True, country borders are plotted. Default is False.
+            map_extent ([float]): Sets the (lon, lat) range for plotting.
+                Tuple of [lon_min, lon_max, lat_min, lat_max]. Default is None.
             ocean_projection (bool): If True, values plotted only in oceans. Default is False.
             land_projection (bool): If True, values plotted only on land. Default is False.
             ice_projection (bool): If True, values plotted only over ice sheets. Default is False.
@@ -453,6 +364,9 @@ class FingerPrint(EarthModelParamters):
 
         figsize = kwargs.pop("figsize", (10, 8))
         fig, ax = plt.subplots(figsize=figsize, subplot_kw={"projection": projection})
+
+        if map_extent is not None:
+            ax.set_extent(map_extent, crs=ccrs.PlateCarree())
 
         if coasts:
             ax.add_feature(cfeature.COASTLINE, linewidth=0.8)
@@ -552,6 +466,22 @@ class FingerPrint(EarthModelParamters):
         f_lm = self._expand_field(f)
         return f_lm.expand(lat=[latitude], lon=[longitude], degrees=degrees)[0]
 
+    def coefficient_evaluation(self, f, l, m):
+        """Return the (l,m)th spherical harmonic coefficient of a function.
+
+        Args:
+            f (SHGrid): Function to evaluate.
+            l (int): The degree.
+            m (int): The order.
+
+        Returns:
+            float: Value of the coefficient.
+        """
+        assert 0 <= l <= self.lmax
+        assert -l <= m <= l
+        f_lm = self._expand_field(f)
+        return f_lm.coeffs[0 if m >= 0 else 1, l, abs(m)]
+
     def zero_grid(self):
         """Return a grid of zeros."""
         return SHGrid.from_zeros(
@@ -629,21 +559,23 @@ class FingerPrint(EarthModelParamters):
     ):
         """
         Returns the solution to the generalised fingerprint problem for a given generalised load.
+        If only a non-zero direct load is input, then the calculation reduces to the standard
+        fingerprint problem.
 
         Args:
             direct_load (SHGrid): The direct load applied in the problem. Default is None.
             displacement_load (SHGrid): The displacement load applied in the problem. Default is None.
             gravitational_potential_load (SHGrid): The gravitational potential load applied in the
                  problem. The default is None.
-            angular_momentum_change (numpy vector): The angular velocity
+            angular_momentum_change (numpy vector): The angular momentum change. Default is None.
+            rtol (float): Relative tolerance for iterative solution. Default is 1e-6.
+            verbose (bool): If True, relative errors printed during iterations.
 
         Returns:
-
-
-        Notes:
-            If rotational feedbacks are included, the potential perturbation
-            is that of gravity, this being a sum of the gravitational and
-            centrifugal perturbations.
+            SHGrid: sea_level_change.
+            SHGrid: displacement.
+            SHGrid: Gravity potential change.
+            numpy vector: angular velocity change.
         """
 
         loads_present = False
@@ -661,16 +593,19 @@ class FingerPrint(EarthModelParamters):
         if displacement_load is not None:
             loads_present = True
             assert self._check_field(displacement_load)
+            displacement_load_lm = self._expand_field(displacement_load)
 
         if gravitational_potential_load is not None:
             loads_present = True
             assert self._check_field(gravitational_potential_load)
+            gravitational_potential_load_lm = self._expand_field(
+                gravitational_potential_load
+            )
 
-        if angular_momentum_change is not None and rotational_feedbacks:
+        if angular_momentum_change is not None:
             loads_present = True
 
         if loads_present is False:
-            # Return zero solution if no loads have been set.
             return self.zero_grid(), self.zero_grid(), self.zero_grid(), np.zeros(2)
 
         load = (
@@ -678,23 +613,76 @@ class FingerPrint(EarthModelParamters):
             + self.water_density * self.ocean_function * mean_sea_level_change
         )
 
+        angular_velocity_change = np.zeros(2)
+
+        g = self.gravitational_acceleration
+        r = self._rotation_factor
+        i = self._inertia_factor
+        m = 1 / (self.polar_moment_of_inertia - self.equatorial_moment_of_inertia)
+        ht = self._ht[2]
+        kt = self._kt[2]
+
         err = 1
         count = 0
         count_print = 0
         while err > rtol:
-            (
-                sea_level_change,
-                displacement,
-                gravity_potential_change,
-                angular_velocity_change,
-            ) = self._iterate_solver(
-                load,
-                mean_sea_level_change,
-                displacement_load=displacement_load,
-                gravitational_potential_load=gravitational_potential_load,
-                angular_momentum_change=angular_momentum_change,
-                rotational_feedbacks=rotational_feedbacks,
+
+            displacement_lm = self._expand_field(load)
+            gravity_potential_change_lm = displacement_lm.copy()
+
+            for l in range(self.lmax + 1):
+
+                displacement_lm.coeffs[:, l, :] *= self._h[l]
+                gravity_potential_change_lm.coeffs[:, l, :] *= self._k[l]
+
+                if displacement_load is not None:
+
+                    displacement_lm.coeffs[:, l, :] += (
+                        self._h_u[l] * displacement_load_lm.coeffs[:, l, :]
+                    )
+
+                    gravity_potential_change_lm.coeffs[:, l, :] += (
+                        self._k_u[l] * displacement_load_lm.coeffs[:, l, :]
+                    )
+
+                if gravitational_potential_load is not None:
+
+                    displacement_lm.coeffs[:, l, :] += (
+                        self._h_phi[l] * gravitational_potential_load_lm.coeffs[:, l, :]
+                    )
+
+                    gravity_potential_change_lm.coeffs[:, l, :] += (
+                        self._k_phi[l] * gravitational_potential_load_lm.coeffs[:, l, :]
+                    )
+
+            if rotational_feedbacks:
+
+                centrifugal_coeffs = r * angular_velocity_change
+
+                displacement_lm.coeffs[:, 2, 1] += ht * centrifugal_coeffs
+                gravity_potential_change_lm.coeffs[:, 2, 1] += kt * centrifugal_coeffs
+
+                angular_velocity_change = (
+                    i * gravity_potential_change_lm.coeffs[:, 2, 1]
+                )
+
+                if angular_momentum_change is not None:
+                    angular_velocity_change -= m * angular_momentum_change
+
+                gravity_potential_change_lm.coeffs[:, 2, 1] += (
+                    r * angular_velocity_change
+                )
+
+            displacement = self._expand_coefficient(displacement_lm)
+            gravity_potential_change = self._expand_coefficient(
+                gravity_potential_change_lm
             )
+
+            sea_level_change = (-1 / g) * (g * displacement + gravity_potential_change)
+            sea_level_change.data += mean_sea_level_change - self.ocean_average(
+                sea_level_change
+            )
+
             load_new = (
                 direct_load
                 + self.water_density * self.ocean_function * sea_level_change
@@ -747,7 +735,7 @@ class FingerPrint(EarthModelParamters):
         return self._expand_coefficient(gravitational_potential_change_lm)
 
     def gravitational_potential_change_to_gravity_potential_change(
-        self, gravity_potential_change, angular_velocity_change
+        self, gravitational_potential_change, angular_velocity_change
     ):
         """
         Adds the centrifugal potential perturbation from the
@@ -761,7 +749,7 @@ class FingerPrint(EarthModelParamters):
             (SHGrid): The gravitaty potential change.
         """
         gravity_potential_change_lm = self._expand_field(gravitational_potential_change)
-        gravitaty_potential_change_lm.coeffs[:, 2, 1] += (
+        gravity_potential_change_lm.coeffs[:, 2, 1] += (
             self._rotation_factor * angular_velocity_change
         )
         return self._expand_coefficient(gravity_potential_change_lm)
@@ -884,7 +872,6 @@ class FingerPrint(EarthModelParamters):
             SHGrid: Load associated with the point load.
         """
         theta = 90.0 - latitude
-        # phi = longitude + 180.0
         point_load_lm = self.zero_coefficients()
         ylm = pysh.expand.spharm(
             point_load_lm.lmax, theta, longitude, normalization=self.normalization
@@ -948,7 +935,9 @@ class FingerPrint(EarthModelParamters):
         )
         return self.direct_load_from_ice_thickness_change(ice_thickness_change)
 
-    def sea_level_point_measurement_adjoint_loads(self, latitude, longitude):
+    def adjoint_loads_for_sea_level_point_measurement(
+        self, latitude, longitude, smoothing_angle=None
+    ):
         """Returns the adjoint loads for a sea level measurement at a given location.
 
         Args:
@@ -958,10 +947,14 @@ class FingerPrint(EarthModelParamters):
         Returns:
             ResponseFields:
         """
-        direct_load = self.point_load(latitude, longitude)
+        direct_load = self.point_load(
+            latitude, longitude, smoothing_angle=smoothing_angle
+        )
         return direct_load, None, None, None
 
-    def displacement_load(self, latitude, longitude):
+    def adjoint_loads_for_displacement_point_measurement(
+        self, latitude, longitude, smoothing_angle=None
+    ):
         """Returns the adjoint loads for a displacement measurement at a given location.
 
         Args:
@@ -971,8 +964,52 @@ class FingerPrint(EarthModelParamters):
         Returns:
             ResponseFields: Adjoint loads for the displacement measurement.
         """
-        displacement_load = -1 * self.point_load(latitude, longitude)
+        displacement_load = -1 * self.point_load(
+            latitude, longitude, smoothing_angle=smoothing_angle
+        )
         return None, displacement_load, None, None
+
+    def adjoint_loads_for_gravity_potential_coefficient(self, l, m):
+        """
+        Returns the adjoint loads for an observation of the gravity potential change
+        at the given degree and order.
+        """
+        assert 0 <= l <= self.lmax
+        assert -l <= m <= l
+        g = self.gravitational_acceleration
+        b = self.mean_sea_floor_radius
+        adjoint_load_lm = self.zero_coefficients()
+        adjoint_load_lm.coeffs[0 if m >= 0 else 1, l, abs(m)] = -g / b**2
+        adjoint_load = self._expand_coefficient(adjoint_load_lm)
+        return None, None, adjoint_load, None
+
+    def adjoint_loads_for_gravitational_potential_coefficient(self, l, m):
+        """
+        Returns the adjoint loads for an observation of the gravitational potential change
+        at the given degree and order.
+        """
+        _, _, adjoint_load, _ = self.adjoint_loads_for_gravity_potential_coefficient(
+            l, m
+        )
+        angular_momentum_change = (
+            self.angular_momentum_change_from_gravitational_potential_load(adjoint_load)
+        )
+        return None, None, adjoint_load, angular_momentum_change
+
+    def angular_momentum_change_from_gravitational_potential_load(
+        self, gravitational_potential_load
+    ):
+        """
+        Returns the angular momentum change for a given gravitational
+        potential load. This method is used to remove the centrifugal contribution
+        from the associated measurement.
+        """
+        gravitational_potential_load_lm = self._expand_field(
+            gravitational_potential_load, lmax_calc=2
+        )
+        r = self._rotation_factor
+        b = self.mean_sea_floor_radius
+        return -r * b * b * gravitational_potential_load_lm.coeffs[:, 2, 1]
 
     def gaussian_averaging_function(self, r, latitude, longitude, cut=False):
         """
@@ -1006,7 +1043,3 @@ class FingerPrint(EarthModelParamters):
             w_lm.coeffs[:, :2, :] = 0.0
             w = self._expand_coefficient(w_lm)
         return w
-
-    def gaussian_averaging_function_components(self, r, latitude, longitude, cut=False):
-
-        pass

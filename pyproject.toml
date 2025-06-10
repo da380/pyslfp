@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "pyslfp"
 version = "0.1.5"
-description = "Library for computing elastic sea level fingerprints"
+description = "Package for computing elastic sea level fingerprints"
 authors = ["David Al-Attar and Dan Heathcote"]
 readme = "README.md"
 license = "MIT"
@@ -15,9 +15,19 @@ pyshtools = ">=4.0.0"
 matplotlib = ">=3.0.0"
 pyqt6 = ">=6.0.0"
 Cartopy = "^0.23.0"
-pytest = "^8.3.3"
-jupyter = "^1.1.1"
 
+[tool.poetry.group.tests]
+optional = true
+
+[tool.poetry.group.tests.dependencies]
+pytest = "^8.3.5"
+
+
+[tool.poetry.group.tutorials]
+optional = true
+
+[tool.poetry.group.tutorials.dependencies]
+jupyter = "^1.1.1"
 
 
 [build-system]

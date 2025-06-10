@@ -438,6 +438,48 @@ class FingerPrint(EarthModelParamters):
         """
         return self.zero_grid().lons()
 
+    def displacement_love_numbers(self):
+        """
+        Return the displacement Love numbers.
+        """
+        return self._h
+
+    def gravitational_love_numbers(self):
+        """
+        Return the gravitational Love numbers.
+        """
+        return self._k
+
+    def load_response(self, load):
+        """
+        Returns the deformation fields associated with a load. This
+        calculation does not account for gravitationally self-consistent
+        sea level change nor rotational feedbacks.
+
+        Args:
+
+            load (SHGrid): The applied load.
+
+        Returns:
+            SHGrid: Vertical displacement.
+            SHGrid: Gravitational potential change.
+
+        """
+
+        self._check_field(load)
+        displacement_lm = self._expand_field(load)
+        gravitational_potential_change_lm = displacement_lm.copy()
+
+        for l in range(0, self.lmax + 1):
+            displacement_lm.coeffs[:, l, :] *= self._h[l]
+            gravitational_potential_change_lm.coeffs[:, l, :] *= self._k[l]
+
+        displacement = self._expand_coefficient(displacement_lm)
+        gravitational_potential_change = self._expand_coefficient(
+            gravitational_potential_change_lm
+        )
+        return displacement, gravitational_potential_change
+
     def integrate(self, f):
         """Integrate function over the surface.
 

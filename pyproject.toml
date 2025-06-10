@@ -16,6 +16,7 @@ matplotlib = ">=3.0.0"
 pyqt6 = ">=6.0.0"
 Cartopy = "^0.23.0"
 
+
 [tool.poetry.group.tests]
 optional = true
 
@@ -28,6 +29,13 @@ optional = true
 
 [tool.poetry.group.tutorials.dependencies]
 jupyter = "^1.1.1"
+
+[tool.poetry.group.examples]
+optional = true
+
+[tool.poetry.group.examples.dependencies]
+jupyter = "^1.1.1"
+pygeoinf = {git = "https://github.com/da380/pygeoinf", rev = "develop"}
 
 
 [build-system]

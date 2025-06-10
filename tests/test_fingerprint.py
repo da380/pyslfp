@@ -1,156 +1,135 @@
 import pytest
 import numpy as np
-from scipy.stats import norm
 from pyslfp.finger_print import FingerPrint
-from pyslfp.fields import ResponseFields
 
-@pytest.mark.parametrize("lmax", [(8), (32), (128)])
+
+@pytest.mark.parametrize("version", [6, 7])
+@pytest.mark.parametrize("rotational_feedbacks", [True, False])
+@pytest.mark.parametrize("rtol", [1e-6])
+@pytest.mark.parametrize("lmax", [60, 128])
 class TestFingerPrint:
-    
-    def fingerprint(self, lmax):
-        fp = FingerPrint(lmax)
-        fp.set_background_state_from_ice_ng()
-        return fp
-    
-    def bilinear_form(self, fp, f1, f2):
-        g = fp.gravitational_acceleration
-        return fp.integrate(f1.sl * f2.sl)  \
-            - (1 /g) * fp.integrate((g * f1.u * f2.u + f1.phi * f2.phi))  \
-            - (1 /g) * np.inner(f1.omega, f2.omega)
-    
-    def test_solver(self, lmax):
-        fp = self.fingerprint(lmax)
-        zeta = fp.northern_hemisphere_load()
-        response = fp.solver(zeta)
-        assert isinstance(response, ResponseFields)
-        assert response.u.lmax == lmax
-        assert response.phi.lmax == lmax
-        assert response.omega.shape == (2,)
-        assert response.sl.lmax == lmax
 
-    def test_generalised_solver(self, lmax):
-        fp = self.fingerprint(lmax)
-        zeta1 = fp.northern_hemisphere_load()
-        zeta2 = fp.southern_hemisphere_load()
-        zero = fp.zero_grid()
-        # Invent some adjoint loads
-        zeta1_u = zeta1 
-        zeta1_phi = zeta1 
-        kk1 = np.array([1,5]) 
-        zeta2_u = zeta2 
-        zeta2_phi = zeta2
-        kk2 = np.array([5,10]) 
-        # Initialise the generalised loads
-        generalised_load1 = ResponseFields(zeta1_u, zeta1_phi, kk1, zeta1)
-        generalised_load2 = ResponseFields(zeta2_u, zeta2_phi, kk2, zeta2)
-        # Compute the response. 
-        response1 = fp.generalised_solver(generalised_load1, rotational_feedbacks=True)
-        response2 = fp.generalised_solver(generalised_load2, rotational_feedbacks=True)
-        # Check to see if the two inner products are equal
-        lhs = self.bilinear_form(fp, generalised_load1, response2)
-        rhs = self.bilinear_form(fp, generalised_load2, response1)
-        print(lhs)
-        print(rhs)
-        assert np.isclose(lhs, rhs, rtol=1e-3)
+    def set_up_fingerprint(self, version, lmax):
+        """
+        Set up a FingerPrint instance of the given trunction
+        degree and set the equilibrium model using the
+        present-day ice-7g values.
+        """
+        fingerprint = FingerPrint(lmax=lmax)
+        fingerprint.set_state_from_ice_ng(version=version)
+        return fingerprint
 
-    def test_solver_no_rotational_feedbacks(self, lmax):
-        fp = self.fingerprint(lmax)
-        zeta = fp.northern_hemisphere_load()
-        response = fp.solver(zeta, rotational_feedbacks=False)
-        assert isinstance(response, ResponseFields)
-        assert response.u.lmax == lmax
-        assert response.phi.lmax == lmax
-        assert response.omega.shape == (2,)
-        assert response.sl.lmax == lmax
+    def random_load(self, fingerprint):
+        """
+        Return a random disk load.
+        """
+        delta = np.random.uniform(10, 30)
+        lat = np.random.uniform(-90, 90)
+        lon = np.random.uniform(-180, 180)
+        amp = np.random.randn()
+        return fingerprint.disk_load(delta, lat, lon, amp)
 
-    def test_generalised_solver_no_rotational_feedbacks(self, lmax):
-        fp = self.fingerprint(lmax)
-        zeta1 = fp.northern_hemisphere_load()
-        zeta2 = fp.southern_hemisphere_load()
-        zero = fp.zero_grid()
-        # Invent some adjoint loads
-        zeta1_u = zeta1 
-        zeta1_phi = zeta1 
-        kk1 = np.array([1,5]) 
-        zeta2_u = zeta2 
-        zeta2_phi = zeta2
-        kk2 = np.array([5,10]) 
-        # Initialise the generalised loads
-        generalised_load1 = ResponseFields(zeta1_u, zeta1_phi, kk1, zeta1)
-        generalised_load2 = ResponseFields(zeta2_u, zeta2_phi, kk2, zeta2)
-        # Compute the response. 
-        response1 = fp.generalised_solver(generalised_load1, rotational_feedbacks=False)
-        response2 = fp.generalised_solver(generalised_load2, rotational_feedbacks=False)
-        # Check to see if the two inner products are equal
-        lhs = self.bilinear_form(fp, generalised_load1, response2)
-        rhs = self.bilinear_form(fp, generalised_load2, response1)
-        print(lhs)
-        print(rhs)
-        assert np.isclose(lhs, rhs, rtol=1e-3)
+    def random_angular_momentum(self, fingerprint):
+        """
+        Return a random angular momentum jump
+        with magnitude comparable to the disk loads.
+        """
+        b = fingerprint.mean_sea_floor_radius
+        omega = fingerprint.rotation_frequency
+        load = self.random_load(fingerprint)
+        load_lm = load.expand(lmax_calc=2, normalization="ortho")
+        return omega * b**4 * load_lm.coeffs[:, 2, 1]
 
-    def test_integrate(self, lmax):
-        fp = self.fingerprint(lmax)
-        zeta1 = fp.northern_hemisphere_load()
-        response1 = fp.solver(zeta1)
-        assert isinstance(fp.integrate(response1.sl * zeta1), float)
-        
-    def test_zeros(self, lmax):
-        fp = self.fingerprint(lmax)
-        zero = fp.zero_grid()
-        assert np.all(zero.data == 0)
+    def test_sea_level_reciprocity(self, version, rotational_feedbacks, rtol, lmax):
+        """
+        Check the sea level reciprocity relation using random loads.
+        """
+        fingerprint = self.set_up_fingerprint(version, lmax)
+        direct_load_1 = self.random_load(fingerprint)
+        direct_load_2 = self.random_load(fingerprint)
+        sea_level_change_1, _, _, _ = fingerprint(
+            direct_load=direct_load_1,
+            rotational_feedbacks=rotational_feedbacks,
+            rtol=rtol,
+        )
+        sea_level_change_2, _, _, _ = fingerprint(
+            direct_load=direct_load_2,
+            rotational_feedbacks=rotational_feedbacks,
+            rtol=rtol,
+        )
+        lhs = fingerprint.integrate(direct_load_2 * sea_level_change_1)
+        rhs = fingerprint.integrate(direct_load_1 * sea_level_change_2)
+        assert np.isclose(lhs, rhs, rtol=1000 * rtol)
 
-    def test_addition(self, lmax):
-        fp = self.fingerprint(lmax)
-        zeta1 = fp.northern_hemisphere_load()
-        zeta2 = fp.southern_hemisphere_load()
-        response1 = fp.solver(zeta1)
-        response2 = fp.solver(zeta2)
-        response = response1 + response2
-        assert isinstance(response, ResponseFields)
-        assert response.u.lmax == lmax
-        assert response.phi.lmax == lmax
-        assert response.omega.shape == (2,)
-        assert response.sl.lmax == lmax
+    def test_generalised_sea_level_reciprocity(
+        self, version, rotational_feedbacks, rtol, lmax
+    ):
+        """
+        Test the generalised reciprocity relation using random forces.
+        """
 
-    def test_subtraction(self, lmax):
-        fp = self.fingerprint(lmax)
-        zeta1 = fp.northern_hemisphere_load()
-        zeta2 = fp.southern_hemisphere_load()
-        response1 = fp.solver(zeta1)
-        response2 = fp.solver(zeta2)
-        response = response1 - response2
-        assert isinstance(response, ResponseFields)
-        assert response.u.lmax == lmax
-        assert response.phi.lmax == lmax
-        assert response.omega.shape == (2,)
-        assert response.sl.lmax == lmax
+        fingerprint = self.set_up_fingerprint(version, lmax)
+        direct_load_1 = self.random_load(fingerprint)
+        direct_load_2 = self.random_load(fingerprint)
+        displacement_load_1 = self.random_load(fingerprint)
+        displacement_load_2 = self.random_load(fingerprint)
+        gravitational_potential_load_1 = self.random_load(fingerprint)
+        gravitational_potential_load_2 = self.random_load(fingerprint)
+        angular_momentum_change_1 = (
+            self.random_angular_momentum(fingerprint)
+            if rotational_feedbacks
+            else np.zeros(2)
+        )
+        angular_momentum_change_2 = (
+            self.random_angular_momentum(fingerprint)
+            if rotational_feedbacks
+            else np.zeros(2)
+        )
 
-    def test_multiplication(self, lmax):
-        fp = self.fingerprint(lmax)
-        zeta1 = fp.northern_hemisphere_load()
-        response1 = fp.solver(zeta1)
-        s = 2
-        response = response1 * s
-        assert isinstance(response, ResponseFields)
-        assert response.u.lmax == lmax
-        assert response.phi.lmax == lmax
-        assert response.omega.shape == (2,)
-        assert response.sl.lmax == lmax
+        (
+            sea_level_change_1,
+            displacement_1,
+            gravity_potential_change_1,
+            angular_velocity_change_1,
+        ) = fingerprint(
+            direct_load=direct_load_1,
+            displacement_load=displacement_load_1,
+            gravitational_potential_load=gravitational_potential_load_1,
+            angular_momentum_change=angular_momentum_change_1,
+        )
 
-    def test_division(self, lmax):
-        fp = self.fingerprint(lmax)
-        zeta1 = fp.northern_hemisphere_load()
-        response1 = fp.solver(zeta1)
-        s = 2
-        response = response1 / s
-        assert isinstance(response, ResponseFields)
-        assert response.u.lmax == lmax
-        assert response.phi.lmax == lmax
-        assert response.omega.shape == (2,)
-        assert response.sl.lmax == lmax
+        (
+            sea_level_change_2,
+            displacement_2,
+            gravity_potential_change_2,
+            angular_velocity_change_2,
+        ) = fingerprint(
+            direct_load=direct_load_2,
+            displacement_load=displacement_load_2,
+            gravitational_potential_load=gravitational_potential_load_2,
+            angular_momentum_change=angular_momentum_change_2,
+        )
 
+        g = fingerprint.gravitational_acceleration
 
+        lhs_integrand = direct_load_2 * sea_level_change_1 - (1 / g) * (
+            g * displacement_load_2 * displacement_1
+            + gravitational_potential_load_2 * gravity_potential_change_1
+        )
 
-    
+        lhs = (
+            fingerprint.integrate(lhs_integrand)
+            - np.dot(angular_momentum_change_2, angular_velocity_change_1) / g
+        )
 
-    
+        rhs_integrand = direct_load_1 * sea_level_change_2 - (1 / g) * (
+            g * displacement_load_1 * displacement_2
+            + gravitational_potential_load_1 * gravity_potential_change_2
+        )
+
+        rhs = (
+            fingerprint.integrate(rhs_integrand)
+            - np.dot(angular_momentum_change_1, angular_velocity_change_2) / g
+        )
+
+        assert np.isclose(lhs, rhs, rtol=1000 * rtol)

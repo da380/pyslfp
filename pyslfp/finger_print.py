@@ -351,7 +351,11 @@ class FingerPrint(EarthModelParamters):
 
         lons = f.lons()
         lats = f.lats()
-        data = f.data.copy()
+
+        if ocean_projection or land_projection or ice_projection:
+            data = f.data.copy()
+        else:
+            data = f.data
 
         if ocean_projection:
             data *= self.ocean_projection().data
@@ -1033,12 +1037,12 @@ class FingerPrint(EarthModelParamters):
         _, _, adjoint_load, _ = self.adjoint_loads_for_gravity_potential_coefficient(
             l, m
         )
-        angular_momentum_change = (
-            self.angular_momentum_change_from_gravitational_potential_load(adjoint_load)
+        angular_momentum_change = self.adjoint_angular_momentum_change_from_adjoint_gravitational_potential_load(
+            adjoint_load
         )
         return None, None, adjoint_load, angular_momentum_change
 
-    def angular_momentum_change_from_gravitational_potential_load(
+    def adjoint_angular_momentum_change_from_adjoint_gravitational_potential_load(
         self, gravitational_potential_load
     ):
         """

@@ -1,37 +1,60 @@
 import matplotlib.pyplot as plt
 from pyslfp import FingerPrint
+from pygeoinf import LinearOperator
+from pygeoinf.homogeneous_space.sphere import Lebesgue
 
 
-# Set up the FingerPrint instance.
-finger_print = FingerPrint()
+class SeaLevelOperator(LinearOperator):
+    """
+    LinearOperator that maps a direct load to the resulting sea level change.
+    """
 
-# Set the intial sea level and ice thickness to present-day
-# values from ice-7g
-finger_print.set_state_from_ice_ng()
+    def __init__(self, fingerprint):
+        self._fingerprint = fingerprint
 
-# Set the direct load.
-direct_load = finger_print.northern_hemisphere_load()
+        domain = Lebesgue(
+            self._fingerprint.lmax, radius=self._fingerprint.mean_sea_floor_radius
+        )
+        codomain = domain
 
-# Compute the sea level change.
-sea_level_change, _, _, _ = finger_print(
-    direct_load=direct_load, verbose=True, rotational_feedbacks=True
-)
+        super().__init__(domain, codomain, self._mapping, adjoint_mapping=self._mapping)
 
-# Normalise by the mean sea level change.
-mean_sea_level_change = finger_print.mean_sea_level_change(direct_load)
-sea_level_change /= mean_sea_level_change
+    def ice_sheet_projection(self):
+        """
+        Returns a LinearOperator that multiplies fields by one over the
+        ice sheets and zero elsewhere.
+        """
+        return LinearOperator.self_adjoint(
+            self.domain, lambda u: u * self._fingerprint.ice_projection(0)
+        )
 
-# Plot the results.
-fig, ax, im = finger_print.plot(
-    sea_level_change,
-    ocean_projection=True,
-    vmin=-1.5,
-    vmax=1.5,
-    contour=True,
-    levels=30,
-)
-cbar = fig.colorbar(
-    im, ax=ax, orientation="horizontal", shrink=0.7, label="Normalised sea level change"
-)
-ax.set_title("My first sea level fingerprint", y=1.1)
+    def _mapping(self, zeta):
+        sea_level_change, _, _, _ = self._fingerprint(direct_load=zeta)
+        return sea_level_change
+
+
+# Set up FingerPrint instance.
+fingerprint = FingerPrint()
+fingerprint.set_state_from_ice_ng()
+
+# Set up the sea level operator.
+A = SeaLevelOperator(fingerprint)
+P = A.ice_sheet_projection()
+
+# Generate a Gaussian measure on the operators domain.
+E = A.domain
+mu = E.sobolev_gaussian_measure(2, 0.4, 1)
+
+
+# Check the adjoint identity.
+u = mu.sample()
+v = P(u)
+
+fig, ax, im = fingerprint.plot(u)
+fig.colorbar(im, ax=ax, orientation="horizontal")
+
+fig, ax, im = fingerprint.plot(v)
+fig.colorbar(im, ax=ax, orientation="horizontal")
+
+
 plt.show()

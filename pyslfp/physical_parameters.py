@@ -13,7 +13,7 @@ class EarthModelParamters:
         /,
         *,
         length_scale=1,
-        mass_scale=1,
+        density_scale=1,
         time_scale=1,
         equatorial_radius=6378137,
         polar_radius=6356752,
@@ -30,12 +30,12 @@ class EarthModelParamters:
 
         # Set the base units.
         self._length_scale = length_scale
-        self._mass_scale = mass_scale
+        self._density_scale = density_scale
         self._time_scale = time_scale
 
         # Set the derived units.
+        self._mass_scale = self._density_scale * self._length_scale**3
         self._frequency_scale = 1 / self.time_scale
-        self._density_scale = self.mass_scale / self.length_scale**3
         self._load_scale = self.mass_scale / self.length_scale**2
         self._velocity_scale = self.length_scale / self.time_scale
         self._acceleration_scale = self.velocity_scale / self.time_scale
@@ -92,6 +92,17 @@ class EarthModelParamters:
         self._rotation_frequency = 7.27220521664304e-05 / self.frequency_scale
         self._water_density = 1000 / self.density_scale
         self._ice_density = 917 / self.density_scale
+
+    @staticmethod
+    def from_standard_non_dimensionalisation():
+        """
+        Returns parameters using a non-dimensionalisation scheme based
+        on the mean radius of the Earth, the density of water, and the length
+        of a year.
+        """
+        return EarthModelParamters(
+            length_scale=6371000, density_scale=1000, time_scale=365 * 24 * 3600
+        )
 
     @property
     def length_scale(self):

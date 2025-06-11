@@ -38,6 +38,7 @@ jupyter = "^1.1.1"
 pygeoinf = {git = "https://github.com/da380/pygeoinf", rev = "develop"}
 
 
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"

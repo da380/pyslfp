@@ -60,7 +60,7 @@ class FingerPrint(EarthModelParamters):
         else:
             super().__init__(
                 length_scale=earth_model_parameters.length_scale,
-                mass_scale=earth_model_parameters.mass_scale,
+                density_scale=earth_model_parameters.density_scale,
                 time_scale=earth_model_parameters.time_scale,
                 equatorial_radius=earth_model_parameters.equatorial_radius,
                 polar_radius=earth_model_parameters.polar_radius,
@@ -122,8 +122,11 @@ class FingerPrint(EarthModelParamters):
         self._ocean_function = None
         self._ocean_area = None
 
+        # Initialise the counter for number of solver calls.
+        self._solver_counter = 0
+
     # -----------------------------------------------#
-    #       Properties related to grid options       #
+    #                    Properties                  #
     # -----------------------------------------------#
 
     @property
@@ -150,10 +153,6 @@ class FingerPrint(EarthModelParamters):
     def extend(self):
         """True if grid extended to include 360 degree longitude."""
         return self._extend
-
-    # ----------------------------------------------------#
-    #     Properties related to the background state     #
-    # ----------------------------------------------------#
 
     @property
     def sea_level(self):
@@ -203,6 +202,14 @@ class FingerPrint(EarthModelParamters):
         if self._ocean_area is None:
             self._compute_ocean_area()
         return self._ocean_area
+
+    @property
+    def solver_counter(self):
+        """
+        Returns the number of times the solver method
+        has been called.
+        """
+        return self._solver_counter
 
     # ---------------------------------------------------------#
     #                     Private methods                     #
@@ -625,6 +632,7 @@ class FingerPrint(EarthModelParamters):
         """
 
         loads_present = False
+        non_zero_rhs = False
 
         if direct_load is not None:
             loads_present = True
@@ -632,6 +640,8 @@ class FingerPrint(EarthModelParamters):
             mean_sea_level_change = -self.integrate(direct_load) / (
                 self.water_density * self.ocean_area
             )
+            non_zero_rhs = non_zero_rhs or np.max(np.abs(direct_load.data)) > 0
+
         else:
             direct_load = self.zero_grid()
             mean_sea_level_change = 0
@@ -640,6 +650,7 @@ class FingerPrint(EarthModelParamters):
             loads_present = True
             assert self._check_field(displacement_load)
             displacement_load_lm = self._expand_field(displacement_load)
+            non_zero_rhs = non_zero_rhs or np.max(np.abs(displacement_load.data)) > 0
 
         if gravitational_potential_load is not None:
             loads_present = True
@@ -647,12 +658,18 @@ class FingerPrint(EarthModelParamters):
             gravitational_potential_load_lm = self._expand_field(
                 gravitational_potential_load
             )
+            non_zero_rhs = (
+                non_zero_rhs or np.max(np.abs(gravitational_potential_load.data)) > 0
+            )
 
         if angular_momentum_change is not None:
             loads_present = True
+            non_zero_rhs = non_zero_rhs or np.max(np.abs(angular_momentum_change)) > 0
 
-        if loads_present is False:
+        if loads_present is False or not non_zero_rhs:
             return self.zero_grid(), self.zero_grid(), self.zero_grid(), np.zeros(2)
+
+        self._solver_counter += 1
 
         load = (
             direct_load

@@ -29,13 +29,7 @@ optional = true
 
 [tool.poetry.group.tutorials.dependencies]
 jupyter = "^1.1.1"
-
-[tool.poetry.group.examples]
-optional = true
-
-[tool.poetry.group.examples.dependencies]
-jupyter = "^1.1.1"
-pygeoinf = {git = "https://github.com/da380/pygeoinf", rev = "develop"}
+pygeoinf = {git = "https://github.com/da380/pygeoinf", rev = "main"}
 
 
 

@@ -1,14 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from cartopy import crs as ccrs
-from pygeoinf import (
-    LinearOperator,
-    LinearForwardProblem,
-    LinearBayesianInversion,
-    GaussianMeasure,
-    CholeskySolver,
-    CGSolver,
-)
+from scipy.stats import norm
+import pygeoinf as inf
 from pygeoinf.homogeneous_space.sphere import Sobolev
 from pyslfp import EarthModelParamters, FingerPrint
 
@@ -44,29 +37,25 @@ model_space = Sobolev(
 
 
 # Set the ice projection operator.
-ice_projection = LinearOperator.formally_self_adjoint(
+ice_projection = inf.LinearOperator.formally_self_adjoint(
     model_space,
     lambda ice_thickness_change: fingerprint.ice_projection(0) * ice_thickness_change,
 )
 
 # Set the load projection.
-load_projection = LinearOperator.formally_self_adjoint(
+load_projection = inf.LinearOperator.formally_self_adjoint(
     model_space, fingerprint.direct_load_from_ice_thickness_change
 )
 
 # Set a prior distribution.
 model_prior_measure = model_space.sobolev_gaussian_measure(2, 0.05, 1)
-model_prior_measure = model_prior_measure.affine_mapping(
-    operator=load_projection @ ice_projection
-)
+model_prior_measure = model_prior_measure.affine_mapping(operator=ice_projection)
 
 
 # Set the sea level operator.
-sea_level_operator = LinearOperator.formally_self_adjoint(
+sea_level_operator = inf.LinearOperator.formally_self_adjoint(
     model_space,
-    lambda direct_load: fingerprint(direct_load=direct_load, rtol=1e-9, verbose=True)[
-        0
-    ],
+    lambda direct_load: fingerprint(direct_load=direct_load, rtol=1e-9)[0],
 )
 
 sea_level_operator = sea_level_operator @ load_projection @ ice_projection
@@ -76,23 +65,35 @@ n = 50
 lats, lons = random_ocean_locations(n, lat1=-60, lat2=60)
 observation_operator = model_space.point_evaluation_operator(lats, lons)
 
-
 # Set the forward problem.
 forward_operator = observation_operator @ sea_level_operator
 data_space = forward_operator.codomain
-data_error_measure = GaussianMeasure.from_standard_deviation(data_space, 0.01)
-forward_problem = LinearForwardProblem(forward_operator, data_error_measure)
+data_error_measure = inf.GaussianMeasure.from_standard_deviation(data_space, 0.01)
+forward_problem = inf.LinearForwardProblem(forward_operator, data_error_measure)
+
+# Set up the property mapping for mean sea level change.
+mean_sea_level_operator = inf.LinearOperator.from_formal_adjoint(
+    model_space,
+    inf.EuclideanSpace(1),
+    fingerprint.mean_sea_level_change,
+    lambda a: fingerprint.constant_grid(
+        -a[0] / (fingerprint.water_density * fingerprint.ocean_area)
+    ),
+)
+property_operator = mean_sea_level_operator @ load_projection @ ice_projection
+
 
 # Set up the inversion
-inversion = LinearBayesianInversion(forward_problem, model_prior_measure)
+inversion = inf.LinearBayesianInversion(forward_problem, model_prior_measure)
 
 # Generate synthetic data.
 model, data = forward_problem.synthetic_model_and_data(model_prior_measure)
 sea_level_change = sea_level_operator(model)
 
 
+"""
 # Plot the direct load input.
-fig, ax, im = fingerprint.plot(model, ice_projection=False, symmetric=True)
+fig, ax, im = fingerprint.plot(model, ice_projection=True, symmetric=True)
 model_clim = im.get_clim()
 fig.colorbar(im, ax=ax, orientation="horizontal", label="direct load")
 ax.plot(
@@ -116,16 +117,16 @@ ax.plot(
     markersize=4,
     transform=ccrs.PlateCarree(),
 )
-
+"""
 
 # Invert the data.
-pi = inversion.model_posterior_measure(data, CholeskySolver(galerkin=True))
+pi = inversion.model_posterior_measure(data, inf.CGMatrixSolver())
 inverted_model = pi.expectation
 inverted_sea_level_change = sea_level_operator(inverted_model)
 
-
+"""
 # Plot the inverted direct load input.
-fig, ax, im = fingerprint.plot(inverted_model, ice_projection=False)
+fig, ax, im = fingerprint.plot(inverted_model, ice_projection=True)
 im.set_clim(model_clim)
 fig.colorbar(im, ax=ax, orientation="horizontal", label="inverted direct load")
 ax.plot(
@@ -149,10 +150,29 @@ ax.plot(
     markersize=4,
     transform=ccrs.PlateCarree(),
 )
+"""
+
 
 print(f"global mean sea level change = {fingerprint.ocean_average(sea_level_change)}")
 print(
     f"estimated global mean sea level change = {fingerprint.ocean_average(inverted_sea_level_change)}"
 )
+
+xi = pi.affine_mapping(operator=property_operator)
+
+mean = xi.expectation[0]
+var = xi.covariance.matrix(dense=True)[0, 0]
+std = np.sqrt(var)
+
+dist = norm(loc=mean, scale=std)
+
+x2 = 2 * np.abs(mean)
+x1 = -x2
+x = np.linspace(x1, x2, 500)
+y = dist.pdf(x)
+plt.figure()
+plt.plot(x, y)
+plt.axvline(x=fingerprint.ocean_average(sea_level_change), ymin=0, ymax=1)
+
 
 plt.show()

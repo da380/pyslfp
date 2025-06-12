@@ -1,21 +1,36 @@
 [tool.poetry]
 name = "pyslfp"
 version = "0.1.5"
-description = "Library for computing elastic sea level fingerprints"
+description = "Package for computing elastic sea level fingerprints"
 authors = ["David Al-Attar and Dan Heathcote"]
 readme = "README.md"
 license = "MIT"
 
 
 [tool.poetry.dependencies]
-python = "^3.10"
-numpy = "^2.0.0"
-scipy = "^1.14.1"
+python = ">=3.9"
+numpy = ">=1.26.0"
+scipy = ">=1.0.0"
+pyshtools = ">=4.0.0"
+matplotlib = ">=3.0.0"
+pyqt6 = ">=6.0.0"
 Cartopy = "^0.23.0"
-pyshtools = "^4.13.1"
-xarray = "^2024.9.0"
-matplotlib = "^3.9.2"
-pytest = "^8.3.3"
+
+
+[tool.poetry.group.tests]
+optional = true
+
+[tool.poetry.group.tests.dependencies]
+pytest = "^8.3.5"
+
+
+[tool.poetry.group.tutorials]
+optional = true
+
+[tool.poetry.group.tutorials.dependencies]
+jupyter = "^1.1.1"
+pygeoinf = {git = "https://github.com/da380/pygeoinf", rev = "main"}
+
 
 
 [build-system]

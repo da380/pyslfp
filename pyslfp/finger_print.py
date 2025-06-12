@@ -1,220 +1,140 @@
-from . import DATADIR
-from pyslfp.ice_ng import IceNG
-from pyslfp.fields import ResponseFields,ResponseCoefficients
+"""
+Module for the FingerPrint class that allows for forward 
+and adjoint elastic fingerprint calculations. 
+"""
+
+import numpy as np
 import pyshtools as pysh
 from pyshtools import SHGrid, SHCoeffs
-import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
+
+
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
+
+# from pyslfp.fields import ResponseFields, ResponseCoefficients
+from pyslfp.ice_ng import IceNG
+from pyslfp.physical_parameters import EarthModelParamters
+
+from . import DATADIR
 
 
 if __name__ == "__main__":
     pass
 
 
-class FingerPrint:
+class FingerPrint(EarthModelParamters):
+    """
+    Class for computing elastic sea level fingerprints.
 
+    Initialisation of the class sets up various computational options,
+    but the backgroud sea level and ice thickness are not set. The latter
+    fields must be set separately, and until this is done fingerprint
+    calculations can not be performed.
+    """
 
-    def __init__(self, lmax=256, /,*, length_scale=1, mass_scale=1, time_scale=1,
-                 grid = "DH", love_number_file=DATADIR + "/love_numbers/PREM_4096.dat"):
+    def __init__(
+        self,
+        /,
+        *,
+        lmax=256,
+        earth_model_parameters=None,
+        grid="DH",
+        extend=True,
+        love_number_file=DATADIR + "/love_numbers/PREM_4096.dat",
+    ):
         """
         Args:
-            lmax (int): Truncation degree for spherical harmonic expansions. 
-            length_scale (float): Length used for non-dimensionalisation. 
-            mass_scale (float): Mass used for non-dimensionalisation. 
-            time_scale (float): Time used for non-dimensionalisation. 
-            grid (str): pyshtools grid option. 
-            love_number_file (str): Path to file containing the Love numbers. 
+            lmax (int): Truncation degree for spherical harmonic expansions.
+            earth_model_parameters (EarthModelParameters): Parameters for the Earth model.
+            grid (str): pyshtools grid option.
+            extend (bool): If True, spatial grid extended to inlcude 360 degrees. Default is True.
+            love_number_file (str): Path to file containing the Love numbers.
         """
 
-        # Set the base units. 
-        self._length_scale = length_scale        
-        self._mass_scale = mass_scale
-        self._time_scale = time_scale                
+        # Set up the earth model parameters
+        if earth_model_parameters is None:
+            super().__init__()
+        else:
+            super().__init__(
+                length_scale=earth_model_parameters.length_scale,
+                density_scale=earth_model_parameters.density_scale,
+                time_scale=earth_model_parameters.time_scale,
+                equatorial_radius=earth_model_parameters.equatorial_radius,
+                polar_radius=earth_model_parameters.polar_radius,
+                mean_radius=earth_model_parameters.mean_radius,
+                mean_sea_floor_radius=earth_model_parameters.mean_sea_floor_radius,
+                mass=earth_model_parameters.mass,
+                gravitational_acceleration=earth_model_parameters.gravitational_acceleration,
+                equatorial_moment_of_inertia=earth_model_parameters.equatorial_moment_of_inertia,
+                polar_moment_of_inertia=earth_model_parameters.polar_moment_of_inertia,
+                rotation_frequency=earth_model_parameters.rotation_frequency,
+                water_density=earth_model_parameters.water_density,
+                ice_density=earth_model_parameters.ice_density,
+            )
 
-        # Set the derived units. Parameter
-        self._frequency_scale = 1 / self.time_scale
-        self._density_scale = self.mass_scale / self.length_scale**3
-        self._load_scale = self.mass_scale / self.length_scale**2
-        self._velocity_scale = self.length_scale / self.time_scale
-        self._acceleration_scale = self.velocity_scale / self.time_scale
-        self._gravitational_potential_scale = self.acceleration_scale * self.length_scale
-        self._moment_of_inertia_scale = self.mass_scale * self.length_scale**2
-
-        # Set the physical constants. 
-        self._equatorial_radius = 6378137 / self.length_scale
-        self._polar_radius = 6356752  / self.length_scale
-        self._mean_radius = 6371000 / self.length_scale
-        self._mean_sea_floor_radius = 6368000 / self.length_scale
-        self._mass = 5.974e24 / self.mass_scale
-        self._gravitational_acceleration = 9.825652323 / self.acceleration_scale
-        self._gravitational_constant = 6.6723e-11 * self.mass_scale * self.time_scale**2 / self.length_scale**3        
-        self._equatorial_moment_of_inertia = 8.0096e37 / self.moment_of_inertia_scale
-        self._polar_moment_of_inertia =  8.0359e37 / self.moment_of_inertia_scale
-        self._rotation_frequency = 7.27220521664304e-05 / self.frequency_scale
-        self._water_density = 1000 / self.density_scale
-        self._ice_density = 917 / self.density_scale
-        self._solid_earth_surface_density = 2600.0 / self.density_scale
-
-        # Set some options. 
-        self._lmax = lmax        
+        # Set some options.
+        self._lmax = lmax
+        self._extend = extend
         if grid == "DH2":
             self._grid = "DH"
             self._sampling = 2
         else:
             self._grid = grid
             self._sampling = 1
-        self._extend = True
+
+        # Do not change these parameters!
         self._normalization = "ortho"
-        self._csphase = 1        
-        
+        self._csphase = 1
+
+        # Scaling of degree-zero coefficient to set surface integral.
+        self._integration_factor = np.sqrt((4 * np.pi)) * self._mean_sea_floor_radius**2
+
+        # Scaling of angular velocity perturbtion to get (2,\pm 1)-coefficients for
+        # centrifugal potential.
+        self._rotation_factor = (
+            np.sqrt((4 * np.pi) / 15.0)
+            * self.rotation_frequency
+            * self.mean_sea_floor_radius**2
+        )
+
+        # Scaling of gravitational potential (2,\pm 1)-coefficients to get
+        # angular velocity perturbations.
+        self._inertia_factor = (
+            np.sqrt(5 / (12 * np.pi))
+            * self.rotation_frequency
+            * self.mean_sea_floor_radius**3
+            / (
+                self.gravitational_constant
+                * (self.polar_moment_of_inertia - self.equatorial_moment_of_inertia)
+            )
+        )
+
         # Read in the Love numbers.
+        self._love_number_file = love_number_file
         self._read_love_numbers(love_number_file)
 
-        # Pre-compute some constants.
-        self._integration_factor =  np.sqrt((4*np.pi)) * self._mean_sea_floor_radius**2
-        self._rotation_factor =  np.sqrt((4*np.pi)/15.) * self.rotation_frequency *  self.mean_sea_floor_radius**2        
-        self._inertia_factor = (np.sqrt(5/(12*np.pi))  * self.rotation_frequency * self.mean_sea_floor_radius**3 / 
-                               (self.gravitational_constant   * (self.polar_moment_of_inertia - self.equatorial_moment_of_inertia)))        
-
-        # Background model not set.        
+        # Background model not set.
         self._sea_level = None
         self._ice_thickness = None
         self._ocean_function = None
         self._ocean_area = None
-        
 
-    #------------------------------------------------#
-    #          Properties related to units           #
-    #------------------------------------------------#
+        # Initialise the counter for number of solver calls.
+        self._solver_counter = 0
 
-    @property
-    def length_scale(self):
-        """Return length for non-dimensionalisation."""
-        return self._length_scale
-
-    @property
-    def mass_scale(self):
-        """Return mass for non-dimensionalisation."""
-        return self._mass_scale
-
-    @property
-    def time_scale(self):
-        """Return time for non-dimensionalisation."""
-        return self._time_scale
-
-    @property
-    def frequency_scale(self):
-        """Return frequency for non-dimensionalisation."""
-        return self._frequency_scale
-
-    @property
-    def density_scale(self):
-        """Return density for non-dimensionalisation."""
-        return self._density_scale
-
-    @property
-    def load_scale(self):
-        """Return load for non-dimensionalisation."""
-        return self._load_scale
-
-    @property
-    def velocity_scale(self):
-        """Return velocity for non-dimensionalisation."""
-        return self._velocity_scale
-
-    @property
-    def acceleration_scale(self):
-        """Return acceleration for non-dimensionalisation."""
-        return self._acceleration_scale
-
-    @property
-    def gravitational_potential_scale(self):
-        """Return gravitational potential for non-dimensionalisation."""
-        return self._gravitational_potential_scale
-
-    @property
-    def moment_of_inertia_scale(self):
-        """Return moment of intertia for non-dimensionalisation."""
-        return self._moment_of_inertia_scale
-
-    #-----------------------------------------------------#
-    #      Properties related to physical constants       #
-    #-----------------------------------------------------#
-
-    @property
-    def equatorial_radius(self):
-        """Return Earth's equatorial radius."""
-        return self._equatorial_radius
-
-    @property
-    def polar_radius(self):
-        """Return Earth's polar radius."""
-        return self._polar_radius
-
-    @property
-    def mean_radius(self):
-        """Return Earth's mean radius."""
-        return self._mean_radius
-
-    @property
-    def mean_sea_floor_radius(self):
-        """Return Earth's mean sea floor radius."""
-        return self._mean_sea_floor_radius
-
-    @property
-    def mass(self):
-        """Return Earth's mass."""
-        return self._mass
-
-    @property
-    def gravitational_acceleration(self):
-        """Return Earth's surface gravitational acceleration."""
-        return self._gravitational_acceleration
-
-    @property 
-    def gravitational_constant(self):
-        """Return Gravitational constant."""
-        return self._gravitational_constant    
-
-    @property
-    def equatorial_moment_of_inertia(self):
-        """Return Earth's equatorial moment of inertia."""
-        return self._equatorial_moment_of_inertia
-
-    @property
-    def polar_moment_of_inertia(self):
-        """Return Earth's polar moment of inertia."""
-        return self._polar_moment_of_inertia
-
-    @property
-    def rotation_frequency(self):
-        """Return Earth's rotational frequency."""
-        return self._rotation_frequency
-
-    @property
-    def water_density(self):
-        """Return density of water."""
-        return self._water_density
-
-    @property
-    def ice_density(self):
-        """Return density of ice."""
-        return self._ice_density
-    
-    @property
-    def solid_earth_surface_density(self):
-        """Return density of the solid Earth's surface."""
-        return self._solid_earth_surface_density
-
-    #-----------------------------------------------#
-    #        Properties related to options          #
-    #-----------------------------------------------#
+    # -----------------------------------------------#
+    #                    Properties                  #
+    # -----------------------------------------------#
 
     @property
     def lmax(self):
         """Return truncation degree for expansions."""
         return self._lmax
 
-    @property 
+    @property
     def normalization(self):
         """Return spherical harmonic normalisation convention."""
         return self._normalization
@@ -234,23 +154,19 @@ class FingerPrint:
         """True if grid extended to include 360 degree longitude."""
         return self._extend
 
-
-    #----------------------------------------------------#
-    #     Properties related to the background state     #
-    #----------------------------------------------------#
-
     @property
     def sea_level(self):
         """Returns the backgroud sea level."""
         if self._sea_level is None:
             raise NotImplementedError("Sea level not set.")
         else:
-            return self._sea_level                
+            return self._sea_level
 
     @sea_level.setter
-    def sea_level(self, value):        
+    def sea_level(self, value):
         self._check_field(value)
         self._sea_level = value
+        self._ocean_function = None
 
     @property
     def ice_thickness(self):
@@ -264,11 +180,12 @@ class FingerPrint:
     def ice_thickness(self, value):
         self._check_field(value)
         self._ice_thickness = value
+        self._ocean_function = None
 
-    @property 
+    @property
     def ocean_function(self):
         """Returns the ocean function."""
-        if self._ocean_function is None:            
+        if self._ocean_function is None:
             self._compute_ocean_function()
         return self._ocean_function
 
@@ -285,51 +202,77 @@ class FingerPrint:
         if self._ocean_area is None:
             self._compute_ocean_area()
         return self._ocean_area
-    
-    #---------------------------------------------------------#
+
+    @property
+    def solver_counter(self):
+        """
+        Returns the number of times the solver method
+        has been called.
+        """
+        return self._solver_counter
+
+    # ---------------------------------------------------------#
     #                     Private methods                     #
-    #---------------------------------------------------------#
+    # ---------------------------------------------------------#
 
-    
     def _read_love_numbers(self, file):
-        # Read in the Love numbers from a given file and non-dimensionalise. 
+        # Read in the Love numbers from a given file and non-dimensionalise.
 
-        data = np.loadtxt(file) 
-        data_degree = len(data[:,0]) -1
-    
+        data = np.loadtxt(file)
+        data_degree = len(data[:, 0]) - 1
+
         if self.lmax > data_degree:
             raise ValueError("maximum degree is larger than present in data file")
-        
-        self._h_u = data[:self.lmax+1,1] * self.load_scale / self.length_scale
-        self._k_u = data[:self.lmax+1,2] * self.load_scale / self.gravitational_potential_scale
-        self._h_phi = data[:self.lmax+1,3] * self.load_scale / self.length_scale
-        self._k_phi = data[:self.lmax+1,4] * self.load_scale / self.gravitational_potential_scale
+
+        self._h_u = data[: self.lmax + 1, 1] * self.load_scale / self.length_scale
+        self._k_u = (
+            data[: self.lmax + 1, 2]
+            * self.load_scale
+            / self.gravitational_potential_scale
+        )
+        self._h_phi = data[: self.lmax + 1, 3] * self.load_scale / self.length_scale
+        self._k_phi = (
+            data[: self.lmax + 1, 4]
+            * self.load_scale
+            / self.gravitational_potential_scale
+        )
 
         self._h = self._h_u + self._h_phi
         self._k = self._k_u + self._k_phi
 
-        self._ht = data[:self.lmax+1,5] * self.gravitational_potential_scale / self.length_scale
-        self._kt = data[:self.lmax+1,6]
+        self._ht = (
+            data[: self.lmax + 1, 5]
+            * self.gravitational_potential_scale
+            / self.length_scale
+        )
+        self._kt = data[: self.lmax + 1, 6]
 
     def _check_field(self, f):
-        # Check SHGrid object is compatible with options.         
-        return (f.lmax == self.lmax and f.grid == self.grid and f.extend == self.extend)
+        # Check SHGrid object is compatible with options.
+        return f.lmax == self.lmax and f.grid == self.grid and f.extend == self.extend
 
-    def _check_coefficient(self,f):
-        # Check SHCoeff object is compatible with options. 
-        return (f.lmax == self.lmax and f.normalization == self.normalization 
-                and f.csphase == self.csphase)            
-    
-    def _expand_field(self, f, /, *, lmax_calc = None):
-        # Expand a SHGrid object using stored parameters. todo: replace expansions with this method.
+    def _check_coefficient(self, f):
+        # Check SHCoeff object is compatible with options.
+        return (
+            f.lmax == self.lmax
+            and f.normalization == self.normalization
+            and f.csphase == self.csphase
+        )
+
+    def _expand_field(self, f, /, *, lmax_calc=None):
+        # Expand a SHGrid object using stored parameters.
         assert self._check_field(f)
         if lmax_calc is None:
-            return f.expand(normalization = self.normalization, csphase = self.csphase)
-        else:   
-            return f.expand(lmax_calc = lmax_calc, normalization = self.normalization, csphase = self.csphase)
+            return f.expand(normalization=self.normalization, csphase=self.csphase)
+        else:
+            return f.expand(
+                lmax_calc=lmax_calc,
+                normalization=self.normalization,
+                csphase=self.csphase,
+            )
 
-    def _expand_coefficient(self,f):
-        # Expand a SHCoeff object using stored parameters. 
+    def _expand_coefficient(self, f):
+        # Expand a SHCoeff object using stored parameters.
         assert self._check_coefficient(f)
         if self._sampling == 2:
             grid = "DH2"
@@ -338,128 +281,218 @@ class FingerPrint:
         return f.expand(grid=grid, extend=self.extend)
 
     def _compute_ocean_function(self):
-        # Copmutes and stores the ocean function. 
+        # Computes and stores the ocean function.
         if self._sea_level is None or self._ice_thickness is None:
             raise NotImplementedError("Sea level and/or ice thickness not set")
-        self._ocean_function = SHGrid.from_array(np.where(self.water_density * self.sea_level.data - 
-                                                          self.ice_density * self.ice_thickness.data > 0, 1, 0),
-                                                          grid=self.grid)
+        self._ocean_function = SHGrid.from_array(
+            np.where(
+                self.water_density * self.sea_level.data
+                - self.ice_density * self.ice_thickness.data
+                > 0,
+                1,
+                0,
+            ),
+            grid=self.grid,
+        )
 
     def _compute_ocean_area(self):
-        # Computes and stores the ocean area. 
+        # Computes and stores the ocean area.
         if self._ocean_function is None:
             self._compute_ocean_function()
-        self._ocean_area = self.integrate(self._ocean_function)            
+        self._ocean_area = self.integrate(self._ocean_function)
 
-    def _centrifugal_perturbation_coefficients(self, om):
-        # returns the centrifugal potential perturbation in spherical harmonic
-        # domain given the rotation vector perturbation
-        psi_2m = np.zeros([2,3])
-        psi_2m[:,1] = self._rotation_factor * om
-        return psi_2m
+    # --------------------------------------------------------#
+    #                       Public methods                    #
+    # --------------------------------------------------------#
 
-    def _rotation_vector_from_zeta_phi(self, zeta_phi):
-        zeta_phi_lm = zeta_phi.expand(normalization=self.normalization, csphase=self.csphase)
-        kk = np.zeros(2)
-        for i in range(2):
-            om = np.zeros(2)
-            om[i] = 1.
-            phi_2m = self._centrifugal_perturbation_coefficients(om)
-            kk[i] = np.sum(phi_2m[:,:3]*zeta_phi_lm.coeffs[:,2,:3]) * self._mean_sea_floor_radius**2
-        return kk     
+    def plot(
+        self,
+        f,
+        /,
+        *,
+        projection=ccrs.Robinson(),
+        contour=False,
+        cmap="RdBu",
+        coasts=True,
+        rivers=False,
+        borders=False,
+        map_extent=None,
+        ocean_projection=False,
+        land_projection=False,
+        ice_projection=False,
+        gridlines=True,
+        symmetric=False,
+        **kwargs,
+    ):
+        """
+        Return a plot of a scalar field on the spatial grid.
 
-    def _iterate_solver(self, sigma, sl_uniform, /, *, rotational_feedbacks=True):
-        # Given a load, returns the response.
+        Args:
+            f (SHGrid): Scalar field to be plotted.
+            projection: cartopy projection to be used. Default is Robinson.
+            contour (bool): If True, a contour plot is made, otherwise a pcolor plot.
+            cmap (string): colormap. Default is RdBu.
+            coasts (bool): If True, coast lines plotted. Default is True.
+            rivers (bool): If True, major rivers plotted. Default is False.
+            borders (bool): If True, country borders are plotted. Default is False.
+            map_extent ([float]): Sets the (lon, lat) range for plotting.
+                Tuple of [lon_min, lon_max, lat_min, lat_max]. Default is None.
+            ocean_projection (bool): If True, values plotted only in oceans. Default is False.
+            land_projection (bool): If True, values plotted only on land. Default is False.
+            ice_projection (bool): If True, values plotted only over ice sheets. Default is False.
+            gridlines (bool): If True, gridlines are included. Default is True.
+            symmetric (bool): If True, clim values set symmetrically based on the fields maximum absolute value.
+                Option overridden if vmin or vmax are set.
+            kwargs: Keyword arguments for forwarding to the plotting functions.
 
-        assert self._check_field(sigma)            
-        sigma_lm = self._expand_field(sigma)
-        u_lm = sigma_lm.copy()
-        phi_lm = sigma_lm.copy()
-        for l in range(self.lmax+1):
-            u_lm.coeffs[:,l,:] *= self._h[l]
-            phi_lm.coeffs[:,l,:] *= self._k[l]
 
-        if rotational_feedbacks:
-            r = self._rotation_factor
-            i = self._inertia_factor
-            kt = self._kt[2]
-            ht = self._ht[2]
-            f = r * i /(1 - r * i * kt)
-            u_lm.coeffs[:,2,1] += ht * f * phi_lm.coeffs[:,2,1]
-            phi_lm.coeffs[:,2,1] += kt * f * phi_lm.coeffs[:,2,1]
-            omega = i * phi_lm.coeffs[:,2,1]
-            phi_lm.coeffs[:,2,1] += r * omega
+        Raises:
+            ValueError: If field is not defined the grid used by the class instance.
+
+
+
+        """
+
+        if not self._check_field(f):
+            raise ValueError("Field not compatible with fingerprint grid")
+
+        lons = f.lons()
+        lats = f.lats()
+
+        if ocean_projection or land_projection or ice_projection:
+            data = f.data.copy()
         else:
-            omega = np.zeros(2)        
+            data = f.data
 
-        g = self.gravitational_acceleration        
-        u = self._expand_coefficient(u_lm)
-        phi = self._expand_coefficient(phi_lm)
-        sl = (-1/g) * (g * u + phi)
-        sl_average = self.ocean_average(sl)            
-        sl.data[:,:] += sl_uniform - sl_average        
+        if ocean_projection:
+            data *= self.ocean_projection().data
 
-        return ResponseFields(u, phi, omega, sl)
-    
-    def _iterate_generalised_solver(self, generalised_load, sl_uniform, /, *, rotational_feedbacks=True):
-        # Given a generalised load, returns the response.
+        if land_projection:
+            data *= self.land_projection().data
 
-        sigma = generalised_load.sl
-        zeta_u = generalised_load.u
-        zeta_phi = generalised_load.phi
-        kk = generalised_load.omega
+        if ice_projection:
+            data *= self.ice_projection().data
 
-        assert self._check_field(sigma)
-        assert self._check_field(zeta_u)
-        assert self._check_field(zeta_phi)
+        figsize = kwargs.pop("figsize", (10, 8))
+        fig, ax = plt.subplots(figsize=figsize, subplot_kw={"projection": projection})
 
-        sigma_lm = self._expand_field(sigma)
-        zeta_u_lm = self._expand_field(zeta_u)
-        zeta_phi_lm = self._expand_field(zeta_phi)
-        u_lm = sigma_lm.copy()
-        phi_lm = sigma_lm.copy()
-        for l in range(self.lmax+1):
-            u_lm.coeffs[:,l,:] = self._h[l] * sigma_lm.coeffs[:,l,:]    \
-                                + self._h_u[l] * zeta_u_lm.coeffs[:,l,:]    \
-                                + self._h_phi[l] * zeta_phi_lm.coeffs[:,l,:]
-            phi_lm.coeffs[:,l,:] = self._k[l] * sigma_lm.coeffs[:,l,:]    \
-                                + self._k_u[l] * zeta_u_lm.coeffs[:,l,:]    \
-                                + self._k_phi[l] * zeta_phi_lm.coeffs[:,l,:]
-            
-        if rotational_feedbacks:
-            r = self._rotation_factor
-            i = self._inertia_factor
-            kt = self._kt[2]
-            ht = self._ht[2]
-            g = r /(1 - r * i * kt)
-            h = 1 /(self.polar_moment_of_inertia - self.equatorial_moment_of_inertia)
-            u_lm.coeffs[:,2,1] += ht * g * i * phi_lm.coeffs[:,2,1]     \
-                                + ht * r * h * kk[:]    \
-                                + kt * g * h * kk[:]
-            phi_lm.coeffs[:,2,1] += kt * g * i * phi_lm.coeffs[:,2,1]    \
-                                + kt * g * h * kk[:]
-            omega = i * phi_lm.coeffs[:,2,1] + h * kk[:]
-            phi_lm.coeffs[:,2,1] += r * omega
+        if map_extent is not None:
+            ax.set_extent(map_extent, crs=ccrs.PlateCarree())
+
+        if coasts:
+            ax.add_feature(cfeature.COASTLINE, linewidth=0.8)
+
+        if rivers:
+            ax.add_feature(cfeature.RIVERS, linewidth=0.8)
+
+        if borders:
+            ax.add_feature(cfeature.BORDERS, linewidth=0.8)
+
+        kwargs.setdefault("cmap", cmap)
+
+        lat_interval = kwargs.pop("lat_interval", 30)
+        lon_interval = kwargs.pop("lon_interval", 30)
+
+        if symmetric:
+            data_max = 1.2 * np.nanmax(np.abs(data))
+            kwargs.setdefault("vmin", -data_max)
+            kwargs.setdefault("vmax", data_max)
+
+        levels = kwargs.pop("levels", 10)
+
+        if contour:
+
+            im = ax.contourf(
+                lons,
+                lats,
+                data,
+                transform=ccrs.PlateCarree(),
+                levels=levels,
+                **kwargs,
+            )
+
         else:
-            omega = np.zeros(2)
 
-        g = self.gravitational_acceleration
-        u = self._expand_coefficient(u_lm)
-        phi = self._expand_coefficient(phi_lm)
-        sl = (-1/g) * (g * u + phi)
-        sl_average = self.ocean_average(sl)
-        sl.data[:,:] += sl_uniform - sl_average
+            im = ax.pcolormesh(
+                lons,
+                lats,
+                data,
+                transform=ccrs.PlateCarree(),
+                **kwargs,
+            )
 
-        return ResponseFields(u, phi, omega, sl)
+        if gridlines:
+            gl = ax.gridlines(
+                linestyle="--",
+                draw_labels=True,
+                dms=True,
+                x_inline=False,
+                y_inline=False,
+            )
 
-        
-    #--------------------------------------------------------#
-    #                       Public methods                       #
-    #--------------------------------------------------------#
+            gl.xlocator = mticker.MultipleLocator(lon_interval)
+            gl.ylocator = mticker.MultipleLocator(lat_interval)
+            gl.xformatter = LongitudeFormatter()
+            gl.yformatter = LatitudeFormatter()
 
+        return fig, ax, im
 
-    def integrate(self, f):        
-        """ Integrate function over the surface.
+    def lats(self):
+        """
+        Return the latitudes for the spatial grid.
+        """
+        return self.zero_grid().lats()
+
+    def lons(self):
+        """
+        Return the longitudes for the spatial grid.
+        """
+        return self.zero_grid().lons()
+
+    def displacement_love_numbers(self):
+        """
+        Return the displacement Love numbers.
+        """
+        return self._h
+
+    def gravitational_love_numbers(self):
+        """
+        Return the gravitational Love numbers.
+        """
+        return self._k
+
+    def load_response(self, load):
+        """
+        Returns the deformation fields associated with a load. This
+        calculation does not account for gravitationally self-consistent
+        sea level change nor rotational feedbacks.
+
+        Args:
+
+            load (SHGrid): The applied load.
+
+        Returns:
+            SHGrid: Vertical displacement.
+            SHGrid: Gravitational potential change.
+
+        """
+
+        self._check_field(load)
+        displacement_lm = self._expand_field(load)
+        gravitational_potential_change_lm = displacement_lm.copy()
+
+        for l in range(0, self.lmax + 1):
+            displacement_lm.coeffs[:, l, :] *= self._h[l]
+            gravitational_potential_change_lm.coeffs[:, l, :] *= self._k[l]
+
+        displacement = self._expand_coefficient(displacement_lm)
+        gravitational_potential_change = self._expand_coefficient(
+            gravitational_potential_change_lm
+        )
+        return displacement, gravitational_potential_change
+
+    def integrate(self, f):
+        """Integrate function over the surface.
 
         Args:
             f (SHGrid): Function to integrate.
@@ -467,9 +500,12 @@ class FingerPrint:
         Returns:
             float: Integral of the function over the surface.
         """
-        return self._integration_factor * self._expand_field(f).coeffs[0,0,0]
-    
-    def evaluate_point(self, f, latitude, longitude):
+        return (
+            self._integration_factor
+            * self._expand_field(f, lmax_calc=0).coeffs[0, 0, 0]
+        )
+
+    def point_evaulation(self, f, latitude, longitude, degrees=True):
         """Evaluate a function at a given point.
 
         Args:
@@ -481,223 +517,387 @@ class FingerPrint:
             float: Value of the function at the point.
         """
         f_lm = self._expand_field(f)
-        return pysh.expand.MakeGridPoint(f_lm.coeffs,latitude,longitude+180).flatten()[0]
-    
+        return f_lm.expand(lat=[latitude], lon=[longitude], degrees=degrees)[0]
+
+    def coefficient_evaluation(self, f, l, m):
+        """Return the (l,m)th spherical harmonic coefficient of a function.
+
+        Args:
+            f (SHGrid): Function to evaluate.
+            l (int): The degree.
+            m (int): The order.
+
+        Returns:
+            float: Value of the coefficient.
+        """
+        assert 0 <= l <= self.lmax
+        assert -l <= m <= l
+        f_lm = self._expand_field(f)
+        return f_lm.coeffs[0 if m >= 0 else 1, l, abs(m)]
+
     def zero_grid(self):
         """Return a grid of zeros."""
-        return SHGrid.from_zeros(lmax=self.lmax, grid=self.grid, sampling=self._sampling, extend=self.extend)
-    
+        return SHGrid.from_zeros(
+            lmax=self.lmax,
+            grid=self.grid,
+            sampling=self._sampling,
+            extend=self.extend,
+        )
+
+    def constant_grid(self, value):
+        """Return a grid of constant values"""
+        f = SHGrid.from_zeros(
+            lmax=self.lmax,
+            grid=self.grid,
+            sampling=self._sampling,
+            extend=self.extend,
+        )
+        f.data[:, :] = value
+        return f
+
     def zero_coefficients(self):
         """Return coefficients of zeros."""
-        return SHCoeffs.from_zeros(lmax=self.lmax, normalization=self.normalization, csphase=self.csphase)
+        return SHCoeffs.from_zeros(
+            lmax=self.lmax,
+            normalization=self.normalization,
+            csphase=self.csphase,
+        )
 
-    def ocean_average(self,f):        
+    def ocean_average(self, f):
         """Return average of a function over the oceans."""
         return self.integrate(self.ocean_function * f) / self.ocean_area
 
-    
-    def set_background_state_from_ice_ng(self,  /, *, version = 7, date=0):
+    def set_state_from_ice_ng(self, /, *, version=7, date=0):
         """
         Sets background state from ice_7g, ice_6g, or ice_5g.
 
         Args:
-            version (int): Selects the model to use. 
-            data (float): Selects the date from which values are taken. 
+            version (int): Selects the model to use.
+            data (float): Selects the date from which values are taken.
 
         Notes:
-            To detemrine the fields, linear interpolation between 
-            model values is applied. If the date is out of range, 
-            constant extrapolation of the boundary values is used. 
+            To detemrine the fields, linear interpolation between
+            model values is applied. If the date is out of range,
+            constant extrapolation of the boundary values is used.
         """
-        ice_ng = IceNG(version = version)
-        ice_thickness, sea_level = ice_ng.get_ice_thickness_and_sea_level(date, self.lmax, grid = self.grid, 
-                                                                          sampling=self._sampling, extend = self.extend)
+        ice_ng = IceNG(version=version)
+        ice_thickness, sea_level = ice_ng.get_ice_thickness_and_sea_level(
+            date,
+            self.lmax,
+            grid=self.grid,
+            sampling=self._sampling,
+            extend=self.extend,
+        )
         self.ice_thickness = ice_thickness / self.length_scale
         self.sea_level = sea_level / self.length_scale
-    
-    
-    def solver(self, zeta, /, *, rotational_feedbacks=True, rtol = 1.e-6, verbose = False):
+
+    def mean_sea_level_change(self, direct_load):
         """
-        Returns the solution to the fingerprint problem for a given direct load.
-
-        Args:
-            zeta (SHGrid): The direct load. 
-            rotational_feedbacks (bool): If true, rotational feedbacks included.
-            rtol (float): Relative tolerance used in assessing convergence of iterations. 
-            verbose (bool): If true, information on iterations printed. 
-
-        Returns:
-            ResponseField: Instance of the class containing the displacement, 
-                gravitaty potential perturbation, rotational perturbation, and 
-                sea level change. 
-
-        Notes:
-            If rotational feedbacks are included, the potential perturbation 
-            is that of gravity, this being a sum of the gravitational and 
-            centrifugal perturbations. 
+        Returns the mean sea level change associated with a direct load.
         """
-        assert self._check_field(zeta)
-        sl_uniform = -self.integrate(zeta) / (self.water_density * self.ocean_area)            
-        sigma = zeta + self.water_density * self.ocean_function * sl_uniform
+        assert self._check_field(direct_load)
+        return -self.integrate(direct_load) / (self.water_density * self.ocean_area)
 
-        err = 1
-        count = 0
-        while err > rtol:
-            response = self._iterate_solver(sigma, sl_uniform, rotational_feedbacks=rotational_feedbacks)
-            sigma_new = zeta + self.water_density * self.ocean_function * response.sl
-            err = np.max(np.abs((sigma_new - sigma).data)) / np.max(np.abs(sigma.data))
-            sigma = sigma_new
-            if verbose:
-                count += 1
-                print(f'Iteration = {count}, relative error = {err:6.4e}')
-
-        return response
-    
-    def generalised_solver(self, generalised_load, /, *, rotational_feedbacks=True, rtol = 1.e-6, verbose = False):
+    def __call__(
+        self,
+        /,
+        *,
+        direct_load=None,
+        displacement_load=None,
+        gravitational_potential_load=None,
+        angular_momentum_change=None,
+        rotational_feedbacks=True,
+        rtol=1.0e-6,
+        verbose=False,
+    ):
         """
         Returns the solution to the generalised fingerprint problem for a given generalised load.
+        If only a non-zero direct load is input, then the calculation reduces to the standard
+        fingerprint problem.
 
         Args:
-            generalised_load (ResponseFields object): The generalised load as an instance of ResponseFields (for now)
-            rotational_feedbacks (bool): If true, rotational feedbacks included.
-            rtol (float): Relative tolerance used in assessing convergence of iterations. 
-            verbose (bool): If true, information on iterations printed. 
+            direct_load (SHGrid): The direct load applied in the problem. Default is None.
+            displacement_load (SHGrid): The displacement load applied in the problem. Default is None.
+            gravitational_potential_load (SHGrid): The gravitational potential load applied in the
+                 problem. The default is None.
+            angular_momentum_change (numpy vector): The angular momentum change. Default is None.
+            rtol (float): Relative tolerance for iterative solution. Default is 1e-6.
+            verbose (bool): If True, relative errors printed during iterations.
 
         Returns:
-            ResponseField: Instance of the class containing the displacement, 
-                gravitaty potential perturbation, rotational perturbation, and 
-                sea level change. 
-
-        Notes:
-            If rotational feedbacks are included, the potential perturbation 
-            is that of gravity, this being a sum of the gravitational and 
-            centrifugal perturbations. 
+            SHGrid: sea_level_change.
+            SHGrid: displacement.
+            SHGrid: Gravity potential change.
+            numpy vector: angular velocity change.
         """
-        assert self._check_field(generalised_load.sl)
-        assert self._check_field(generalised_load.u)
-        assert self._check_field(generalised_load.phi)
 
-        load = generalised_load
-        zeta = load.sl
-        sl_uniform = -self.integrate(zeta) / (self.water_density * self.ocean_area)            
-        sigma = zeta + self.water_density * self.ocean_function * sl_uniform
-        load.sl = sigma
+        loads_present = False
+        non_zero_rhs = False
+
+        if direct_load is not None:
+            loads_present = True
+            assert self._check_field(direct_load)
+            mean_sea_level_change = -self.integrate(direct_load) / (
+                self.water_density * self.ocean_area
+            )
+            non_zero_rhs = non_zero_rhs or np.max(np.abs(direct_load.data)) > 0
+
+        else:
+            direct_load = self.zero_grid()
+            mean_sea_level_change = 0
+
+        if displacement_load is not None:
+            loads_present = True
+            assert self._check_field(displacement_load)
+            displacement_load_lm = self._expand_field(displacement_load)
+            non_zero_rhs = non_zero_rhs or np.max(np.abs(displacement_load.data)) > 0
+
+        if gravitational_potential_load is not None:
+            loads_present = True
+            assert self._check_field(gravitational_potential_load)
+            gravitational_potential_load_lm = self._expand_field(
+                gravitational_potential_load
+            )
+            non_zero_rhs = (
+                non_zero_rhs or np.max(np.abs(gravitational_potential_load.data)) > 0
+            )
+
+        if angular_momentum_change is not None:
+            loads_present = True
+            non_zero_rhs = non_zero_rhs or np.max(np.abs(angular_momentum_change)) > 0
+
+        if loads_present is False or not non_zero_rhs:
+            return self.zero_grid(), self.zero_grid(), self.zero_grid(), np.zeros(2)
+
+        self._solver_counter += 1
+
+        load = (
+            direct_load
+            + self.water_density * self.ocean_function * mean_sea_level_change
+        )
+
+        angular_velocity_change = np.zeros(2)
+
+        g = self.gravitational_acceleration
+        r = self._rotation_factor
+        i = self._inertia_factor
+        m = 1 / (self.polar_moment_of_inertia - self.equatorial_moment_of_inertia)
+        ht = self._ht[2]
+        kt = self._kt[2]
 
         err = 1
         count = 0
+        count_print = 0
         while err > rtol:
-            response = self._iterate_generalised_solver(load, sl_uniform, rotational_feedbacks=rotational_feedbacks)
-            sigma_new = zeta + self.water_density * self.ocean_function * response.sl
-            err = np.max(np.abs((sigma_new - load.sl).data)) / np.max(np.abs(load.sl.data))
-            load.sl = sigma_new
-            if verbose:
-                count += 1
-                print(f'Iteration = {count}, relative error = {err:6.4e}')
 
-        return response
+            displacement_lm = self._expand_field(load)
+            gravity_potential_change_lm = displacement_lm.copy()
 
-    def gravity_potential_to_gravitational_potential(self, response, rotational_feedbacks=True):
-        """Converts the gravity potential within a ResponseField to the gravitational potential.
-        
-        Args:
-            response (ResponseField): The response field to convert.
-            
-        Returns:
-            phi (SHGrid): The gravitational potential.
+            for l in range(self.lmax + 1):
+
+                displacement_lm.coeffs[:, l, :] *= self._h[l]
+                gravity_potential_change_lm.coeffs[:, l, :] *= self._k[l]
+
+                if displacement_load is not None:
+
+                    displacement_lm.coeffs[:, l, :] += (
+                        self._h_u[l] * displacement_load_lm.coeffs[:, l, :]
+                    )
+
+                    gravity_potential_change_lm.coeffs[:, l, :] += (
+                        self._k_u[l] * displacement_load_lm.coeffs[:, l, :]
+                    )
+
+                if gravitational_potential_load is not None:
+
+                    displacement_lm.coeffs[:, l, :] += (
+                        self._h_phi[l] * gravitational_potential_load_lm.coeffs[:, l, :]
+                    )
+
+                    gravity_potential_change_lm.coeffs[:, l, :] += (
+                        self._k_phi[l] * gravitational_potential_load_lm.coeffs[:, l, :]
+                    )
+
+            if rotational_feedbacks:
+
+                centrifugal_coeffs = r * angular_velocity_change
+
+                displacement_lm.coeffs[:, 2, 1] += ht * centrifugal_coeffs
+                gravity_potential_change_lm.coeffs[:, 2, 1] += kt * centrifugal_coeffs
+
+                angular_velocity_change = (
+                    i * gravity_potential_change_lm.coeffs[:, 2, 1]
+                )
+
+                if angular_momentum_change is not None:
+                    angular_velocity_change -= m * angular_momentum_change
+
+                gravity_potential_change_lm.coeffs[:, 2, 1] += (
+                    r * angular_velocity_change
+                )
+
+            displacement = self._expand_coefficient(displacement_lm)
+            gravity_potential_change = self._expand_coefficient(
+                gravity_potential_change_lm
+            )
+
+            sea_level_change = (-1 / g) * (g * displacement + gravity_potential_change)
+            sea_level_change.data += mean_sea_level_change - self.ocean_average(
+                sea_level_change
+            )
+
+            load_new = (
+                direct_load
+                + self.water_density * self.ocean_function * sea_level_change
+            )
+            if count > 1 or mean_sea_level_change != 0:
+                err = np.max(np.abs((load_new - load).data)) / np.max(np.abs(load.data))
+                if verbose:
+                    count_print += 1
+                    print(f"Iteration = {count_print}, relative error = {err:6.4e}")
+
+            load = load_new
+            count += 1
+
+        return (
+            sea_level_change,
+            displacement,
+            gravity_potential_change,
+            angular_velocity_change,
+        )
+
+    def centrifugal_potential_change(self, angular_velocity_change):
         """
-        if not rotational_feedbacks:
-            return response.phi    
-        phi_lm = self._expand_field(response.phi).coeffs
-        phi_lm[:,2,1] -= self._rotation_factor * response.omega
-        phi = self._expand_coefficient(SHCoeffs.from_array(phi_lm, normalization = self.normalization, csphase = self.csphase))
-        return phi
-
-    def gravitational_potential_to_gravity_potential(self, response, rotational_feedbacks=True):
-        """Converts the gravitational potential within a ResponseField to the gravity potential.
-        
-        Args:
-            response (ResponseField): The response field to convert.
-            
-        Returns:
-            gamma (SHGrid): The gravity potential.
-        """    
-        if not rotational_feedbacks:
-            return response.phi
-        phi_lm = self._expand_field(response.phi).coeffs
-        phi_lm[:,2,1] += self._rotation_factor * response.omega
-        gamma = self._expand_coefficient(SHCoeffs.from_array(phi_lm, normalization = self.normalization, csphase = self.csphase))
-        return gamma
-
-    def ocean_mask(self, value = np.nan):
-        """Return a mask over the oceans.
-
-        Args:
-            value (float): Value to set the mask over the oceans.
-
-        Returns:
-            SHGrid: Mask over the oceans.
+        Returns the centrifugal potential change associated with a given
+        angular velocity change.
         """
-        return SHGrid.from_array(np.where(self.ocean_function.data > 0, 1, value), grid = self.grid)      
+        centrifugal_potential_change_lm = self.zero_coefficients()
+        centrifugal_potential_change_lm.coeffs[:, 2, 1] = (
+            self._rotation_factor * angular_velocity_change
+        )
+        return self._expand_coefficient(centrifugal_potential_change_lm)
 
-    def ice_mask(self, value = np.nan):
-        """Return a mask over the ice.
-        
-        Args:
-            value (float): Value to set the mask over the ice.
-            
-        Returns:
-            SHGrid: Mask over the ice.
+    def gravity_potential_change_to_gravitational_potential_change(
+        self, gravity_potential_change, angular_velocity_change
+    ):
         """
-        return SHGrid.from_array(np.where(self.ice_thickness.data > 0, 1, value), grid = self.grid)
+        Subtracts the centrifugal potential perturbation from the
+        gravity potential change to isolate the gravitational potential change.
 
-    def land_mask(self, value = np.nan):
-        """Return mask over the land.
-        
         Args:
-            value (float): Value to set the mask over the land.
-        
-        Returns:
-            SHGrid: Mask over the land.
-        """
-        return SHGrid.from_array(np.where(self.ocean_function.data == 0, 1, value), grid = self.grid)        
+            gravity_potential_change (SHGrid): The gravity potential change.
+            angular_velocity_change (numpy vector): The angular velocity change.
 
-    def northern_hemisphere_mask(self, value = np.nan):
-        """Return mask over the northern hemisphere.
-        
-        Args:
-            value (float): Value to set the mask over the northern hemisphere.
-        
         Returns:
-            SHGrid: Mask over the northern hemisphere.
+            (SHGrid): The gravitational potential change.
         """
-        lats, _ = np.meshgrid(self.ice_thickness.lats(), self.ice_thickness.lons(), indexing="ij")
-        return SHGrid.from_array(np.where(lats > 0, 1, value), grid = self.grid)
+        gravitational_potential_change_lm = self._expand_field(gravity_potential_change)
+        gravitational_potential_change_lm.coeffs[:, 2, 1] -= (
+            self._rotation_factor * angular_velocity_change
+        )
+        return self._expand_coefficient(gravitational_potential_change_lm)
 
-    def southern_hemisphere_mask(self, value = np.nan):
-        """Return mask over the southern hemisphere.
-            
-        Args:
-            value (float): Value to set the mask over the southern hemisphere.
-        
-        Returns:
-            SHGrid: Mask over the southern hemisphere.
+    def gravitational_potential_change_to_gravity_potential_change(
+        self, gravitational_potential_change, angular_velocity_change
+    ):
         """
-        lats, _ = np.meshgrid(self.ice_thickness.lats(), self.ice_thickness.lons(), indexing="ij")
-        return SHGrid.from_array(np.where(lats < 0, 1, value), grid = self.grid)      
-    
-    def altimetery_mask(self, latitude1 = -66., latitude2 = 66., value = np.nan):
-        """Return mask over the altimetry region.
-        
+        Adds the centrifugal potential perturbation from the
+        gravitational potential change to return the gravity potential change.
+
         Args:
-            latitude1 (float): Southern latitude of the altimetry region.
-            latitude2 (float): Northern latitude of the altimetry region.
-            value (float): Value to set the mask over the altimetry region.
-        
+            gravitational_potential_change (SHGrid): The gravitational potential change.
+            angular_velocity_change (numpy vector): The angular velocity change.
+
         Returns:
-            SHGrid: Mask over the altimetry region.
+            (SHGrid): The gravitaty potential change.
         """
-        lats, _ = np.meshgrid(self.ice_thickness.lats(), self.ice_thickness.lons(), indexing="ij")
-        return SHGrid.from_array(np.where(np.logical_and(np.logical_and(lats > latitude1, lats < latitude2), self.ocean_function.data == 0), 1, value), grid = self.grid)
+        gravity_potential_change_lm = self._expand_field(gravitational_potential_change)
+        gravity_potential_change_lm.coeffs[:, 2, 1] += (
+            self._rotation_factor * angular_velocity_change
+        )
+        return self._expand_coefficient(gravity_potential_change_lm)
+
+    def ocean_projection(self, value=np.nan):
+        """
+        Returns a field that is 1 over the oceans and equal to "value" elsewhere.
+        The defult value is NaN.
+        """
+        return SHGrid.from_array(
+            np.where(self.ocean_function.data > 0, 1, value), grid=self.grid
+        )
+
+    def ice_projection(self, value=np.nan):
+        """
+        Returns a field that is 1 over the ice sheets and equal to "value" elsewhere.
+        The defult value is NaN.
+        """
+        return SHGrid.from_array(
+            np.where(self.ice_thickness.data > 0, 1, value), grid=self.grid
+        )
+
+    def land_projection(self, value=np.nan):
+        """
+        Returns a field that is 1 over the land and equal to "value" elsewhere.
+        The defult value is NaN.
+        """
+
+        return SHGrid.from_array(
+            np.where(self.ocean_function.data == 0, 1, value), grid=self.grid
+        )
+
+    def northern_hemisphere_projection(self, value=np.nan):
+        """
+        Returns a field that is 1 over the northern hemisphere and equal to "value" elsewhere.
+        The defult value is NaN.
+        """
+        lats, _ = np.meshgrid(
+            self.ice_thickness.lats(),
+            self.ice_thickness.lons(),
+            indexing="ij",
+        )
+        return SHGrid.from_array(np.where(lats > 0, 1, value), grid=self.grid)
+
+    def southern_hemisphere_projection(self, value=np.nan):
+        """
+        Returns a field that is 1 over the southern hemisphere and equal to "value" elsewhere.
+        The defult value is NaN.
+        """
+        lats, _ = np.meshgrid(
+            self.ice_thickness.lats(),
+            self.ice_thickness.lons(),
+            indexing="ij",
+        )
+        return SHGrid.from_array(np.where(lats < 0, 1, value), grid=self.grid)
+
+    def altimetery_projection(self, latitude1=-66.0, latitude2=66.0, value=np.nan):
+        """
+        Returns a function that is equal to 1 in the oceans between the specified
+        latitudes, and elsewhere equal to a given value.
+
+        Args:
+            latitude1 (float): Latitude below which the field equals the chosen value.
+                Default is -66 degrees.
+            latitude2 (float): Latitude above which the field equals the chosen value.
+                Default is +66 degrees.
+            value (float): Value of the function outside of the latitude range. Default
+                value is NaN
+        """
+        lats, _ = np.meshgrid(
+            self.ice_thickness.lats(),
+            self.ice_thickness.lons(),
+            indexing="ij",
+        )
+        return SHGrid.from_array(
+            np.where(
+                np.logical_and(
+                    np.logical_and(lats > latitude1, lats < latitude2),
+                    self.ocean_function.data == 0,
+                ),
+                1,
+                value,
+            ),
+            grid=self.grid,
+        )
 
     def disk_load(self, delta, latitutude, longitude, amplitude):
         """Return a disk load.
@@ -711,89 +911,113 @@ class FingerPrint:
         Returns:
             SHGrid: Load associated with the disk.
         """
-        return amplitude * SHGrid.from_cap(delta, latitutude, longitude, lmax = self.lmax, grid=self.grid,
-                               extend = self._extend, sampling = self._sampling)
-    
-    def point_load(self, latitude, longitude, amplitude=1):
-        """Return a point load with inverse Laplacian smoothing.
-        
+        return amplitude * SHGrid.from_cap(
+            delta,
+            latitutude,
+            longitude,
+            lmax=self.lmax,
+            grid=self.grid,
+            extend=self._extend,
+            sampling=self._sampling,
+        )
+
+    def point_load(self, latitude, longitude, amplitude=1, smoothing_angle=None):
+        """Return a point load.
+
         Args:
-            latitude (float): Latitude of the point load.
-            longitude (float): Longitude of the point load.
+            latitude (float): Latitude of the point load in degrees.
+            longitude (float): Longitude of the point load in degrees.
             amplitude (float): Amplitude of the load.
+            smoothing_angle (float): Angle over which point load
+                 is smoothed. Default is None
 
         Returns:
             SHGrid: Load associated with the point load.
         """
-        theta = 90.- latitude
-        phi = longitude + 180.
+        theta = 90.0 - latitude
         point_load_lm = self.zero_coefficients()
-        ylm = pysh.expand.spharm(point_load_lm.lmax,theta,phi,normalization = self.normalization)
-        
-        for l in range(0,point_load_lm.lmax+1):
-            point_load_lm.coeffs[0,l,0] +=  ylm[0,l,0]
-            for m in range(1,l+1):
-                point_load_lm.coeffs[0,l,m] += ylm[0,l,m]
-                point_load_lm.coeffs[1,l,m] += ylm[1,l,m]
+        ylm = pysh.expand.spharm(
+            point_load_lm.lmax, theta, longitude, normalization=self.normalization
+        )
 
-        point_load_lm = (1/self.mean_sea_floor_radius**2)*point_load_lm
+        for l in range(0, point_load_lm.lmax + 1):
+            point_load_lm.coeffs[0, l, 0] += ylm[0, l, 0]
+            for m in range(1, l + 1):
+                point_load_lm.coeffs[0, l, m] += ylm[0, l, m]
+                point_load_lm.coeffs[1, l, m] += ylm[1, l, m]
+
+        if smoothing_angle is not None:
+            th = 0.5 * smoothing_angle * np.pi / 180
+            t = th * th
+            for l in range(0, point_load_lm.lmax + 1):
+                fac = np.exp(-l * (l + 1) * t)
+                point_load_lm.coeffs[:, l, :] *= fac
+
+        point_load_lm = (1 / self.mean_sea_floor_radius**2) * point_load_lm
         point_load = amplitude * self._expand_coefficient(point_load_lm)
-               
+
         return point_load
 
-    def load_from_ice_thickness_change(self, ice_thickness_change):
+    def direct_load_from_ice_thickness_change(self, ice_thickness_change):
         """Converts an ice thickness change into the associated load.
-        
+
         Args:
             ice_thickness_change (SHGrid): Ice thickness change.
-            
+
         Returns:
             SHGrid: Load associated with the ice thickness change.
         """
         self._check_field(ice_thickness_change)
         return self.ice_density * self.one_minus_ocean_function * ice_thickness_change
-    
-    def northern_hemisphere_load(self, fraction = 1):
+
+    def northern_hemisphere_load(self, fraction=1):
         """Returns a load associated with melting the given fraction of ice in the northern hemisphere.
-        
+
         Args:
             fraction (float): Fraction of ice to melt.
-        
+
         Returns:
             SHGrid: Load associated with melting the given fraction of ice in the northern hemisphere.
         """
-        ice_thickness_change = -fraction * self.ice_thickness * self.northern_hemisphere_mask(0)
-        return self.load_from_ice_thickness_change(ice_thickness_change)
+        ice_thickness_change = (
+            -fraction * self.ice_thickness * self.northern_hemisphere_projection(0)
+        )
+        return self.direct_load_from_ice_thickness_change(ice_thickness_change)
 
-    def southern_hemisphere_load(self, fraction = 1):
+    def southern_hemisphere_load(self, fraction=1):
         """Returns a load associated with melting the given fraction of ice in the northern hemisphere.
-        
+
         Args:
             fraction (float): Fraction of ice to melt.
-            
+
         Returns:
             SHGrid: Load associated with melting the given fraction of ice in the northern hemisphere.
         """
-        ice_thickness_change = -fraction * self.ice_thickness * self.southern_hemisphere_mask(0)
-        return self.load_from_ice_thickness_change(ice_thickness_change)
+        ice_thickness_change = (
+            -fraction * self.ice_thickness * self.southern_hemisphere_projection(0)
+        )
+        return self.direct_load_from_ice_thickness_change(ice_thickness_change)
 
-    def sea_level_adjoint_load(self, latitude, longitude):
+    def adjoint_loads_for_sea_level_point_measurement(
+        self, latitude, longitude, smoothing_angle=None
+    ):
         """Returns the adjoint loads for a sea level measurement at a given location.
-        
+
         Args:
             latitude (float): Latitude of the measurement.
             longitude (float): Longitude of the measurement.
-            
+
         Returns:
-            ResponseFields: Adjoint loads for the sea level measurement.
+            ResponseFields:
         """
-        zeta = self.point_load(latitude, longitude)
-        zeta_u = self.zero_grid()
-        zeta_phi = self.zero_grid()
-        kk = np.zeros(2)
-        return ResponseFields(zeta_u, zeta_phi, kk, zeta)
-    
-    def displacement_load(self, latitude, longitude):
+        direct_load = self.point_load(
+            latitude, longitude, smoothing_angle=smoothing_angle
+        )
+        return direct_load, None, None, None
+
+    def adjoint_loads_for_displacement_point_measurement(
+        self, latitude, longitude, smoothing_angle=None
+    ):
         """Returns the adjoint loads for a displacement measurement at a given location.
 
         Args:
@@ -803,50 +1027,82 @@ class FingerPrint:
         Returns:
             ResponseFields: Adjoint loads for the displacement measurement.
         """
-        zeta = self.zero_grid()
-        zeta_u = -1*self.point_load(latitude, longitude)
-        zeta_phi = self.zero_grid()
-        kk = np.zeros(2)
-        return ResponseFields(zeta_u, zeta_phi, kk, zeta)
+        displacement_load = -1 * self.point_load(
+            latitude, longitude, smoothing_angle=smoothing_angle
+        )
+        return None, displacement_load, None, None
 
-    def gaussian_averaging_function(self, r, latitude, longitude, cut = False):
+    def adjoint_loads_for_gravity_potential_coefficient(self, l, m):
+        """
+        Returns the adjoint loads for an observation of the gravity potential change
+        at the given degree and order.
+        """
+        assert 0 <= l <= self.lmax
+        assert -l <= m <= l
+        g = self.gravitational_acceleration
+        b = self.mean_sea_floor_radius
+        adjoint_load_lm = self.zero_coefficients()
+        adjoint_load_lm.coeffs[0 if m >= 0 else 1, l, abs(m)] = -g / b**2
+        adjoint_load = self._expand_coefficient(adjoint_load_lm)
+        return None, None, adjoint_load, None
+
+    def adjoint_loads_for_gravitational_potential_coefficient(self, l, m):
+        """
+        Returns the adjoint loads for an observation of the gravitational potential change
+        at the given degree and order.
+        """
+        _, _, adjoint_load, _ = self.adjoint_loads_for_gravity_potential_coefficient(
+            l, m
+        )
+        angular_momentum_change = self.adjoint_angular_momentum_change_from_adjoint_gravitational_potential_load(
+            adjoint_load
+        )
+        return None, None, adjoint_load, angular_momentum_change
+
+    def adjoint_angular_momentum_change_from_adjoint_gravitational_potential_load(
+        self, gravitational_potential_load
+    ):
+        """
+        Returns the angular momentum change for a given gravitational
+        potential load. This method is used to remove the centrifugal contribution
+        from the associated measurement.
+        """
+        gravitational_potential_load_lm = self._expand_field(
+            gravitational_potential_load, lmax_calc=2
+        )
+        r = self._rotation_factor
+        b = self.mean_sea_floor_radius
+        return -r * b * b * gravitational_potential_load_lm.coeffs[:, 2, 1]
+
+    def gaussian_averaging_function(self, r, latitude, longitude, cut=False):
         """
         Returns a Gaussian averaging function.
-        
+
         Args:
             r (float): Radius of the averaging function.
             latitude (float): Latitude of the centre of the averaging function.
             longitude (float): Longitude of the centre of the averaging function.
             cut (bool): If true, the averaging function is cut at the truncation degree.
-            
+
         Returns:
             SHGrid: Gaussian averaging function.
         """
-        th0 = (90 - latitude) * np.pi /180
-        ph0 = (longitude - 180) * np.pi /180
-        c = np.log(2) /(1 - np.cos(1000 * r /self.mean_sea_floor_radius))
+        th0 = (90 - latitude) * np.pi / 180
+        ph0 = (longitude) * np.pi / 180
+        c = np.log(2) / (1 - np.cos(1000 * r / self.mean_sea_floor_radius))
         fac = 2 * np.pi * (1 - np.exp(-2 * c))
-        fac = c /(self.mean_sea_floor_radius ** 2 * fac)
+        fac = c / (self.mean_sea_floor_radius**2 * fac)
         w = self.zero_grid()
         for ilat, lat in enumerate(w.lats()):
-            th = (90 - lat) * np.pi /180
+            th = (90 - lat) * np.pi / 180
             fac1 = np.cos(th) * np.cos(th0)
             fac2 = np.sin(th) * np.sin(th0)
-            for ilon,lon in enumerate(w.lons()):
-                ph = lon * np.pi /180
+            for ilon, lon in enumerate(w.lons()):
+                ph = lon * np.pi / 180
                 calpha = fac1 + fac2 * np.cos(ph - ph0)
                 w.data[ilat, ilon] = fac * np.exp(-c * (1 - calpha))
-        if(cut):
-            w_lm = w.expand()
-            w_lm.coeffs[:,:2,:] = 0.
+        if cut:
+            w_lm = self._expand_field(w)
+            w_lm.coeffs[:, :2, :] = 0.0
             w = self._expand_coefficient(w_lm)
         return w
-    
-    def gaussian_averaging_function_components(self, r, latitude, longitude, cut = False):
-
-        pass
-
-
-
-
-    

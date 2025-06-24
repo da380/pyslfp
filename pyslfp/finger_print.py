@@ -16,7 +16,7 @@ from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
 
 # from pyslfp.fields import ResponseFields, ResponseCoefficients
 from pyslfp.ice_ng import IceNG
-from pyslfp.physical_parameters import EarthModelParamters
+from pyslfp.physical_parameters import EarthModelParameters
 
 from . import DATADIR
 
@@ -25,7 +25,7 @@ if __name__ == "__main__":
     pass
 
 
-class FingerPrint(EarthModelParamters):
+class FingerPrint(EarthModelParameters):
     """
     Class for computing elastic sea level fingerprints.
 
@@ -304,138 +304,6 @@ class FingerPrint(EarthModelParamters):
     # --------------------------------------------------------#
     #                       Public methods                    #
     # --------------------------------------------------------#
-
-    def plot(
-        self,
-        f,
-        /,
-        *,
-        projection=ccrs.Robinson(),
-        contour=False,
-        cmap="RdBu",
-        coasts=True,
-        rivers=False,
-        borders=False,
-        map_extent=None,
-        ocean_projection=False,
-        land_projection=False,
-        ice_projection=False,
-        gridlines=True,
-        symmetric=False,
-        **kwargs,
-    ):
-        """
-        Return a plot of a scalar field on the spatial grid.
-
-        Args:
-            f (SHGrid): Scalar field to be plotted.
-            projection: cartopy projection to be used. Default is Robinson.
-            contour (bool): If True, a contour plot is made, otherwise a pcolor plot.
-            cmap (string): colormap. Default is RdBu.
-            coasts (bool): If True, coast lines plotted. Default is True.
-            rivers (bool): If True, major rivers plotted. Default is False.
-            borders (bool): If True, country borders are plotted. Default is False.
-            map_extent ([float]): Sets the (lon, lat) range for plotting.
-                Tuple of [lon_min, lon_max, lat_min, lat_max]. Default is None.
-            ocean_projection (bool): If True, values plotted only in oceans. Default is False.
-            land_projection (bool): If True, values plotted only on land. Default is False.
-            ice_projection (bool): If True, values plotted only over ice sheets. Default is False.
-            gridlines (bool): If True, gridlines are included. Default is True.
-            symmetric (bool): If True, clim values set symmetrically based on the fields maximum absolute value.
-                Option overridden if vmin or vmax are set.
-            kwargs: Keyword arguments for forwarding to the plotting functions.
-
-
-        Raises:
-            ValueError: If field is not defined the grid used by the class instance.
-
-
-
-        """
-
-        if not self._check_field(f):
-            raise ValueError("Field not compatible with fingerprint grid")
-
-        lons = f.lons()
-        lats = f.lats()
-
-        if ocean_projection or land_projection or ice_projection:
-            data = f.data.copy()
-        else:
-            data = f.data
-
-        if ocean_projection:
-            data *= self.ocean_projection().data
-
-        if land_projection:
-            data *= self.land_projection().data
-
-        if ice_projection:
-            data *= self.ice_projection().data
-
-        figsize = kwargs.pop("figsize", (10, 8))
-        fig, ax = plt.subplots(figsize=figsize, subplot_kw={"projection": projection})
-
-        if map_extent is not None:
-            ax.set_extent(map_extent, crs=ccrs.PlateCarree())
-
-        if coasts:
-            ax.add_feature(cfeature.COASTLINE, linewidth=0.8)
-
-        if rivers:
-            ax.add_feature(cfeature.RIVERS, linewidth=0.8)
-
-        if borders:
-            ax.add_feature(cfeature.BORDERS, linewidth=0.8)
-
-        kwargs.setdefault("cmap", cmap)
-
-        lat_interval = kwargs.pop("lat_interval", 30)
-        lon_interval = kwargs.pop("lon_interval", 30)
-
-        if symmetric:
-            data_max = 1.2 * np.nanmax(np.abs(data))
-            kwargs.setdefault("vmin", -data_max)
-            kwargs.setdefault("vmax", data_max)
-
-        levels = kwargs.pop("levels", 10)
-
-        if contour:
-
-            im = ax.contourf(
-                lons,
-                lats,
-                data,
-                transform=ccrs.PlateCarree(),
-                levels=levels,
-                **kwargs,
-            )
-
-        else:
-
-            im = ax.pcolormesh(
-                lons,
-                lats,
-                data,
-                transform=ccrs.PlateCarree(),
-                **kwargs,
-            )
-
-        if gridlines:
-            gl = ax.gridlines(
-                linestyle="--",
-                draw_labels=True,
-                dms=True,
-                x_inline=False,
-                y_inline=False,
-            )
-
-            gl.xlocator = mticker.MultipleLocator(lon_interval)
-            gl.ylocator = mticker.MultipleLocator(lat_interval)
-            gl.xformatter = LongitudeFormatter()
-            gl.yformatter = LatitudeFormatter()
-
-        return fig, ax, im
 
     def lats(self):
         """

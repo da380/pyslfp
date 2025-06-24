@@ -3,7 +3,7 @@ Module for a class that stores basic Earth model data along with a non-dimension
 """
 
 
-class EarthModelParamters:
+class EarthModelParameters:
     """
     Class for storing Earth model parmaters and a non-dimensionalisation scheme.
     """
@@ -100,7 +100,7 @@ class EarthModelParamters:
         on the mean radius of the Earth, the density of water, and the length
         of a year.
         """
-        return EarthModelParamters(
+        return EarthModelParameters(
             length_scale=6371000, density_scale=1000, time_scale=365 * 24 * 3600
         )
 

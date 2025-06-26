@@ -155,6 +155,13 @@ class FingerPrint(EarthModelParameters):
         return self._extend
 
     @property
+    def background_set(self):
+        """
+        Returns true is background state has been set.
+        """
+        return self._sea_level is not None and self._ice_thickness is not None
+
+    @property
     def sea_level(self):
         """Returns the backgroud sea level."""
         if self._sea_level is None:

@@ -128,7 +128,23 @@ class SeaLevelOperator(inf.LinearOperator):
 
     def _mapping(self, direct_load):
          
-        return self._fingerprint(direct_load=direct_load, rotational_feedbacks=self._rotational_feedbacks, rtol=self._rtol)
+        sea_level_change, vertical_displacement, gravity_potential_change, angular_velocity_change = self._fingerprint(direct_load=direct_load, rotational_feedbacks=self._rotational_feedbacks, rtol=self._rtol)
+        
+        if self._rotational_feedbacks:
+            gravitational_potential_change = (
+                self._fingerprint.gravity_potential_change_to_gravitational_potential_change(
+                    gravity_potential_change, angular_velocity_change
+                )
+            )
+        else:
+            gravitational_potential_change = gravity_potential_change
+
+        return (
+            sea_level_change,
+            vertical_displacement,
+            gravitational_potential_change,
+            angular_velocity_change
+        )
     
     def _formal_adjoint(self, response_fields):
 
@@ -138,7 +154,7 @@ class SeaLevelOperator(inf.LinearOperator):
             zeta_u_d = -1 * response_fields[1]
             zeta_phi_d = -g * response_fields[2]
             if self._rotational_feedbacks:
-                kk_d = -g * (response_fields[3] - (1/g) * self._fingerprint.adjoint_angular_momentum_change_from_adjoint_gravitational_potential_load(response_fields[2]))
+                kk_d = -g * (response_fields[3] - self._fingerprint.adjoint_angular_momentum_change_from_adjoint_gravitational_potential_load(response_fields[2]))
             else:
                 kk_d = np.zeros(2)
             
@@ -231,14 +247,16 @@ class GraceObservationOperator(ObservationOperator):
         angular_velocity_change = response_fields[3]
 
         # Get the gravitational potential change. todo!!
-        if self._rotational_feedbacks:
+        """if self._rotational_feedbacks:
             gravitational_potential_change = (
                 self._fingerprint.gravity_potential_change_to_gravitational_potential_change(
                     gravity_potential_change, angular_velocity_change
                 )
             )
         else:
-            gravitational_potential_change = gravity_potential_change
+            gravitational_potential_change = gravity_potential_change"""
+        
+        gravitational_potential_change = gravity_potential_change
 
         # Convert the gravitational potential change to spherical harmonic coefficients.
         gravitational_sh_coeffs = self._to_ordered_sh_coefficients(gravitational_potential_change)
@@ -252,10 +270,12 @@ class GraceObservationOperator(ObservationOperator):
         gravitational_potential_change = self._from_ordered_sh_coefficients(gravitational_sh_coeffs)
 
         # Convert the gravitational potential change to gravity potential change.
-        if self._rotational_feedbacks:
+        """if self._rotational_feedbacks:
             gravity_potential_change = self._fingerprint.gravitational_potential_change_to_gravity_potential_change(gravitational_potential_change, np.zeros(2))
         else:
-            gravity_potential_change = gravitational_potential_change
+            gravity_potential_change = gravitational_potential_change"""
+        
+        gravity_potential_change = gravitational_potential_change
 
         # Create a zero grid for the dual loads.
         zero_grid = self._fingerprint.zero_grid()

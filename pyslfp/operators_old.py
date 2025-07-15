@@ -183,19 +183,36 @@ class ObservationOperator(ABC, inf.LinearOperator):
         
         self.sea_level_operator = sea_level_operator
         
-        operator = self._operator()
-        if not isinstance(operator, inf.LinearOperator):
-            raise TypeError("The operator must be a pygeoinf LinearOperator.")
+        domain = sea_level_operator.codomain
+        codomain = self._data_space()
 
-        super().__init__(operator.domain, operator.codomain, operator, adjoint_mapping=operator.adjoint)
+        operator = inf.LinearOperator.from_formal_adjoint(
+            domain, codomain, self._mapping, self._formal_adjoint
+        )
+
+        super().__init__(domain, codomain, operator, adjoint_mapping=operator.adjoint)
         
     @abstractmethod
-    def _operator(self):
+    def _mapping(self, response_fields):
         """
-        LinearOperator instance that implements the mapping from the response fields to the data space.
+        Maps the response fields to the data space.
         """
         pass
     
+    @abstractmethod
+    def _formal_adjoint(self, data):
+        """
+        Maps from the data space to the response fields.
+        """
+        pass
+
+    @abstractmethod
+    def _data_space(self):
+        """
+        Returns the data space of the observation operator.
+        """
+        pass
+
     @property
     def forward_operator(self):
         """
@@ -222,13 +239,6 @@ class GraceObservationOperator(ObservationOperator):
         self._rotational_feedbacks = sea_level_operator._rotational_feedbacks
         super().__init__(sea_level_operator)
 
-    def _operator(self):
-        """Returns a LinearOperato instance which maps the response fields to spherical harmonic coefficients of gravitational potential change."""
-        domain = self.sea_level_operator.codomain
-        codomain = inf.EuclideanSpace(self._data_size)
-        return inf.LinearOperator.from_formal_adjoint(
-            domain, codomain, self._mapping, self._formal_adjoint
-        )
 
     def _mapping(self, response_fields):
         """Maps the response fields to spherical harmonic coefficients of gravitational potential change."""
@@ -246,6 +256,10 @@ class GraceObservationOperator(ObservationOperator):
             gravitational_potential_change,
             np.zeros(2)
         )
+    
+    def _data_space(self):
+        """Returns the data space of the observation operator."""
+        return inf.EuclideanSpace(self._data_size)
     
     def _to_ordered_sh_coefficients(self, grid):
         """Converts a grid to ordered spherical harmonic coefficients."""
@@ -281,20 +295,10 @@ class TideGaugeObservationOperator(ObservationOperator):
         self._point_evaluation_operator = self._sl_space.point_evaluation_operator(tide_gauge_locations)
         super().__init__(sea_level_operator)
 
-    def _operator(self):
-        """
-        Returns a LinearOperator instance that maps the response fields to a vector of tide gauge measurements.
-        """
-        domain = self.sea_level_operator.codomain
-        codomain = self._point_evaluation_operator.codomain
-        return inf.LinearOperator(
-            domain, codomain, self._mapping, adjoint_mapping=self._adjoint_mapping
-        )
-
     def _mapping(self, response_fields):
         return self._point_evaluation_operator(response_fields[0])
     
-    def _adjoint_mapping(self, tide_gauge_measurements):
+    def _formal_adjoint(self, tide_gauge_measurements):
         zero_grid = self._fingerprint.zero_grid()
         return (
             self._point_evaluation_operator.adjoint(tide_gauge_measurements),
@@ -302,6 +306,9 @@ class TideGaugeObservationOperator(ObservationOperator):
             zero_grid,
             np.zeros(2)
         )
+    
+    def _data_space(self):
+        return self._point_evaluation_operator.codomain
 
 class GraceObservationOperator2(inf.LinearOperator):
     """

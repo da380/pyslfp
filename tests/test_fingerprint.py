@@ -133,3 +133,85 @@ class TestFingerPrint:
         )
 
         assert np.isclose(lhs, rhs, rtol=1000 * rtol)
+
+    def test_alternative_generalised_sea_level_reciprocity(
+        self, version, rotational_feedbacks, rtol, lmax
+    ):
+        """
+        Test the generalised reciprocity relation using random forces.
+        """
+
+        fingerprint = self.set_up_fingerprint(version, lmax)
+        direct_load_1 = self.random_load(fingerprint)
+        direct_load_2 = self.random_load(fingerprint)
+        displacement_load_1 = self.random_load(fingerprint)
+        displacement_load_2 = self.random_load(fingerprint)
+        gravitational_potential_load_1 = self.random_load(fingerprint)
+        gravitational_potential_load_2 = self.random_load(fingerprint)
+        angular_momentum_change_1 = (
+            self.random_angular_momentum(fingerprint)
+            if rotational_feedbacks
+            else np.zeros(2)
+        )
+        angular_momentum_change_2 = (
+            self.random_angular_momentum(fingerprint)
+            if rotational_feedbacks
+            else np.zeros(2)
+        )
+
+        (
+            sea_level_change_1,
+            displacement_1,
+            gravity_potential_change_1,
+            angular_velocity_change_1,
+        ) = fingerprint(
+            direct_load=direct_load_1,
+            displacement_load=displacement_load_1,
+            gravitational_potential_load=gravitational_potential_load_1,
+            angular_momentum_change=angular_momentum_change_1,
+        )
+
+        (
+            sea_level_change_2,
+            displacement_2,
+            gravity_potential_change_2,
+            angular_velocity_change_2,
+        ) = fingerprint(
+            direct_load=direct_load_2,
+            displacement_load=displacement_load_2,
+            gravitational_potential_load=gravitational_potential_load_2,
+            angular_momentum_change=angular_momentum_change_2,
+        )
+
+        gravitational_potential_change_1 = fingerprint.gravity_potential_change_to_gravitational_potential_change(
+            gravity_potential_change_1,
+            angular_velocity_change_1
+        )
+        gravitational_potential_change_2 = fingerprint.gravity_potential_change_to_gravitational_potential_change(
+            gravity_potential_change_2,
+            angular_velocity_change_2
+        )
+
+        g = fingerprint.gravitational_acceleration
+
+        lhs_integrand = direct_load_2 * sea_level_change_1 - (1 / g) * (
+            g * displacement_load_2 * displacement_1
+            + gravitational_potential_load_2 * gravitational_potential_change_1
+        )
+
+        lhs = (
+            fingerprint.integrate(lhs_integrand)
+            - np.dot(angular_momentum_change_2 - fingerprint.adjoint_angular_momentum_change_from_adjoint_gravitational_potential_load(gravitational_potential_load_2), angular_velocity_change_1) / g
+        )
+
+        rhs_integrand = direct_load_1 * sea_level_change_2 - (1 / g) * (
+            g * displacement_load_1 * displacement_2
+            + gravitational_potential_load_1 * gravitational_potential_change_2
+        )
+
+        rhs = (
+            fingerprint.integrate(rhs_integrand)
+            - np.dot(angular_momentum_change_1 - fingerprint.adjoint_angular_momentum_change_from_adjoint_gravitational_potential_load(gravitational_potential_load_1), angular_velocity_change_2) / g
+        )
+        
+        assert np.isclose(lhs, rhs, rtol=1000 * rtol)    

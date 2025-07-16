@@ -667,7 +667,7 @@ class FingerPrint(EarthModelParameters):
             (SHGrid): The gravitational potential change.
         """
         gravitational_potential_change_lm = self._expand_field(gravity_potential_change)
-        gravitational_potential_change_lm.coeffs[:, 2, 1] += (
+        gravitational_potential_change_lm.coeffs[:, 2, 1] -= (
             self._rotation_factor * angular_velocity_change
         )
         return self._expand_coefficient(gravitational_potential_change_lm)
@@ -687,7 +687,7 @@ class FingerPrint(EarthModelParameters):
             (SHGrid): The gravitaty potential change.
         """
         gravity_potential_change_lm = self._expand_field(gravitational_potential_change)
-        gravity_potential_change_lm.coeffs[:, 2, 1] -= (
+        gravity_potential_change_lm.coeffs[:, 2, 1] += (
             self._rotation_factor * angular_velocity_change
         )
         return self._expand_coefficient(gravity_potential_change_lm)

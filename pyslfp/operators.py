@@ -154,7 +154,7 @@ class SeaLevelOperator(inf.LinearOperator):
             zeta_u_d = -1 * response_fields[1]
             zeta_phi_d = -g * response_fields[2]
             if self._rotational_feedbacks:
-                kk_d = -g * (response_fields[3] - self._fingerprint.adjoint_angular_momentum_change_from_adjoint_gravitational_potential_load(response_fields[2]))
+                kk_d = -g * (response_fields[3] + self._fingerprint.adjoint_angular_momentum_change_from_adjoint_gravitational_potential_load(response_fields[2]))
             else:
                 kk_d = np.zeros(2)
             
@@ -214,7 +214,6 @@ class GraceObservationOperator(ObservationOperator):
         Args:
             sea_level_operator (SeaLevelOperator): An instance of the SeaLevelOperator class.
             observation_degree (int): The degree of the spherical harmonics used for the observations.
-            rotational_feedbacks (bool): Whether to include rotational feedbacks in the operator.
         """
         self._observation_degree = observation_degree
         self._data_size = (self._observation_degree+1)**2 - 4
@@ -223,7 +222,7 @@ class GraceObservationOperator(ObservationOperator):
         super().__init__(sea_level_operator)
 
     def _operator(self):
-        """Returns a LinearOperato instance which maps the response fields to spherical harmonic coefficients of gravitational potential change."""
+        """Returns a LinearOperator instance which maps the response fields to spherical harmonic coefficients of gravitational potential change."""
         domain = self.sea_level_operator.codomain
         codomain = inf.EuclideanSpace(self._data_size)
         return inf.LinearOperator.from_formal_adjoint(
@@ -302,6 +301,160 @@ class TideGaugeObservationOperator(ObservationOperator):
             zero_grid,
             np.zeros(2)
         )
+
+class AveragingOperator(inf.LinearOperator):
+    """
+    Class for an operator which computes a vector of weighted averages of a field.
+    Weighting functions can be given as 2D fields or as components.
+    """
+    def __init__(self, space, /, *, weighting_functions=None, weighting_components=None, fingerprint=None):
+        """
+        Args:
+            space (Sobolev): The Sobolev space in which the operator acts.
+            weighting_functions (list of SHGrid): A list of 2D fields to use as weights.
+            weighting_components (list of SHCoeffs): A list of spherical harmonic coefficients to use as weights.
+            fingerprint (FingerPrint): An instance of the FingerPrint class that must have its background state set.
+        """
+        self._space = space
+
+        assert weighting_components is not None or weighting_functions is not None, "Either weighting functions or components must be given."
+        if weighting_functions is not None:
+            self._weighting_functions = weighting_functions
+            self._weighting_components = [space.to_components(wf) for wf in weighting_functions]
+        elif weighting_components is not None:
+            self._weighting_components = weighting_components
+            self._weighting_functions = [space.from_components(wc) for wc in weighting_components]
+
+        if fingerprint is None:
+            self._fingerprint = FingerPrint(
+                earth_model_parameters=EarthModelParameters.from_standard_non_dimensionalisation()
+            )
+            self._fingerprint.set_state_from_ice_ng()
+        else:
+            if not fingerprint.background_set:
+                raise ValueError("fingerprint must have its background state set.")
+            self._fingerprint = fingerprint
+
+        self._averages_size = len(self._weighting_functions)
+        self._averages_space = inf.EuclideanSpace(self._averages_size)
+
+        super().__init__(self._space, self._averages_space, self._mapping, dual_mapping = self._dual_mapping)
+
+    @property
+    def weighting_functions(self):
+        """Returns the weighting functions."""
+        return self._weighting_functions
+    
+    @property
+    def weighting_components(self):
+        """Returns the weighting components."""
+        return self._weighting_components
+    
+    def _mapping(self, field):
+        """Maps a field to a vector of weighted averages."""
+        averages = np.zeros(self._averages_size)
+        for i, w in enumerate(self._weighting_functions):
+            averages[i] = self._fingerprint.integrate(field * w)
+        return averages
+    
+    def _dual_mapping(self, ap):
+        """The dual mapping"""
+        cap = self.codomain.dual.to_components(ap) * self._space.radius**2
+        czp = sum([wi * ai for wi, ai in zip(self._weighting_components, cap)])
+        return inf.LinearForm(self.domain, components=czp)
+
+class WahrOperator(inf.LinearOperator):
+    """
+    Class for an operator which acts the wahr method on a vector of gravitational potential coefficients to produce a load average.
+    """
+    def __init__(self, observation_degree, weighting_components, love_numbers, radius):
+
+        self._weighting_components = weighting_components
+        self._property_size = len(self._weighting_components)
+        self._property_space = inf.EuclideanSpace(self._property_size)
+
+        self._observation_degree = observation_degree
+        self._data_size = (self._observation_degree+1)**2 - 4
+        self._data_space = inf.EuclideanSpace(self._data_size)
+
+        self._love_numbers = love_numbers
+        self._radius = radius
+
+        super().__init__(self._data_space, self._property_space, self._mapping)    
+    
+    def _mapping(self, phi):
+        """The forward mapping."""
+        ## Loops over l and m, and computes sigma = k^-1*phi_lm*w_i
+        k = self._love_numbers
+        b = self._radius
+        w = np.zeros(self._property_size)
+        for i in range(self._property_size):
+            for l in range(2,self._observation_degree+1):
+                for m in range(-1*l,l+1):
+                    vec_index = (l**2)-4+m+l
+                    w[i] += b**2 * (1/k[l]) * phi[vec_index] * self._weighting_components[i][vec_index]
+
+        return w
+    
+class AveragingOperator2(inf.LinearOperator):
+    """
+    Class for an operator which computes a vector of weighted averages of a field.
+    Weighting functions can be given as 2D fields or as components.
+    """
+    def __init__(self, space, /, *, weighting_functions=None, weighting_components=None, fingerprint=None):
+        """
+        Args:
+            space (Sobolev): The Sobolev space in which the operator acts.
+            weighting_functions (list of SHGrid): A list of 2D fields to use as weights.
+            weighting_components (list of SHCoeffs): A list of spherical harmonic coefficients to use as weights.
+            fingerprint (FingerPrint): An instance of the FingerPrint class that must have its background state set.
+        """
+        self._space = space
+
+        assert weighting_components is not None or weighting_functions is not None, "Either weighting functions or components must be given."
+        if weighting_functions is not None:
+            self._weighting_functions = weighting_functions
+            self._weighting_components = [space.to_components(wf) for wf in weighting_functions]
+        elif weighting_components is not None:
+            self._weighting_components = weighting_components
+            self._weighting_functions = [space.from_components(wc) for wc in weighting_components]
+
+        if fingerprint is None:
+            self._fingerprint = FingerPrint(
+                earth_model_parameters=EarthModelParameters.from_standard_non_dimensionalisation()
+            )
+            self._fingerprint.set_state_from_ice_ng()
+        else:
+            if not fingerprint.background_set:
+                raise ValueError("fingerprint must have its background state set.")
+            self._fingerprint = fingerprint
+
+        self._averages_size = len(self._weighting_functions)
+        self._averages_space = inf.EuclideanSpace(self._averages_size)
+
+        operator = inf.LinearOperator.formally_self_adjoint(
+            self._space,
+            self._mapping,
+        )
+
+        super().__init__(operator.domain, operator.codomain, operator, adjoint_mapping=operator.adjoint)
+
+    @property
+    def weighting_functions(self):
+        """Returns the weighting functions."""
+        return self._weighting_functions
+    
+    @property
+    def weighting_components(self):
+        """Returns the weighting components."""
+        return self._weighting_components
+    
+    def _mapping(self, field):
+        """Maps a field to a vector of weighted averages."""
+        averages = np.zeros(self._averages_size)
+        for i, w in enumerate(self._weighting_functions):
+            averages[i] = self._fingerprint.integrate(field * w)
+        return averages
 
 class GraceObservationOperator2(inf.LinearOperator):
     """

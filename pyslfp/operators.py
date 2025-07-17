@@ -120,11 +120,7 @@ class SeaLevelOperator(inf.LinearOperator):
              inf.EuclideanSpace(2)]
         )
 
-        operator = inf.LinearOperator.from_formal_adjoint(
-            domain, codomain, self._mapping, self._formal_adjoint
-        )
-
-        super().__init__(domain, codomain, operator, adjoint_mapping=operator.adjoint)
+        super().__init__(domain, codomain, self._mapping, formal_adjoint_mapping=self._formal_adjoint)
 
     def _mapping(self, direct_load):
          
@@ -225,8 +221,8 @@ class GraceObservationOperator(ObservationOperator):
         """Returns a LinearOperator instance which maps the response fields to spherical harmonic coefficients of gravitational potential change."""
         domain = self.sea_level_operator.codomain
         codomain = inf.EuclideanSpace(self._data_size)
-        return inf.LinearOperator.from_formal_adjoint(
-            domain, codomain, self._mapping, self._formal_adjoint
+        return inf.LinearOperator(
+            domain, codomain, self._mapping, formal_adjoint_mapping=self._formal_adjoint
         )
 
     def _mapping(self, response_fields):

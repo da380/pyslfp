@@ -2381,14 +2381,14 @@ test = ["pytest", "pytest-doctestplus (>=0.7)"]
 
 [[package]]
 name = "pygeoinf"
-version = "1.0.5"
+version = "1.0.7"
 description = "A package for solving geophysical inference and inverse problems"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
 files = [
-    {file = "pygeoinf-1.0.5-py3-none-any.whl", hash = "sha256:bd8c17023ef274b4d91f14d206e5742daed31fdaee6d61ca46b112d63cf0e937"},
-    {file = "pygeoinf-1.0.5.tar.gz", hash = "sha256:10e5d46c7606d5ff09b2640876911486db0cae929a93eee68cebdad92bcd04cd"},
+    {file = "pygeoinf-1.0.7-py3-none-any.whl", hash = "sha256:91358ee91434fa88c78175149385c63457e16fb9b6636c1bd3da6447fb5df72b"},
+    {file = "pygeoinf-1.0.7.tar.gz", hash = "sha256:6d1cd0c57cb9c9872751842652d1c36693f7cce0c38e11cde2c2ac0c53537fc9"},
 ]
 
 [package.dependencies]

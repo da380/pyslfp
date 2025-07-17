@@ -270,6 +270,7 @@ class AveragingOperator(inf.LinearOperator):
 
         if fingerprint is None:
             self._fingerprint = FingerPrint(
+                lmax=space.lmax,
                 earth_model_parameters=EarthModelParameters.from_standard_non_dimensionalisation()
             )
             self._fingerprint.set_state_from_ice_ng()

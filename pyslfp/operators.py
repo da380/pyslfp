@@ -69,6 +69,13 @@ class SeaLevelOperator(inf.LinearOperator):
 
         super().__init__(domain, codomain, self._mapping, formal_adjoint_mapping=self._formal_adjoint)
 
+    @property
+    def fingerprint(self):
+        """
+        Returns the FingerPrint instance used by the operator.
+        """
+        return self._fingerprint
+
     def _mapping(self, direct_load):
          
         sea_level_change, vertical_displacement, gravity_potential_change, angular_velocity_change = self._fingerprint(direct_load=direct_load, rotational_feedbacks=self._rotational_feedbacks, rtol=self._rtol)

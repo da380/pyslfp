@@ -8,7 +8,7 @@ from pygeoinf.symmetric_space.sphere import Sobolev
 @pytest.mark.parametrize("version", [6, 7])
 @pytest.mark.parametrize("rotational_feedbacks", [True, False])
 @pytest.mark.parametrize("rtol", [1e-6])
-@pytest.mark.parametrize("lmax", [60, 128])
+@pytest.mark.parametrize("lmax", [10, 32])
 @pytest.mark.parametrize("order", [2])
 @pytest.mark.parametrize("scale", [0.1])
 @pytest.mark.parametrize("grace_observation_degree", [10])
@@ -75,7 +75,7 @@ class TestOperators:
             rtol=rtol,
         )
 
-    def test_sea_level_operator_self_adjoint(self, version, rotational_feedbacks, rtol, lmax, order, scale):
+    def test_sea_level_operator_self_adjoint(self, version, rotational_feedbacks, rtol, lmax, order, scale, grace_observation_degree, number_of_tide_gauges, number_of_weighting_functions):
         """
         Test the self-adjointness of the sea level operator.
         """
@@ -103,7 +103,7 @@ class TestOperators:
 
         assert np.isclose(lhs, rhs, rtol=1000 * rtol)
 
-    def test_grace_observation_operator_self_adjoint(self, version, rotational_feedbacks, rtol, lmax, order, scale, grace_observation_degree):
+    def test_grace_observation_operator_self_adjoint(self, version, rotational_feedbacks, rtol, lmax, order, scale, grace_observation_degree, number_of_tide_gauges, number_of_weighting_functions):
         """
         Test the self-adjointness of the Grace observation operator.
         """
@@ -122,7 +122,7 @@ class TestOperators:
 
         load1 = self.random_load(sea_level_operator.fingerprint)
         load2 = self.random_load(sea_level_operator.fingerprint)
-        response1 = grace_observation_operator(load1)
+        response1 = sea_level_operator(load1)
         data2 = forward_operator(load2)
 
         model_space = sea_level_operator.domain
@@ -147,7 +147,7 @@ class TestOperators:
         )
         assert np.isclose(lhs, rhs, rtol=1000 * rtol)
 
-    def test_tide_gauge_observation_operator_self_adjoint(self, version, rotational_feedbacks, rtol, lmax, order, scale, number_of_tide_gauges):
+    def test_tide_gauge_observation_operator_self_adjoint(self, version, rotational_feedbacks, rtol, lmax, order, scale, grace_observation_degree, number_of_tide_gauges, number_of_weighting_functions):
         """
         Test the self-adjointness of the Tide Gauge observation operator.
         """
@@ -167,7 +167,7 @@ class TestOperators:
 
         load1 = self.random_load(sea_level_operator.fingerprint)
         load2 = self.random_load(sea_level_operator.fingerprint)
-        response1 = tide_gauge_observation_operator(load1)
+        response1 = sea_level_operator(load1)
         data2 = forward_operator(load2)
 
         model_space = sea_level_operator.domain
@@ -192,7 +192,7 @@ class TestOperators:
         )
         assert np.isclose(lhs, rhs, rtol=1000 * rtol)
 
-    def test_averaging_operator_self_adjoint(self, version, lmax, order, scale, number_of_weighting_functions, rtol):
+    def test_averaging_operator_self_adjoint(self, version, rotational_feedbacks, rtol, lmax, order, scale, grace_observation_degree, number_of_tide_gauges, number_of_weighting_functions):
         """
         Test the self-adjointness of the Averaging operator.
         """

@@ -208,10 +208,10 @@
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="api/physical_parameters.html">pyslfp.physical_parameters</a></li>
-<li class="toctree-l1"><a class="reference internal" href="api/ice_ng.html">pyslfp.ice_ng</a></li>
-<li class="toctree-l1"><a class="reference internal" href="api/finger_print.html">pyslfp.finger_print</a></li>
-<li class="toctree-l1"><a class="reference internal" href="api/plotting.html">pyslfp.plotting</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="api/modules.html">pyslfp</a><input class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><div class="visually-hidden">Toggle navigation of pyslfp</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="api/pyslfp.html">pyslfp package</a></li>
+</ul>
+</li>
 </ul>
 
 </div>
@@ -253,18 +253,13 @@
         </div>
         <article role="main" id="furo-main-content">
           <p>pysl:PySLFP: Python Sea Level Fingerprints</p>
-<p><cite>pyslfp</cite> is a Python package for computing elastic sea level “fingerprints”. It provides a robust and user-friendly framework for solving the sea level equation, accounting for the Earth’s elastic deformation, gravitational self-consistency between the ice, oceans, and solid Earth, and rotational feedback effects.</p>
-<p>The core of the library is the <cite>FingerPrint</cite> class, which implements an iterative solver to determine the unique pattern of sea-level change that results from a change in a surface load, such as the melting of an ice sheet.</p>
+<dl class="simple">
+<dt><cite>pyslfp</cite> is a Python package for computing elastic sea level “fingerprints”. It provides</dt><dd><p>a robust and user-friendly framework for solving the sea level equation, accounting for
+the Earth’s elastic deformation, gravitational self-consistency between the ice, oceans,
+and solid Earth, and rotational feedback effects.</p>
+</dd>
+</dl>
 <p>—</p>
-<p>## Key Features</p>
-<ul class="simple">
-<li><p><strong>Elastic Sea Level Equation Solver:</strong> Implements an iterative solver for the generalized sea level equation.</p></li>
-<li><p><strong>Comprehensive Physics:</strong> Accounts for Earth’s elastic response (via load Love numbers), self-consistent gravity, and rotational feedbacks (polar wander).</p></li>
-<li><p><strong>Ice History Models:</strong> Includes a data loader for the ICE-5G, ICE-6G, and ICE-7G global ice history models, allowing for easy setup of realistic background states.</p></li>
-<li><p><strong>Forward and Adjoint Modeling:</strong> Provides a high-level interface for both forward calculations (predicting sea level change from a load) and  adjoint modeling (for use in inverse problems), powered by <cite>pygeoinf</cite>.</p></li>
-<li><p><strong>Built-in Visualization:</strong> Comes with high-quality map plotting utilities built on <cite>matplotlib</cite> and <cite>cartopy</cite> for easy visualization of global data grids.</p></li>
-<li><p><strong>Object-Oriented Design:</strong> A clean, object-oriented structure separates the physical earth model parameters, ice model data, and the core solver logic.</p></li>
-</ul>
 <div class="toctree-wrapper compound">
 </div>
 <div class="toctree-wrapper compound">

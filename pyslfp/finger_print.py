@@ -76,10 +76,15 @@ class FingerPrint(EarthModelParameters):
 
         # Set options.
         self._lmax: int = lmax
-        self._grid = grid
+
+        if grid == "DH2":
+            self._grid = "DH"
+            self._sampling = 2
+        else:
+            self._grid = grid
+            self._sampling = 1
 
         # Internal parameters (do not change)
-        self._sampling: int = 2 if self.grid == "DH2" else 1
         self._extend: bool = True
         self._normalization: str = "ortho"
         self._csphase: int = 1

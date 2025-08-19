@@ -1,6 +1,15 @@
 import matplotlib.pyplot as plt
 from pyslfp import FingerPrint, plot, IceModel
 
+import pyshtools as sh
+
+u = sh.SHGrid.from_zeros(32, grid="DH", sampling=1, extend=True)
+
+print(u.data.shape)
+
+
+"""
+
 # 1. Initialise the fingerprint model
 # lmax sets the spherical harmonic resolution.
 fp = FingerPrint(lmax=256)
@@ -31,3 +40,4 @@ cbar = fig.colorbar(im, ax=ax, orientation="horizontal", pad=0.05, shrink=0.7)
 cbar.set_label("Sea Level Change (meters)")
 
 plt.show()
+"""

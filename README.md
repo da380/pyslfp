@@ -45,8 +45,8 @@ Optionally, tests and tutorials can be included using ```-with tests, tutorials`
 
 If you use `pyslfp` in your published work, please cite the following paper:
 
-*   Al-Attar, D., Syvret, F., Crawford, O., Mitrovica, J.X. and Lloyd, A.J., 2024. *Reciprocity and sensitivity kernels for sea level fingerprints*. Geophysical Journal International, 236(1), pp.362-378.
-
+*   Al-Attar, D., Syvret, F., Crawford, O., Mitrovica, J.X. and Lloyd, A.J., 2024. Reciprocity and sensitivity kernels for sea level fingerprints. *Geophysical Journal International*, **236**(1), 362-378.
+    
 Additionally, please cite the appropriate ice history model if you use the `IceNG` class from
 
 *   [Peltier group data sets](https://www.atmosp.physics.utoronto.ca/~peltier/data.php)

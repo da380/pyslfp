@@ -25,7 +25,7 @@ cbar = fig.colorbar(im, ax=ax, orientation="horizontal", pad=0.05, shrink=0.7)
 cbar.set_label("Sea Level Change (meters)")
 
 
-L, D, R = A.random_svd(10, power=2)
+L, D, R = A.random_svd(50, power=2)
 
 B = L @ D @ R
 

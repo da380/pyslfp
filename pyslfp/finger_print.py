@@ -13,7 +13,7 @@ import numpy as np
 import pyshtools as pysh
 from pyshtools import SHGrid, SHCoeffs
 
-import pygeoinf as inf
+from pygeoinf import LinearOperator, HilbertSpaceDirectSum, EuclideanSpace
 from pygeoinf.symmetric_space.sphere import Sobolev
 
 from pyslfp.ice_ng import IceNG, IceModel
@@ -209,8 +209,11 @@ class FingerPrint(EarthModelParameters):
         return self._solver_counter
 
     # ---------------------------------------------------------#
-    #                     Private methods                     #
+    #                     Private methods                      #
     # ---------------------------------------------------------#
+
+    def _grid_name(self):
+        return self.grid if self._sampling == 1 else "DH2"
 
     def _read_love_numbers(self, file: str) -> None:
         """Reads and non-dimensionalises Love numbers from a file."""
@@ -856,6 +859,43 @@ class FingerPrint(EarthModelParameters):
             w = self._expand_coefficient(w_lm)
         return w
 
+    def load_space(self, order: float, scale: float) -> Sobolev:
+        """
+        Returns the load space for the sea level fingerprint operator as an instance
+        of pygeoinf.symmetric_space.sphere.Sobolev.
+
+        Args:
+            order: The Sobolev order.
+            scale: The Sobolev scale.
+        """
+        return Sobolev(
+            self.lmax,
+            order,
+            scale,
+            radius=self.mean_sea_floor_radius,
+            grid=self._grid_name(),
+        )
+
+    def response_space(self, order: float, scale: float) -> HilbertSpaceDirectSum:
+        """
+        Returns the response space of the sea level fingerprint operator as an
+        instance of pygeoinf.HilbertSpaceDirectSum.
+
+        Args:
+            order: The Sobolev order.
+            scale: The Sobolev scale.
+        """
+        field_space = Sobolev(
+            self.lmax,
+            order + 1,
+            scale,
+            radius=self.mean_sea_floor_radius,
+            grid=self._grid_name(),
+        )
+        return HilbertSpaceDirectSum(
+            [field_space, field_space, field_space, EuclideanSpace(2)]
+        )
+
     def as_linear_operator(
         self,
         order: float,
@@ -885,17 +925,8 @@ class FingerPrint(EarthModelParameters):
             the adjoint mapping, and the mathematical spaces (domain and codomain).
         """
 
-        grid = self.grid if self._sampling == 1 else "DH2"
-
-        load_space = Sobolev(
-            self.lmax, order, scale, radius=self.mean_sea_floor_radius, grid=grid
-        )
-        response_space = Sobolev(
-            self.lmax, order + 1, scale, radius=self.mean_sea_floor_radius, grid=grid
-        )
-        codomain = inf.HilbertSpaceDirectSum(
-            [response_space, response_space, response_space, inf.EuclideanSpace(2)]
-        )
+        domain = self.load_space(order, scale)
+        codomain = self.response_space(order, scale)
 
         def mapping(u: SHGrid) -> List[Union[SHGrid, np.ndarray]]:
             """The forward mapping from a load to the sea level response fields."""
@@ -949,8 +980,8 @@ class FingerPrint(EarthModelParameters):
             )
             return adjoint_sea_level
 
-        return inf.LinearOperator(
-            load_space,
+        return LinearOperator(
+            domain,
             codomain,
             mapping,
             formal_adjoint_mapping=formal_adjoint_mapping,

@@ -865,7 +865,7 @@ class FingerPrint(EarthModelParameters):
 
         This method wraps the instance's physical forward model (the __call__ method)
         and its corresponding adjoint into a formal mathematical operator, which can
-        be used for advanced scientific computing tasks like inverse problems.
+        be used in the solution of inverse problems.
 
         Args:
             order: The Sobolev order, defining the smoothness of the input load space.

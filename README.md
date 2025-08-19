@@ -76,7 +76,8 @@ direct_load = fp.northern_hemisphere_load(fraction=0.1)
 
 # 4. Solve the sea level equation for the given load
 # This returns the sea level change, surface displacement, gravity change,
-# and angular velocity change.
+# and angular velocity change. In this instance, only the first of the
+# returned fields is used. 
 sea_level_change, _, _, _ = fp(direct_load=direct_load)
 
 # 5. Plot the resulting sea level fingerprint,

@@ -15,7 +15,7 @@ The core of the library is the `FingerPrint` class, which implements an iterativ
 * **Elastic Sea Level Equation Solver:** Implements an iterative solver for the generalized sea level equation.
 * **Comprehensive Physics:** Accounts for Earth's elastic response (via load Love numbers), self-consistent gravity, and rotational feedbacks (polar wander).
 * **Ice History Models:** Includes a data loader for the ICE-5G, ICE-6G, and ICE-7G global ice history models, allowing for easy setup of realistic background states.
-* **Forward and Adjoint Modeling:** Provides a high-level interface for both forward calculations (predicting sea level change from a load) and  adjoint modeling (for use in inverse problems), powered by `pygeoinf` and based on the theory of [Al-Attar et al.(2024)](https://academic.oup.com/gji/article/236/1/362/7338265)
+* **Forward and Adjoint Modeling:** Provides a high-level interface for both forward calculations (predicting sea level change from a load) and  adjoint modeling (for use in inverse problems), powered by `pygeoinf`, and based on the theory of [Al-Attar et al.(2024)](https://academic.oup.com/gji/article/236/1/362/7338265)
 * **Built-in Visualization:** Comes with high-quality map plotting utilities built on `matplotlib` and `cartopy` for easy visualization of global data grids.
 
 

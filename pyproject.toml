@@ -18,12 +18,12 @@ Cartopy = "^0.23.0"
 pygeoinf = ">=1.0.9"
 
 
-
 [tool.poetry.group.tests]
 optional = true
 
 [tool.poetry.group.tests.dependencies]
 pytest = "^8.3.5"
+pytest-cov = "^6.2.1"
 
 
 [tool.poetry.group.tutorials]

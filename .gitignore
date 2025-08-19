@@ -3,3 +3,14 @@ __pycache__
 *.png
 *~
 dist/*
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Pytest cache
+.pytest_cache/
+
+# Coverage reports
+.coverage
+htmlcov/

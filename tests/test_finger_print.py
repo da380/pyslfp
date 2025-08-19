@@ -2,30 +2,38 @@ import pytest
 import numpy as np
 from pyslfp.finger_print import FingerPrint, EarthModelParameters, IceModel
 from pyshtools import SHGrid
+import pygeoinf as inf
 
 
 @pytest.fixture(
     scope="module",
     params=[
-        (64, IceModel.ICE7G),  # Low resolution, ICE7G
-        (128, IceModel.ICE7G),  # High resolution, ICE7G
-        (128, IceModel.ICE6G),  # High resolution, ICE6G
+        # Test default grid (DH1) with different lmax and ice models
+        (64, IceModel.ICE7G, "DH"),
+        (128, IceModel.ICE7G, "DH"),
+        (128, IceModel.ICE6G, "DH"),
+        # Add specific tests for DH2 and GLQ grids
+        (64, IceModel.ICE7G, "DH2"),
+        (64, IceModel.ICE7G, "GLQ"),
     ],
     ids=[
-        "lmax64-ICE7G",
-        "lmax128-ICE7G",
-        "lmax128-ICE6G",
+        "lmax64-ICE7G-DH1",
+        "lmax128-ICE7G-DH1",
+        "lmax128-ICE6G-DH1",
+        "lmax64-ICE7G-DH2",
+        "lmax64-ICE7G-GLQ",
     ],
 )
 def fingerprint(request):
     """
     Provides a pre-configured FingerPrint instance for testing.
     This fixture is parameterized to create instances with different
-    lmax values and background ice models.
+    lmax values, background ice models, and grid types.
     """
-    lmax, version = request.param
+    lmax, version, grid = request.param
     fp = FingerPrint(
         lmax=lmax,
+        grid=grid,
         earth_model_parameters=EarthModelParameters.from_standard_non_dimensionalisation(),
     )
     fp.set_state_from_ice_ng(version=version)
@@ -34,11 +42,10 @@ def fingerprint(request):
 
 def random_load(fp: FingerPrint) -> SHGrid:
     """Returns a random disk load for use in tests."""
-    delta = np.random.uniform(10, 30)
-    lat = np.random.uniform(-90, 90)
-    lon = np.random.uniform(-180, 180)
-    amp = np.random.randn()
-    return fp.disk_load(delta, lat, lon, amp)
+    f = np.random.uniform()
+    load1 = fp.northern_hemisphere_load()
+    load2 = fp.southern_hemisphere_load()
+    return load1 * f + load2 * (1 - f)
 
 
 def random_angular_momentum(fp: FingerPrint):
@@ -114,7 +121,7 @@ def test_sea_level_reciprocity(fingerprint: FingerPrint, rotational_feedbacks: b
     """
     direct_load_1 = random_load(fingerprint)
     direct_load_2 = random_load(fingerprint)
-    rtol = 1e-6
+    rtol = 1e-9
 
     sea_level_change_1, _, _, _ = fingerprint(
         direct_load=direct_load_1,
@@ -130,7 +137,7 @@ def test_sea_level_reciprocity(fingerprint: FingerPrint, rotational_feedbacks: b
     lhs = fingerprint.integrate(direct_load_2 * sea_level_change_1)
     rhs = fingerprint.integrate(direct_load_1 * sea_level_change_2)
 
-    assert np.isclose(lhs, rhs, rtol=5000 * rtol)
+    assert np.isclose(lhs, rhs, rtol=1000 * rtol)
 
 
 @pytest.mark.parametrize("rotational_feedbacks", [True, False])
@@ -150,7 +157,7 @@ def test_generalised_sea_level_reciprocity(
     angular_momentum_change_2 = (
         random_angular_momentum(fingerprint) if rotational_feedbacks else np.zeros(2)
     )
-    rtol = 1e-6
+    rtol = 1e-9
 
     (
         sea_level_change_1,
@@ -198,4 +205,130 @@ def test_generalised_sea_level_reciprocity(
         - np.dot(angular_momentum_change_1, angular_velocity_change_2) / g
     )
 
-    assert np.isclose(lhs, rhs, rtol=5000 * rtol)
+    assert np.isclose(lhs, rhs, rtol=1000 * rtol)
+
+
+def test_as_linear_operator_creation(fingerprint: FingerPrint):
+    """
+    A simple smoke test to ensure the as_linear_operator method runs
+    and returns an object of the correct pygeoinf.LinearOperator type.
+    """
+    op = fingerprint.as_linear_operator(2.0, 1.0)
+    assert isinstance(op, inf.LinearOperator)
+
+
+@pytest.mark.parametrize("rotational_feedbacks", [True, False])
+@pytest.mark.parametrize("order, scale", [(0.0, 1.0), (1.0, 0.5)])
+def test_linear_operator_adjoint_identity(
+    fingerprint: FingerPrint,
+    rotational_feedbacks: bool,
+    order: float,
+    scale: float,
+):
+    """
+    Tests the adjoint identity (dot-product test) for the LinearOperator.
+
+    This is a fundamental test that verifies that the implemented formal
+    adjoint mapping is indeed the correct adjoint of the forward mapping
+    with respect to the defined Hilbert space inner products.
+    """
+
+    rtol = 1e-9
+
+    # 1. Create the linear operator with a tight solver tolerance for accuracy
+    A = fingerprint.as_linear_operator(
+        order, scale, rotational_feedbacks=rotational_feedbacks, rtol=rtol
+    )
+
+    # 2. Create random elements in the domain and codomain spaces
+    direct_load = random_load(fingerprint)
+    adjoint_direct_load = random_load(fingerprint)
+    adjoint_displacement_load = random_load(fingerprint)
+    adjoint_gravitational_potential_load = random_load(fingerprint)
+
+    adjoint_angular_momentum_change = (
+        random_angular_momentum(fingerprint) if rotational_feedbacks else np.zeros(2)
+    )
+
+    u = direct_load
+    v = [
+        adjoint_direct_load,
+        adjoint_displacement_load,
+        adjoint_gravitational_potential_load,
+        adjoint_angular_momentum_change,
+    ]
+
+    # 3. Calculate the inner products for both sides of the identity
+    lhs = A.codomain.inner_product(A(u), v)
+    rhs = A.domain.inner_product(u, A.adjoint(v))
+
+    # 5. Assert that the two sides are equal within a relative tolerance
+    # A looser tolerance is needed here due to numerical precision accumulating
+    # through the iterative solvers in both the forward and adjoint mappings.
+    assert np.isclose(lhs, rhs, rtol=1000 * rtol)
+
+
+# ====================================================================#
+#               Tests for Error Handling and Assertions               #
+# ====================================================================#
+
+
+def test_uninitialized_state_raises_error():
+    """
+    Tests that accessing properties that depend on the background state
+    raises an AttributeError if the state has not been set.
+    """
+    # Create an instance WITHOUT calling set_state_from_ice_ng
+    fp = FingerPrint(lmax=32)
+
+    with pytest.raises(AttributeError, match="Sea level has not been set"):
+        _ = fp.sea_level
+
+    with pytest.raises(AttributeError, match="Ice thickness has not been set"):
+        _ = fp.ice_thickness
+
+    with pytest.raises(
+        AttributeError, match="must be set before computing ocean function"
+    ):
+        _ = fp.ocean_function
+
+
+def test_incompatible_grid_raises_error(fingerprint: FingerPrint):
+    """
+    Tests that methods raise a ValueError if they are passed an SHGrid
+    object that is not compatible with the FingerPrint instance's settings.
+    """
+    # Create a grid with a different lmax
+    incompatible_grid = SHGrid.from_zeros(lmax=16, grid=fingerprint.grid)
+
+    with pytest.raises(ValueError, match="not compatible"):
+        fingerprint.integrate(incompatible_grid)
+
+    with pytest.raises(ValueError, match="not compatible"):
+        fingerprint(direct_load=incompatible_grid)
+
+
+def test_lmax_too_large_for_love_numbers_raises_error():
+    """
+    Tests that initializing a FingerPrint instance with an lmax greater
+    than what's available in the Love number file raises a ValueError.
+    """
+    with pytest.raises(ValueError, match="is larger than the maximum degree"):
+        # The default Love number file goes up to degree 4096
+        _ = FingerPrint(lmax=5000)
+
+
+def test_coefficient_evaluation_out_of_bounds(fingerprint: FingerPrint):
+    """
+    Tests that coefficient_evaluation raises a ValueError for out-of-bounds
+    degree (l) or order (m).
+    """
+    grid = fingerprint.zero_grid()
+
+    # Test l > lmax
+    with pytest.raises(ValueError, match="is out of bounds"):
+        fingerprint.coefficient_evaluation(grid, l=fingerprint.lmax + 1, m=0)
+
+    # Test m > l
+    with pytest.raises(ValueError, match="is out of bounds"):
+        fingerprint.coefficient_evaluation(grid, l=2, m=3)

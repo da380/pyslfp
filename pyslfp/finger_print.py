@@ -807,12 +807,12 @@ class FingerPrint(EarthModelParameters):
         _, _, adjoint_load, _ = self.adjoint_loads_for_gravity_potential_coefficient(
             l, m
         )
-        angular_momentum_change = self.adjoint_angular_momentum_change_from_adjoint_gravitational_potential_load(
+        angular_momentum_change = self.angular_momentum_change_from_potential(
             adjoint_load
         )
         return None, None, adjoint_load, angular_momentum_change
 
-    def adjoint_angular_momentum_change_from_adjoint_gravitational_potential_load(
+    def angular_momentum_change_from_potential(
         self, gravitational_potential_load: SHGrid
     ) -> np.ndarray:
         """Returns the adjoint angular momentum change for a given gravitational potential load."""
@@ -884,15 +884,14 @@ class FingerPrint(EarthModelParameters):
             A pygeoinf.LinearOperator object that encapsulates the forward mapping,
             the adjoint mapping, and the mathematical spaces (domain and codomain).
         """
+
+        grid = self.grid if self._sampling == 1 else "DH2"
+
         load_space = Sobolev(
-            self.lmax, order, scale, radius=self.mean_sea_floor_radius, grid=self.grid
+            self.lmax, order, scale, radius=self.mean_sea_floor_radius, grid=grid
         )
         response_space = Sobolev(
-            self.lmax,
-            order + 1,
-            scale,
-            radius=self.mean_sea_floor_radius,
-            grid=self.grid,
+            self.lmax, order + 1, scale, radius=self.mean_sea_floor_radius, grid=grid
         )
         codomain = inf.HilbertSpaceDirectSum(
             [response_space, response_space, response_space, inf.EuclideanSpace(2)]
@@ -935,9 +934,7 @@ class FingerPrint(EarthModelParameters):
             if rotational_feedbacks:
                 adjoint_angular_momentum_change = -g * (
                     response[3]
-                    + self.adjoint_angular_momentum_change_from_adjoint_gravitational_potential_load(
-                        response[2]
-                    )
+                    + self.angular_momentum_change_from_potential(response[2])
                 )
             else:
                 adjoint_angular_momentum_change = None

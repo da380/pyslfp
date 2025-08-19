@@ -1,52 +1,74 @@
 """
-Module for plotting functions
+Module for plotting functions using matplotlib and cartopy.
 """
 
+from typing import Tuple, Optional, List, Union
 import numpy as np
 from pyshtools import SHGrid
+
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
+from matplotlib.figure import Figure
+from matplotlib.collections import QuadMesh
+from matplotlib.contour import QuadContourSet
+
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
+from cartopy.mpl.geoaxes import GeoAxes
 
 
 def plot(
-    f,
+    f: SHGrid,
     /,
     *,
-    projection=ccrs.Robinson(),
-    contour=False,
-    cmap="RdBu",
-    coasts=True,
-    rivers=False,
-    borders=False,
-    map_extent=None,
-    gridlines=True,
-    symmetric=False,
+    projection: ccrs.Projection = ccrs.Robinson(),
+    contour: bool = False,
+    cmap: str = "RdBu",
+    coasts: bool = True,
+    rivers: bool = False,
+    borders: bool = False,
+    map_extent: Optional[List[float]] = None,
+    gridlines: bool = True,
+    symmetric: bool = False,
     **kwargs,
-):
+) -> Tuple[Figure, GeoAxes, Union[QuadMesh, QuadContourSet]]:
     """
-    Return a plot of a SHGrid object.
+    Plots a pyshtools SHGrid object on a map. 🗺️
+
+    This function provides a flexible interface to visualize spherical harmonic
+    grid data using cartopy for projections and matplotlib for plotting.
 
     Args:
-        f (SHGrid): Scalar field to be plotted.
-        projection: cartopy projection to be used. Default is Robinson.
-        contour (bool): If True, a contour plot is made, otherwise a pcolor plot.
-        cmap (string): colormap. Default is RdBu.
-        coasts (bool): If True, coast lines plotted. Default is True.
-        rivers (bool): If True, major rivers plotted. Default is False.
-        borders (bool): If True, country borders are plotted. Default is False.
-        map_extent ([float]): Sets the (lon, lat) range for plotting.
-            Tuple of [lon_min, lon_max, lat_min, lat_max]. Default is None.
-        gridlines (bool): If True, gridlines are included. Default is True.
-        symmetric (bool): If True, clim values set symmetrically based on the fields maximum absolute value.
-            Option overridden if vmin or vmax are set.
-        kwargs: Keyword arguments for forwarding to the plotting functions.
+        f (SHGrid): The scalar field to be plotted.
+        projection (ccrs.Projection): The cartopy projection to be used.
+            Defaults to ccrs.Robinson().
+        contour (bool): If True, a filled contour plot is created. If False,
+            a pcolormesh plot is created. Defaults to False.
+        cmap (str): The colormap for the plot. Defaults to 'RdBu'.
+        coasts (bool): If True, coastlines are drawn. Defaults to True.
+        rivers (bool): If True, major rivers are drawn. Defaults to False.
+        borders (bool): If True, country borders are drawn. Defaults to False.
+        map_extent (Optional[List[float]]): Sets the longitude and latitude
+            range for the plot, given as [lon_min, lon_max, lat_min, lat_max].
+            Defaults to None (global extent).
+        gridlines (bool): If True, latitude and longitude gridlines are
+            included. Defaults to True.
+        symmetric (bool): If True, the color scale is set symmetrically
+            around zero based on the field's maximum absolute value. This is
+            overridden if 'vmin' or 'vmax' are provided in kwargs.
+            Defaults to False.
+        **kwargs: Additional keyword arguments are forwarded to the underlying
+            matplotlib plotting function (ax.pcolormesh or ax.contourf).
+
+    Returns:
+        Tuple[Figure, GeoAxes, Union[QuadMesh, QuadContourSet]]:
+            A tuple containing the matplotlib Figure, the cartopy GeoAxes,
+            and the plot artist object (e.g., QuadMesh or QuadContourSet).
     """
 
     if not isinstance(f, SHGrid):
-        raise ValueError("Scalar field is not of SHGrid type.")
+        raise ValueError("Scalar field must be of SHGrid type.")
 
     lons = f.lons()
     lats = f.lats()
@@ -77,9 +99,9 @@ def plot(
         kwargs.setdefault("vmax", data_max)
 
     levels = kwargs.pop("levels", 10)
+    im: Union[QuadMesh, QuadContourSet]
 
     if contour:
-
         im = ax.contourf(
             lons,
             lats,
@@ -88,9 +110,7 @@ def plot(
             levels=levels,
             **kwargs,
         )
-
     else:
-
         im = ax.pcolormesh(
             lons,
             lats,

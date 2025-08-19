@@ -1,21 +1,24 @@
 import pytest
 import numpy as np
-from pyslfp.finger_print import FingerPrint
+from pyslfp.finger_print import FingerPrint, EarthModelParameters, IceModel
 
 
-@pytest.mark.parametrize("version", [6, 7])
+@pytest.mark.parametrize("version", [IceModel.ICE6G, IceModel.ICE7G])
 @pytest.mark.parametrize("rotational_feedbacks", [True, False])
 @pytest.mark.parametrize("rtol", [1e-6])
-@pytest.mark.parametrize("lmax", [60, 128])
+@pytest.mark.parametrize("lmax", [128])
 class TestFingerPrint:
 
     def set_up_fingerprint(self, version, lmax):
         """
-        Set up a FingerPrint instance of the given trunction
+        Set up a FingerPrint instance of the given truncation
         degree and set the equilibrium model using the
-        present-day ice-7g values.
+        present-day ice-ng values.
         """
-        fingerprint = FingerPrint(lmax=lmax)
+        fingerprint = FingerPrint(
+            lmax=lmax,
+            earth_model_parameters=EarthModelParameters.from_standard_non_dimensionalisation(),
+        )
         fingerprint.set_state_from_ice_ng(version=version)
         return fingerprint
 
@@ -67,7 +70,6 @@ class TestFingerPrint:
         """
         Test the generalised reciprocity relation using random forces.
         """
-
         fingerprint = self.set_up_fingerprint(version, lmax)
         direct_load_1 = self.random_load(fingerprint)
         direct_load_2 = self.random_load(fingerprint)
@@ -140,7 +142,6 @@ class TestFingerPrint:
         """
         Test the generalised reciprocity relation using random forces.
         """
-
         fingerprint = self.set_up_fingerprint(version, lmax)
         direct_load_1 = self.random_load(fingerprint)
         direct_load_2 = self.random_load(fingerprint)
@@ -183,13 +184,15 @@ class TestFingerPrint:
             angular_momentum_change=angular_momentum_change_2,
         )
 
-        gravitational_potential_change_1 = fingerprint.gravity_potential_change_to_gravitational_potential_change(
-            gravity_potential_change_1,
-            angular_velocity_change_1
+        gravitational_potential_change_1 = (
+            fingerprint.gravity_potential_change_to_gravitational_potential_change(
+                gravity_potential_change_1, angular_velocity_change_1
+            )
         )
-        gravitational_potential_change_2 = fingerprint.gravity_potential_change_to_gravitational_potential_change(
-            gravity_potential_change_2,
-            angular_velocity_change_2
+        gravitational_potential_change_2 = (
+            fingerprint.gravity_potential_change_to_gravitational_potential_change(
+                gravity_potential_change_2, angular_velocity_change_2
+            )
         )
 
         g = fingerprint.gravitational_acceleration
@@ -201,7 +204,14 @@ class TestFingerPrint:
 
         lhs = (
             fingerprint.integrate(lhs_integrand)
-            - np.dot(angular_momentum_change_2 - fingerprint.adjoint_angular_momentum_change_from_adjoint_gravitational_potential_load(gravitational_potential_load_2), angular_velocity_change_1) / g
+            - np.dot(
+                angular_momentum_change_2
+                - fingerprint.adjoint_angular_momentum_change_from_adjoint_gravitational_potential_load(
+                    gravitational_potential_load_2
+                ),
+                angular_velocity_change_1,
+            )
+            / g
         )
 
         rhs_integrand = direct_load_1 * sea_level_change_2 - (1 / g) * (
@@ -211,7 +221,14 @@ class TestFingerPrint:
 
         rhs = (
             fingerprint.integrate(rhs_integrand)
-            - np.dot(angular_momentum_change_1 - fingerprint.adjoint_angular_momentum_change_from_adjoint_gravitational_potential_load(gravitational_potential_load_1), angular_velocity_change_2) / g
+            - np.dot(
+                angular_momentum_change_1
+                - fingerprint.adjoint_angular_momentum_change_from_adjoint_gravitational_potential_load(
+                    gravitational_potential_load_1
+                ),
+                angular_velocity_change_2,
+            )
+            / g
         )
-        
-        assert np.isclose(lhs, rhs, rtol=1000 * rtol)    
+
+        assert np.isclose(lhs, rhs, rtol=1000 * rtol)

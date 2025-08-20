@@ -271,21 +271,6 @@ class FingerPrint(EarthModelParameters):
             )
         return True
 
-    def _expand_field(
-        self, f: SHGrid, /, *, lmax_calc: Optional[int] = None
-    ) -> SHCoeffs:
-        """Expands an SHGrid object into spherical harmonic coefficients."""
-        self._check_field(f)
-        return f.expand(
-            lmax_calc=lmax_calc, normalization=self.normalization, csphase=self.csphase
-        )
-
-    def _expand_coefficient(self, f: SHCoeffs) -> SHGrid:
-        """Expands spherical harmonic coefficients into an SHGrid object."""
-        self._check_coefficient(f)
-        grid = "DH2" if self._sampling == 2 else self.grid
-        return f.expand(grid=grid, extend=self.extend)
-
     def _compute_ocean_function(self) -> None:
         """Computes and stores the ocean function from sea level and ice."""
         if self._sea_level is None or self._ice_thickness is None:
@@ -321,6 +306,21 @@ class FingerPrint(EarthModelParameters):
         """Return the longitudes for the spatial grid."""
         return self.zero_grid().lons()
 
+    def expand_field(
+        self, f: SHGrid, /, *, lmax_calc: Optional[int] = None
+    ) -> SHCoeffs:
+        """Expands an SHGrid object into spherical harmonic coefficients."""
+        self._check_field(f)
+        return f.expand(
+            lmax_calc=lmax_calc, normalization=self.normalization, csphase=self.csphase
+        )
+
+    def expand_coefficient(self, f: SHCoeffs) -> SHGrid:
+        """Expands spherical harmonic coefficients into an SHGrid object."""
+        self._check_coefficient(f)
+        grid = "DH2" if self._sampling == 2 else self.grid
+        return f.expand(grid=grid, extend=self.extend)
+
     def displacement_love_numbers(self) -> np.ndarray:
         """Return the displacement Love numbers, `h`."""
         return self._h
@@ -345,15 +345,15 @@ class FingerPrint(EarthModelParameters):
             potential change as `SHGrid` objects.
         """
         self._check_field(load)
-        displacement_lm = self._expand_field(load)
+        displacement_lm = self.expand_field(load)
         gravitational_potential_change_lm = displacement_lm.copy()
 
         for l in range(0, self.lmax + 1):
             displacement_lm.coeffs[:, l, :] *= self._h[l]
             gravitational_potential_change_lm.coeffs[:, l, :] *= self._k[l]
 
-        displacement = self._expand_coefficient(displacement_lm)
-        gravitational_potential_change = self._expand_coefficient(
+        displacement = self.expand_coefficient(displacement_lm)
+        gravitational_potential_change = self.expand_coefficient(
             gravitational_potential_change_lm
         )
         return displacement, gravitational_potential_change
@@ -369,8 +369,7 @@ class FingerPrint(EarthModelParameters):
             The integral of the function over the surface.
         """
         return (
-            self._integration_factor
-            * self._expand_field(f, lmax_calc=0).coeffs[0, 0, 0]
+            self._integration_factor * self.expand_field(f, lmax_calc=0).coeffs[0, 0, 0]
         )
 
     def point_evaluation(
@@ -388,7 +387,7 @@ class FingerPrint(EarthModelParameters):
         Returns:
             The value of the function at the specified point.
         """
-        f_lm = self._expand_field(f)
+        f_lm = self.expand_field(f)
         return f_lm.expand(lat=[latitude], lon=[longitude], degrees=degrees)[0]
 
     def coefficient_evaluation(self, f: SHGrid, l: int, m: int) -> float:
@@ -405,7 +404,7 @@ class FingerPrint(EarthModelParameters):
         """
         if not (0 <= l <= self.lmax and -l <= m <= l):
             raise ValueError(f"(l,m)=({l},{m}) is out of bounds for lmax={self.lmax}.")
-        f_lm = self._expand_field(f)
+        f_lm = self.expand_field(f)
         return f_lm.coeffs[0 if m >= 0 else 1, l, abs(m)]
 
     def zero_grid(self) -> SHGrid:
@@ -503,13 +502,13 @@ class FingerPrint(EarthModelParameters):
         if displacement_load is not None:
             loads_present = True
             assert self._check_field(displacement_load)
-            displacement_load_lm = self._expand_field(displacement_load)
+            displacement_load_lm = self.expand_field(displacement_load)
             non_zero_rhs = non_zero_rhs or np.max(np.abs(displacement_load.data)) > 0
 
         if gravitational_potential_load is not None:
             loads_present = True
             assert self._check_field(gravitational_potential_load)
-            gravitational_potential_load_lm = self._expand_field(
+            gravitational_potential_load_lm = self.expand_field(
                 gravitational_potential_load
             )
             non_zero_rhs = (
@@ -544,7 +543,7 @@ class FingerPrint(EarthModelParameters):
         count_print = 0
         while err > rtol:
 
-            displacement_lm = self._expand_field(load)
+            displacement_lm = self.expand_field(load)
             gravity_potential_change_lm = displacement_lm.copy()
 
             for l in range(self.lmax + 1):
@@ -590,8 +589,8 @@ class FingerPrint(EarthModelParameters):
                     r * angular_velocity_change
                 )
 
-            displacement = self._expand_coefficient(displacement_lm)
-            gravity_potential_change = self._expand_coefficient(
+            displacement = self.expand_coefficient(displacement_lm)
+            gravity_potential_change = self.expand_coefficient(
                 gravity_potential_change_lm
             )
 
@@ -628,17 +627,17 @@ class FingerPrint(EarthModelParameters):
         centrifugal_potential_change_lm.coeffs[:, 2, 1] = (
             self._rotation_factor * angular_velocity_change
         )
-        return self._expand_coefficient(centrifugal_potential_change_lm)
+        return self.expand_coefficient(centrifugal_potential_change_lm)
 
     def gravity_potential_change_to_gravitational_potential_change(
         self, gravity_potential_change: SHGrid, angular_velocity_change: np.ndarray
     ) -> SHGrid:
         """Subtracts the centrifugal potential to isolate the gravitational potential."""
-        gravitational_potential_change_lm = self._expand_field(gravity_potential_change)
+        gravitational_potential_change_lm = self.expand_field(gravity_potential_change)
         gravitational_potential_change_lm.coeffs[:, 2, 1] -= (
             self._rotation_factor * angular_velocity_change
         )
-        return self._expand_coefficient(gravitational_potential_change_lm)
+        return self.expand_coefficient(gravitational_potential_change_lm)
 
     def gravitational_potential_change_to_gravity_potential_change(
         self,
@@ -646,11 +645,11 @@ class FingerPrint(EarthModelParameters):
         angular_velocity_change: np.ndarray,
     ) -> SHGrid:
         """Adds the centrifugal potential to get the total gravity potential."""
-        gravity_potential_change_lm = self._expand_field(gravitational_potential_change)
+        gravity_potential_change_lm = self.expand_field(gravitational_potential_change)
         gravity_potential_change_lm.coeffs[:, 2, 1] += (
             self._rotation_factor * angular_velocity_change
         )
-        return self._expand_coefficient(gravity_potential_change_lm)
+        return self.expand_coefficient(gravity_potential_change_lm)
 
     def ocean_projection(self, value: float = np.nan) -> SHGrid:
         """Returns a grid that is 1 over oceans and `value` elsewhere."""
@@ -749,7 +748,7 @@ class FingerPrint(EarthModelParameters):
                 fac = np.exp(-l * (l + 1) * t)
                 point_load_lm.coeffs[:, l, :] *= fac
         point_load_lm *= 1 / self.mean_sea_floor_radius**2
-        return amplitude * self._expand_coefficient(point_load_lm)
+        return amplitude * self.expand_coefficient(point_load_lm)
 
     def direct_load_from_ice_thickness_change(
         self, ice_thickness_change: SHGrid
@@ -800,7 +799,7 @@ class FingerPrint(EarthModelParameters):
         b = self.mean_sea_floor_radius
         adjoint_load_lm = self.zero_coefficients()
         adjoint_load_lm.coeffs[0 if m >= 0 else 1, l, abs(m)] = -g / b**2
-        adjoint_load = self._expand_coefficient(adjoint_load_lm)
+        adjoint_load = self.expand_coefficient(adjoint_load_lm)
         return None, None, adjoint_load, None
 
     def adjoint_loads_for_gravitational_potential_coefficient(
@@ -819,7 +818,7 @@ class FingerPrint(EarthModelParameters):
         self, gravitational_potential_load: SHGrid
     ) -> np.ndarray:
         """Returns the adjoint angular momentum change for a given gravitational potential load."""
-        gravitational_potential_load_lm = self._expand_field(
+        gravitational_potential_load_lm = self.expand_field(
             gravitational_potential_load, lmax_calc=2
         )
         r = self._rotation_factor
@@ -854,9 +853,9 @@ class FingerPrint(EarthModelParameters):
                 calpha = fac1 + fac2 * np.cos(ph - ph0)
                 w.data[ilat, ilon] = fac * np.exp(-c * (1 - calpha))
         if cut:
-            w_lm = self._expand_field(w)
+            w_lm = self.expand_field(w)
             w_lm.coeffs[:, :2, :] = 0.0
-            w = self._expand_coefficient(w_lm)
+            w = self.expand_coefficient(w_lm)
         return w
 
     def load_space(self, order: float, scale: float) -> Sobolev:

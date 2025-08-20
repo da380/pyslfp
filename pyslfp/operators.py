@@ -1,0 +1,233 @@
+"""
+Module for defining functional operators related to the sea level problem.
+
+These operators map high-dimensional function spaces (like loads or responses)
+to finite-dimensional vector spaces of data or properties.
+"""
+
+from abc import ABC, abstractmethod
+from typing import Any
+
+import numpy as np
+
+from pyshtools import SHCoeffs
+
+from pygeoinf import HilbertSpace, LinearForm, LinearOperator, EuclideanSpace
+
+from .finger_print import FingerPrint
+from .utils import SHVectorConverter
+
+Vector = Any
+
+# ==================================================================== #
+#                        The Common Base Class                         #
+# ==================================================================== #
+
+
+class FingerPrintOperator(ABC, LinearOperator):
+    """
+    Abstract base class for operators that map a function space related to the
+    sea level problem to a finite-dimensional data or property space.
+    """
+
+    def __init_subclass__(cls, **kwargs):
+        """
+        This hook checks that a new subclass implements AT MOST ONE of the
+        three possible adjoint-related methods.
+        """
+        super().__init_subclass__(**kwargs)
+        implementations = {
+            "adjoint": cls._adjoint_mapping is not FingerPrintOperator._adjoint_mapping,
+            "dual": cls._dual_mapping is not FingerPrintOperator._dual_mapping,
+            "formal_adjoint": (
+                cls._formal_adjoint_mapping
+                is not FingerPrintOperator._formal_adjoint_mapping
+            ),
+        }
+        num_implemented = sum(implementations.values())
+        if num_implemented > 1:
+            raise TypeError(
+                f"Subclass '{cls.__name__}' must implement at most one of "
+                "'_adjoint_mapping', '_dual_mapping', or '_formal_adjoint_mapping'. "
+                f"Found {num_implemented} implementations."
+            )
+
+    def __init__(
+        self,
+        fingerprint: FingerPrint,
+        order: float,
+        scale: float,
+        domain: HilbertSpace,
+    ) -> None:
+        """
+        Initializes the base operator.
+
+        Args:
+            fingerprint: The configured FingerPrint instance.
+            order: The Sobolev order of the problem.
+            scale: The Sobolev scale of the problem.
+            domain: The specific domain (e.g., load or response space).
+        """
+        if not isinstance(fingerprint, FingerPrint):
+            raise TypeError("fingerprint must be an instance of FingerPrint.")
+        if not fingerprint.background_set:
+            raise ValueError("fingerprint must have a background state set.")
+
+        self._fingerprint = fingerprint
+        self._order = order
+        self._scale = scale
+
+        # Logic to select the implemented adjoint variant
+        mapping_kwargs = {}
+        if self._adjoint_mapping is not FingerPrintOperator._adjoint_mapping:
+            mapping_kwargs["adjoint_mapping"] = self._adjoint_mapping
+        elif self._dual_mapping is not FingerPrintOperator._dual_mapping:
+            mapping_kwargs["dual_mapping"] = self._dual_mapping
+        elif (
+            self._formal_adjoint_mapping
+            is not FingerPrintOperator._formal_adjoint_mapping
+        ):
+            mapping_kwargs["formal_adjoint_mapping"] = self._formal_adjoint_mapping
+
+        super().__init__(
+            domain,
+            self._data_space(),
+            self._mapping,
+            **mapping_kwargs,
+        )
+
+    @property
+    def fingerprint(self) -> FingerPrint:
+        """The `FingerPrint` instance associated with the operator."""
+        return self._fingerprint
+
+    @property
+    def order(self) -> float:
+        """The Sobolev order used to define the operator's spaces."""
+        return self._order
+
+    @property
+    def scale(self) -> float:
+        """The Sobolev scale used to define the operator's spaces."""
+        return self._scale
+
+    @abstractmethod
+    def _data_space(self) -> HilbertSpace:
+        """A subclass must implement this to return the data/property space."""
+        pass
+
+    @abstractmethod
+    def _mapping(self, element: Vector) -> Vector:
+        """A subclass must implement the forward mapping."""
+        pass
+
+    # --- Adjoint-related methods are abstract by default ---
+    def _adjoint_mapping(self, data: Vector) -> Vector:
+        raise NotImplementedError
+
+    def _dual_mapping(self, data_dual: LinearForm) -> LinearForm:
+        raise NotImplementedError
+
+    def _formal_adjoint_mapping(self, data: Vector) -> Vector:
+        raise NotImplementedError
+
+
+# ==================================================================== #
+#                        ObservationOperator Base                      #
+# ==================================================================== #
+
+
+class ObservationOperator(FingerPrintOperator):
+    """
+    Abstract base class for observation operators.
+    Maps the RESPONSE SPACE to a finite-dimensional data space.
+    """
+
+    def __init__(self, fingerprint: FingerPrint, order: float, scale: float) -> None:
+        """
+        Args:
+            fingerprint: The configured FingerPrint instance.
+            order: The Sobolev order of the problem.
+            scale: The Sobolev scale of the problem.
+        """
+        # Construct the specific domain for this operator type
+        response_space = fingerprint.response_space(order, scale)
+        # Pass all common arguments up to the base class
+        super().__init__(fingerprint, order, scale, response_space)
+
+
+# ==================================================================== #
+#                         PropertyOperator Base                        #
+# ==================================================================== #
+
+
+class PropertyOperator(FingerPrintOperator):
+    """
+    Abstract base class for property operators.
+    Maps the LOAD SPACE to a finite-dimensional property space.
+    """
+
+    def __init__(self, fingerprint: FingerPrint, order: float, scale: float) -> None:
+        """
+        Args:
+            fingerprint: The configured FingerPrint instance.
+            order: The Sobolev order of the problem.
+            scale: The Sobolev scale of the problem.
+        """
+        # Construct the specific domain for this operator type
+        load_space = fingerprint.load_space(order, scale)
+        # Pass all common arguments up to the base class
+        super().__init__(fingerprint, order, scale, load_space)
+
+
+# ==================================================================== #
+#                     Grace Observation Operator                       #
+# ==================================================================== #
+
+
+class GraceObservationOperator(ObservationOperator):
+    """
+    Observation operator for GRACE-like gravity measurements.
+
+    Maps the response fields to a vector of spherical harmonic coefficients
+    of the gravitational potential change, for degrees l >= 2.
+    """
+
+    def __init__(
+        self,
+        fingerprint: FingerPrint,
+        order: float,
+        scale: float,
+        observation_degree: int,
+    ) -> None:
+        """
+        Args:
+            fingerprint: The configured FingerPrint instance.
+            order: The Sobolev order of the problem.
+            scale: The Sobolev scale of the problem.
+            observation_degree: The max degree of the SH coefficient observations.
+        """
+        self._converter = SHVectorConverter(lmax=observation_degree, lmin=2)
+        super().__init__(fingerprint, order, scale)
+
+    def _data_space(self) -> EuclideanSpace:
+        """The data space is a vector of the SH coefficients."""
+        return EuclideanSpace(self._converter.vector_size)
+
+    def _mapping(self, element: Vector) -> np.ndarray:
+        """Maps response fields to an ordered vector of SH coefficients."""
+        coeffs = self.fingerprint.expand_field(element[2]).coeffs
+        return self._converter.to_vector(coeffs)
+
+    def _formal_adjoint_mapping(self, data: np.ndarray) -> list:
+        """Maps a vector of SH coefficients back to the response space."""
+        coeffs = self._converter.from_vector(data, output_lmax=self.fingerprint.lmax)
+        adjoint_load_lm = SHCoeffs.from_array(
+            coeffs,
+            lmax=self.fingerprint.lmax,
+            normalization=self.fingerprint.normalization,
+            csphase=self.fingerprint.csphase,
+        )
+        adjoint_load = self.fingerprint.expand_coefficient(adjoint_load_lm)
+        zero_grid = self.fingerprint.zero_grid()
+        return [zero_grid, zero_grid, adjoint_load, np.zeros(2)]

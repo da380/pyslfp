@@ -7,6 +7,9 @@ from pyslfp.ice_ng import IceNG, IceModel
 from pyslfp.physical_parameters import EarthModelParameters
 from pyslfp.finger_print import FingerPrint
 
+from pyslfp.operators import FingerPrintOperator, ObservationOperator, PropertyOperator
+
+
 # from pyslfp.operators import (
 #    SeaLevelOperator,
 #    GraceObservationOperator,
@@ -15,3 +18,5 @@ from pyslfp.finger_print import FingerPrint
 #    WahrOperator,
 # )
 from pyslfp.plotting import plot
+
+from pyslfp.utils import SHVectorConverter

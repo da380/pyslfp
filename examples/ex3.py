@@ -1,30 +1,20 @@
+import pyslfp as sl
 import numpy as np
 import matplotlib.pyplot as plt
-import pyshtools as sh
-from pyslfp import SHVectorConverter
+
+fp = sl.FingerPrint()
+fp.set_state_from_ice_ng()
+
+order = 2
+scale = 0.2
 
 
-lmax = 4
-u = sh.SHGrid.from_zeros(8)
+P = sl.TideGaugeObservationOperator(fp, 2, 0.2, [(0, 0)])
 
-for i, lat in enumerate(u.lats()):
-    th = (90 - lat) * np.pi / 180
-    for j, lon in enumerate(u.lons()):
-        ph = lon * np.pi / 180
-        u.data[i, j] = np.sin(th) * np.cos(ph)
+u = P.domain.random()
+v = P.codomain.random()
 
+lhs = P.codomain.inner_product(v, P(u))
+rhs = P.domain.inner_product(P.adjoint(v), u)
 
-# u.plot()
-# plt.show()
-
-ulm = u.expand()
-
-coeffs_in = ulm.coeffs
-
-converter = SHVectorConverter(8, lmin=2)
-
-vec = converter.to_vector(coeffs_in)
-
-coeffs_out = converter.from_vector(vec)
-
-print(coeffs_in - coeffs_out)
+print(lhs, rhs)

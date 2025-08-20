@@ -10,7 +10,7 @@ from typing import Any, List, Tuple
 
 import numpy as np
 
-from pyshtools import SHCoeffs
+from pyshtools import SHCoeffs, SHGrid
 
 from pygeoinf import HilbertSpace, LinearForm, LinearOperator, EuclideanSpace
 
@@ -278,3 +278,58 @@ class TideGaugeObservationOperator(ObservationOperator):
         adjoint_sl_load = self._point_evaluation_operator.adjoint(data)
         zero_grid = self.fingerprint.zero_grid()
         return [adjoint_sl_load, zero_grid, zero_grid, np.zeros(2)]
+
+
+# ====================================================== #
+#                 Load averaging operator                #
+# ====================================================== #
+
+
+class LoadAveragingOperator(PropertyOperator):
+    """
+    An operator that computes a vector of weighted averages of a load
+    (or similar scalar field). A list of weighting functions defined on
+    the appropriate SHGrid must be provided.
+    """
+
+    def __init__(
+        self,
+        fingerprint: FingerPrint,
+        order: float,
+        scale: float,
+        weighting_functions: List[SHGrid],
+    ):
+        """
+        Args:
+            fingerprint: The configured FingerPrint instance.
+            order: The Sobolev order for the load space.
+            scale: The Sobolev scale for the load space.
+            weighting_functions: A list of 2D grids to use as weights.
+        """
+        for w in weighting_functions:
+            if not isinstance(w, SHGrid):
+                raise TypeError("weighting_functions must be a list of SHGrids.")
+            if not fingerprint.check_field(w):
+                raise ValueError("weighting_functions not defined on compatible grids")
+
+        self._weighting_functions = weighting_functions
+        super().__init__(fingerprint, order, scale)
+
+    def _data_space(self):
+        """The data space is a vector of the weighted averages."""
+        return EuclideanSpace(len(self._weighting_functions))
+
+    def _mapping(self, element: Vector) -> np.ndarray:
+        """Maps a load to a vector of its weighted averages."""
+        averages = np.zeros(len(self._weighting_functions))
+        for i, w in enumerate(self._weighting_functions):
+            averages[i] = self.fingerprint.integrate(element * w)
+        return averages
+
+    def _formal_adjoint_mapping(self, data: np.ndarray) -> Vector:
+        """Maps a vector of weighted averages back to the load space."""
+        adjoint_load = self.fingerprint.zero_grid()
+        radius = self.fingerprint.mean_sea_floor_radius
+        for i, w in enumerate(self._weighting_functions):
+            adjoint_load += radius**2 * data[i] * w
+        return adjoint_load

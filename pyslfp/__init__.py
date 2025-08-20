@@ -13,6 +13,7 @@ from pyslfp.operators import (
     PropertyOperator,
     GraceObservationOperator,
     TideGaugeObservationOperator,
+    LoadAveragingOperator,
 )
 
 

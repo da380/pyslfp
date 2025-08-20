@@ -165,7 +165,7 @@ class FingerPrint(EarthModelParameters):
 
     @sea_level.setter
     def sea_level(self, value: SHGrid) -> None:
-        self._check_field(value)
+        self.check_field(value)
         self._sea_level = value
         self._ocean_function = None
 
@@ -178,7 +178,7 @@ class FingerPrint(EarthModelParameters):
 
     @ice_thickness.setter
     def ice_thickness(self, value: SHGrid) -> None:
-        self._check_field(value)
+        self.check_field(value)
         self._ice_thickness = value
         self._ocean_function = None
 
@@ -247,30 +247,6 @@ class FingerPrint(EarthModelParameters):
         )
         self._kt = data[: self.lmax + 1, 6]
 
-    def _check_field(self, f: SHGrid) -> bool:
-        """Checks if an SHGrid object is compatible with instance settings."""
-        is_compatible = (
-            f.lmax == self.lmax and f.grid == self.grid and f.extend == self.extend
-        )
-        if not is_compatible:
-            raise ValueError(
-                "Provided SHGrid object is not compatible with FingerPrint settings."
-            )
-        return True
-
-    def _check_coefficient(self, f: SHCoeffs) -> bool:
-        """Checks if an SHCoeffs object is compatible with instance settings."""
-        is_compatible = (
-            f.lmax == self.lmax
-            and f.normalization == self.normalization
-            and f.csphase == self.csphase
-        )
-        if not is_compatible:
-            raise ValueError(
-                "Provided SHCoeffs object is not compatible with FingerPrint settings."
-            )
-        return True
-
     def _compute_ocean_function(self) -> None:
         """Computes and stores the ocean function from sea level and ice."""
         if self._sea_level is None or self._ice_thickness is None:
@@ -306,18 +282,42 @@ class FingerPrint(EarthModelParameters):
         """Return the longitudes for the spatial grid."""
         return self.zero_grid().lons()
 
+    def check_field(self, f: SHGrid) -> bool:
+        """Checks if an SHGrid object is compatible with instance settings."""
+        is_compatible = (
+            f.lmax == self.lmax and f.grid == self.grid and f.extend == self.extend
+        )
+        if not is_compatible:
+            raise ValueError(
+                "Provided SHGrid object is not compatible with FingerPrint settings."
+            )
+        return True
+
+    def check_coefficient(self, f: SHCoeffs) -> bool:
+        """Checks if an SHCoeffs object is compatible with instance settings."""
+        is_compatible = (
+            f.lmax == self.lmax
+            and f.normalization == self.normalization
+            and f.csphase == self.csphase
+        )
+        if not is_compatible:
+            raise ValueError(
+                "Provided SHCoeffs object is not compatible with FingerPrint settings."
+            )
+        return True
+
     def expand_field(
         self, f: SHGrid, /, *, lmax_calc: Optional[int] = None
     ) -> SHCoeffs:
         """Expands an SHGrid object into spherical harmonic coefficients."""
-        self._check_field(f)
+        self.check_field(f)
         return f.expand(
             lmax_calc=lmax_calc, normalization=self.normalization, csphase=self.csphase
         )
 
     def expand_coefficient(self, f: SHCoeffs) -> SHGrid:
         """Expands spherical harmonic coefficients into an SHGrid object."""
-        self._check_coefficient(f)
+        self.check_coefficient(f)
         grid = "DH2" if self._sampling == 2 else self.grid
         return f.expand(grid=grid, extend=self.extend)
 
@@ -344,7 +344,7 @@ class FingerPrint(EarthModelParameters):
             A tuple containing the vertical displacement and the gravitational
             potential change as `SHGrid` objects.
         """
-        self._check_field(load)
+        self.check_field(load)
         displacement_lm = self.expand_field(load)
         gravitational_potential_change_lm = displacement_lm.copy()
 
@@ -450,7 +450,7 @@ class FingerPrint(EarthModelParameters):
         """
         Returns the mean sea level change from a direct load (eustatic change).
         """
-        self._check_field(direct_load)
+        self.check_field(direct_load)
         return -self.integrate(direct_load) / (self.water_density * self.ocean_area)
 
     def __call__(
@@ -489,7 +489,7 @@ class FingerPrint(EarthModelParameters):
 
         if direct_load is not None:
             loads_present = True
-            assert self._check_field(direct_load)
+            assert self.check_field(direct_load)
             mean_sea_level_change = -self.integrate(direct_load) / (
                 self.water_density * self.ocean_area
             )
@@ -501,13 +501,13 @@ class FingerPrint(EarthModelParameters):
 
         if displacement_load is not None:
             loads_present = True
-            assert self._check_field(displacement_load)
+            assert self.check_field(displacement_load)
             displacement_load_lm = self.expand_field(displacement_load)
             non_zero_rhs = non_zero_rhs or np.max(np.abs(displacement_load.data)) > 0
 
         if gravitational_potential_load is not None:
             loads_present = True
-            assert self._check_field(gravitational_potential_load)
+            assert self.check_field(gravitational_potential_load)
             gravitational_potential_load_lm = self.expand_field(
                 gravitational_potential_load
             )
@@ -754,7 +754,7 @@ class FingerPrint(EarthModelParameters):
         self, ice_thickness_change: SHGrid
     ) -> SHGrid:
         """Converts an ice thickness change into the associated surface mass load."""
-        self._check_field(ice_thickness_change)
+        self.check_field(ice_thickness_change)
         return self.ice_density * self.one_minus_ocean_function * ice_thickness_change
 
     def northern_hemisphere_load(self, fraction: float = 1.0) -> SHGrid:

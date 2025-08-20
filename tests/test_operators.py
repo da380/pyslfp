@@ -4,12 +4,15 @@ import pygeoinf as inf
 
 from typing import List, Tuple
 
+from pyshtools import SHGrid
+
 from pyslfp.finger_print import FingerPrint, EarthModelParameters, IceModel
 from pyslfp.operators import (
     FingerPrintOperator,
     GraceObservationOperator,
     ObservationOperator,
     TideGaugeObservationOperator,
+    LoadAveragingOperator,
 )
 
 # ==================================================================== #
@@ -201,6 +204,90 @@ class TestTideGaugeObservationOperator:
 
         # 3. Perform the dot-product test
         u = op.domain.random()
+        v = op.codomain.random()
+        lhs = op.codomain.inner_product(op(u), v)
+        rhs = op.domain.inner_product(u, op.adjoint(v))
+
+        assert np.isclose(lhs, rhs, rtol=1e-6)
+
+
+# ==================================================================== #
+#                 Tests for LoadAveragingOperator                      #
+# ==================================================================== #
+
+
+class TestLoadAveragingOperator:
+    """A test suite for the LoadAveragingOperator."""
+
+    def create_weighting_functions(
+        self, fingerprint: FingerPrint, num_functions: int
+    ) -> List[SHGrid]:
+        """Helper to generate random SHGrid weighting functions for testing."""
+        weights = []
+        for _ in range(num_functions):
+            delta = np.random.uniform(5, 20)
+            lat = np.random.uniform(-90, 90)
+            lon = np.random.uniform(-180, 180)
+            weights.append(fingerprint.disk_load(delta, lat, lon, 1.0))
+        return weights
+
+    def test_load_averaging_initialization(self, configured_fingerprint):
+        """Tests that the operator initializes correctly."""
+        weights = self.create_weighting_functions(configured_fingerprint, 5)
+        op = LoadAveragingOperator(
+            fingerprint=configured_fingerprint,
+            order=0.0,
+            scale=1.0,
+            weighting_functions=weights,
+        )
+
+        assert isinstance(op.domain, inf.symmetric_space.sphere.Sobolev)
+        assert isinstance(op.codomain, inf.EuclideanSpace)
+        assert op.codomain.dim == len(weights)
+
+    def test_load_averaging_init_errors(self, configured_fingerprint):
+        """Tests that initialization fails with incompatible weighting functions."""
+        # Test with a non-SHGrid object
+        bad_weights_type = [configured_fingerprint.zero_grid(), np.zeros(5)]
+        with pytest.raises(TypeError):
+            LoadAveragingOperator(
+                fingerprint=configured_fingerprint,
+                order=0.0,
+                scale=1.0,
+                weighting_functions=bad_weights_type,
+            )
+
+        # Test with an SHGrid of the wrong lmax
+        incompatible_grid = SHGrid.from_zeros(lmax=16)
+        bad_weights_lmax = [configured_fingerprint.zero_grid(), incompatible_grid]
+        with pytest.raises(ValueError):
+            LoadAveragingOperator(
+                fingerprint=configured_fingerprint,
+                order=0.0,
+                scale=1.0,
+                weighting_functions=bad_weights_lmax,
+            )
+
+    @pytest.mark.parametrize("num_weights", [1, 5, 20])
+    def test_load_averaging_adjoint_identity(self, configured_fingerprint, num_weights):
+        """
+        Performs the dot-product test to verify the adjoint identity for
+        the load averaging operator.
+        """
+        # 1. Create a set of random weighting functions
+        weights = self.create_weighting_functions(configured_fingerprint, num_weights)
+
+        # 2. Create the operator
+        op = LoadAveragingOperator(
+            fingerprint=configured_fingerprint,
+            order=1.0,
+            scale=0.5,
+            weighting_functions=weights,
+        )
+
+        # 3. Perform the dot-product test
+        mu = op.domain.heat_gaussian_measure(1.0, 1)
+        u = mu.sample()
         v = op.codomain.random()
         lhs = op.codomain.inner_product(op(u), v)
         rhs = op.domain.inner_product(u, op.adjoint(v))

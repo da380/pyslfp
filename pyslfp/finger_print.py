@@ -1019,6 +1019,13 @@ class FingerPrint(EarthModelParameters):
         domain = self.sobolev_load_space(order, scale)
         codomain = self.sobolev_response_space(order, scale)
 
+        lebesgue_operator = self.as_lebesgue_linear_operator(
+            rotational_feedbacks=rotational_feedbacks, rtol=rtol
+        )
+
+        return LinearOperator.from_formal_adjoint(domain, codomain, lebesgue_operator)
+
+        """
         domain_inverse_mass_operator = domain.inverse_mass_operator
         codomain_mass_operator = BlockDiagonalLinearOperator(
             [space.mass_operator for space in codomain.subspaces[:3]]
@@ -1038,3 +1045,4 @@ class FingerPrint(EarthModelParameters):
         return LinearOperator(
             domain, codomain, lebesgue_operator, adjoint_mapping=adjoint_mapping
         )
+        """

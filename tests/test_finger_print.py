@@ -1,40 +1,50 @@
 import pytest
 import numpy as np
 from pyslfp.finger_print import FingerPrint, EarthModelParameters, IceModel
+from pyslfp.physical_parameters import EQUATORIAL_RADIUS, WATER_DENSITY
 from pyshtools import SHGrid
 import pygeoinf as inf
+
+# Define the non-dimensionalisation schemes to be tested
+standard_nondim = EarthModelParameters.from_standard_non_dimensionalisation()
+equatorial_nondim = EarthModelParameters(
+    length_scale=EQUATORIAL_RADIUS / 2, density_scale=WATER_DENSITY, time_scale=3600
+)
 
 
 @pytest.fixture(
     scope="module",
     params=[
-        # Test default grid (DH1) with different lmax and ice models
-        (64, IceModel.ICE7G, "DH"),
-        (128, IceModel.ICE7G, "DH"),
-        (128, IceModel.ICE6G, "DH"),
+        # Test default grid (DH1) with different lmax, ice models, and nondim schemes
+        (64, IceModel.ICE7G, "DH", standard_nondim),
+        (64, IceModel.ICE7G, "DH", equatorial_nondim),
+        (128, IceModel.ICE7G, "DH", standard_nondim),
+        (128, IceModel.ICE6G, "DH", standard_nondim),
         # Add specific tests for DH2 and GLQ grids
-        (64, IceModel.ICE7G, "DH2"),
-        (64, IceModel.ICE7G, "GLQ"),
+        (64, IceModel.ICE7G, "DH2", standard_nondim),
+        (64, IceModel.ICE7G, "GLQ", standard_nondim),
     ],
     ids=[
-        "lmax64-ICE7G-DH1",
-        "lmax128-ICE7G-DH1",
-        "lmax128-ICE6G-DH1",
-        "lmax64-ICE7G-DH2",
-        "lmax64-ICE7G-GLQ",
+        "lmax64-ICE7G-DH-standard",
+        "lmax64-ICE7G-DH-equatorial",
+        "lmax128-ICE7G-DH-standard",
+        "lmax128-ICE6G-DH-standard",
+        "lmax64-ICE7G-DH2-standard",
+        "lmax64-ICE7G-GLQ-standard",
     ],
 )
 def fingerprint(request):
     """
     Provides a pre-configured FingerPrint instance for testing.
     This fixture is parameterized to create instances with different
-    lmax values, background ice models, and grid types.
+    lmax values, background ice models, grid types, and non-dimensionalisation
+    schemes.
     """
-    lmax, version, grid = request.param
+    lmax, version, grid, nondim_scheme = request.param
     fp = FingerPrint(
         lmax=lmax,
         grid=grid,
-        earth_model_parameters=EarthModelParameters.from_standard_non_dimensionalisation(),
+        earth_model_parameters=nondim_scheme,
     )
     fp.set_state_from_ice_ng(version=version)
     return fp

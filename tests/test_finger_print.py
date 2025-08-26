@@ -257,10 +257,8 @@ def test_linear_operator_adjoint_identity(
     with respect to the defined Hilbert space inner products.
     """
 
-    rtol = 1e-9
-
     # 1. Create the linear operator with a tight solver tolerance for accuracy
-
+    rtol = 1e-9
     if sobolev:
         A = fingerprint.as_sobolev_linear_operator(
             order,

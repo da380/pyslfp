@@ -7,14 +7,14 @@ from pyslfp.ice_ng import IceNG, IceModel
 from pyslfp.physical_parameters import EarthModelParameters
 from pyslfp.finger_print import FingerPrint
 
-from pyslfp.operators import (
-    FingerPrintOperator,
-    ObservationOperator,
-    PropertyOperator,
-    GraceObservationOperator,
-    TideGaugeObservationOperator,
-    LoadAveragingOperator,
-)
+# from pyslfp.operators import (
+#    FingerPrintOperator,
+#    ObservationOperator,
+#    PropertyOperator,
+#    GraceObservationOperator,
+#    TideGaugeObservationOperator,
+#    LoadAveragingOperator,
+# )
 
 
 # from pyslfp.operators import (

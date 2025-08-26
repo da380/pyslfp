@@ -865,7 +865,15 @@ class FingerPrint(EarthModelParameters):
 
     def lebesgue_load_space(self) -> Lebesgue:
         """
-        Returns the load space as an instance of pygeoinf.symmetric_space.sphere.Lebesgue.
+        Defines the mathematical space for square-integrable surface mass loads.
+
+        This method returns an instance of a pygeoinf Lebesgue space ($L^2$),
+        which represents scalar functions on the sphere with a finite integral
+        of their square. It is the natural function space for defining loads
+        without imposing any prior assumptions about their smoothness.
+
+        Returns:
+            An instance of `pygeoinf.symmetric_space.sphere.Lebesgue`.
         """
         return Lebesgue(
             self.lmax,
@@ -875,7 +883,21 @@ class FingerPrint(EarthModelParameters):
 
     def lebesgue_response_space(self) -> HilbertSpaceDirectSum:
         """
-        Returns the response space as an instance of pygeoinf.HilbertSpaceDirectSum.
+        Defines the mathematical space for the physical response fields.
+
+        This method returns a direct sum of Hilbert spaces, where each component
+        corresponds to a distinct physical field resulting from the sea-level
+        calculation. This composite space serves as the codomain for the
+        Lebesgue-space sea-level operator.
+
+        The components of the direct sum are:
+        1. Sea-level change (a Lebesgue $L^2$ space).
+        2. Vertical surface displacement (a Lebesgue $L^2$ space).
+        3. Gravitational potential change (a Lebesgue $L^2$ space).
+        4. Angular velocity change (a 2D Euclidean space for [ω_x, ω_y]).
+
+        Returns:
+            An instance of `pygeoinf.HilbertSpaceDirectSum`.
         """
         field_space = self.lebesgue_load_space()
         return HilbertSpaceDirectSum(
@@ -884,12 +906,20 @@ class FingerPrint(EarthModelParameters):
 
     def sobolev_load_space(self, order: float, scale: float) -> Sobolev:
         """
-        Returns the load space for the sea level fingerprint operator as an instance
-        of pygeoinf.symmetric_space.sphere.Sobolev.
+        Defines a Sobolev space for surface mass loads with smoothness constraints.
+
+        This space is primarily used to regularize inverse problems. By seeking
+        a solution within a Sobolev space, we implicitly penalize roughness,
+        leading to a more physically plausible (i.e., smoother) estimate of
+        the unknown surface load.
 
         Args:
-            order: The Sobolev order.
-            scale: The Sobolev scale.
+            order: The Sobolev order (s > 0), which controls the degree of
+                smoothness. Higher orders enforce greater smoothness.
+            scale: The Sobolev scale (λ > 0), a characteristic length scale.
+
+        Returns:
+            An instance of `pygeoinf.symmetric_space.sphere.Sobolev`.
         """
         return Sobolev(
             self.lmax,
@@ -903,12 +933,19 @@ class FingerPrint(EarthModelParameters):
         self, order: float, scale: float
     ) -> HilbertSpaceDirectSum:
         """
-        Returns the response space of the sea level fingerprint operator as an
-        instance of pygeoinf.HilbertSpaceDirectSum.
+        Defines the response space corresponding to a Sobolev load space.
+
+        When the input load is defined in a Sobolev space of order `s`, the
+        resulting physical fields have order `s+1`, this following from
+        elliptic regularity.
 
         Args:
-            order: The Sobolev order.
-            scale: The Sobolev scale.
+            order: The Sobolev order `s` of the corresponding load space.
+            scale: The Sobolev scale `λ` of the corresponding load space.
+
+        Returns:
+            An instance of `pygeoinf.HilbertSpaceDirectSum` where the field
+            components are Sobolev spaces of order `s+1`.
         """
         field_space = Sobolev(
             self.lmax,
@@ -925,7 +962,24 @@ class FingerPrint(EarthModelParameters):
         self, /, *, rotational_feedbacks: bool = True, rtol: float = 1e-6
     ) -> LinearOperator:
         """
-        Returns the sea level fingerprint model as a pygeoinf LinearOperator acting on L2 functions.
+        Wraps the physical model as a LinearOperator between Lebesgue spaces.
+
+        This method provides the fundamental mathematical representation of the
+        sea-level fingerprint problem. It encapsulates the forward mapping
+        (from a surface mass load to the response fields) and its corresponding
+        adjoint mapping into a single `pygeoinf.LinearOperator` object. This
+        operator acts on simple, square-integrable functions ($L^2$) without
+        any smoothness priors.
+
+        Args:
+            rotational_feedbacks: If True, include polar wander effects in the
+                forward and adjoint calculations. Defaults to True.
+            rtol: The relative tolerance for the underlying iterative solver.
+                Defaults to 1e-6.
+
+        Returns:
+            A `pygeoinf.LinearOperator` that maps from the Lebesgue load
+            space to the Lebesgue response space.
         """
 
         domain = self.lebesgue_load_space()
@@ -997,23 +1051,31 @@ class FingerPrint(EarthModelParameters):
         rtol: float = 1e-6,
     ) -> LinearOperator:
         """
-        Returns the sea level fingerprint model as a pygeoinf LinearOperator.
+        Constructs the sea-level model as a LinearOperator between Sobolev spaces.
 
-        This method wraps the instance's physical forward model (the __call__ method)
-        and its corresponding adjoint into a formal mathematical operator, which can
-        be used in the solution of inverse problems.
+        This is the primary tool for solving regularized inverse problems. By
+        defining the operator on Sobolev spaces, we frame the problem to seek a
+        spatially smooth surface load, which is often a necessary physical
+        constraint to obtain a unique and stable solution from noisy or
+        incomplete data. This approach is equivalent to a form of Tikhonov
+        regularization.
+
+        The operator correctly handles the transformation between the underlying
+        Lebesgue representation (where the physics is calculated) and the
+        Sobolev representation (where the problem is posed) by internally
+        managing the "mass matrices" that define the Sobolev inner products.
 
         Args:
-            order: The Sobolev order, defining the smoothness of the input load space.
-            scale: The Sobolev scale, defining the characteristic length scale of
-                features in the input load space.
-            rotational_feedbacks: Configures the operator to include the effects of
-                polar wander in the forward and adjoint calculations.
-            rtol: The relative tolerance passed to the underlying iterative solver.
+            order: The Sobolev order (s > 0), controlling the degree of
+                smoothness of the input load space.
+            scale: The Sobolev scale (λ > 0), a characteristic length scale
+                that defines the spatial scale at which the smoothness is enforced.
+            rotational_feedbacks: If True, include polar wander effects. Defaults to True.
+            rtol: Relative tolerance for the underlying iterative solver. Defaults to 1e-6.
 
-        Returns:
-            A pygeoinf.LinearOperator object that encapsulates the forward mapping,
-            the adjoint mapping, and the mathematical spaces (domain and codomain).
+            Returns:
+                A `pygeoinf.LinearOperator` that maps from the Sobolev load
+                space to the Sobolev response space.
         """
 
         domain = self.sobolev_load_space(order, scale)
@@ -1024,25 +1086,3 @@ class FingerPrint(EarthModelParameters):
         )
 
         return LinearOperator.from_formal_adjoint(domain, codomain, lebesgue_operator)
-
-        """
-        domain_inverse_mass_operator = domain.inverse_mass_operator
-        codomain_mass_operator = BlockDiagonalLinearOperator(
-            [space.mass_operator for space in codomain.subspaces[:3]]
-            + [codomain.subspace(3).identity_operator()]
-        )
-
-        lebesgue_operator = self.as_lebesgue_linear_operator(
-            rotational_feedbacks=rotational_feedbacks, rtol=rtol
-        )
-
-        adjoint_mapping = (
-            domain_inverse_mass_operator
-            @ lebesgue_operator.adjoint
-            @ codomain_mass_operator
-        )
-
-        return LinearOperator(
-            domain, codomain, lebesgue_operator, adjoint_mapping=adjoint_mapping
-        )
-        """

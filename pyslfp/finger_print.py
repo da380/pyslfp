@@ -13,8 +13,13 @@ import numpy as np
 import pyshtools as pysh
 from pyshtools import SHGrid, SHCoeffs
 
-from pygeoinf import LinearOperator, HilbertSpaceDirectSum, EuclideanSpace
-from pygeoinf.symmetric_space.sphere import Sobolev
+from pygeoinf import (
+    LinearOperator,
+    HilbertSpaceDirectSum,
+    EuclideanSpace,
+    BlockDiagonalLinearOperator,
+)
+from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
 from pyslfp.ice_ng import IceNG, IceModel
 from pyslfp.physical_parameters import EarthModelParameters
@@ -858,7 +863,26 @@ class FingerPrint(EarthModelParameters):
             w = self.expand_coefficient(w_lm)
         return w
 
-    def load_space(self, order: float, scale: float) -> Sobolev:
+    def lebesgue_load_space(self) -> Lebesgue:
+        """
+        Returns the load space as an instance of pygeoinf.symmetric_space.sphere.Lebesgue.
+        """
+        return Lebesgue(
+            self.lmax,
+            radius=self.mean_sea_floor_radius,
+            grid=self._grid_name(),
+        )
+
+    def lebesgue_response_space(self) -> HilbertSpaceDirectSum:
+        """
+        Returns the response space as an instance of pygeoinf.HilbertSpaceDirectSum.
+        """
+        field_space = self.lebesgue_load_space()
+        return HilbertSpaceDirectSum(
+            [field_space, field_space, field_space, EuclideanSpace(2)]
+        )
+
+    def sobolev_load_space(self, order: float, scale: float) -> Sobolev:
         """
         Returns the load space for the sea level fingerprint operator as an instance
         of pygeoinf.symmetric_space.sphere.Sobolev.
@@ -875,7 +899,9 @@ class FingerPrint(EarthModelParameters):
             grid=self._grid_name(),
         )
 
-    def response_space(self, order: float, scale: float) -> HilbertSpaceDirectSum:
+    def sobolev_response_space(
+        self, order: float, scale: float
+    ) -> HilbertSpaceDirectSum:
         """
         Returns the response space of the sea level fingerprint operator as an
         instance of pygeoinf.HilbertSpaceDirectSum.
@@ -895,37 +921,15 @@ class FingerPrint(EarthModelParameters):
             [field_space, field_space, field_space, EuclideanSpace(2)]
         )
 
-    def as_linear_operator(
-        self,
-        order: float,
-        scale: float,
-        /,
-        *,
-        rotational_feedbacks: bool = True,
-        rtol: float = 1e-6,
-    ) -> inf.LinearOperator:
+    def as_lebesgue_linear_operator(
+        self, /, *, rotational_feedbacks: bool = True, rtol: float = 1e-6
+    ) -> LinearOperator:
         """
-        Returns the sea level fingerprint model as a pygeoinf LinearOperator.
-
-        This method wraps the instance's physical forward model (the __call__ method)
-        and its corresponding adjoint into a formal mathematical operator, which can
-        be used in the solution of inverse problems.
-
-        Args:
-            order: The Sobolev order, defining the smoothness of the input load space.
-            scale: The Sobolev scale, defining the characteristic length scale of
-                features in the input load space.
-            rotational_feedbacks: Configures the operator to include the effects of
-                polar wander in the forward and adjoint calculations.
-            rtol: The relative tolerance passed to the underlying iterative solver.
-
-        Returns:
-            A pygeoinf.LinearOperator object that encapsulates the forward mapping,
-            the adjoint mapping, and the mathematical spaces (domain and codomain).
+        Returns the sea level fingerprint model as a pygeoinf LinearOperator acting on L2 functions.
         """
 
-        domain = self.load_space(order, scale)
-        codomain = self.response_space(order, scale)
+        domain = self.lebesgue_load_space()
+        codomain = self.lebesgue_response_space()
 
         def mapping(u: SHGrid) -> List[Union[SHGrid, np.ndarray]]:
             """The forward mapping from a load to the sea level response fields."""
@@ -954,8 +958,8 @@ class FingerPrint(EarthModelParameters):
                 angular_velocity_change,
             ]
 
-        def formal_adjoint_mapping(response: List[Union[SHGrid, np.ndarray]]) -> SHGrid:
-            """The formal adjoint mapping from response fields to the adjoint load."""
+        def adjoint_mapping(response: List[Union[SHGrid, np.ndarray]]) -> SHGrid:
+            """The adjoint mapping from response fields to the adjoint load."""
             g = self.gravitational_acceleration
             adjoint_direct_load = response[0]
             adjoint_displacement_load = -1 * response[1]
@@ -980,8 +984,57 @@ class FingerPrint(EarthModelParameters):
             return adjoint_sea_level
 
         return LinearOperator(
-            domain,
-            codomain,
-            mapping,
-            formal_adjoint_mapping=formal_adjoint_mapping,
+            domain, codomain, mapping, adjoint_mapping=adjoint_mapping
+        )
+
+    def as_sobolev_linear_operator(
+        self,
+        order: float,
+        scale: float,
+        /,
+        *,
+        rotational_feedbacks: bool = True,
+        rtol: float = 1e-6,
+    ) -> LinearOperator:
+        """
+        Returns the sea level fingerprint model as a pygeoinf LinearOperator.
+
+        This method wraps the instance's physical forward model (the __call__ method)
+        and its corresponding adjoint into a formal mathematical operator, which can
+        be used in the solution of inverse problems.
+
+        Args:
+            order: The Sobolev order, defining the smoothness of the input load space.
+            scale: The Sobolev scale, defining the characteristic length scale of
+                features in the input load space.
+            rotational_feedbacks: Configures the operator to include the effects of
+                polar wander in the forward and adjoint calculations.
+            rtol: The relative tolerance passed to the underlying iterative solver.
+
+        Returns:
+            A pygeoinf.LinearOperator object that encapsulates the forward mapping,
+            the adjoint mapping, and the mathematical spaces (domain and codomain).
+        """
+
+        domain = self.sobolev_load_space(order, scale)
+        codomain = self.sobolev_response_space(order, scale)
+
+        domain_inverse_mass_operator = domain.inverse_mass_operator
+        codomain_mass_operator = BlockDiagonalLinearOperator(
+            [space.mass_operator for space in codomain.subspaces[:3]]
+            + [codomain.subspace(3).identity_operator()]
+        )
+
+        lebesgue_operator = self.as_lebesgue_linear_operator(
+            rotational_feedbacks=rotational_feedbacks, rtol=rtol
+        )
+
+        adjoint_mapping = (
+            domain_inverse_mass_operator
+            @ lebesgue_operator.adjoint
+            @ codomain_mass_operator
+        )
+
+        return LinearOperator(
+            domain, codomain, lebesgue_operator, adjoint_mapping=adjoint_mapping
         )

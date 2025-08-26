@@ -208,22 +208,36 @@ def test_generalised_sea_level_reciprocity(
     assert np.isclose(lhs, rhs, rtol=1000 * rtol)
 
 
-def test_as_linear_operator_creation(fingerprint: FingerPrint):
+def test_as_lebesgue_operator_creation(fingerprint: FingerPrint):
     """
-    A simple smoke test to ensure the as_linear_operator method runs
+    A simple smoke test to ensure the as_lebesgue_operator method runs
     and returns an object of the correct pygeoinf.LinearOperator type.
     """
-    op = fingerprint.as_linear_operator(2.0, 1.0)
+    op = fingerprint.as_lebesgue_linear_operator()
     assert isinstance(op, inf.LinearOperator)
 
 
+def test_as_sobolev_operator_creation(fingerprint: FingerPrint):
+    """
+    A simple smoke test to ensure the as_lebesgue_operator method runs
+    and returns an object of the correct pygeoinf.LinearOperator type.
+    """
+    op = fingerprint.as_sobolev_linear_operator(
+        2, 0.2 * fingerprint.mean_sea_floor_radius
+    )
+    assert isinstance(op, inf.LinearOperator)
+
+
+@pytest.mark.parametrize("sobolev", [False, True])
 @pytest.mark.parametrize("rotational_feedbacks", [True, False])
-@pytest.mark.parametrize("order, scale", [(0.0, 1.0), (1.0, 0.5)])
+@pytest.mark.parametrize("order", [1, 2])
+@pytest.mark.parametrize("scale", [0.1, 0.5])
 def test_linear_operator_adjoint_identity(
     fingerprint: FingerPrint,
-    rotational_feedbacks: bool,
+    sobolev: bool,
     order: float,
     scale: float,
+    rotational_feedbacks: bool,
 ):
     """
     Tests the adjoint identity (dot-product test) for the LinearOperator.
@@ -236,9 +250,18 @@ def test_linear_operator_adjoint_identity(
     rtol = 1e-9
 
     # 1. Create the linear operator with a tight solver tolerance for accuracy
-    A = fingerprint.as_linear_operator(
-        order, scale, rotational_feedbacks=rotational_feedbacks, rtol=rtol
-    )
+
+    if sobolev:
+        A = fingerprint.as_sobolev_linear_operator(
+            order,
+            scale * fingerprint.mean_sea_floor_radius,
+            rotational_feedbacks=rotational_feedbacks,
+            rtol=rtol,
+        )
+    else:
+        A = fingerprint.as_lebesgue_linear_operator(
+            rotational_feedbacks=rotational_feedbacks, rtol=rtol
+        )
 
     # 2. Create random elements in the domain and codomain spaces
     direct_load = random_load(fingerprint)

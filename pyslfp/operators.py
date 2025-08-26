@@ -329,7 +329,6 @@ class LoadAveragingOperator(PropertyOperator):
     def _formal_adjoint_mapping(self, data: np.ndarray) -> Vector:
         """Maps a vector of weighted averages back to the load space."""
         adjoint_load = self.fingerprint.zero_grid()
-        radius = self.fingerprint.mean_sea_floor_radius
         for i, w in enumerate(self._weighting_functions):
-            adjoint_load += radius**2 * data[i] * w
+            adjoint_load += data[i] * w
         return adjoint_load

@@ -17,18 +17,18 @@ from pygeoinf import (
     LinearOperator,
     HilbertSpaceDirectSum,
     EuclideanSpace,
-    BlockDiagonalLinearOperator,
 )
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
-from pyslfp.ice_ng import IceNG, IceModel
-from pyslfp.physical_parameters import EarthModelParameters
+from .ice_ng import IceNG, IceModel
+from .physical_parameters import EarthModelParameters
+from .love_numbers import LoveNumbers
 
 
 from . import DATADIR
 
 
-class FingerPrint(EarthModelParameters):
+class FingerPrint(EarthModelParameters, LoveNumbers):
     """
     Computes elastic sea level "fingerprints" for a given surface load.
 
@@ -89,6 +89,13 @@ class FingerPrint(EarthModelParameters):
             self._grid = grid
             self._sampling = 1
 
+        LoveNumbers.__init__(
+            self,
+            self.lmax,
+            self,
+            file=love_number_file,
+        )
+
         # Internal parameters (do not change)
         self._extend: bool = True
         self._normalization: str = "ortho"
@@ -113,10 +120,6 @@ class FingerPrint(EarthModelParameters):
                 * (self.polar_moment_of_inertia - self.equatorial_moment_of_inertia)
             )
         )
-
-        # Read in the Love numbers.
-        self._love_number_file: str = love_number_file
-        self._read_love_numbers(love_number_file)
 
         # Background model not set.
         self._sea_level: Optional[SHGrid] = None
@@ -220,38 +223,6 @@ class FingerPrint(EarthModelParameters):
     def _grid_name(self):
         return self.grid if self._sampling == 1 else "DH2"
 
-    def _read_love_numbers(self, file: str) -> None:
-        """Reads and non-dimensionalises Love numbers from a file."""
-        data = np.loadtxt(file)
-        data_degree = len(data[:, 0]) - 1
-
-        if self.lmax > data_degree:
-            raise ValueError(
-                f"lmax ({self.lmax}) is larger than the maximum degree "
-                f"in the Love number file ({data_degree})."
-            )
-
-        self._h_u = data[: self.lmax + 1, 1] * self.load_scale / self.length_scale
-        self._k_u = (
-            data[: self.lmax + 1, 2]
-            * self.load_scale
-            / self.gravitational_potential_scale
-        )
-        self._h_phi = data[: self.lmax + 1, 3] * self.load_scale / self.length_scale
-        self._k_phi = (
-            data[: self.lmax + 1, 4]
-            * self.load_scale
-            / self.gravitational_potential_scale
-        )
-        self._h = self._h_u + self._h_phi
-        self._k = self._k_u + self._k_phi
-        self._ht = (
-            data[: self.lmax + 1, 5]
-            * self.gravitational_potential_scale
-            / self.length_scale
-        )
-        self._kt = data[: self.lmax + 1, 6]
-
     def _compute_ocean_function(self) -> None:
         """Computes and stores the ocean function from sea level and ice."""
         if self._sea_level is None or self._ice_thickness is None:
@@ -325,14 +296,6 @@ class FingerPrint(EarthModelParameters):
         self.check_coefficient(f)
         grid = "DH2" if self._sampling == 2 else self.grid
         return f.expand(grid=grid, extend=self.extend)
-
-    def displacement_love_numbers(self) -> np.ndarray:
-        """Return the displacement Love numbers, `h`."""
-        return self._h
-
-    def gravitational_love_numbers(self) -> np.ndarray:
-        """Return the gravitational Love numbers, `k`."""
-        return self._k
 
     def load_response(self, load: SHGrid) -> Tuple[SHGrid, SHGrid]:
         """

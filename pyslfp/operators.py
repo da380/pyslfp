@@ -3,11 +3,14 @@ Module for defining some operators related to the sea level problem.
 """
 
 from __future__ import annotations
-from typing import Optional, Tuple, List, Union
+from typing import Optional, Tuple, List, Union, Callable
 
 import inspect
 
 import numpy as np
+
+from scipy.sparse import diags
+
 
 from pyshtools import SHGrid, SHCoeffs
 
@@ -23,6 +26,8 @@ from pygeoinf import (
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
 from .utils import SHVectorConverter
+from .physical_parameters import EarthModelParameters
+from .love_numbers import LoveNumbers
 
 
 def underlying_space(space: HilbertSpace):
@@ -133,17 +138,17 @@ def tide_gauge_operator(
     )
 
 
-def sh_coefficient_operator(
+def field_to_sh_coefficient_operator(
     field_space: Union[Lebesgue, Sobolev], lmax: int, lmin: int = 0
 ) -> LinearOperator:
     """
     Maps a scalar field to a vector of its spherical harmonic coefficients.
 
-    The output coefficientd are ordered in the following manner:
+    The output coefficients are ordered in the following manner:
 
     u_{00}, u_{1-1}, u_{10}, u_{11}, u_{2-2}, u_{2-1}, u_{20}, u_{21}, u_{22}, ...
 
-    in this case assumeing lmin = 0.
+    in this case assuming lmin = 0.
 
     If lmax is larger than the field's lmax, the output will be padded by zeros.
 
@@ -175,13 +180,12 @@ def sh_coefficient_operator(
     def adjoint_mapping(data: np.ndarray) -> SHGrid:
         """L2 adjoint mapping: Vector -> Coefficients -> Grid"""
         coeffs = converter.from_vector(data, output_lmax=l2_space.lmax)
-        adjoint_load_lm = SHCoeffs.from_array(
+        ulm = SHCoeffs.from_array(
             coeffs,
             normalization=l2_space.normalization,
             csphase=l2_space.csphase,
         )
-        adjoint_load = l2_space.from_coefficient(adjoint_load_lm) / l2_space.radius**2
-        return adjoint_load
+        return l2_space.from_coefficient(ulm) / l2_space.radius**2
 
     l2_operator = LinearOperator(
         l2_space, codomain, mapping, adjoint_mapping=adjoint_mapping
@@ -189,6 +193,64 @@ def sh_coefficient_operator(
 
     if is_sobolev:
         return LinearOperator.from_formal_adjoint(field_space, codomain, l2_operator)
+    else:
+        return l2_operator
+
+
+def sh_coefficient_to_field_operator(
+    field_space: Union[Lebesgue, Sobolev], lmax: int, lmin: int = 0
+) -> LinearOperator:
+    """
+    Maps a vector spherical harmonic coefficients to a scalar field,
+    padding by zero for absent coefficients. This is the right inverse
+    of the field_to_sh_coefficient_operator.
+
+    The input coefficients are ordered in the following manner:
+
+    u_{00}, u_{1-1}, u_{10}, u_{11}, u_{2-2}, u_{2-1}, u_{20}, u_{21}, u_{22}, ...
+
+    in this case assuming lmin = 0.
+
+    This operator can map to both Lebesgue (L2) and Sobolev spaces.
+
+    Args:
+        field_space: The domain space for the scalar field.
+        lmax: The maximum spherical harmonic degree to include in the output.
+        lmin: The minimum spherical harmonic degree to include in the output.
+            Defaults to 0.
+
+    Returns:
+        A LinearOperator that maps an SHGrid to a NumPy vector of coefficients.
+    """
+
+    if not isinstance(field_space, (Lebesgue, Sobolev)):
+        raise TypeError("field_space must be a Lebesgue or Sobolev space.")
+
+    is_sobolev = isinstance(field_space, Sobolev)
+    l2_space = field_space.underlying_space if is_sobolev else field_space
+
+    converter = SHVectorConverter(lmax=lmax, lmin=lmin)
+    domain = EuclideanSpace(converter.vector_size)
+
+    def mapping(data: np.ndarray) -> SHGrid:
+        coeffs = converter.from_vector(data, output_lmax=l2_space.lmax)
+        ulm = SHCoeffs.from_array(
+            coeffs,
+            normalization=l2_space.normalization,
+            csphase=l2_space.csphase,
+        )
+        return l2_space.from_coefficient(ulm)
+
+    def adjoint_mapping(u: SHGrid) -> np.ndarray:
+        ulm = l2_space.to_coefficient(u)
+        return converter.to_vector(ulm.coeffs) * l2_space.radius**2
+
+    l2_operator = LinearOperator(
+        domain, l2_space, mapping, adjoint_mapping=adjoint_mapping
+    )
+
+    if is_sobolev:
+        return LinearOperator.from_formal_adjoint(domain, field_space, l2_operator)
     else:
         return l2_operator
 
@@ -215,7 +277,7 @@ def grace_operator(
 
     # Define the non-zero block of the operator by calling the new factory
     grav_potential_space = response_space.subspace(2)
-    partial_op = sh_coefficient_operator(
+    partial_op = field_to_sh_coefficient_operator(
         grav_potential_space, lmax=observation_degree, lmin=2
     )
     codomain = partial_op.codomain
@@ -287,3 +349,56 @@ def averaging_operator(
         return LinearOperator.from_formal_adjoint(load_space, codomain, l2_operator)
     else:
         return l2_operator
+
+
+def wahr_operator(
+    love_numbers: LoveNumbers,
+    potential_space: Union[Lebesgue, Sobolev],
+    load_space: Union[Lebesgue, Sobolev],
+    /,
+    *,
+    lmax=None,
+) -> LinearOperator:
+    """
+    Returns as a LinearOperator the approximate mapping from a gravitational
+    potential field to the corresponding surface load using the method of
+    Wahr, Molenaar, & Bryan (1998).
+
+    Args:
+        love_numbers: An instance of the LoveNumbers class.
+        potential_space: The Hilbert space of the potential field.
+        load_space: The Hilbert space of the load field.
+        lmax: The maximum spherical harmonic degree to use. If None, the
+            maximum degree in the potential space is used.
+
+    Notes:
+        Mathematically, this opeator is continuous between a Sobolev space
+        with order s and another with order s-1. But it can be practically
+        useful to define this operator in more generally settings.
+
+    Returns:
+        A LinearOperator object.
+    """
+
+    if not isinstance(potential_space, (Lebesgue, Sobolev)):
+        raise TypeError("potential_space must be a Lebesgue or Sobolev space.")
+
+    if not isinstance(load_space, (Lebesgue, Sobolev)):
+        raise TypeError("load_space must be a Lebesgue or Sobolev space.")
+
+    if not isinstance(love_numbers, LoveNumbers):
+        raise TypeError("love_numbers must be a LoveNumbers object.")
+
+    l2_potential_space = underlying_space(potential_space)
+
+    lmax_ = lmax if lmax is not None else l2_potential_space.lmax
+
+    def scaling_function(k: (int, int)) -> float:
+        l, _ = k
+        return 1 / love_numbers.k[l] if 1 < l <= lmax_ else 0
+
+    l2_operator = l2_potential_space.invariant_automorphism_from_index_function(
+        scaling_function
+    )
+
+    return LinearOperator.from_formal_adjoint(potential_space, load_space, l2_operator)

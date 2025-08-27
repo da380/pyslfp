@@ -15,7 +15,7 @@ pyshtools = ">=4.0.0"
 matplotlib = ">=3.0.0"
 pyqt6 = ">=6.0.0"
 Cartopy = "^0.23.0"
-pygeoinf = ">=1.1.7"
+pygeoinf = ">=1.1.8"
 
 
 [tool.poetry.group.tests]

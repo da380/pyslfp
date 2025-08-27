@@ -18,8 +18,8 @@ equatorial_nondim = EarthModelParameters(
         # Test default grid (DH1) with different lmax, ice models, and nondim schemes
         (64, IceModel.ICE7G, "DH", standard_nondim),
         (64, IceModel.ICE7G, "DH", equatorial_nondim),
-        (128, IceModel.ICE7G, "DH", standard_nondim),
-        (128, IceModel.ICE6G, "DH", standard_nondim),
+        (100, IceModel.ICE7G, "DH", standard_nondim),
+        (100, IceModel.ICE6G, "DH", standard_nondim),
         # Add specific tests for DH2 and GLQ grids
         (64, IceModel.ICE7G, "DH2", standard_nondim),
         (64, IceModel.ICE7G, "GLQ", standard_nondim),

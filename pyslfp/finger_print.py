@@ -89,11 +89,13 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
             self._grid = grid
             self._sampling = 1
 
+        self._love_number_file = love_number_file
+
         LoveNumbers.__init__(
             self,
             self.lmax,
             self,
-            file=love_number_file,
+            file=self._love_number_file,
         )
 
         # Internal parameters (do not change)
@@ -210,6 +212,13 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         if self._ocean_area is None:
             self._compute_ocean_area()
         return self._ocean_area
+
+    @property
+    def love_numbers(self):
+        """
+        Returns the associated instance of the LoveNumbers class.
+        """
+        return LoveNumbers(self.lmax, self, file=self._love_number_file)
 
     @property
     def solver_counter(self) -> int:

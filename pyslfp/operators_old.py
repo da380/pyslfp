@@ -1,245 +1,132 @@
 """
-Module for defining some operators related to the sea level problem.
-
-These operators map high-dimensional function spaces (like loads or responses)
-to finite-dimensional vector spaces of data or properties.
+Module for pygeoinf operators linked to the sea level problem.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, List, Tuple
+from typing import List, Tuple, Optional, Union
 
 import numpy as np
-
 from pyshtools import SHCoeffs, SHGrid
 
-from pygeoinf import HilbertSpace, LinearForm, LinearOperator, EuclideanSpace
+import pygeoinf as inf
+from pygeoinf.symmetric_space.sphere import Sobolev
+from pygeoinf import LinearForm
 
-from .finger_print import FingerPrint
-from .utils import SHVectorConverter
-
-Vector = Any
-
-# ==================================================================== #
-#                        The Common Base Class                         #
-# ==================================================================== #
+from pyslfp.physical_parameters import EarthModelParameters
+from pyslfp.finger_print import FingerPrint
 
 
-class FingerPrintOperator(ABC, LinearOperator):
-    """
-    Abstract base class for operators that map a function space related to the
-    sea level problem to a finite-dimensional data or property space.
-    """
-
-    def __init_subclass__(cls, **kwargs):
-        """
-        This hook checks that a new subclass implements AT MOST ONE of the
-        three possible adjoint-related methods.
-        """
-        super().__init_subclass__(**kwargs)
-        implementations = {
-            "adjoint": cls._adjoint_mapping is not FingerPrintOperator._adjoint_mapping,
-            "dual": cls._dual_mapping is not FingerPrintOperator._dual_mapping,
-            "formal_adjoint": (
-                cls._formal_adjoint_mapping
-                is not FingerPrintOperator._formal_adjoint_mapping
-            ),
-        }
-        num_implemented = sum(implementations.values())
-        if num_implemented > 1:
-            raise TypeError(
-                f"Subclass '{cls.__name__}' must implement at most one of "
-                "'_adjoint_mapping', '_dual_mapping', or '_formal_adjoint_mapping'. "
-                f"Found {num_implemented} implementations."
-            )
-
-    def __init__(
-        self,
-        fingerprint: FingerPrint,
-        order: float,
-        scale: float,
-        domain: HilbertSpace,
-    ) -> None:
-        """
-        Initializes the base operator.
-
-        Args:
-            fingerprint: The configured FingerPrint instance.
-            order: The Sobolev order of the problem.
-            scale: The Sobolev scale of the problem.
-            domain: The specific domain (e.g., load or response space).
-        """
-        if not isinstance(fingerprint, FingerPrint):
-            raise TypeError("fingerprint must be an instance of FingerPrint.")
-        if not fingerprint.background_set:
-            raise ValueError("fingerprint must have a background state set.")
-
-        self._fingerprint = fingerprint
-        self._order = order
-        self._scale = scale
-
-        mapping_kwargs = {}
-        if self.__class__._adjoint_mapping is not FingerPrintOperator._adjoint_mapping:
-            mapping_kwargs["adjoint_mapping"] = self._adjoint_mapping
-        elif self.__class__._dual_mapping is not FingerPrintOperator._dual_mapping:
-            mapping_kwargs["dual_mapping"] = self._dual_mapping
-        elif (
-            self.__class__._formal_adjoint_mapping
-            is not FingerPrintOperator._formal_adjoint_mapping
-        ):
-            mapping_kwargs["formal_adjoint_mapping"] = self._formal_adjoint_mapping
-
-        super().__init__(
-            domain,
-            self._data_space(),
-            self._mapping,
-            **mapping_kwargs,
-        )
-
-    @property
-    def fingerprint(self) -> FingerPrint:
-        """The `FingerPrint` instance associated with the operator."""
-        return self._fingerprint
-
-    @property
-    def order(self) -> float:
-        """The Sobolev order used to define the operator's spaces."""
-        return self._order
-
-    @property
-    def scale(self) -> float:
-        """The Sobolev scale used to define the operator's spaces."""
-        return self._scale
-
-    @abstractmethod
-    def _data_space(self) -> HilbertSpace:
-        """A subclass must implement this to return the data/property space."""
-        pass
-
-    @abstractmethod
-    def _mapping(self, element: Vector) -> Vector:
-        """A subclass must implement the forward mapping."""
-        pass
-
-    # --- Adjoint-related methods are abstract by default ---
-    def _adjoint_mapping(self, data: Vector) -> Vector:
-        raise NotImplementedError
-
-    def _dual_mapping(self, data_dual: LinearForm) -> LinearForm:
-        raise NotImplementedError
-
-    def _formal_adjoint_mapping(self, data: Vector) -> Vector:
-        raise NotImplementedError
-
-
-# ==================================================================== #
-#                        ObservationOperator Base                      #
-# ==================================================================== #
-
-
-class ObservationOperator(FingerPrintOperator):
+class ObservationOperator(ABC, inf.LinearOperator):
     """
     Abstract base class for observation operators.
-    Maps the RESPONSE SPACE to a finite-dimensional data space.
+
+    These operators map the full physical response (from SeaLevelOperator)
+    to a specific space of observations (e.g., GRACE coefficients, tide gauges).
     """
 
-    def __init__(self, fingerprint: FingerPrint, order: float, scale: float) -> None:
+    def __init__(self, sea_level_operator: SeaLevelOperator) -> None:
         """
         Args:
-            fingerprint: The configured FingerPrint instance.
-            order: The Sobolev order of the problem.
-            scale: The Sobolev scale of the problem.
+            sea_level_operator: An instance of the SeaLevelOperator class.
         """
-        # Construct the specific domain for this operator type
-        response_space = fingerprint.response_space(order, scale)
-        # Pass all common arguments up to the base class
-        super().__init__(fingerprint, order, scale, response_space)
+        if not isinstance(sea_level_operator, SeaLevelOperator):
+            raise TypeError(
+                "sea_level_operator must be an instance of SeaLevelOperator."
+            )
+        self.sea_level_operator = sea_level_operator
+        operator = self._operator()
+        super().__init__(
+            operator.domain,
+            operator.codomain,
+            operator,
+            adjoint_mapping=operator.adjoint,
+        )
 
-
-# ==================================================================== #
-#                         PropertyOperator Base                        #
-# ==================================================================== #
-
-
-class PropertyOperator(FingerPrintOperator):
-    """
-    Abstract base class for property operators.
-    Maps the LOAD SPACE to a finite-dimensional property space.
-    """
-
-    def __init__(self, fingerprint: FingerPrint, order: float, scale: float) -> None:
+    @abstractmethod
+    def _operator(self) -> inf.LinearOperator:
         """
-        Args:
-            fingerprint: The configured FingerPrint instance.
-            order: The Sobolev order of the problem.
-            scale: The Sobolev scale of the problem.
+        Must return a LinearOperator that maps response fields to the data space.
         """
-        # Construct the specific domain for this operator type
-        load_space = fingerprint.load_space(order, scale)
-        # Pass all common arguments up to the base class
-        super().__init__(fingerprint, order, scale, load_space)
+        pass
 
-
-# ==================================================================== #
-#                     Grace Observation Operator                       #
-# ==================================================================== #
+    @property
+    def forward_operator(self) -> inf.LinearOperator:
+        """
+        Returns the full forward operator (SeaLevelOperator composed with this
+        ObservationOperator).
+        """
+        return self @ self.sea_level_operator
 
 
 class GraceObservationOperator(ObservationOperator):
     """
-    Observation operator for GRACE-like gravity measurements.
+    Observation operator for GRACE-like gravity measurements. 🛰️
 
     Maps the response fields to a vector of spherical harmonic coefficients
-    of the gravitational potential change, for degrees l >= 2.
+    of the gravitational potential change.
     """
 
     def __init__(
-        self,
-        fingerprint: FingerPrint,
-        order: float,
-        scale: float,
-        observation_degree: int,
+        self, sea_level_operator: SeaLevelOperator, observation_degree: int
     ) -> None:
         """
         Args:
-            fingerprint: The configured FingerPrint instance.
-            order: The Sobolev order of the problem.
-            scale: The Sobolev scale of the problem.
-            observation_degree: The max degree of the SH coefficient observations.
+            sea_level_operator: An instance of the SeaLevelOperator.
+            observation_degree: The max degree of the spherical harmonic observations.
         """
-        self._converter = SHVectorConverter(lmax=observation_degree, lmin=2)
-        super().__init__(fingerprint, order, scale)
+        self._observation_degree = observation_degree
+        self._data_size = (self._observation_degree + 1) ** 2 - 4  # Excludes l=0,1
+        self._fingerprint = sea_level_operator.fingerprint
+        super().__init__(sea_level_operator)
 
-    def _data_space(self) -> EuclideanSpace:
-        """The data space is a vector of the SH coefficients."""
-        return EuclideanSpace(self._converter.vector_size)
-
-    def _mapping(self, element: Vector) -> np.ndarray:
-        """Maps response fields to an ordered vector of SH coefficients."""
-        coeffs = self.fingerprint.expand_field(element[2]).coeffs
-        return self._converter.to_vector(coeffs)
-
-    def _formal_adjoint_mapping(self, data: np.ndarray) -> list:
-        """Maps a vector of SH coefficients back to the response space."""
-        coeffs = self._converter.from_vector(data, output_lmax=self.fingerprint.lmax)
-        adjoint_load_lm = SHCoeffs.from_array(
-            coeffs,
-            lmax=self.fingerprint.lmax,
-            normalization=self.fingerprint.normalization,
-            csphase=self.fingerprint.csphase,
+    def _operator(self) -> inf.LinearOperator:
+        """Returns the LinearOperator for this observation type."""
+        domain = self.sea_level_operator.codomain
+        codomain = inf.EuclideanSpace(self._data_size)
+        return inf.LinearOperator(
+            domain, codomain, self._mapping, formal_adjoint_mapping=self._formal_adjoint
         )
-        adjoint_load = self.fingerprint.expand_coefficient(adjoint_load_lm)
-        zero_grid = self.fingerprint.zero_grid()
-        return [zero_grid, zero_grid, adjoint_load, np.zeros(2)]
 
+    def _mapping(self, response_fields: List[Union[SHGrid, np.ndarray]]) -> np.ndarray:
+        """Maps response fields to an ordered vector of SH coefficients."""
+        gravitational_potential_change = response_fields[2]
+        return self._to_ordered_sh_coefficients(gravitational_potential_change)
 
-# ==================================================================== #
-#                     Grace Observation Operator                       #
-# ==================================================================== #
+    def _formal_adjoint(
+        self, gravitational_sh_coeffs: np.ndarray
+    ) -> Tuple[SHGrid, SHGrid, SHGrid, np.ndarray]:
+        """Maps an ordered vector of SH coefficients to the adjoint loads."""
+        gravitational_potential_change = self._from_ordered_sh_coefficients(
+            gravitational_sh_coeffs
+        )
+        zero_grid = self._fingerprint.zero_grid()
+        return (zero_grid, zero_grid, gravitational_potential_change, np.zeros(2))
+
+    def _to_ordered_sh_coefficients(self, grid: SHGrid) -> np.ndarray:
+        """Converts a grid to an ordered vector of SH coefficients (l>=2)."""
+        coeffs = self._fingerprint._expand_field(grid).coeffs
+        vec = np.zeros(self._data_size)
+        for l in range(2, self._observation_degree + 1):
+            vec[((l) ** 2) - 4 : ((l + 1) ** 2) - 4] = np.concatenate(
+                (coeffs[1, l, 1 : l + 1][::-1], coeffs[0, l, 0 : l + 1])
+            )
+        return vec
+
+    def _from_ordered_sh_coefficients(self, vec: np.ndarray) -> SHGrid:
+        """Converts an ordered vector of SH coefficients (l>=2) to a grid."""
+        lmax = self._fingerprint.lmax
+        coeffs = np.zeros((2, lmax + 1, lmax + 1))
+        for l in range(2, self._observation_degree + 1):
+            coeffs[1, l, 1 : l + 1] = vec[(l**2) - 4 : (l**2) - 4 + l][::-1]
+            coeffs[0, l, 0 : l + 1] = vec[(l**2) - 4 + l : ((l + 1) ** 2) - 4]
+        return self._fingerprint._expand_coefficient(
+            SHCoeffs.from_array(coeffs, normalization=self._fingerprint.normalization)
+        )
 
 
 class TideGaugeObservationOperator(ObservationOperator):
     """
-    Observation operator for tide gauge sea level measurements.
+    Observation operator for tide gauge sea level measurements. 🌊
 
     Maps the response fields to a vector of sea level change values at
     a discrete set of locations.
@@ -247,88 +134,188 @@ class TideGaugeObservationOperator(ObservationOperator):
 
     def __init__(
         self,
-        fingerprint: FingerPrint,
-        order: float,
-        scale: float,
-        points: List[Tuple[float, float]],
+        sea_level_operator: SeaLevelOperator,
+        tide_gauge_locations: List[Tuple[float, float]],
     ) -> None:
         """
         Args:
-            fingerprint: The configured FingerPrint instance.
-            order: The Sobolev order for the response space. Must be greater than 1.
-            scale: The Sobolev scale for the response space. Must be greater than 0.
-            points: A list of (latitude, longitude) points in degrees
+            sea_level_operator: An instance of the SeaLevelOperator.
+            tide_gauge_locations: A list of (latitude, longitude) points in degrees
                 where the sea level change is to be evaluated.
         """
-        self._points = points
-        super().__init__(fingerprint, order, scale)
-        field_space = self.domain.subspace(0)
-        self._point_evaluation_operator = field_space.point_evaluation_operator(points)
+        self._fingerprint = sea_level_operator.fingerprint
+        self._sl_space = sea_level_operator.codomain.subspaces[0]
+        self._point_evaluation_operator = self._sl_space.point_evaluation_operator(
+            tide_gauge_locations
+        )
+        super().__init__(sea_level_operator)
 
-    def _data_space(self):
-        """The data space is a vector of sea level change values."""
-        return EuclideanSpace(len(self._points))
+    def _operator(self) -> inf.LinearOperator:
+        """Returns a LinearOperator that maps response fields to tide gauge measurements."""
+        domain = self.sea_level_operator.codomain
+        codomain = self._point_evaluation_operator.codomain
+        return inf.LinearOperator(
+            domain, codomain, self._mapping, adjoint_mapping=self._adjoint_mapping
+        )
 
-    def _mapping(self, element: Vector) -> np.ndarray:
+    def _mapping(self, response_fields: List[Union[SHGrid, np.ndarray]]) -> np.ndarray:
         """The forward mapping to a vector of sea level change values."""
-        return self._point_evaluation_operator(element[0])
+        sea_level_change = response_fields[0]
+        return self._point_evaluation_operator(sea_level_change)
 
-    def _adjoint_mapping(self, data: np.ndarray) -> Vector:
-        """The adjoint mapping from sea level change values back to the response space."""
-        adjoint_sl_load = self._point_evaluation_operator.adjoint(data)
-        zero_grid = self.fingerprint.zero_grid()
-        return [adjoint_sl_load, zero_grid, zero_grid, np.zeros(2)]
+    def _adjoint_mapping(
+        self, tide_gauge_measurements: np.ndarray
+    ) -> Tuple[SHGrid, SHGrid, SHGrid, np.ndarray]:
+        """The adjoint mapping from tide gauge measurements back to the response space."""
+        zero_grid = self._fingerprint.zero_grid()
+        adjoint_sea_level_load = self._point_evaluation_operator.adjoint(
+            tide_gauge_measurements
+        )
+        return (adjoint_sea_level_load, zero_grid, zero_grid, np.zeros(2))
 
 
-# ====================================================== #
-#                 Load averaging operator                #
-# ====================================================== #
-
-
-class LoadAveragingOperator(PropertyOperator):
+class AveragingOperator(inf.LinearOperator):
     """
-    An operator that computes a vector of weighted averages of a load
-    (or similar scalar field). A list of weighting functions defined on
-    the appropriate SHGrid must be provided.
+    An operator that computes a vector of weighted averages of a field.
     """
 
     def __init__(
         self,
-        fingerprint: FingerPrint,
-        order: float,
-        scale: float,
-        weighting_functions: List[SHGrid],
-    ):
+        space: Sobolev,
+        /,
+        *,
+        weighting_functions: Optional[List[SHGrid]] = None,
+        weighting_components: Optional[List[SHCoeffs]] = None,
+        fingerprint: Optional[FingerPrint] = None,
+    ) -> None:
         """
         Args:
-            fingerprint: The configured FingerPrint instance.
-            order: The Sobolev order for the load space.
-            scale: The Sobolev scale for the load space.
+            space: The Sobolev space in which the operator acts.
             weighting_functions: A list of 2D grids to use as weights.
+            weighting_components: A list of SH coefficients to use as weights.
+            fingerprint: An instance of the FingerPrint class.
         """
-        for w in weighting_functions:
-            if not isinstance(w, SHGrid):
-                raise TypeError("weighting_functions must be a list of SHGrids.")
-            if not fingerprint.check_field(w):
-                raise ValueError("weighting_functions not defined on compatible grids")
+        self._space = space
 
-        self._weighting_functions = weighting_functions
-        super().__init__(fingerprint, order, scale)
+        if weighting_functions is None and weighting_components is None:
+            raise ValueError(
+                "Either weighting functions or components must be provided."
+            )
 
-    def _data_space(self):
-        """The data space is a vector of the weighted averages."""
-        return EuclideanSpace(len(self._weighting_functions))
+        if weighting_functions is not None:
+            self._weighting_functions = weighting_functions
+            self._weighting_components = [
+                space.to_components(wf) for wf in weighting_functions
+            ]
+        else:
+            self._weighting_components = weighting_components
+            self._weighting_functions = [
+                space.from_components(wc) for wc in weighting_components
+            ]
 
-    def _mapping(self, element: Vector) -> np.ndarray:
-        """Maps a load to a vector of its weighted averages."""
-        averages = np.zeros(len(self._weighting_functions))
+        if fingerprint is None:
+            self._fingerprint = FingerPrint(
+                lmax=space.lmax,
+                earth_model_parameters=EarthModelParameters.from_standard_non_dimensionalisation(),
+            )
+            self._fingerprint.set_state_from_ice_ng()
+        else:
+            self._fingerprint = fingerprint
+
+        self._averages_size = len(self._weighting_functions)
+        self._averages_space = inf.EuclideanSpace(self._averages_size)
+
+        super().__init__(
+            self._space,
+            self._averages_space,
+            self._mapping,
+            dual_mapping=self._dual_mapping,
+        )
+
+    @property
+    def weighting_functions(self) -> List[SHGrid]:
+        """Returns the list of weighting functions (grids)."""
+        return self._weighting_functions
+
+    @property
+    def weighting_components(self) -> List[SHCoeffs]:
+        """Returns the list of weighting functions (SH coefficients)."""
+        return self._weighting_components
+
+    def _mapping(self, field: SHGrid) -> np.ndarray:
+        """Maps a field to a vector of its weighted averages."""
+        averages = np.zeros(self._averages_size)
         for i, w in enumerate(self._weighting_functions):
-            averages[i] = self.fingerprint.integrate(element * w)
+            averages[i] = self._fingerprint.integrate(field * w)
         return averages
 
-    def _formal_adjoint_mapping(self, data: np.ndarray) -> Vector:
-        """Maps a vector of weighted averages back to the load space."""
-        adjoint_load = self.fingerprint.zero_grid()
-        for i, w in enumerate(self._weighting_functions):
-            adjoint_load += data[i] * w
-        return adjoint_load
+    def _dual_mapping(self, ap: LinearForm) -> LinearForm:
+        """The dual mapping."""
+        cap = self.codomain.dual.to_components(ap) * self._space.radius**2
+        czp = sum([wi * ai for wi, ai in zip(self._weighting_components, cap)])
+        return inf.LinearForm(self.domain, components=czp)
+
+
+class WahrOperator(inf.LinearOperator):
+    """
+    Applies the Wahr approximation to infer a load average from gravity data.
+
+    This implements a simplified inversion that relates gravitational potential
+    coefficients directly to surface mass, scaled by Love numbers. It does not
+    account for the full sea level equation.
+
+    NOTE: This operator is incomplete. The adjoint mapping is missing, and the
+    forward mapping is implemented inefficiently with nested loops.
+    """
+
+    def __init__(
+        self,
+        observation_degree: int,
+        weighting_components: List[np.ndarray],
+        love_numbers: np.ndarray,
+        radius: float,
+    ) -> None:
+        """
+        Args:
+            observation_degree: Max degree of the gravity observation.
+            weighting_components: List of weighting functions (as SH coefficient vectors).
+            love_numbers: Array of gravitational Love numbers `k`.
+            radius: The radius of the sphere.
+        """
+        self._weighting_components = weighting_components
+        self._property_size = len(self._weighting_components)
+        self._property_space = inf.EuclideanSpace(self._property_size)
+
+        self._observation_degree = observation_degree
+        self._data_size = (self._observation_degree + 1) ** 2 - 4
+        self._data_space = inf.EuclideanSpace(self._data_size)
+
+        self._love_numbers = love_numbers
+        self._radius = radius
+
+        # The adjoint mapping is missing and should be added here.
+        super().__init__(self._data_space, self._property_space, self._mapping)
+
+    def _mapping(self, phi: np.ndarray) -> np.ndarray:
+        """
+        The forward mapping.
+
+        NOTE: This implementation is very inefficient due to nested Python loops.
+        It should be vectorized for any practical application.
+        """
+        k = self._love_numbers
+        b = self._radius
+        w = np.zeros(self._property_size)
+        for i in range(self._property_size):
+            for l in range(2, self._observation_degree + 1):
+                for m in range(-1 * l, l + 1):
+                    # This indexing assumes the same vectorization as GraceObservationOperator
+                    vec_index = (l**2) - 4 + m + l
+                    w[i] += (
+                        b**2
+                        * (1 / k[l])
+                        * phi[vec_index]
+                        * self._weighting_components[i][vec_index]
+                    )
+
+        return w

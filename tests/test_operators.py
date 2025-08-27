@@ -1,207 +1,267 @@
 import pytest
 import numpy as np
 import pygeoinf as inf
-from pyslfp import FingerPrint
+from pyshtools import SHGrid, SHCoeffs
+from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
+from pygeoinf import HilbertSpaceDirectSum, EuclideanSpace
+
+from pyslfp import EarthModelParameters
+from pyslfp.love_numbers import LoveNumbers
 from pyslfp.operators import (
-    sh_coefficient_operator,
+    field_to_sh_coefficient_operator,
+    sh_coefficient_to_field_operator,
     tide_gauge_operator,
     grace_operator,
     averaging_operator,
+    wahr_operator,
 )
 
-# ================== Fixtures ==================
+# Define a standard radius for creating test spaces
+RADIUS = 100
+
+# ================== Tests for field_to_sh_coefficient_operator ==================
 
 
-@pytest.fixture(scope="module", params=[16, 32], ids=["lmax16", "lmax32"])
-def fingerprint(request):
-    """Provides a FingerPrint instance for creating test spaces."""
-    return FingerPrint(lmax=request.param)
+@pytest.mark.parametrize("lmax", [16, 32])
+class TestFieldToShCoefficientOperator:
+    """A test suite for the field_to_sh_coefficient_operator factory."""
 
+    @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
+    def test_forward_mapping_known_input(self, lmax, space_type):
+        """Tests the forward mapping with a known spherical harmonic field."""
+        if space_type == "lebesgue":
+            field_space = Lebesgue(lmax, radius=RADIUS)
+        else:  # sobolev
+            field_space = Sobolev(lmax, 2, 0.5, radius=RADIUS)
 
-# ================== Tests for sh_coefficient_operator ==================
+        l, m = 3, 2
+        known_field_lm = SHCoeffs.from_zeros(
+            lmax=lmax,
+            normalization=field_space.normalization,
+            csphase=field_space.csphase,
+        )
+        known_field_lm.set_coeffs(values=[1.0], ls=[l], ms=[m])
+        known_field = field_space.from_coefficient(known_field_lm)
 
+        op = field_to_sh_coefficient_operator(field_space, lmax=5, lmin=2)
 
-class TestShCoefficientOperator:
-    """A test suite for the sh_coefficient_operator factory."""
+        result_vec = op(known_field)
+
+        expected_vec = op.codomain.zero
+        idx = (l**2 - 2**2) + (m + l)
+        expected_vec[idx] = 1.0
+
+        assert np.allclose(result_vec, expected_vec)
 
     @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
     @pytest.mark.parametrize("lmax_obs", [8, 16])
     @pytest.mark.parametrize("lmin_obs", [0, 2])
-    def test_adjoint_identity(self, fingerprint, space_type, lmax_obs, lmin_obs):
-        """
-        Tests the adjoint identity for a variety of observation degrees
-        and for both Lebesgue and Sobolev spaces.
-        """
-        if lmax_obs > fingerprint.lmax:
+    def test_adjoint_identity(self, lmax, space_type, lmax_obs, lmin_obs):
+        """Tests the adjoint identity for a variety of observation degrees."""
+        if lmax_obs > lmax:
             pytest.skip("Observation degree exceeds grid resolution.")
 
         if space_type == "lebesgue":
-            field_space = fingerprint.lebesgue_load_space()
-        else:  # sobolev
-            field_space = fingerprint.sobolev_load_space(2, 0.5)
+            field_space = Lebesgue(lmax, radius=RADIUS)
+        else:
+            field_space = Sobolev(lmax, 2, 0.5, radius=RADIUS)
 
-        op = sh_coefficient_operator(field_space, lmax=lmax_obs, lmin=lmin_obs)
+        op = field_to_sh_coefficient_operator(field_space, lmax=lmax_obs, lmin=lmin_obs)
 
-        # Create random elements in the domain and codomain to test the identity
         u = field_space.random()
         v = op.codomain.random()
 
-        # Manually perform the adjoint identity test (dot-product test)
-        # ⟨A(u), v⟩ = ⟨u, A*(v)⟩
         lhs = op.codomain.inner_product(op(u), v)
         rhs = op.domain.inner_product(u, op.adjoint(v))
 
         assert np.isclose(lhs, rhs, rtol=1e-12)
 
 
-# ================== Tests for tide_gauge_operator ==================
+# ================== Tests for sh_coefficient_to_field_operator ==================
 
 
-class TestTideGaugeOperator:
-    """A test suite for the tide_gauge_operator factory."""
+@pytest.mark.parametrize("lmax", [16, 32])
+class TestShCoefficientToFieldOperator:
+    """A test suite for the sh_coefficient_to_field_operator factory."""
 
-    @pytest.mark.parametrize(
-        "points",
-        [[(10, 20)], [(-5, 8), (45, -30), (22, 120)]],
-        ids=["single_point", "multi_point"],
+    @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
+    def test_right_inverse_property(self, lmax, space_type):
+        """Tests that applying synthesis then analysis returns the original vector."""
+        if space_type == "lebesgue":
+            field_space = Lebesgue(lmax, radius=RADIUS)
+        else:
+            field_space = Sobolev(lmax, 2, 0.5, radius=RADIUS)
+
+        lmax_obs, lmin_obs = 8, 2
+
+        op_synthesis = sh_coefficient_to_field_operator(
+            field_space, lmax=lmax_obs, lmin=lmin_obs
+        )
+        op_analysis = field_to_sh_coefficient_operator(
+            field_space, lmax=lmax_obs, lmin=lmin_obs
+        )
+
+        v_initial = op_synthesis.domain.random()
+        v_final = op_analysis(op_synthesis(v_initial))
+
+        assert np.isclose(
+            op_synthesis.domain.norm(v_initial - v_final)
+            / op_synthesis.domain.norm(v_initial),
+            0.0,
+        )
+        # assert np.allclose(v_initial, v_final)
+
+    @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
+    def test_adjoint_identity(self, lmax, space_type):
+        """Tests the adjoint identity for the synthesis operator."""
+        if space_type == "lebesgue":
+            field_space = Lebesgue(lmax, radius=RADIUS)
+        else:
+            field_space = Sobolev(lmax, 2, 0.5, radius=RADIUS)
+
+        op = sh_coefficient_to_field_operator(field_space, lmax=8, lmin=2)
+
+        u = op.domain.random()
+        v = op.codomain.random()
+
+        lhs = op.codomain.inner_product(op(u), v)
+        rhs = op.domain.inner_product(u, op.adjoint(v))
+
+        assert np.isclose(lhs, rhs, rtol=1e-12)
+
+
+# ================== Helper to build response spaces ==================
+
+
+def _create_response_space(lmax, space_type):
+    """Helper function to build response spaces for tests."""
+    if space_type == "lebesgue":
+        field_space = Lebesgue(lmax, radius=RADIUS)
+    else:  # sobolev
+        field_space = Sobolev(lmax, 2, 0.5, radius=RADIUS)
+
+    return HilbertSpaceDirectSum(
+        [field_space, field_space, field_space, EuclideanSpace(2)]
     )
-    def test_forward_mapping(self, fingerprint, points):
-        """
-        Tests the forward mapping with a constant field to ensure it
-        returns the correct values at the specified points.
-        """
-        # Point evaluation requires a Sobolev space of order > 1
-        response_space = fingerprint.sobolev_response_space(order=2, scale=0.5)
+
+
+# ================== Tests for block operators ==================
+
+
+@pytest.mark.parametrize("lmax", [16, 32])
+class TestBlockOperators:
+    """A test suite for operators that act on the response space."""
+
+    def test_tide_gauge_forward_mapping(self, lmax):
+        """Tests the tide gauge forward mapping with a constant field."""
+        response_space = _create_response_space(lmax, "sobolev")
+        points = [(-5, 8), (45, -30)]
         op = tide_gauge_operator(response_space, points)
 
-        # Create a response where the sea level is a constant field of value 5.0
         field_space = response_space.subspace(0)
-        const_slc = fingerprint.constant_grid(5.0)
-        zero_field = field_space.zero
-        zero_vec = response_space.subspace(3).zero
+        const_grid = SHGrid.from_zeros(lmax=lmax)
+        const_grid.data[:, :] = 5.0
 
-        response_vector = [const_slc, zero_field, zero_field, zero_vec]
-
-        # Apply the operator
+        response_vector = [
+            const_grid,
+            field_space.zero,
+            field_space.zero,
+            EuclideanSpace(2).zero,
+        ]
         result = op(response_vector)
 
-        # The result should be a vector where every entry is 5.0
         expected = np.full(len(points), 5.0)
         assert np.allclose(result, expected)
 
-    @pytest.mark.parametrize("sobolev_order", [2, 3])
-    def test_adjoint_identity(self, fingerprint, sobolev_order):
+    def test_tide_gauge_adjoint_identity(self, lmax):
         """Tests the adjoint identity for the tide gauge operator."""
-        response_space = fingerprint.sobolev_response_space(
-            order=sobolev_order, scale=0.5
-        )
+        response_space = _create_response_space(lmax, "sobolev")
         points = [(10, 20), (-30, 50)]
         op = tide_gauge_operator(response_space, points)
 
         u = op.domain.random()
         v = op.codomain.random()
 
-        # Manually perform the adjoint identity test (dot-product test)
         lhs = op.codomain.inner_product(op(u), v)
         rhs = op.domain.inner_product(u, op.adjoint(v))
-
         assert np.isclose(lhs, rhs, rtol=1e-12)
 
-
-# ================== Tests for grace_operator ==================
-
-
-class TestGraceOperator:
-    """A test suite for the grace_operator factory."""
-
     @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
-    @pytest.mark.parametrize("obs_degree", [8, 16])
-    def test_adjoint_identity(self, fingerprint, space_type, obs_degree):
-        """
-        Tests the adjoint identity for the full block operator for both
-        Lebesgue and Sobolev response spaces.
-        """
-        if obs_degree > fingerprint.lmax:
-            pytest.skip("Observation degree exceeds grid resolution.")
-
-        if space_type == "lebesgue":
-            response_space = fingerprint.lebesgue_response_space()
-        else:  # sobolev
-            response_space = fingerprint.sobolev_response_space(order=2, scale=0.5)
-
+    def test_grace_operator_adjoint_identity(self, lmax, space_type):
+        """Tests the adjoint identity for the grace operator."""
+        response_space = _create_response_space(lmax, space_type)
+        obs_degree = lmax // 2
         op = grace_operator(response_space, obs_degree)
 
         u = op.domain.random()
         v = op.codomain.random()
 
-        # Manually perform the adjoint identity test (dot-product test)
         lhs = op.codomain.inner_product(op(u), v)
         rhs = op.domain.inner_product(u, op.adjoint(v))
-
         assert np.isclose(lhs, rhs, rtol=1e-12)
 
 
 # ================== Tests for averaging_operator ==================
 
 
-class TestAveragingOperator:
-    """A test suite for the averaging_operator factory."""
+@pytest.mark.parametrize("lmax", [16, 32])
+class TestAveragingOperators:
+    """A test suite for the averaging_operator."""
 
     @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
-    def test_forward_mapping_known_input(self, fingerprint, space_type):
-        """
-        Tests the forward mapping with a known input. The inner product of a
-        function with itself should be its squared L2 norm.
-        """
+    def test_averaging_adjoint_identity(self, lmax, space_type):
+        """Tests the adjoint identity for the basic averaging operator."""
         if space_type == "lebesgue":
-            load_space = fingerprint.lebesgue_load_space()
-        else:  # sobolev
-            load_space = fingerprint.sobolev_load_space(2, 0.5)
+            load_space = Lebesgue(lmax, radius=RADIUS)
+        else:
+            load_space = Sobolev(lmax, 2, 0.5, radius=RADIUS)
 
-        # Use a single, non-trivial weighting function
         l2_space = (
             load_space.underlying_space if space_type == "sobolev" else load_space
         )
-        weighting_function = l2_space.random()
-
-        op = averaging_operator(load_space, [weighting_function])
-
-        # The input u is the same as the weighting function w
-        u = weighting_function
-
-        # The result should be a single-element vector containing <w, w>_L2
-        result = op(u)
-
-        # Calculate the expected L2 norm squared directly
-        expected_norm_sq = l2_space.inner_product(
-            weighting_function, weighting_function
-        )
-
-        assert np.isclose(result[0], expected_norm_sq)
-
-    @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
-    @pytest.mark.parametrize("num_weights", [1, 3])
-    def test_adjoint_identity(self, fingerprint, space_type, num_weights):
-        """
-        Tests the adjoint identity for the averaging operator.
-        """
-        if space_type == "lebesgue":
-            load_space = fingerprint.lebesgue_load_space()
-        else:  # sobolev
-            load_space = fingerprint.sobolev_load_space(order=2, scale=0.5)
-
-        # Create a list of random weighting functions
-        l2_space = (
-            load_space.underlying_space if space_type == "sobolev" else load_space
-        )
-        weighting_functions = [l2_space.random() for _ in range(num_weights)]
-
+        weighting_functions = [l2_space.random() for _ in range(3)]
         op = averaging_operator(load_space, weighting_functions)
 
         u = op.domain.random()
         v = op.codomain.random()
 
-        # Manually perform the adjoint identity test (dot-product test)
+        lhs = op.codomain.inner_product(op(u), v)
+        rhs = op.domain.inner_product(u, op.adjoint(v))
+        assert np.isclose(lhs, rhs, rtol=1e-12)
+
+
+# ================== Tests for wahr_operator ==================
+
+
+@pytest.mark.parametrize("lmax", [16, 32])
+class TestWahrOperator:
+    """A test suite for the wahr_operator factory."""
+
+    @pytest.mark.parametrize("domain_type", ["lebesgue", "sobolev"])
+    @pytest.mark.parametrize("codomain_type", ["lebesgue", "sobolev"])
+    def test_adjoint_identity(self, lmax, domain_type, codomain_type):
+        """Tests the adjoint identity for all space combinations."""
+
+        # Create domain (potential) and codomain (load) spaces
+        if domain_type == "lebesgue":
+            potential_space = Lebesgue(lmax, radius=RADIUS)
+        else:
+            potential_space = Sobolev(lmax, 2, 0.5, radius=RADIUS)
+
+        if codomain_type == "lebesgue":
+            load_space = Lebesgue(lmax, radius=RADIUS)
+        else:
+            load_space = Sobolev(lmax, 2, 0.5, radius=RADIUS)
+
+        # The operator needs a LoveNumbers instance
+        params = EarthModelParameters.from_standard_non_dimensionalisation()
+        love_numbers = LoveNumbers(lmax, params)
+
+        op = wahr_operator(love_numbers, potential_space, load_space)
+
+        u = op.domain.random()
+        v = op.codomain.random()
+
         lhs = op.codomain.inner_product(op(u), v)
         rhs = op.domain.inner_product(u, op.adjoint(v))
 

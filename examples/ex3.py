@@ -12,7 +12,7 @@ from pyslfp.utils import SHVectorConverter
 # Import the cartopy coordinate reference system for plotting
 import cartopy.crs as ccrs
 
-from pyslfp.operators import grace_operator, sh_coefficient_operator
+from pyslfp.operators import grace_operator, sh_coefficient_operator, wahr_operator
 
 
 fp = FingerPrint(
@@ -21,20 +21,15 @@ fp = FingerPrint(
 )
 fp.set_state_from_ice_ng()
 
-A = fp.as_sobolev_linear_operator(1, 0.1)
-B = grace_operator(A.codomain, 4)
+ln = fp.love_numbers
 
-# X = Sobolev(128, 2, 0.5)
+X = fp.sobolev_load_space(2, 0.5)
+A = wahr_operator(fp.love_numbers, X, X)
 
+u = X.random()
+v = X.random()
 
-# B = sh_coefficient_operator(X, 4)
-
-
-u = B.domain.random()
-v = B.codomain.random()
-
-
-lhs = B.codomain.inner_product(v, B(u))
-rhs = B.domain.inner_product(B.adjoint(v), u)
+lhs = X.inner_product(v, A(u))
+rhs = X.inner_product(A.adjoint(v), u)
 
 print(lhs, rhs, np.abs(lhs - rhs) / np.abs(rhs))

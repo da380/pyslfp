@@ -6,6 +6,8 @@ from typing import Tuple, Optional, List, Union
 import numpy as np
 from pyshtools import SHGrid
 
+from pygeoinf.symmetric_space.sphere import SphereHelper
+
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 from matplotlib.figure import Figure
@@ -34,10 +36,11 @@ def plot(
     **kwargs,
 ) -> Tuple[Figure, GeoAxes, Union[QuadMesh, QuadContourSet]]:
     """
-    Plots a pyshtools SHGrid object on a map. 🗺️
+    Plots a pyshtools SHGrid object on a map.
 
     This function provides a flexible interface to visualize spherical harmonic
-    grid data using cartopy for projections and matplotlib for plotting.
+    grid data by acting as a wrapper around the plotting facilities provided
+    by the pygeoinf library.
 
     Args:
         f (SHGrid): The scalar field to be plotted.
@@ -55,9 +58,8 @@ def plot(
         gridlines (bool): If True, latitude and longitude gridlines are
             included. Defaults to True.
         symmetric (bool): If True, the color scale is set symmetrically
-            around zero based on the field's maximum absolute value. This is
-            overridden if 'vmin' or 'vmax' are provided in kwargs.
-            Defaults to False.
+            around zero. This is overridden if 'vmin' or 'vmax' are provided
+            in kwargs. Defaults to False.
         **kwargs: Additional keyword arguments are forwarded to the underlying
             matplotlib plotting function (ax.pcolormesh or ax.contourf).
 
@@ -68,69 +70,25 @@ def plot(
     """
 
     if not isinstance(f, SHGrid):
-        raise ValueError("Scalar field must be of SHGrid type.")
+        raise ValueError("must be of SHGrid type.")
 
-    lons = f.lons()
-    lats = f.lats()
+    # Instantiate the helper class from pygeoinf.
+    sphere_helper = SphereHelper(f.lmax, 1, f.grid, f.extend)
 
-    figsize = kwargs.pop("figsize", (10, 8))
-    fig, ax = plt.subplots(figsize=figsize, subplot_kw={"projection": projection})
+    # --- Create a dictionary to hold all keyword arguments ---
+    plot_options = {
+        "projection": projection,
+        "contour": contour,
+        "cmap": cmap,
+        "coasts": coasts,
+        "rivers": rivers,
+        "borders": borders,
+        "map_extent": map_extent,
+        "gridlines": gridlines,
+        "symmetric": symmetric,
+    }
 
-    if map_extent is not None:
-        ax.set_extent(map_extent, crs=ccrs.PlateCarree())
+    plot_options.update(kwargs)
 
-    if coasts:
-        ax.add_feature(cfeature.COASTLINE, linewidth=0.8)
-
-    if rivers:
-        ax.add_feature(cfeature.RIVERS, linewidth=0.8)
-
-    if borders:
-        ax.add_feature(cfeature.BORDERS, linewidth=0.8)
-
-    kwargs.setdefault("cmap", cmap)
-
-    lat_interval = kwargs.pop("lat_interval", 30)
-    lon_interval = kwargs.pop("lon_interval", 30)
-
-    if symmetric:
-        data_max = 1.2 * np.nanmax(np.abs(f.data))
-        kwargs.setdefault("vmin", -data_max)
-        kwargs.setdefault("vmax", data_max)
-
-    levels = kwargs.pop("levels", 10)
-    im: Union[QuadMesh, QuadContourSet]
-
-    if contour:
-        im = ax.contourf(
-            lons,
-            lats,
-            f.data,
-            transform=ccrs.PlateCarree(),
-            levels=levels,
-            **kwargs,
-        )
-    else:
-        im = ax.pcolormesh(
-            lons,
-            lats,
-            f.data,
-            transform=ccrs.PlateCarree(),
-            **kwargs,
-        )
-
-    if gridlines:
-        gl = ax.gridlines(
-            linestyle="--",
-            draw_labels=True,
-            dms=True,
-            x_inline=False,
-            y_inline=False,
-        )
-
-        gl.xlocator = mticker.MultipleLocator(lon_interval)
-        gl.ylocator = mticker.MultipleLocator(lat_interval)
-        gl.xformatter = LongitudeFormatter()
-        gl.yformatter = LatitudeFormatter()
-
-    return fig, ax, im
+    # Call the underlying plot method, unpacking the collected options.
+    return sphere_helper.plot(f, **plot_options)

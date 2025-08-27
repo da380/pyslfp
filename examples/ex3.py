@@ -12,7 +12,7 @@ from pyslfp.utils import SHVectorConverter
 # Import the cartopy coordinate reference system for plotting
 import cartopy.crs as ccrs
 
-from pyslfp.operators import grace_operator
+from pyslfp.operators import grace_operator, sh_coefficient_operator
 
 
 fp = FingerPrint(
@@ -21,23 +21,20 @@ fp = FingerPrint(
 )
 fp.set_state_from_ice_ng()
 
-A = fp.as_lebesgue_linear_operator()
-
+A = fp.as_sobolev_linear_operator(1, 0.1)
 B = grace_operator(A.codomain, 4)
 
+# X = Sobolev(128, 2, 0.5)
 
-u = B.domain.zero
+
+# B = sh_coefficient_operator(X, 4)
+
+
+u = B.domain.random()
 v = B.codomain.random()
-
-phi = u[2]
-phi_lm = fp.expand_field(phi)
-phi_lm.coeffs[0, 2, 0] = 1
-phi = fp.expand_coefficient(phi_lm)
-u[2] = phi
 
 
 lhs = B.codomain.inner_product(v, B(u))
 rhs = B.domain.inner_product(B.adjoint(v), u)
 
 print(lhs, rhs, np.abs(lhs - rhs) / np.abs(rhs))
-print(rhs / lhs, fp.mean_sea_floor_radius**2)

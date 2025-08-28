@@ -14,6 +14,7 @@ from pyslfp.operators import (
     grace_operator,
     averaging_operator,
     WahrMolenaarByranMethod,
+    ice_thickness_change_to_load_operator,
 )
 
 # Define a standard radius for creating test spaces
@@ -306,4 +307,77 @@ class TestWahrMolenaarByranMethod:
 
         lhs = op.codomain.inner_product(op(u), v)
         rhs = op.domain.inner_product(u, op.adjoint(v))
+        assert np.isclose(lhs, rhs, rtol=1e-12)
+
+
+# ================== Tests for ice_thickness_change_to_load_operator ==================
+
+
+@pytest.mark.parametrize("lmax", [16, 32])
+class TestIceThicknessToLoadOperator:
+    """A test suite for the ice_thickness_change_to_load_operator."""
+
+    @pytest.fixture
+    def fp_instance(self, lmax):
+        """Provides a configured FingerPrint instance for the tests."""
+        fp = FingerPrint(lmax=lmax)
+        fp.set_state_from_ice_ng()
+        return fp
+
+    @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
+    @pytest.mark.parametrize("ice_projection", [True, False])
+    def test_forward_mapping(self, lmax, space_type, ice_projection, fp_instance):
+        """
+        Tests the forward mapping of the operator to ensure it correctly
+        converts an ice thickness change grid to a surface mass load grid.
+        """
+        if space_type == "lebesgue":
+            space = Lebesgue(lmax, radius=fp_instance.mean_sea_floor_radius)
+        else:
+            space = Sobolev(lmax, 2, 0.5, radius=fp_instance.mean_sea_floor_radius)
+
+        # Create the operator to be tested
+        op = ice_thickness_change_to_load_operator(
+            fp_instance, space, ice_projection=ice_projection
+        )
+
+        # 1. Create a random ice thickness change field
+        ice_thickness_change = space.random()
+
+        # 2. Apply the operator to get the actual load
+        load_actual = op(ice_thickness_change)
+
+        # 3. Manually calculate the expected load based on the physical definition
+        load_expected = (
+            fp_instance.ice_density
+            * fp_instance.one_minus_ocean_function
+            * ice_thickness_change
+        )
+        if ice_projection:
+            load_expected = fp_instance.ice_projection(0) * load_expected
+
+        # 4. Assert that the operator's output matches the expected calculation
+        assert np.allclose(load_actual.data, load_expected.data, rtol=1e-12)
+
+    @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
+    def test_adjoint_identity(self, lmax, space_type, fp_instance):
+        """
+        Tests the adjoint identity for the operator. This confirms that the
+        operator is correctly defined as formally self-adjoint.
+        """
+        if space_type == "lebesgue":
+            space = Lebesgue(lmax, radius=fp_instance.mean_sea_floor_radius)
+        else:
+            space = Sobolev(lmax, 2, 0.5, radius=fp_instance.mean_sea_floor_radius)
+
+        op = ice_thickness_change_to_load_operator(fp_instance, space)
+
+        # Create two random fields in the space
+        u = space.random()
+        v = space.random()
+
+        # Test the adjoint identity: <A(u), v> = <u, A*(v)>
+        lhs = space.inner_product(op(u), v)
+        rhs = space.inner_product(u, op.adjoint(v))
+
         assert np.isclose(lhs, rhs, rtol=1e-12)

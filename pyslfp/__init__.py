@@ -14,6 +14,7 @@ from pyslfp.operators import (
     sh_coefficient_to_field_operator,
     averaging_operator,
     WahrMolenaarByranMethod,
+    ice_thickness_change_to_load_operator,
 )
 
 # from pyslfp.operators import (
@@ -35,4 +36,4 @@ from pyslfp.operators import (
 # )
 from pyslfp.plotting import plot
 
-from pyslfp.utils import SHVectorConverter
+from pyslfp.utils import SHVectorConverter, read_gloss_tide_gauge_data

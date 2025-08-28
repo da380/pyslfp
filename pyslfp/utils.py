@@ -3,7 +3,9 @@ Module collecting some small helper functions or classes.
 """
 
 import numpy as np
-from typing import Optional
+from typing import Optional, Tuple, List
+
+from . import DATADIR
 
 
 class SHVectorConverter:
@@ -92,3 +94,33 @@ class SHVectorConverter:
             coeffs[0, l, 0 : l + 1] = vec[start_idx + l : start_idx + 2 * l + 1]
 
         return coeffs
+
+
+def read_gloss_tide_gauge_data() -> Tuple[List[str], List[float], List[float]]:
+    """
+    Reads and parses the GLOSS tide gauge data file.
+
+    The function opens the `gloss.txt` file located in the package's
+    data directory, reads each line, and parses it to extract the station
+    name, latitude, and longitude.
+
+    Returns:
+        A tuple containing three lists:
+        - A list of station names (str).
+        - A list of latitudes (float).
+        - A list of longitudes (float).
+    """
+    file_path = DATADIR + "/tide_gauge/gloss.txt"
+    names = []
+    lats = []
+    lons = []
+
+    with open(file_path, "r") as f:
+        for line in f:
+            parts = line.strip().split()
+            if len(parts) == 3:
+                names.append(parts[0])
+                lats.append(float(parts[1]))
+                lons.append(float(parts[2]))
+
+    return names, lats, lons

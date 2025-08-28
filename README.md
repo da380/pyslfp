@@ -94,6 +94,10 @@ cbar.set_label("Sea Level Change (meters)")
 plt.show()
 ```
 
+The output of the above script will look similar to the following figure:
+
+![Example of Bayesian Inference on a Circle](docs/figures/sl.png)
+
 ---
 ## Core Components
 

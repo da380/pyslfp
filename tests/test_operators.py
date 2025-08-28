@@ -5,7 +5,7 @@ from pyshtools import SHGrid, SHCoeffs
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 from pygeoinf import HilbertSpaceDirectSum, EuclideanSpace
 
-from pyslfp import EarthModelParameters
+from pyslfp import EarthModelParameters, FingerPrint
 from pyslfp.love_numbers import LoveNumbers
 from pyslfp.operators import (
     field_to_sh_coefficient_operator,
@@ -13,11 +13,12 @@ from pyslfp.operators import (
     tide_gauge_operator,
     grace_operator,
     averaging_operator,
-    wahr_operator,
+    WahrMolenaarByranMethod,
 )
 
 # Define a standard radius for creating test spaces
-RADIUS = 100
+RADIUS = 6371.0
+
 
 # ================== Tests for field_to_sh_coefficient_operator ==================
 
@@ -109,7 +110,7 @@ class TestShCoefficientToFieldOperator:
             / op_synthesis.domain.norm(v_initial),
             0.0,
         )
-        # assert np.allclose(v_initial, v_final)
+        assert np.allclose(v_initial, v_final)
 
     @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
     def test_adjoint_identity(self, lmax, space_type):
@@ -230,39 +231,79 @@ class TestAveragingOperators:
         assert np.isclose(lhs, rhs, rtol=1e-12)
 
 
-# ================== Tests for wahr_operator ==================
+# ================== Tests for WahrMolenaarByranMethod Operators ==================
+
+
+@pytest.fixture(scope="module")
+def wmb_method(lmax=32):
+    """Provides a configured WahrMolenaarByranMethod instance for testing."""
+    # The factory requires an object with Earth Model parameters.
+    # A FingerPrint instance is a convenient way to provide one.
+    fp = FingerPrint(lmax=lmax)
+    return WahrMolenaarByranMethod.from_finger_print(
+        observation_degree=lmax, finger_print=fp
+    )
 
 
 @pytest.mark.parametrize("lmax", [16, 32])
-class TestWahrOperator:
-    """A test suite for the wahr_operator factory."""
+class TestWahrMolenaarByranMethod:
+    """A test suite for the WahrMolenaarByranMethod class."""
 
-    @pytest.mark.parametrize("domain_type", ["lebesgue", "sobolev"])
-    @pytest.mark.parametrize("codomain_type", ["lebesgue", "sobolev"])
-    def test_adjoint_identity(self, lmax, domain_type, codomain_type):
-        """Tests the adjoint identity for all space combinations."""
-
-        # Create domain (potential) and codomain (load) spaces
-        if domain_type == "lebesgue":
-            potential_space = Lebesgue(lmax, radius=RADIUS)
+    @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
+    def test_potential_to_load_adjoint_identity(self, lmax, space_type, wmb_method):
+        """Tests the potential field -> load field operator."""
+        if space_type == "lebesgue":
+            space = Lebesgue(lmax, radius=RADIUS)
         else:
-            potential_space = Sobolev(lmax, 2, 0.5, radius=RADIUS)
+            space = Sobolev(lmax, 2, 0.5, radius=RADIUS)
 
-        if codomain_type == "lebesgue":
-            load_space = Lebesgue(lmax, radius=RADIUS)
-        else:
-            load_space = Sobolev(lmax, 2, 0.5, radius=RADIUS)
-
-        # The operator needs a LoveNumbers instance
-        params = EarthModelParameters.from_standard_non_dimensionalisation()
-        love_numbers = LoveNumbers(lmax, params)
-
-        op = wahr_operator(love_numbers, potential_space, load_space)
+        op = wmb_method.potential_field_to_load_operator(space, space)
 
         u = op.domain.random()
         v = op.codomain.random()
 
         lhs = op.codomain.inner_product(op(u), v)
         rhs = op.domain.inner_product(u, op.adjoint(v))
+        assert np.isclose(lhs, rhs, rtol=1e-12)
 
+    @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
+    def test_coeff_to_load_adjoint_identity(self, lmax, space_type, wmb_method):
+        """Tests the potential coefficients -> load field operator."""
+        if space_type == "lebesgue":
+            load_space = Lebesgue(lmax, radius=RADIUS)
+        else:
+            load_space = Sobolev(lmax, 2, 0.5, radius=RADIUS)
+
+        op = wmb_method.potential_coefficient_to_load_operator(load_space)
+
+        u = op.domain.random()
+        v = op.codomain.random()
+
+        lhs = op.codomain.inner_product(op(u), v)
+        rhs = op.domain.inner_product(u, op.adjoint(v))
+        assert np.isclose(lhs, rhs, rtol=1e-12)
+
+    @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
+    def test_coeff_to_avg_adjoint_identity(self, lmax, space_type, wmb_method):
+        """Tests the potential coefficients -> load average operator."""
+        if space_type == "lebesgue":
+            load_space = Lebesgue(lmax, radius=RADIUS)
+        else:
+            load_space = Sobolev(lmax, 2, 0.5, radius=RADIUS)
+
+        # Create some random averaging functions
+        l2_space = (
+            load_space.underlying_space if space_type == "sobolev" else load_space
+        )
+        weighting_functions = [l2_space.random() for _ in range(3)]
+
+        op = wmb_method.potential_coefficient_to_load_average_operator(
+            load_space, weighting_functions
+        )
+
+        u = op.domain.random()
+        v = op.codomain.random()
+
+        lhs = op.codomain.inner_product(op(u), v)
+        rhs = op.domain.inner_product(u, op.adjoint(v))
         assert np.isclose(lhs, rhs, rtol=1e-12)

@@ -5,6 +5,8 @@ non-dimensionalisation scheme.
 
 from __future__ import annotations
 
+import inspect
+
 # =====================================================================
 # Default Earth Model Physical Parameters
 # Based on the Preliminary Reference Earth Model (PREM) and other
@@ -129,6 +131,38 @@ class EarthModelParameters:
         return EarthModelParameters(
             length_scale=6371000.0, density_scale=1000.0, time_scale=3600
         )
+
+    @staticmethod
+    def _get_init_kwargs_from_instance(
+        emp_instance: "EarthModelParameters",
+    ) -> dict[str, float]:
+        """
+        Extracts __init__ keyword arguments from an existing EarthModelParameters instance.
+
+        This is a helper method to facilitate re-initializing a subclass with
+        the parameters of an existing parent class instance.
+
+        Args:
+            emp_instance: An instance of EarthModelParameters or its subclass.
+
+        Returns:
+            A dictionary of keyword arguments suitable for initializing a new
+            EarthModelParameters instance.
+        """
+        signature = inspect.signature(EarthModelParameters.__init__)
+        param_names = [
+            p for p in signature.parameters if p not in ("self", "args", "kwargs")
+        ]
+        scale_names = {"length_scale", "density_scale", "time_scale"}
+
+        kwargs = {}
+        for name in param_names:
+            if name in scale_names:
+                kwargs[name] = getattr(emp_instance, name)
+            else:
+                # Assumes a corresponding '_si' property for other parameters
+                kwargs[name] = getattr(emp_instance, f"{name}_si")
+        return kwargs
 
     @property
     def length_scale(self) -> float:

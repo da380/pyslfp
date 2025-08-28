@@ -64,20 +64,10 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         if earth_model_parameters is None:
             super().__init__()
         else:
-            parent_signature = inspect.signature(EarthModelParameters.__init__)
-            param_names = [
-                param for param in parent_signature.parameters if param != "self"
-            ]
-            scale_names = {"length_scale", "density_scale", "time_scale"}
-            kwargs = {
-                name: (
-                    getattr(earth_model_parameters, name)
-                    if name in scale_names
-                    else getattr(earth_model_parameters, f"{name}_si")
-                )
-                for name in param_names
-            }
-            super().__init__(**kwargs)
+            init_kwargs = EarthModelParameters._get_init_kwargs_from_instance(
+                earth_model_parameters
+            )
+            super().__init__(**init_kwargs)
 
         # Set options.
         self._lmax: int = lmax
@@ -214,11 +204,9 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         return self._ocean_area
 
     @property
-    def love_numbers(self):
-        """
-        Returns the associated instance of the LoveNumbers class.
-        """
-        return LoveNumbers(self.lmax, self, file=self._love_number_file)
+    def love_number_file(self):
+        """Returns the path to the Love number file."""
+        return self._love_number_file
 
     @property
     def solver_counter(self) -> int:

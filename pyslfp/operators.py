@@ -25,9 +25,12 @@ from pygeoinf import (
 
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
+
+from . import DATADIR
 from .utils import SHVectorConverter
 from .physical_parameters import EarthModelParameters
 from .love_numbers import LoveNumbers
+from .finger_print import FingerPrint
 
 
 def underlying_space(space: HilbertSpace):
@@ -351,54 +354,196 @@ def averaging_operator(
         return l2_operator
 
 
-def wahr_operator(
-    love_numbers: LoveNumbers,
-    potential_space: Union[Lebesgue, Sobolev],
-    load_space: Union[Lebesgue, Sobolev],
-    /,
-    *,
-    lmax=None,
-) -> LinearOperator:
+class WahrMolenaarByranMethod(EarthModelParameters, LoveNumbers):
     """
-    Returns as a LinearOperator the approximate mapping from a gravitational
-    potential field to the corresponding surface load using the method of
-    Wahr, Molenaar, & Bryan (1998).
-
-    Args:
-        love_numbers: An instance of the LoveNumbers class.
-        potential_space: The Hilbert space of the potential field.
-        load_space: The Hilbert space of the load field.
-        lmax: The maximum spherical harmonic degree to use. If None, the
-            maximum degree in the potential space is used.
-
-    Notes:
-        Mathematically, this opeator is continuous between a Sobolev space
-        with order s and another with order s-1. But it can be practically
-        useful to define this operator in more generally settings.
-
-    Returns:
-        A LinearOperator object.
+    A class that groups together functions linked to the method of Wahr, Molenaar, & Bryan (1998)
+    for estimating surface loads from GRACE data.
     """
 
-    if not isinstance(potential_space, (Lebesgue, Sobolev)):
-        raise TypeError("potential_space must be a Lebesgue or Sobolev space.")
+    def __init__(
+        self,
+        observation_degree: int,
+        /,
+        *,
+        earth_model_parameters: Optional[EarthModelParameters] = None,
+        love_number_file: str = DATADIR + "/love_numbers/PREM_4096.dat",
+    ):
+        """
+        Args:
+            observation_degree: The maximum degree of the SH coefficient observations.
+            earth_model_parameters: Parameters for the Earth model. If None,
+                default parameters are used.
+            love_number_file: Path to the file containing the Love numbers.
+        """
 
-    if not isinstance(load_space, (Lebesgue, Sobolev)):
-        raise TypeError("load_space must be a Lebesgue or Sobolev space.")
+        if earth_model_parameters is None:
+            super().__init__()
+        else:
+            init_kwargs = EarthModelParameters._get_init_kwargs_from_instance(
+                earth_model_parameters
+            )
+            super().__init__(**init_kwargs)
 
-    if not isinstance(love_numbers, LoveNumbers):
-        raise TypeError("love_numbers must be a LoveNumbers object.")
+        self._love_number_file = love_number_file
 
-    l2_potential_space = underlying_space(potential_space)
+        self._observation_degree = observation_degree
 
-    lmax_ = lmax if lmax is not None else l2_potential_space.lmax
+        LoveNumbers.__init__(
+            self,
+            self._observation_degree,
+            self,
+            file=self._love_number_file,
+        )
 
-    def scaling_function(k: (int, int)) -> float:
-        l, _ = k
-        return 1 / love_numbers.k[l] if 1 < l <= lmax_ else 0
+    @staticmethod
+    def from_finger_print(observation_degree: int, finger_print: FingerPrint):
+        """
+        Creates a WahrMolenaarByranMethod object from a FingerPrint object.
 
-    l2_operator = l2_potential_space.invariant_automorphism_from_index_function(
-        scaling_function
-    )
+        Args:
+            observation_degree: The maximum degree of the SH coefficient observations.
+            finger_print: The FingerPrint object.
 
-    return LinearOperator.from_formal_adjoint(potential_space, load_space, l2_operator)
+        Returns:
+            A WahrMolenaarByranMethod object.
+        """
+        return WahrMolenaarByranMethod(
+            observation_degree,
+            earth_model_parameters=finger_print,
+            love_number_file=finger_print.love_number_file,
+        )
+
+    @property
+    def observation_degree(self) -> int:
+        """The maximum degree of the SH coefficient observations."""
+        return self._observation_degree
+
+    def potential_field_to_load_operator(
+        self,
+        potential_space: Union[Lebesgue, Sobolev],
+        load_space: Union[Lebesgue, Sobolev],
+    ):
+        """
+        Returns as a LinearOperator that maps a gravitational potential field to an
+        approximation of the causative surface load.
+
+        Args:
+            potential_space: The HilbertSpace for the potential field.
+            load_space: The HilbertSpace for the load field.
+
+        Returns:
+            A LinearOperator object.
+        """
+
+        if not isinstance(potential_space, (Lebesgue, Sobolev)):
+            raise TypeError("potential_space must be a Lebesgue or Sobolev space.")
+
+        if not isinstance(load_space, (Lebesgue, Sobolev)):
+            raise TypeError("load_space must be a Lebesgue or Sobolev space.")
+
+        l2_potential_space = underlying_space(potential_space)
+
+        def scaling_function(k: (int, int)) -> float:
+            l, _ = k
+            return 1 / self.k[l] if 1 < l <= self.observation_degree else 0
+
+        l2_operator = l2_potential_space.invariant_automorphism_from_index_function(
+            scaling_function
+        )
+
+        return LinearOperator.from_formal_adjoint(
+            potential_space, load_space, l2_operator
+        )
+
+    def potential_coefficient_to_load_operator(
+        self, load_space: Union[Lebesgue, Sobolev]
+    ):
+        """
+        Returns as a LinearOperator the approximate mapping between a vector of gravitational potential
+        coefficients and an approximation to the causative surface load.
+
+        Args:
+            load_space: The load_space: The HilbertSpace for the load field.
+
+        Returns:
+            A LinearOperator object.
+
+        Notes:
+
+            The input coefficients are ordered in the following manner:
+
+            u_{2-2}, u_{2-1}, u_{20}, u_{21}, u_{22}, u_{3,-3}, u_{3-2},...
+        """
+
+        if not isinstance(load_space, (Lebesgue, Sobolev)):
+            raise TypeError("load_space must be a Lebesgue or Sobolev space.")
+
+        coeff_to_field_operator = sh_coefficient_to_field_operator(
+            load_space, self.observation_degree, lmin=2
+        )
+
+        potential_field_to_load_operator = self.potential_field_to_load_operator(
+            load_space, load_space
+        )
+
+        return potential_field_to_load_operator @ coeff_to_field_operator
+
+    def potential_field_to_load_average_operator(
+        self, potential_space, load_space, weighting_functions
+    ):
+        """
+        Returns as a LinearOperator a mapping from a vector of gravitational potential
+        field to averages of the causative load.
+
+        Args:
+            load_space: The HilbertSpace for the load field.
+            weighting_functions: A list of weighting functions.
+
+        Returns:
+            A LinearOperator object.
+
+        Notes:
+
+            The input coefficients are ordered in the following manner:
+
+            u_{2-2}, u_{2-1}, u_{20}, u_{21}, u_{22}, u_{3,-3}, u_{3-2},...
+        """
+
+        potential_field_to_load_operator = self.potential_field_to_load_operator(
+            potential_space, load_space
+        )
+        load_to_load_averages_operator = averaging_operator(
+            load_space, weighting_functions
+        )
+
+        return load_to_load_averages_operator @ potential_field_to_load_operator
+
+    def potential_coefficient_to_load_average_operator(
+        self, load_space: Union[Lebesgue, Sobolev], weighting_functions: List[SHGrid]
+    ):
+        """
+        Returns as a LinearOperator a mapping from a vector of gravitational potential
+        coefficients to averages of the causative load.
+
+        Args:
+            load_space: The HilbertSpace for the load field.
+            weighting_functions: A list of weighting functions.
+
+        Returns:
+            A LinearOperator object.
+
+        Notes:
+
+            The input coefficients are ordered in the following manner:
+
+            u_{2-2}, u_{2-1}, u_{20}, u_{21}, u_{22}, u_{3,-3}, u_{3-2},...
+        """
+
+        coefficient_to_load_opeator = self.potential_coefficient_to_load_operator(
+            load_space
+        )
+        load_to_load_averages_operator = averaging_operator(
+            load_space, weighting_functions
+        )
+
+        return load_to_load_averages_operator @ coefficient_to_load_opeator

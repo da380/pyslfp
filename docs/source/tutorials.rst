@@ -6,11 +6,11 @@
     .. toctree::
        :maxdepth: 1
     
-       tutorials/t1
-       tutorials/t2
-       tutorials/t3
-       tutorials/t4
-       tutorials/t5
-       tutorials/t6
+       tutorials/tutorial1
+       tutorials/tutorial2
+       tutorials/tutorial3
+       tutorials/tutorial4
+       tutorials/tutorial5
+       tutorials/tutorial6
        
     

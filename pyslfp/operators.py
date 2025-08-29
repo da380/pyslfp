@@ -354,12 +354,34 @@ def averaging_operator(
         return l2_operator
 
 
+def ice_projection_operator(
+    finger_print: FingerPrint, load_space: Union[Lebesgue, Sobolev]
+):
+    """
+    Returns a LinearOpeator that maps a load to be non-zero only over the background ice sheets.
+
+    Args:
+        finger_print: The FingerPrint object.
+        load_space: The Hilbert space for the load.
+
+    Returns:
+        A LinearOperator object.
+
+    """
+
+    def mapping(load: SHGrid) -> SHGrid:
+        return finger_print.ice_projection(0) * load
+
+    l2_load_space = underlying_space(load_space)
+
+    l2_operator = LinearOperator.self_adjoint(l2_load_space, mapping)
+
+    return LinearOperator.from_formally_self_adjoint(load_space, l2_operator)
+
+
 def ice_thickness_change_to_load_operator(
     finger_print: FingerPrint,
     load_space: Union[Lebesgue, Sobolev],
-    /,
-    *,
-    ice_projection: bool = False,
 ):
     """
     Returns a LinearOperator that maps the ice thickness change to a load.
@@ -367,22 +389,13 @@ def ice_thickness_change_to_load_operator(
     Args:
         finger_print: The FingerPrint object.
         load_space: The Hilbert space for the load.
-        ice_projection: If True, the ice thickness change is projected onto the
-            background ice surface.
 
     Returns:
         A LinearOperator object.
     """
 
     def mapping(ice_thicknes_change: SHGrid) -> SHGrid:
-        load = (
-            finger_print.ice_density
-            * finger_print.one_minus_ocean_function
-            * ice_thicknes_change
-        )
-        if ice_projection:
-            load = finger_print.ice_projection(0) * load
-        return load
+        return finger_print.direct_load_from_ice_thickness_change(ice_thicknes_change)
 
     l2_load_space = underlying_space(load_space)
 

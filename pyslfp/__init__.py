@@ -15,25 +15,10 @@ from pyslfp.operators import (
     averaging_operator,
     WahrMolenaarByranMethod,
     ice_thickness_change_to_load_operator,
+    ice_projection_operator,
 )
 
-# from pyslfp.operators import (
-#    FingerPrintOperator,
-#    ObservationOperator,
-#    PropertyOperator,
-#    GraceObservationOperator,
-#    TideGaugeObservationOperator,
-#    LoadAveragingOperator,
-# )
 
-
-# from pyslfp.operators import (
-#    SeaLevelOperator,
-#    GraceObservationOperator,
-#    TideGaugeObservationOperator,
-#    AveragingOperator,
-#    WahrOperator,
-# )
 from pyslfp.plotting import plot
 
 from pyslfp.utils import SHVectorConverter, read_gloss_tide_gauge_data

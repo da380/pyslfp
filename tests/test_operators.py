@@ -325,8 +325,7 @@ class TestIceThicknessToLoadOperator:
         return fp
 
     @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
-    @pytest.mark.parametrize("ice_projection", [True, False])
-    def test_forward_mapping(self, lmax, space_type, ice_projection, fp_instance):
+    def test_forward_mapping(self, lmax, space_type, fp_instance):
         """
         Tests the forward mapping of the operator to ensure it correctly
         converts an ice thickness change grid to a surface mass load grid.
@@ -337,9 +336,7 @@ class TestIceThicknessToLoadOperator:
             space = Sobolev(lmax, 2, 0.5, radius=fp_instance.mean_sea_floor_radius)
 
         # Create the operator to be tested
-        op = ice_thickness_change_to_load_operator(
-            fp_instance, space, ice_projection=ice_projection
-        )
+        op = ice_thickness_change_to_load_operator(fp_instance, space)
 
         # 1. Create a random ice thickness change field
         ice_thickness_change = space.random()
@@ -353,8 +350,6 @@ class TestIceThicknessToLoadOperator:
             * fp_instance.one_minus_ocean_function
             * ice_thickness_change
         )
-        if ice_projection:
-            load_expected = fp_instance.ice_projection(0) * load_expected
 
         # 4. Assert that the operator's output matches the expected calculation
         assert np.allclose(load_actual.data, load_expected.data, rtol=1e-12)

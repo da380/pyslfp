@@ -11,6 +11,8 @@
        tutorials/tutorial3
        tutorials/tutorial4
        tutorials/tutorial5
+       tutorials/tutorial6
+       
        
        
     

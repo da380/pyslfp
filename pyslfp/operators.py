@@ -354,29 +354,106 @@ def averaging_operator(
         return l2_operator
 
 
-def ice_projection_operator(
-    finger_print: FingerPrint, load_space: Union[Lebesgue, Sobolev]
+def spatial_projection_operator(
+    projection_field: SHGrid,
+    load_space: Union[Lebesgue, Sobolev],
 ):
     """
-    Returns a LinearOpeator that maps a load to be non-zero only over the background ice sheets.
+    Returns a linear opeator that multiplies a load by a projection field.
+
+    Args:
+        projection_field: The projection field.
+        load_space: The Hilbert space for the load.
+
+    Returns:
+        A LinearOperator object.
+    """
+
+    def mapping(load: SHGrid) -> SHGrid:
+        return projection_field * load
+
+    l2_load_space = underlying_space(load_space)
+    l2_operator = LinearOperator.self_adjoint(l2_load_space, mapping)
+    return LinearOperator.from_formally_self_adjoint(load_space, l2_operator)
+
+
+def ice_projection_operator(
+    finger_print: FingerPrint,
+    load_space: Union[Lebesgue, Sobolev],
+    /,
+    *,
+    exclude_ice_shelves: bool = False,
+):
+    """
+    Returns a LinearOpeator multiplies a load by a function that is one
+    over the background ice sheets and zero elsewhere.
 
     Args:
         finger_print: The FingerPrint object.
         load_space: The Hilbert space for the load.
+        exclude_ice_shelves: If True, the function is set to zero in ice-shelved regions.
 
     Returns:
         A LinearOperator object.
 
     """
 
-    def mapping(load: SHGrid) -> SHGrid:
-        return finger_print.ice_projection(0) * load
+    projection_field = finger_print.ice_projection(
+        value=0, exclude_ice_shelves=exclude_ice_shelves
+    )
+    return spatial_projection_operator(projection_field, load_space)
 
-    l2_load_space = underlying_space(load_space)
 
-    l2_operator = LinearOperator.self_adjoint(l2_load_space, mapping)
+def ocean_projection_operator(
+    finger_print: FingerPrint,
+    load_space: Union[Lebesgue, Sobolev],
+    /,
+    *,
+    exclude_ice_shelves: bool = False,
+):
+    """
+    Returns a LinearOpeator multiplies a load by a function that is one
+    over the background oceans and zero elsewhere.
 
-    return LinearOperator.from_formally_self_adjoint(load_space, l2_operator)
+    Args:
+        finger_print: The FingerPrint object.
+        load_space: The Hilbert space for the load.
+        exclude_ice_shelves: If True, the function is set to zero in ice-shelved regions.
+
+    Returns:
+        A LinearOperator object.
+
+    """
+
+    projection_field = finger_print.ocean_projection(
+        value=0, exclude_ice_shelves=exclude_ice_shelves
+    )
+    return spatial_projection_operator(projection_field, load_space)
+
+
+def land_projection_operator(
+    finger_print: FingerPrint,
+    load_space: Union[Lebesgue, Sobolev],
+    /,
+    *,
+    exclude_ice: bool = True,
+):
+    """
+    Returns a LinearOpeator multiplies a load by a function that is one
+    over the background land and zero elsewhere.
+
+    Args:
+        finger_print: The FingerPrint object.
+        load_space: The Hilbert space for the load.
+        exclude_ice: If True, the function is set to zero in ice-covered regions.
+
+    Returns:
+        A LinearOperator object.
+
+    """
+
+    projection_field = finger_print.land_projection(value=0, exclude_ice=exclude_ice)
+    return spatial_projection_operator(projection_field, load_space)
 
 
 def ice_thickness_change_to_load_operator(
@@ -404,7 +481,7 @@ def ice_thickness_change_to_load_operator(
     return LinearOperator.from_formally_self_adjoint(load_space, l2_operator)
 
 
-class WahrMolenaarByranMethod(EarthModelParameters, LoveNumbers):
+class WMBMethod(EarthModelParameters, LoveNumbers):
     """
     A class that groups together functions linked to the method of Wahr, Molenaar, & Bryan (1998)
     for estimating surface loads from GRACE data.
@@ -457,7 +534,7 @@ class WahrMolenaarByranMethod(EarthModelParameters, LoveNumbers):
         Returns:
             A WahrMolenaarByranMethod object.
         """
-        return WahrMolenaarByranMethod(
+        return WMBMethod(
             observation_degree,
             earth_model_parameters=finger_print,
             love_number_file=finger_print.love_number_file,

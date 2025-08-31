@@ -13,9 +13,11 @@ from pyslfp.operators import (
     field_to_sh_coefficient_operator,
     sh_coefficient_to_field_operator,
     averaging_operator,
-    WahrMolenaarByranMethod,
+    WMBMethod,
     ice_thickness_change_to_load_operator,
     ice_projection_operator,
+    ocean_projection_operator,
+    land_projection_operator,
 )
 
 

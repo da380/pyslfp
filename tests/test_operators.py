@@ -13,7 +13,7 @@ from pyslfp.operators import (
     tide_gauge_operator,
     grace_operator,
     averaging_operator,
-    WahrMolenaarByranMethod,
+    WMBMethod,
     ice_thickness_change_to_load_operator,
 )
 
@@ -232,23 +232,21 @@ class TestAveragingOperators:
         assert np.isclose(lhs, rhs, rtol=1e-12)
 
 
-# ================== Tests for WahrMolenaarByranMethod Operators ==================
+# ================== Tests for WMBMethod Operators ==================
 
 
 @pytest.fixture(scope="module")
 def wmb_method(lmax=32):
-    """Provides a configured WahrMolenaarByranMethod instance for testing."""
+    """Provides a configured WMBMethod instance for testing."""
     # The factory requires an object with Earth Model parameters.
     # A FingerPrint instance is a convenient way to provide one.
     fp = FingerPrint(lmax=lmax)
-    return WahrMolenaarByranMethod.from_finger_print(
-        observation_degree=lmax, finger_print=fp
-    )
+    return WMBMethod.from_finger_print(observation_degree=lmax, finger_print=fp)
 
 
 @pytest.mark.parametrize("lmax", [16, 32])
-class TestWahrMolenaarByranMethod:
-    """A test suite for the WahrMolenaarByranMethod class."""
+class TestWMBMethod:
+    """A test suite for the WMBMethod class."""
 
     @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
     def test_potential_to_load_adjoint_identity(self, lmax, space_type, wmb_method):

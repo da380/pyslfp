@@ -294,35 +294,6 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         grid = "DH2" if self._sampling == 2 else self.grid
         return f.expand(grid=grid, extend=self.extend)
 
-    def load_response(self, load: SHGrid) -> Tuple[SHGrid, SHGrid]:
-        """
-        Returns the direct elastic deformation for a load.
-
-        Note:
-            This calculation does not account for the sea level equation (i.e., no
-            gravitationally self-consistent sea level change or rotational feedbacks).
-
-        Args:
-            load: The applied surface load.
-
-        Returns:
-            A tuple containing the vertical displacement and the gravitational
-            potential change as `SHGrid` objects.
-        """
-        self.check_field(load)
-        displacement_lm = self.expand_field(load)
-        gravitational_potential_change_lm = displacement_lm.copy()
-
-        for l in range(0, self.lmax + 1):
-            displacement_lm.coeffs[:, l, :] *= self._h[l]
-            gravitational_potential_change_lm.coeffs[:, l, :] *= self._k[l]
-
-        displacement = self.expand_coefficient(displacement_lm)
-        gravitational_potential_change = self.expand_coefficient(
-            gravitational_potential_change_lm
-        )
-        return displacement, gravitational_potential_change
-
     def integrate(self, f: SHGrid) -> float:
         """
         Integrate a function over the surface of the sphere.
@@ -616,36 +587,104 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         )
         return self.expand_coefficient(gravity_potential_change_lm)
 
-    def ocean_projection(self, value: float = np.nan) -> SHGrid:
-        """Returns a grid that is 1 over oceans and `value` elsewhere."""
-        return SHGrid.from_array(
-            np.where(self.ocean_function.data > 0, 1, value), grid=self.grid
-        )
+    def ocean_projection(
+        self, /, *, value: float = np.nan, exclude_ice_shelves: bool = False
+    ) -> SHGrid:
+        """
+        Returns a grid that is 1 over oceans and `value` elsewhere.
 
-    def ice_projection(self, value: float = np.nan) -> SHGrid:
-        """Returns a grid that is 1 over ice sheets and `value` elsewhere."""
-        return SHGrid.from_array(
-            np.where(self.ice_thickness.data > 0, 1, value), grid=self.grid
-        )
+        Args:
+            value: The value to assign outside the ocean. Default is NaN.
+            exclude_ice_shelves: If True, exclude ice shelves from the projection.
+                                 Default is False.
 
-    def land_projection(self, value: float = np.nan) -> SHGrid:
-        """Returns a grid that is 1 over land and `value` elsewhere."""
-        return SHGrid.from_array(
-            np.where(self.ocean_function.data == 0, 1, value), grid=self.grid
-        )
+        """
+        if exclude_ice_shelves:
+            return SHGrid.from_array(
+                np.where(
+                    (self.ocean_function.data > 0) & (self.ice_thickness.data == 0),
+                    1,
+                    value,
+                ),
+                grid=self.grid,
+            )
+        else:
+            return SHGrid.from_array(
+                np.where(self.ocean_function.data > 0, 1, value), grid=self.grid
+            )
 
-    def northern_hemisphere_projection(self, value: float = np.nan) -> SHGrid:
-        """Returns a grid that is 1 in the Northern Hemisphere and `value` elsewhere."""
+    def ice_projection(
+        self, /, *, value: float = np.nan, exclude_ice_shelves: bool = False
+    ) -> SHGrid:
+        """
+        Returns a grid that is 1 over ice sheets and `value` elsewhere.
+
+        Args:
+            value: The value to assign outside the ice sheet. Default is NaN.
+            exclude_ice_shelves: If True, exclude ice shelves from the projection.
+                                 Default is False.
+        """
+
+        if exclude_ice_shelves:
+            return SHGrid.from_array(
+                np.where(
+                    (self.ice_thickness.data > 0) & (self.ocean_function.data == 0),
+                    1,
+                    value,
+                ),
+                grid=self.grid,
+            )
+        else:
+            return SHGrid.from_array(
+                np.where(self.ice_thickness.data > 0, 1, value), grid=self.grid
+            )
+
+    def land_projection(
+        self, /, *, value: float = np.nan, exclude_ice: bool = False
+    ) -> SHGrid:
+        """
+        Returns a grid that is 1 over land and `value` elsewhere.
+
+        Args:
+            value: The value to assign outside the land. Default is NaN.
+            exclude_ice: If True, exclude ice from the projection. Default is False.
+        """
+        if exclude_ice:
+            return SHGrid.from_array(
+                np.where(
+                    (self.ice_thickness.data == 0) & (self.ocean_function.data == 0),
+                    1,
+                    value,
+                ),
+                grid=self.grid,
+            )
+        else:
+            return SHGrid.from_array(
+                np.where(self.ocean_function.data == 0, 1, value), grid=self.grid
+            )
+
+    def northern_hemisphere_projection(self, /, *, value: float = np.nan) -> SHGrid:
+        """
+        Returns a grid that is 1 in the Northern Hemisphere and `value` elsewhere.
+
+        Args:
+            value: The value to assign outside the Northern Hemisphere. Default is NaN.
+        """
         lats, _ = np.meshgrid(self.lats(), self.lons(), indexing="ij")
         return SHGrid.from_array(np.where(lats > 0, 1, value), grid=self.grid)
 
-    def southern_hemisphere_projection(self, value: float = np.nan) -> SHGrid:
+    def southern_hemisphere_projection(self, /, *, value: float = np.nan) -> SHGrid:
         """Returns a grid that is 1 in the Southern Hemisphere and `value` elsewhere."""
         lats, _ = np.meshgrid(self.lats(), self.lons(), indexing="ij")
         return SHGrid.from_array(np.where(lats < 0, 1, value), grid=self.grid)
 
     def altimetry_projection(
-        self, latitude1: float = -66.0, latitude2: float = 66.0, value: float = np.nan
+        self,
+        /,
+        *,
+        latitude_min: float = -66,
+        latitude_max: float = 66,
+        value: float = np.nan,
     ) -> SHGrid:
         """
         Returns a grid that is 1 in the oceans between specified latitudes
@@ -653,7 +692,7 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         """
         lats, _ = np.meshgrid(self.lats(), self.lons(), indexing="ij")
         ocean_mask = self.ocean_function.data > 0
-        lat_mask = np.logical_and(lats > latitude1, lats < latitude2)
+        lat_mask = np.logical_and(lats > latitude_min, lats < latitude_max)
         return SHGrid.from_array(
             np.where(np.logical_and(ocean_mask, lat_mask), 1, value), grid=self.grid
         )
@@ -680,41 +719,6 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
             sampling=self._sampling,
         )
 
-    def point_load(
-        self,
-        latitude: float,
-        longitude: float,
-        amplitude: float = 1.0,
-        smoothing_angle: Optional[float] = None,
-    ) -> SHGrid:
-        """
-        Return a point load, optionally smoothed with a Gaussian kernel.
-
-        Args:
-            latitude: Latitude of the point load in degrees.
-            longitude: Longitude of the point load in degrees.
-            amplitude: Amplitude of the load.
-            smoothing_angle: Angle in degrees for Gaussian smoothing.
-        """
-        theta = 90.0 - latitude
-        point_load_lm = self.zero_coefficients()
-        ylm = pysh.expand.spharm(
-            point_load_lm.lmax, theta, longitude, normalization=self.normalization
-        )
-        for l in range(point_load_lm.lmax + 1):
-            point_load_lm.coeffs[0, l, 0] += ylm[0, l, 0]
-            for m in range(1, l + 1):
-                point_load_lm.coeffs[0, l, m] += ylm[0, l, m]
-                point_load_lm.coeffs[1, l, m] += ylm[1, l, m]
-        if smoothing_angle is not None:
-            th = 0.5 * smoothing_angle * np.pi / 180.0
-            t = th * th
-            for l in range(point_load_lm.lmax + 1):
-                fac = np.exp(-l * (l + 1) * t)
-                point_load_lm.coeffs[:, l, :] *= fac
-        point_load_lm *= 1 / self.mean_sea_floor_radius**2
-        return amplitude * self.expand_coefficient(point_load_lm)
-
     def direct_load_from_ice_thickness_change(
         self, ice_thickness_change: SHGrid
     ) -> SHGrid:
@@ -725,59 +729,20 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
     def northern_hemisphere_load(self, fraction: float = 1.0) -> SHGrid:
         """Returns a load from melting a fraction of Northern Hemisphere ice."""
         ice_change = (
-            -fraction * self.ice_thickness * self.northern_hemisphere_projection(0)
+            -fraction
+            * self.ice_thickness
+            * self.northern_hemisphere_projection(value=0)
         )
         return self.direct_load_from_ice_thickness_change(ice_change)
 
     def southern_hemisphere_load(self, fraction: float = 1.0) -> SHGrid:
         """Returns a load from melting a fraction of Southern Hemisphere ice."""
         ice_change = (
-            -fraction * self.ice_thickness * self.southern_hemisphere_projection(0)
+            -fraction
+            * self.ice_thickness
+            * self.southern_hemisphere_projection(value=0)
         )
         return self.direct_load_from_ice_thickness_change(ice_change)
-
-    def adjoint_loads_for_sea_level_point_measurement(
-        self, latitude: float, longitude: float, smoothing_angle: Optional[float] = None
-    ) -> Tuple[SHGrid, None, None, None]:
-        """Returns the adjoint loads for a sea level point measurement."""
-        direct_load = self.point_load(
-            latitude, longitude, smoothing_angle=smoothing_angle
-        )
-        return direct_load, None, None, None
-
-    def adjoint_loads_for_displacement_point_measurement(
-        self, latitude: float, longitude: float, smoothing_angle: Optional[float] = None
-    ) -> Tuple[None, SHGrid, None, None]:
-        """Returns the adjoint loads for a displacement point measurement."""
-        displacement_load = -1.0 * self.point_load(
-            latitude, longitude, smoothing_angle=smoothing_angle
-        )
-        return None, displacement_load, None, None
-
-    def adjoint_loads_for_gravity_potential_coefficient(
-        self, l: int, m: int
-    ) -> Tuple[None, None, SHGrid, None]:
-        """Returns adjoint loads for an observation of a gravity potential coefficient."""
-        if not (0 <= l <= self.lmax and -l <= m <= l):
-            raise ValueError(f"(l,m)=({l},{m}) is out of bounds for lmax={self.lmax}.")
-        g = self.gravitational_acceleration
-        b = self.mean_sea_floor_radius
-        adjoint_load_lm = self.zero_coefficients()
-        adjoint_load_lm.coeffs[0 if m >= 0 else 1, l, abs(m)] = -g / b**2
-        adjoint_load = self.expand_coefficient(adjoint_load_lm)
-        return None, None, adjoint_load, None
-
-    def adjoint_loads_for_gravitational_potential_coefficient(
-        self, l: int, m: int
-    ) -> Tuple[None, None, SHGrid, np.ndarray]:
-        """Returns adjoint loads for an observation of a gravitational potential coefficient."""
-        _, _, adjoint_load, _ = self.adjoint_loads_for_gravity_potential_coefficient(
-            l, m
-        )
-        angular_momentum_change = self.angular_momentum_change_from_potential(
-            adjoint_load
-        )
-        return None, None, adjoint_load, angular_momentum_change
 
     def angular_momentum_change_from_potential(
         self, gravitational_potential_load: SHGrid
@@ -789,39 +754,6 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         r = self._rotation_factor
         b = self.mean_sea_floor_radius
         return -r * b * b * gravitational_potential_load_lm.coeffs[:, 2, 1]
-
-    def gaussian_averaging_function(
-        self, r: float, latitude: float, longitude: float, cut: bool = False
-    ) -> SHGrid:
-        """
-        Returns a Gaussian averaging function centered at a point.
-
-        Args:
-            r: Radius of the averaging function in kilometers.
-            latitude: Latitude of the center in degrees.
-            longitude: Longitude of the center in degrees.
-            cut: If true, the function is high-pass filtered by removing l<2.
-        """
-        th0 = (90.0 - latitude) * np.pi / 180.0
-        ph0 = longitude * np.pi / 180.0
-        c = np.log(2) / (1 - np.cos(1000 * r / self.mean_sea_floor_radius))
-        fac = 2 * np.pi * (1 - np.exp(-2 * c))
-        fac = c / (self.mean_sea_floor_radius**2 * fac)
-        w = self.zero_grid()
-        lats, lons = self.lats(), self.lons()
-        for ilat, lat in enumerate(lats):
-            th = (90.0 - lat) * np.pi / 180.0
-            fac1 = np.cos(th) * np.cos(th0)
-            fac2 = np.sin(th) * np.sin(th0)
-            for ilon, lon in enumerate(lons):
-                ph = lon * np.pi / 180.0
-                calpha = fac1 + fac2 * np.cos(ph - ph0)
-                w.data[ilat, ilon] = fac * np.exp(-c * (1 - calpha))
-        if cut:
-            w_lm = self.expand_field(w)
-            w_lm.coeffs[:, :2, :] = 0.0
-            w = self.expand_coefficient(w_lm)
-        return w
 
     def lebesgue_load_space(self) -> Lebesgue:
         """

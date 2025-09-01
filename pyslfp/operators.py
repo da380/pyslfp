@@ -354,7 +354,7 @@ def averaging_operator(
         return l2_operator
 
 
-def spatial_projection_operator(
+def spatial_mutliplication_operator(
     projection_field: SHGrid,
     load_space: Union[Lebesgue, Sobolev],
 ):
@@ -401,7 +401,7 @@ def ice_projection_operator(
     projection_field = finger_print.ice_projection(
         value=0, exclude_ice_shelves=exclude_ice_shelves
     )
-    return spatial_projection_operator(projection_field, load_space)
+    return spatial_mutliplication_operator(projection_field, load_space)
 
 
 def ocean_projection_operator(
@@ -428,7 +428,7 @@ def ocean_projection_operator(
     projection_field = finger_print.ocean_projection(
         value=0, exclude_ice_shelves=exclude_ice_shelves
     )
-    return spatial_projection_operator(projection_field, load_space)
+    return spatial_mutliplication_operator(projection_field, load_space)
 
 
 def land_projection_operator(
@@ -453,7 +453,7 @@ def land_projection_operator(
     """
 
     projection_field = finger_print.land_projection(value=0, exclude_ice=exclude_ice)
-    return spatial_projection_operator(projection_field, load_space)
+    return spatial_mutliplication_operator(projection_field, load_space)
 
 
 def ice_thickness_change_to_load_operator(

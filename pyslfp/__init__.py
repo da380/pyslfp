@@ -18,6 +18,7 @@ from pyslfp.operators import (
     ice_projection_operator,
     ocean_projection_operator,
     land_projection_operator,
+    spatial_mutliplication_operator,
 )
 
 

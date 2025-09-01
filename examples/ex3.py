@@ -14,7 +14,7 @@ from pyslfp.operators import (
     grace_operator,
     field_to_sh_coefficient_operator,
     sh_coefficient_to_field_operator,
-    WahrMolenaarByranMethod,
+    WMBMethod,
 )
 
 
@@ -54,7 +54,7 @@ v = A(u)
 w = B(v)
 
 
-wmb_method = WahrMolenaarByranMethod.from_finger_print(observation_degree, fp)
+wmb_method = WMBMethod.from_finger_print(observation_degree, fp)
 
 D = wmb_method.potential_coefficient_to_load_operator(load_space)
 y = D(w)

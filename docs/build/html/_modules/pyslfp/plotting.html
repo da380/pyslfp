@@ -198,19 +198,19 @@
 <div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
   <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="../../tutorials/t1.html">Tutorial 1 - Computing a sea level fingerprint</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../tutorials/t2.html">Tutorial 2 - Exploring some options in the FingerPrint Class</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../tutorials/t3.html">Tutorial 3 - Sensitivity kernels for sea level point measurements.</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../tutorials/t4.html">Tutorial 4 - Sensitivity kernels for displacement point measurements.</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../tutorials/t5.html">Tutorial 5 - Sensitivity kernels for gravitational potential coefficients.</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../tutorials/t6.html">Tutorial 6 - Inversion of tide gauge data</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial1.html">Tutorial 1: Calculating a Basic Sea Level Fingerprint</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial2.html">Tutorial 2: A Deeper Dive into the Sea Level Equation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial3.html">Tutorial 3: Reciprocity and Generalised Sea Level Forcing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial4.html">Tutorial 4: Adjoints and Sensitivity Kernels with <code class="docutils literal notranslate"><span class="pre">pygeoinf</span></code></a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial5.html">Tutorial 5: A Bayesian Inverse Problem - Inferring Ice Melt from Tide Gauges</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial6.html">Tutorial 6: Implementing and investigating the WMB method</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="../../api/physical_parameters.html">pyslfp.physical_parameters</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../api/ice_ng.html">pyslfp.ice_ng</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../api/finger_print.html">pyslfp.finger_print</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../api/plotting.html">pyslfp.plotting</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../api/modules.html">pyslfp</a><input class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><div class="visually-hidden">Toggle navigation of pyslfp</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/pyslfp.html">pyslfp package</a></li>
+</ul>
+</li>
 </ul>
 
 </div>
@@ -254,6 +254,8 @@
 <span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">pyshtools</span><span class="w"> </span><span class="kn">import</span> <span class="n">SHGrid</span>
 
+<span class="kn">from</span><span class="w"> </span><span class="nn">pygeoinf.symmetric_space.sphere</span><span class="w"> </span><span class="kn">import</span> <span class="n">SphereHelper</span>
+
 <span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.ticker</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">mticker</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">matplotlib.figure</span><span class="w"> </span><span class="kn">import</span> <span class="n">Figure</span>
@@ -267,7 +269,7 @@
 
 
 <div class="viewcode-block" id="plot">
-<a class="viewcode-back" href="../../api/plotting.html#pyslfp.plotting.plot">[docs]</a>
+<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.plotting.plot">[docs]</a>
 <span class="k">def</span><span class="w"> </span><span class="nf">plot</span><span class="p">(</span>
     <span class="n">f</span><span class="p">:</span> <span class="n">SHGrid</span><span class="p">,</span>
     <span class="o">/</span><span class="p">,</span>
@@ -284,10 +286,11 @@
     <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Figure</span><span class="p">,</span> <span class="n">GeoAxes</span><span class="p">,</span> <span class="n">Union</span><span class="p">[</span><span class="n">QuadMesh</span><span class="p">,</span> <span class="n">QuadContourSet</span><span class="p">]]:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">    Plots a pyshtools SHGrid object on a map. 🗺️</span>
+<span class="sd">    Plots a pyshtools SHGrid object on a map.</span>
 
 <span class="sd">    This function provides a flexible interface to visualize spherical harmonic</span>
-<span class="sd">    grid data using cartopy for projections and matplotlib for plotting.</span>
+<span class="sd">    grid data by acting as a wrapper around the plotting facilities provided</span>
+<span class="sd">    by the pygeoinf library.</span>
 
 <span class="sd">    Args:</span>
 <span class="sd">        f (SHGrid): The scalar field to be plotted.</span>
@@ -305,9 +308,8 @@
 <span class="sd">        gridlines (bool): If True, latitude and longitude gridlines are</span>
 <span class="sd">            included. Defaults to True.</span>
 <span class="sd">        symmetric (bool): If True, the color scale is set symmetrically</span>
-<span class="sd">            around zero based on the field&#39;s maximum absolute value. This is</span>
-<span class="sd">            overridden if &#39;vmin&#39; or &#39;vmax&#39; are provided in kwargs.</span>
-<span class="sd">            Defaults to False.</span>
+<span class="sd">            around zero. This is overridden if &#39;vmin&#39; or &#39;vmax&#39; are provided</span>
+<span class="sd">            in kwargs. Defaults to False.</span>
 <span class="sd">        **kwargs: Additional keyword arguments are forwarded to the underlying</span>
 <span class="sd">            matplotlib plotting function (ax.pcolormesh or ax.contourf).</span>
 
@@ -318,72 +320,28 @@
 <span class="sd">    &quot;&quot;&quot;</span>
 
     <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="n">SHGrid</span><span class="p">):</span>
-        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Scalar field must be of SHGrid type.&quot;</span><span class="p">)</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;must be of SHGrid type.&quot;</span><span class="p">)</span>
 
-    <span class="n">lons</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">lons</span><span class="p">()</span>
-    <span class="n">lats</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">lats</span><span class="p">()</span>
+    <span class="c1"># Instantiate the helper class from pygeoinf.</span>
+    <span class="n">sphere_helper</span> <span class="o">=</span> <span class="n">SphereHelper</span><span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">lmax</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">f</span><span class="o">.</span><span class="n">grid</span><span class="p">,</span> <span class="n">f</span><span class="o">.</span><span class="n">extend</span><span class="p">)</span>
 
-    <span class="n">figsize</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s2">&quot;figsize&quot;</span><span class="p">,</span> <span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">8</span><span class="p">))</span>
-    <span class="n">fig</span><span class="p">,</span> <span class="n">ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="n">figsize</span><span class="p">,</span> <span class="n">subplot_kw</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;projection&quot;</span><span class="p">:</span> <span class="n">projection</span><span class="p">})</span>
+    <span class="c1"># --- Create a dictionary to hold all keyword arguments ---</span>
+    <span class="n">plot_options</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;projection&quot;</span><span class="p">:</span> <span class="n">projection</span><span class="p">,</span>
+        <span class="s2">&quot;contour&quot;</span><span class="p">:</span> <span class="n">contour</span><span class="p">,</span>
+        <span class="s2">&quot;cmap&quot;</span><span class="p">:</span> <span class="n">cmap</span><span class="p">,</span>
+        <span class="s2">&quot;coasts&quot;</span><span class="p">:</span> <span class="n">coasts</span><span class="p">,</span>
+        <span class="s2">&quot;rivers&quot;</span><span class="p">:</span> <span class="n">rivers</span><span class="p">,</span>
+        <span class="s2">&quot;borders&quot;</span><span class="p">:</span> <span class="n">borders</span><span class="p">,</span>
+        <span class="s2">&quot;map_extent&quot;</span><span class="p">:</span> <span class="n">map_extent</span><span class="p">,</span>
+        <span class="s2">&quot;gridlines&quot;</span><span class="p">:</span> <span class="n">gridlines</span><span class="p">,</span>
+        <span class="s2">&quot;symmetric&quot;</span><span class="p">:</span> <span class="n">symmetric</span><span class="p">,</span>
+    <span class="p">}</span>
 
-    <span class="k">if</span> <span class="n">map_extent</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="n">ax</span><span class="o">.</span><span class="n">set_extent</span><span class="p">(</span><span class="n">map_extent</span><span class="p">,</span> <span class="n">crs</span><span class="o">=</span><span class="n">ccrs</span><span class="o">.</span><span class="n">PlateCarree</span><span class="p">())</span>
+    <span class="n">plot_options</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">kwargs</span><span class="p">)</span>
 
-    <span class="k">if</span> <span class="n">coasts</span><span class="p">:</span>
-        <span class="n">ax</span><span class="o">.</span><span class="n">add_feature</span><span class="p">(</span><span class="n">cfeature</span><span class="o">.</span><span class="n">COASTLINE</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mf">0.8</span><span class="p">)</span>
-
-    <span class="k">if</span> <span class="n">rivers</span><span class="p">:</span>
-        <span class="n">ax</span><span class="o">.</span><span class="n">add_feature</span><span class="p">(</span><span class="n">cfeature</span><span class="o">.</span><span class="n">RIVERS</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mf">0.8</span><span class="p">)</span>
-
-    <span class="k">if</span> <span class="n">borders</span><span class="p">:</span>
-        <span class="n">ax</span><span class="o">.</span><span class="n">add_feature</span><span class="p">(</span><span class="n">cfeature</span><span class="o">.</span><span class="n">BORDERS</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mf">0.8</span><span class="p">)</span>
-
-    <span class="n">kwargs</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="s2">&quot;cmap&quot;</span><span class="p">,</span> <span class="n">cmap</span><span class="p">)</span>
-
-    <span class="n">lat_interval</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s2">&quot;lat_interval&quot;</span><span class="p">,</span> <span class="mi">30</span><span class="p">)</span>
-    <span class="n">lon_interval</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s2">&quot;lon_interval&quot;</span><span class="p">,</span> <span class="mi">30</span><span class="p">)</span>
-
-    <span class="k">if</span> <span class="n">symmetric</span><span class="p">:</span>
-        <span class="n">data_max</span> <span class="o">=</span> <span class="mf">1.2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">nanmax</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">data</span><span class="p">))</span>
-        <span class="n">kwargs</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="s2">&quot;vmin&quot;</span><span class="p">,</span> <span class="o">-</span><span class="n">data_max</span><span class="p">)</span>
-        <span class="n">kwargs</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="s2">&quot;vmax&quot;</span><span class="p">,</span> <span class="n">data_max</span><span class="p">)</span>
-
-    <span class="n">levels</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s2">&quot;levels&quot;</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
-    <span class="n">im</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">QuadMesh</span><span class="p">,</span> <span class="n">QuadContourSet</span><span class="p">]</span>
-
-    <span class="k">if</span> <span class="n">contour</span><span class="p">:</span>
-        <span class="n">im</span> <span class="o">=</span> <span class="n">ax</span><span class="o">.</span><span class="n">contourf</span><span class="p">(</span>
-            <span class="n">lons</span><span class="p">,</span>
-            <span class="n">lats</span><span class="p">,</span>
-            <span class="n">f</span><span class="o">.</span><span class="n">data</span><span class="p">,</span>
-            <span class="n">transform</span><span class="o">=</span><span class="n">ccrs</span><span class="o">.</span><span class="n">PlateCarree</span><span class="p">(),</span>
-            <span class="n">levels</span><span class="o">=</span><span class="n">levels</span><span class="p">,</span>
-            <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
-        <span class="p">)</span>
-    <span class="k">else</span><span class="p">:</span>
-        <span class="n">im</span> <span class="o">=</span> <span class="n">ax</span><span class="o">.</span><span class="n">pcolormesh</span><span class="p">(</span>
-            <span class="n">lons</span><span class="p">,</span>
-            <span class="n">lats</span><span class="p">,</span>
-            <span class="n">f</span><span class="o">.</span><span class="n">data</span><span class="p">,</span>
-            <span class="n">transform</span><span class="o">=</span><span class="n">ccrs</span><span class="o">.</span><span class="n">PlateCarree</span><span class="p">(),</span>
-            <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
-        <span class="p">)</span>
-
-    <span class="k">if</span> <span class="n">gridlines</span><span class="p">:</span>
-        <span class="n">gl</span> <span class="o">=</span> <span class="n">ax</span><span class="o">.</span><span class="n">gridlines</span><span class="p">(</span>
-            <span class="n">linestyle</span><span class="o">=</span><span class="s2">&quot;--&quot;</span><span class="p">,</span>
-            <span class="n">draw_labels</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-            <span class="n">dms</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-            <span class="n">x_inline</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
-            <span class="n">y_inline</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
-        <span class="p">)</span>
-
-        <span class="n">gl</span><span class="o">.</span><span class="n">xlocator</span> <span class="o">=</span> <span class="n">mticker</span><span class="o">.</span><span class="n">MultipleLocator</span><span class="p">(</span><span class="n">lon_interval</span><span class="p">)</span>
-        <span class="n">gl</span><span class="o">.</span><span class="n">ylocator</span> <span class="o">=</span> <span class="n">mticker</span><span class="o">.</span><span class="n">MultipleLocator</span><span class="p">(</span><span class="n">lat_interval</span><span class="p">)</span>
-        <span class="n">gl</span><span class="o">.</span><span class="n">xformatter</span> <span class="o">=</span> <span class="n">LongitudeFormatter</span><span class="p">()</span>
-        <span class="n">gl</span><span class="o">.</span><span class="n">yformatter</span> <span class="o">=</span> <span class="n">LatitudeFormatter</span><span class="p">()</span>
-
-    <span class="k">return</span> <span class="n">fig</span><span class="p">,</span> <span class="n">ax</span><span class="p">,</span> <span class="n">im</span></div>
+    <span class="c1"># Call the underlying plot method, unpacking the collected options.</span>
+    <span class="k">return</span> <span class="n">sphere_helper</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="o">**</span><span class="n">plot_options</span><span class="p">)</span></div>
 
 </pre></div>
         </article>

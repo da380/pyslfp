@@ -199,12 +199,12 @@
 <div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
   <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="tutorials/t1.html">Tutorial 1 - Computing a sea level fingerprint</a></li>
-<li class="toctree-l1"><a class="reference internal" href="tutorials/t2.html">Tutorial 2 - Exploring some options in the FingerPrint Class</a></li>
-<li class="toctree-l1"><a class="reference internal" href="tutorials/t3.html">Tutorial 3 - Sensitivity kernels for sea level point measurements.</a></li>
-<li class="toctree-l1"><a class="reference internal" href="tutorials/t4.html">Tutorial 4 - Sensitivity kernels for displacement point measurements.</a></li>
-<li class="toctree-l1"><a class="reference internal" href="tutorials/t5.html">Tutorial 5 - Sensitivity kernels for gravitational potential coefficients.</a></li>
-<li class="toctree-l1"><a class="reference internal" href="tutorials/t6.html">Tutorial 6 - Inversion of tide gauge data</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials/tutorial1.html">Tutorial 1: Calculating a Basic Sea Level Fingerprint</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials/tutorial2.html">Tutorial 2: A Deeper Dive into the Sea Level Equation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials/tutorial3.html">Tutorial 3: Reciprocity and Generalised Sea Level Forcing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials/tutorial4.html">Tutorial 4: Adjoints and Sensitivity Kernels with <code class="docutils literal notranslate"><span class="pre">pygeoinf</span></code></a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials/tutorial5.html">Tutorial 5: A Bayesian Inverse Problem - Inferring Ice Melt from Tide Gauges</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials/tutorial6.html">Tutorial 6: Implementing and investigating the WMB method</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul>
@@ -253,12 +253,17 @@
         </div>
         <article role="main" id="furo-main-content">
           <p>pysl:PySLFP: Python Sea Level Fingerprints</p>
-<dl class="simple">
-<dt><cite>pyslfp</cite> is a Python package for computing elastic sea level “fingerprints”. It provides</dt><dd><p>a robust and user-friendly framework for solving the sea level equation, accounting for
-the Earth’s elastic deformation, gravitational self-consistency between the ice, oceans,
-and solid Earth, and rotational feedback effects.</p>
-</dd>
-</dl>
+<p><cite>pyslfp</cite> is a Python package for computing elastic sea level “fingerprints”. It provides a robust and user-friendly framework for solving the sea level equation, accounting for the Earth’s elastic deformation, gravitational self-consistency between the ice, oceans, and solid Earth, and rotational feedback effects.</p>
+<p>The core of the library is the <cite>FingerPrint</cite> class, which implements an iterative solver to determine the unique pattern of sea-level change that results from a change in a surface load, such as the melting of an ice sheet.</p>
+<p>—</p>
+<p>## Key Features</p>
+<ul class="simple">
+<li><p><strong>Elastic Sea Level Equation Solver:</strong> Implements an iterative solver for the  sea level equation and the generalised sea level equation needed within adjoint calculations.</p></li>
+<li><p><strong>Comprehensive Physics:</strong> Accounts for Earth’s elastic response (via load Love numbers), self-consistent gravity, and rotational feedbacks (polar wander).</p></li>
+<li><p><strong>Ice History Models:</strong> Includes a data loader for the ICE-5G, ICE-6G, and ICE-7G global ice history models, allowing for easy setup of realistic background states.</p></li>
+<li><p><strong>Forward and Adjoint Modeling:</strong> Provides a high-level interface for both forward calculations (predicting sea level change from a load) and  adjoint modeling (for use in inverse problems), powered by <cite>pygeoinf</cite>, and based on the theory of [Al-Attar et al.(2024)](<a class="reference external" href="https://academic.oup.com/gji/article/236/1/362/7338265">https://academic.oup.com/gji/article/236/1/362/7338265</a>)</p></li>
+<li><p><strong>Built-in Visualization:</strong> Comes with high-quality map plotting utilities built on <cite>matplotlib</cite> and <cite>cartopy</cite> for easy visualization of global data grids.</p></li>
+</ul>
 <p>—</p>
 <div class="toctree-wrapper compound">
 </div>

@@ -198,19 +198,19 @@
 <div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
   <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="../../tutorials/t1.html">Tutorial 1 - Computing a sea level fingerprint</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../tutorials/t2.html">Tutorial 2 - Exploring some options in the FingerPrint Class</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../tutorials/t3.html">Tutorial 3 - Sensitivity kernels for sea level point measurements.</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../tutorials/t4.html">Tutorial 4 - Sensitivity kernels for displacement point measurements.</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../tutorials/t5.html">Tutorial 5 - Sensitivity kernels for gravitational potential coefficients.</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../tutorials/t6.html">Tutorial 6 - Inversion of tide gauge data</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial1.html">Tutorial 1: Calculating a Basic Sea Level Fingerprint</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial2.html">Tutorial 2: A Deeper Dive into the Sea Level Equation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial3.html">Tutorial 3: Reciprocity and Generalised Sea Level Forcing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial4.html">Tutorial 4: Adjoints and Sensitivity Kernels with <code class="docutils literal notranslate"><span class="pre">pygeoinf</span></code></a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial5.html">Tutorial 5: A Bayesian Inverse Problem - Inferring Ice Melt from Tide Gauges</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial6.html">Tutorial 6: Implementing and investigating the WMB method</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="../../api/physical_parameters.html">pyslfp.physical_parameters</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../api/ice_ng.html">pyslfp.ice_ng</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../api/finger_print.html">pyslfp.finger_print</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../api/plotting.html">pyslfp.plotting</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../api/modules.html">pyslfp</a><input class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><div class="visually-hidden">Toggle navigation of pyslfp</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/pyslfp.html">pyslfp package</a></li>
+</ul>
+</li>
 </ul>
 
 </div>
@@ -264,7 +264,7 @@
 
 
 <div class="viewcode-block" id="IceModel">
-<a class="viewcode-back" href="../../api/ice_ng.html#pyslfp.ice_ng.IceModel">[docs]</a>
+<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.ice_ng.IceModel">[docs]</a>
 <span class="k">class</span><span class="w"> </span><span class="nc">IceModel</span><span class="p">(</span><span class="n">Enum</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;An enumeration for the different ICE-NG model versions.&quot;&quot;&quot;</span>
 
@@ -275,7 +275,7 @@
 
 
 <div class="viewcode-block" id="IceNG">
-<a class="viewcode-back" href="../../api/ice_ng.html#pyslfp.ice_ng.IceNG">[docs]</a>
+<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.ice_ng.IceNG">[docs]</a>
 <span class="k">class</span><span class="w"> </span><span class="nc">IceNG</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    A data loader for the ICE-5G, ICE-6G, and ICE-7G glacial isostatic</span>
@@ -374,7 +374,7 @@
         <span class="k">return</span> <span class="n">ice_thickness</span><span class="p">,</span> <span class="n">topography</span>
 
 <div class="viewcode-block" id="IceNG.get_ice_thickness_and_topography">
-<a class="viewcode-back" href="../../api/ice_ng.html#pyslfp.ice_ng.IceNG.get_ice_thickness_and_topography">[docs]</a>
+<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.ice_ng.IceNG.get_ice_thickness_and_topography">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">get_ice_thickness_and_topography</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">date</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
@@ -419,7 +419,7 @@
 
 
 <div class="viewcode-block" id="IceNG.get_ice_thickness_and_sea_level">
-<a class="viewcode-back" href="../../api/ice_ng.html#pyslfp.ice_ng.IceNG.get_ice_thickness_and_sea_level">[docs]</a>
+<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.ice_ng.IceNG.get_ice_thickness_and_sea_level">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">get_ice_thickness_and_sea_level</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">date</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
@@ -471,7 +471,7 @@
 
 
 <div class="viewcode-block" id="IceNG.get_ice_thickness">
-<a class="viewcode-back" href="../../api/ice_ng.html#pyslfp.ice_ng.IceNG.get_ice_thickness">[docs]</a>
+<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.ice_ng.IceNG.get_ice_thickness">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">get_ice_thickness</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">date</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
@@ -490,7 +490,7 @@
 
 
 <div class="viewcode-block" id="IceNG.get_sea_level">
-<a class="viewcode-back" href="../../api/ice_ng.html#pyslfp.ice_ng.IceNG.get_sea_level">[docs]</a>
+<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.ice_ng.IceNG.get_sea_level">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">get_sea_level</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">date</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
@@ -509,7 +509,7 @@
 
 
 <div class="viewcode-block" id="IceNG.get_topography">
-<a class="viewcode-back" href="../../api/ice_ng.html#pyslfp.ice_ng.IceNG.get_topography">[docs]</a>
+<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.ice_ng.IceNG.get_topography">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">get_topography</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">date</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>

@@ -198,12 +198,12 @@
 <div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
   <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="../../tutorials/t1.html">Tutorial 1 - Computing a sea level fingerprint</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../tutorials/t2.html">Tutorial 2 - Exploring some options in the FingerPrint Class</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../tutorials/t3.html">Tutorial 3 - Sensitivity kernels for sea level point measurements.</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../tutorials/t4.html">Tutorial 4 - Sensitivity kernels for displacement point measurements.</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../tutorials/t5.html">Tutorial 5 - Sensitivity kernels for gravitational potential coefficients.</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../tutorials/t6.html">Tutorial 6 - Inversion of tide gauge data</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial1.html">Tutorial 1: Calculating a Basic Sea Level Fingerprint</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial2.html">Tutorial 2: A Deeper Dive into the Sea Level Equation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial3.html">Tutorial 3: Reciprocity and Generalised Sea Level Forcing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial4.html">Tutorial 4: Adjoints and Sensitivity Kernels with <code class="docutils literal notranslate"><span class="pre">pygeoinf</span></code></a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial5.html">Tutorial 5: A Bayesian Inverse Problem - Inferring Ice Melt from Tide Gauges</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial6.html">Tutorial 6: Implementing and investigating the WMB method</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul>
@@ -261,11 +261,16 @@
 <span class="kn">import</span><span class="w"> </span><span class="nn">pyshtools</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pysh</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">pyshtools</span><span class="w"> </span><span class="kn">import</span> <span class="n">SHGrid</span><span class="p">,</span> <span class="n">SHCoeffs</span>
 
-<span class="kn">import</span><span class="w"> </span><span class="nn">pygeoinf</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">inf</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">pygeoinf.symmetric_space.sphere</span><span class="w"> </span><span class="kn">import</span> <span class="n">Sobolev</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pygeoinf</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">LinearOperator</span><span class="p">,</span>
+    <span class="n">HilbertSpaceDirectSum</span><span class="p">,</span>
+    <span class="n">EuclideanSpace</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pygeoinf.symmetric_space.sphere</span><span class="w"> </span><span class="kn">import</span> <span class="n">Lebesgue</span><span class="p">,</span> <span class="n">Sobolev</span>
 
-<span class="kn">from</span><span class="w"> </span><span class="nn">pyslfp.ice_ng</span><span class="w"> </span><span class="kn">import</span> <span class="n">IceNG</span><span class="p">,</span> <span class="n">IceModel</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">pyslfp.physical_parameters</span><span class="w"> </span><span class="kn">import</span> <span class="n">EarthModelParameters</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.ice_ng</span><span class="w"> </span><span class="kn">import</span> <span class="n">IceNG</span><span class="p">,</span> <span class="n">IceModel</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.physical_parameters</span><span class="w"> </span><span class="kn">import</span> <span class="n">EarthModelParameters</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.love_numbers</span><span class="w"> </span><span class="kn">import</span> <span class="n">LoveNumbers</span>
 
 
 <span class="kn">from</span><span class="w"> </span><span class="nn">.</span><span class="w"> </span><span class="kn">import</span> <span class="n">DATADIR</span>
@@ -273,7 +278,7 @@
 
 <div class="viewcode-block" id="FingerPrint">
 <a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint">[docs]</a>
-<span class="k">class</span><span class="w"> </span><span class="nc">FingerPrint</span><span class="p">(</span><span class="n">EarthModelParameters</span><span class="p">):</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">FingerPrint</span><span class="p">(</span><span class="n">EarthModelParameters</span><span class="p">,</span> <span class="n">LoveNumbers</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Computes elastic sea level &quot;fingerprints&quot; for a given surface load.</span>
 
@@ -309,20 +314,10 @@
         <span class="k">if</span> <span class="n">earth_model_parameters</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
             <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
         <span class="k">else</span><span class="p">:</span>
-            <span class="n">parent_signature</span> <span class="o">=</span> <span class="n">inspect</span><span class="o">.</span><span class="n">signature</span><span class="p">(</span><span class="n">EarthModelParameters</span><span class="o">.</span><span class="fm">__init__</span><span class="p">)</span>
-            <span class="n">param_names</span> <span class="o">=</span> <span class="p">[</span>
-                <span class="n">param</span> <span class="k">for</span> <span class="n">param</span> <span class="ow">in</span> <span class="n">parent_signature</span><span class="o">.</span><span class="n">parameters</span> <span class="k">if</span> <span class="n">param</span> <span class="o">!=</span> <span class="s2">&quot;self&quot;</span>
-            <span class="p">]</span>
-            <span class="n">scale_names</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;length_scale&quot;</span><span class="p">,</span> <span class="s2">&quot;density_scale&quot;</span><span class="p">,</span> <span class="s2">&quot;time_scale&quot;</span><span class="p">}</span>
-            <span class="n">kwargs</span> <span class="o">=</span> <span class="p">{</span>
-                <span class="n">name</span><span class="p">:</span> <span class="p">(</span>
-                    <span class="nb">getattr</span><span class="p">(</span><span class="n">earth_model_parameters</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
-                    <span class="k">if</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">scale_names</span>
-                    <span class="k">else</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">earth_model_parameters</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">_si&quot;</span><span class="p">)</span>
-                <span class="p">)</span>
-                <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">param_names</span>
-            <span class="p">}</span>
-            <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+            <span class="n">init_kwargs</span> <span class="o">=</span> <span class="n">EarthModelParameters</span><span class="o">.</span><span class="n">_get_init_kwargs_from_instance</span><span class="p">(</span>
+                <span class="n">earth_model_parameters</span>
+            <span class="p">)</span>
+            <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="o">**</span><span class="n">init_kwargs</span><span class="p">)</span>
 
         <span class="c1"># Set options.</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_lmax</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">lmax</span>
@@ -333,6 +328,15 @@
         <span class="k">else</span><span class="p">:</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">_grid</span> <span class="o">=</span> <span class="n">grid</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">_sampling</span> <span class="o">=</span> <span class="mi">1</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_love_number_file</span> <span class="o">=</span> <span class="n">love_number_file</span>
+
+        <span class="n">LoveNumbers</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span>
+            <span class="bp">self</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">lmax</span><span class="p">,</span>
+            <span class="bp">self</span><span class="p">,</span>
+            <span class="n">file</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_love_number_file</span><span class="p">,</span>
+        <span class="p">)</span>
 
         <span class="c1"># Internal parameters (do not change)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_extend</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span>
@@ -358,10 +362,6 @@
                 <span class="o">*</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">polar_moment_of_inertia</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">equatorial_moment_of_inertia</span><span class="p">)</span>
             <span class="p">)</span>
         <span class="p">)</span>
-
-        <span class="c1"># Read in the Love numbers.</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_love_number_file</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">love_number_file</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_read_love_numbers</span><span class="p">(</span><span class="n">love_number_file</span><span class="p">)</span>
 
         <span class="c1"># Background model not set.</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_sea_level</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">SHGrid</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
@@ -415,7 +415,7 @@
 
     <span class="nd">@sea_level</span><span class="o">.</span><span class="n">setter</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">sea_level</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="n">SHGrid</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_check_field</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">check_field</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_sea_level</span> <span class="o">=</span> <span class="n">value</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_ocean_function</span> <span class="o">=</span> <span class="kc">None</span>
 
@@ -428,7 +428,7 @@
 
     <span class="nd">@ice_thickness</span><span class="o">.</span><span class="n">setter</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">ice_thickness</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="n">SHGrid</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_check_field</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">check_field</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_ice_thickness</span> <span class="o">=</span> <span class="n">value</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_ocean_function</span> <span class="o">=</span> <span class="kc">None</span>
 
@@ -454,84 +454,21 @@
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ocean_area</span>
 
     <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">love_number_file</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Returns the path to the Love number file.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_love_number_file</span>
+
+    <span class="nd">@property</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">solver_counter</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Returns the number of times the __call__ solver method has been called.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_solver_counter</span>
 
     <span class="c1"># ---------------------------------------------------------#</span>
-    <span class="c1">#                     Private methods                     #</span>
+    <span class="c1">#                     Private methods                      #</span>
     <span class="c1"># ---------------------------------------------------------#</span>
 
-    <span class="k">def</span><span class="w"> </span><span class="nf">_read_love_numbers</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">file</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Reads and non-dimensionalises Love numbers from a file.&quot;&quot;&quot;</span>
-        <span class="n">data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">loadtxt</span><span class="p">(</span><span class="n">file</span><span class="p">)</span>
-        <span class="n">data_degree</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">data</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">])</span> <span class="o">-</span> <span class="mi">1</span>
-
-        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">lmax</span> <span class="o">&gt;</span> <span class="n">data_degree</span><span class="p">:</span>
-            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
-                <span class="sa">f</span><span class="s2">&quot;lmax (</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">lmax</span><span class="si">}</span><span class="s2">) is larger than the maximum degree &quot;</span>
-                <span class="sa">f</span><span class="s2">&quot;in the Love number file (</span><span class="si">{</span><span class="n">data_degree</span><span class="si">}</span><span class="s2">).&quot;</span>
-            <span class="p">)</span>
-
-        <span class="bp">self</span><span class="o">.</span><span class="n">_h_u</span> <span class="o">=</span> <span class="n">data</span><span class="p">[:</span> <span class="bp">self</span><span class="o">.</span><span class="n">lmax</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">load_scale</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">length_scale</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_k_u</span> <span class="o">=</span> <span class="p">(</span>
-            <span class="n">data</span><span class="p">[:</span> <span class="bp">self</span><span class="o">.</span><span class="n">lmax</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">]</span>
-            <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">load_scale</span>
-            <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">gravitational_potential_scale</span>
-        <span class="p">)</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_h_phi</span> <span class="o">=</span> <span class="n">data</span><span class="p">[:</span> <span class="bp">self</span><span class="o">.</span><span class="n">lmax</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">load_scale</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">length_scale</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_k_phi</span> <span class="o">=</span> <span class="p">(</span>
-            <span class="n">data</span><span class="p">[:</span> <span class="bp">self</span><span class="o">.</span><span class="n">lmax</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">4</span><span class="p">]</span>
-            <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">load_scale</span>
-            <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">gravitational_potential_scale</span>
-        <span class="p">)</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_h</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_h_u</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">_h_phi</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_k</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_k_u</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">_k_phi</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_ht</span> <span class="o">=</span> <span class="p">(</span>
-            <span class="n">data</span><span class="p">[:</span> <span class="bp">self</span><span class="o">.</span><span class="n">lmax</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">5</span><span class="p">]</span>
-            <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">gravitational_potential_scale</span>
-            <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">length_scale</span>
-        <span class="p">)</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_kt</span> <span class="o">=</span> <span class="n">data</span><span class="p">[:</span> <span class="bp">self</span><span class="o">.</span><span class="n">lmax</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">6</span><span class="p">]</span>
-
-    <span class="k">def</span><span class="w"> </span><span class="nf">_check_field</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">f</span><span class="p">:</span> <span class="n">SHGrid</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Checks if an SHGrid object is compatible with instance settings.&quot;&quot;&quot;</span>
-        <span class="n">is_compatible</span> <span class="o">=</span> <span class="p">(</span>
-            <span class="n">f</span><span class="o">.</span><span class="n">lmax</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">lmax</span> <span class="ow">and</span> <span class="n">f</span><span class="o">.</span><span class="n">grid</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">grid</span> <span class="ow">and</span> <span class="n">f</span><span class="o">.</span><span class="n">extend</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">extend</span>
-        <span class="p">)</span>
-        <span class="k">if</span> <span class="ow">not</span> <span class="n">is_compatible</span><span class="p">:</span>
-            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
-                <span class="s2">&quot;Provided SHGrid object is not compatible with FingerPrint settings.&quot;</span>
-            <span class="p">)</span>
-        <span class="k">return</span> <span class="kc">True</span>
-
-    <span class="k">def</span><span class="w"> </span><span class="nf">_check_coefficient</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">f</span><span class="p">:</span> <span class="n">SHCoeffs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Checks if an SHCoeffs object is compatible with instance settings.&quot;&quot;&quot;</span>
-        <span class="n">is_compatible</span> <span class="o">=</span> <span class="p">(</span>
-            <span class="n">f</span><span class="o">.</span><span class="n">lmax</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">lmax</span>
-            <span class="ow">and</span> <span class="n">f</span><span class="o">.</span><span class="n">normalization</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">normalization</span>
-            <span class="ow">and</span> <span class="n">f</span><span class="o">.</span><span class="n">csphase</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">csphase</span>
-        <span class="p">)</span>
-        <span class="k">if</span> <span class="ow">not</span> <span class="n">is_compatible</span><span class="p">:</span>
-            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
-                <span class="s2">&quot;Provided SHCoeffs object is not compatible with FingerPrint settings.&quot;</span>
-            <span class="p">)</span>
-        <span class="k">return</span> <span class="kc">True</span>
-
-    <span class="k">def</span><span class="w"> </span><span class="nf">_expand_field</span><span class="p">(</span>
-        <span class="bp">self</span><span class="p">,</span> <span class="n">f</span><span class="p">:</span> <span class="n">SHGrid</span><span class="p">,</span> <span class="o">/</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">lmax_calc</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
-    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHCoeffs</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Expands an SHGrid object into spherical harmonic coefficients.&quot;&quot;&quot;</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_check_field</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">f</span><span class="o">.</span><span class="n">expand</span><span class="p">(</span>
-            <span class="n">lmax_calc</span><span class="o">=</span><span class="n">lmax_calc</span><span class="p">,</span> <span class="n">normalization</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">normalization</span><span class="p">,</span> <span class="n">csphase</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">csphase</span>
-        <span class="p">)</span>
-
-    <span class="k">def</span><span class="w"> </span><span class="nf">_expand_coefficient</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">f</span><span class="p">:</span> <span class="n">SHCoeffs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Expands spherical harmonic coefficients into an SHGrid object.&quot;&quot;&quot;</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_check_coefficient</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
-        <span class="n">grid</span> <span class="o">=</span> <span class="s2">&quot;DH2&quot;</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sampling</span> <span class="o">==</span> <span class="mi">2</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">grid</span>
-        <span class="k">return</span> <span class="n">f</span><span class="o">.</span><span class="n">expand</span><span class="p">(</span><span class="n">grid</span><span class="o">=</span><span class="n">grid</span><span class="p">,</span> <span class="n">extend</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">extend</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_grid_name</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">grid</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sampling</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="s2">&quot;DH2&quot;</span>
 
     <span class="k">def</span><span class="w"> </span><span class="nf">_compute_ocean_function</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Computes and stores the ocean function from sea level and ice.&quot;&quot;&quot;</span>
@@ -574,50 +511,55 @@
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">zero_grid</span><span class="p">()</span><span class="o">.</span><span class="n">lons</span><span class="p">()</span></div>
 
 
-<div class="viewcode-block" id="FingerPrint.displacement_love_numbers">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.displacement_love_numbers">[docs]</a>
-    <span class="k">def</span><span class="w"> </span><span class="nf">displacement_love_numbers</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the displacement Love numbers, `h`.&quot;&quot;&quot;</span>
-        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_h</span></div>
-
-
-<div class="viewcode-block" id="FingerPrint.gravitational_love_numbers">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.gravitational_love_numbers">[docs]</a>
-    <span class="k">def</span><span class="w"> </span><span class="nf">gravitational_love_numbers</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the gravitational Love numbers, `k`.&quot;&quot;&quot;</span>
-        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_k</span></div>
-
-
-<div class="viewcode-block" id="FingerPrint.load_response">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.load_response">[docs]</a>
-    <span class="k">def</span><span class="w"> </span><span class="nf">load_response</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">load</span><span class="p">:</span> <span class="n">SHGrid</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">SHGrid</span><span class="p">,</span> <span class="n">SHGrid</span><span class="p">]:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">        Returns the direct elastic deformation for a load.</span>
-
-<span class="sd">        Note:</span>
-<span class="sd">            This calculation does not account for the sea level equation (i.e., no</span>
-<span class="sd">            gravitationally self-consistent sea level change or rotational feedbacks).</span>
-
-<span class="sd">        Args:</span>
-<span class="sd">            load: The applied surface load.</span>
-
-<span class="sd">        Returns:</span>
-<span class="sd">            A tuple containing the vertical displacement and the gravitational</span>
-<span class="sd">            potential change as `SHGrid` objects.</span>
-<span class="sd">        &quot;&quot;&quot;</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_check_field</span><span class="p">(</span><span class="n">load</span><span class="p">)</span>
-        <span class="n">displacement_lm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_expand_field</span><span class="p">(</span><span class="n">load</span><span class="p">)</span>
-        <span class="n">gravitational_potential_change_lm</span> <span class="o">=</span> <span class="n">displacement_lm</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
-
-        <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">lmax</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
-            <span class="n">displacement_lm</span><span class="o">.</span><span class="n">coeffs</span><span class="p">[:,</span> <span class="n">l</span><span class="p">,</span> <span class="p">:]</span> <span class="o">*=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_h</span><span class="p">[</span><span class="n">l</span><span class="p">]</span>
-            <span class="n">gravitational_potential_change_lm</span><span class="o">.</span><span class="n">coeffs</span><span class="p">[:,</span> <span class="n">l</span><span class="p">,</span> <span class="p">:]</span> <span class="o">*=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_k</span><span class="p">[</span><span class="n">l</span><span class="p">]</span>
-
-        <span class="n">displacement</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_expand_coefficient</span><span class="p">(</span><span class="n">displacement_lm</span><span class="p">)</span>
-        <span class="n">gravitational_potential_change</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_expand_coefficient</span><span class="p">(</span>
-            <span class="n">gravitational_potential_change_lm</span>
+<div class="viewcode-block" id="FingerPrint.check_field">
+<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.check_field">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">check_field</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">f</span><span class="p">:</span> <span class="n">SHGrid</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Checks if an SHGrid object is compatible with instance settings.&quot;&quot;&quot;</span>
+        <span class="n">is_compatible</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">f</span><span class="o">.</span><span class="n">lmax</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">lmax</span> <span class="ow">and</span> <span class="n">f</span><span class="o">.</span><span class="n">grid</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">grid</span> <span class="ow">and</span> <span class="n">f</span><span class="o">.</span><span class="n">extend</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">extend</span>
         <span class="p">)</span>
-        <span class="k">return</span> <span class="n">displacement</span><span class="p">,</span> <span class="n">gravitational_potential_change</span></div>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">is_compatible</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;Provided SHGrid object is not compatible with FingerPrint settings.&quot;</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="kc">True</span></div>
+
+
+<div class="viewcode-block" id="FingerPrint.check_coefficient">
+<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.check_coefficient">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">check_coefficient</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">f</span><span class="p">:</span> <span class="n">SHCoeffs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Checks if an SHCoeffs object is compatible with instance settings.&quot;&quot;&quot;</span>
+        <span class="n">is_compatible</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">f</span><span class="o">.</span><span class="n">lmax</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">lmax</span>
+            <span class="ow">and</span> <span class="n">f</span><span class="o">.</span><span class="n">normalization</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">normalization</span>
+            <span class="ow">and</span> <span class="n">f</span><span class="o">.</span><span class="n">csphase</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">csphase</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">is_compatible</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;Provided SHCoeffs object is not compatible with FingerPrint settings.&quot;</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="kc">True</span></div>
+
+
+<div class="viewcode-block" id="FingerPrint.expand_field">
+<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.expand_field">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">expand_field</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">f</span><span class="p">:</span> <span class="n">SHGrid</span><span class="p">,</span> <span class="o">/</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">lmax_calc</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHCoeffs</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Expands an SHGrid object into spherical harmonic coefficients.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">check_field</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">f</span><span class="o">.</span><span class="n">expand</span><span class="p">(</span>
+            <span class="n">lmax_calc</span><span class="o">=</span><span class="n">lmax_calc</span><span class="p">,</span> <span class="n">normalization</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">normalization</span><span class="p">,</span> <span class="n">csphase</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">csphase</span>
+        <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="FingerPrint.expand_coefficient">
+<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.expand_coefficient">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">expand_coefficient</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">f</span><span class="p">:</span> <span class="n">SHCoeffs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Expands spherical harmonic coefficients into an SHGrid object.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">check_coefficient</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+        <span class="n">grid</span> <span class="o">=</span> <span class="s2">&quot;DH2&quot;</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sampling</span> <span class="o">==</span> <span class="mi">2</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">grid</span>
+        <span class="k">return</span> <span class="n">f</span><span class="o">.</span><span class="n">expand</span><span class="p">(</span><span class="n">grid</span><span class="o">=</span><span class="n">grid</span><span class="p">,</span> <span class="n">extend</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">extend</span><span class="p">)</span></div>
 
 
 <div class="viewcode-block" id="FingerPrint.integrate">
@@ -633,8 +575,7 @@
 <span class="sd">            The integral of the function over the surface.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="p">(</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">_integration_factor</span>
-            <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_expand_field</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="n">lmax_calc</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">coeffs</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_integration_factor</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">expand_field</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="n">lmax_calc</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">coeffs</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span>
         <span class="p">)</span></div>
 
 
@@ -655,7 +596,7 @@
 <span class="sd">        Returns:</span>
 <span class="sd">            The value of the function at the specified point.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
-        <span class="n">f_lm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_expand_field</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+        <span class="n">f_lm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">expand_field</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
         <span class="k">return</span> <span class="n">f_lm</span><span class="o">.</span><span class="n">expand</span><span class="p">(</span><span class="n">lat</span><span class="o">=</span><span class="p">[</span><span class="n">latitude</span><span class="p">],</span> <span class="n">lon</span><span class="o">=</span><span class="p">[</span><span class="n">longitude</span><span class="p">],</span> <span class="n">degrees</span><span class="o">=</span><span class="n">degrees</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span></div>
 
 
@@ -675,7 +616,7 @@
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="mi">0</span> <span class="o">&lt;=</span> <span class="n">l</span> <span class="o">&lt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">lmax</span> <span class="ow">and</span> <span class="o">-</span><span class="n">l</span> <span class="o">&lt;=</span> <span class="n">m</span> <span class="o">&lt;=</span> <span class="n">l</span><span class="p">):</span>
             <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;(l,m)=(</span><span class="si">{</span><span class="n">l</span><span class="si">}</span><span class="s2">,</span><span class="si">{</span><span class="n">m</span><span class="si">}</span><span class="s2">) is out of bounds for lmax=</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">lmax</span><span class="si">}</span><span class="s2">.&quot;</span><span class="p">)</span>
-        <span class="n">f_lm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_expand_field</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+        <span class="n">f_lm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">expand_field</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
         <span class="k">return</span> <span class="n">f_lm</span><span class="o">.</span><span class="n">coeffs</span><span class="p">[</span><span class="mi">0</span> <span class="k">if</span> <span class="n">m</span> <span class="o">&gt;=</span> <span class="mi">0</span> <span class="k">else</span> <span class="mi">1</span><span class="p">,</span> <span class="n">l</span><span class="p">,</span> <span class="nb">abs</span><span class="p">(</span><span class="n">m</span><span class="p">)]</span></div>
 
 
@@ -739,7 +680,7 @@
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Returns the mean sea level change from a direct load (eustatic change).</span>
 <span class="sd">        &quot;&quot;&quot;</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_check_field</span><span class="p">(</span><span class="n">direct_load</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">check_field</span><span class="p">(</span><span class="n">direct_load</span><span class="p">)</span>
         <span class="k">return</span> <span class="o">-</span><span class="bp">self</span><span class="o">.</span><span class="n">integrate</span><span class="p">(</span><span class="n">direct_load</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">water_density</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">ocean_area</span><span class="p">)</span></div>
 
 
@@ -779,7 +720,7 @@
 
         <span class="k">if</span> <span class="n">direct_load</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
             <span class="n">loads_present</span> <span class="o">=</span> <span class="kc">True</span>
-            <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">_check_field</span><span class="p">(</span><span class="n">direct_load</span><span class="p">)</span>
+            <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">check_field</span><span class="p">(</span><span class="n">direct_load</span><span class="p">)</span>
             <span class="n">mean_sea_level_change</span> <span class="o">=</span> <span class="o">-</span><span class="bp">self</span><span class="o">.</span><span class="n">integrate</span><span class="p">(</span><span class="n">direct_load</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span>
                 <span class="bp">self</span><span class="o">.</span><span class="n">water_density</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">ocean_area</span>
             <span class="p">)</span>
@@ -791,14 +732,14 @@
 
         <span class="k">if</span> <span class="n">displacement_load</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
             <span class="n">loads_present</span> <span class="o">=</span> <span class="kc">True</span>
-            <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">_check_field</span><span class="p">(</span><span class="n">displacement_load</span><span class="p">)</span>
-            <span class="n">displacement_load_lm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_expand_field</span><span class="p">(</span><span class="n">displacement_load</span><span class="p">)</span>
+            <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">check_field</span><span class="p">(</span><span class="n">displacement_load</span><span class="p">)</span>
+            <span class="n">displacement_load_lm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">expand_field</span><span class="p">(</span><span class="n">displacement_load</span><span class="p">)</span>
             <span class="n">non_zero_rhs</span> <span class="o">=</span> <span class="n">non_zero_rhs</span> <span class="ow">or</span> <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">displacement_load</span><span class="o">.</span><span class="n">data</span><span class="p">))</span> <span class="o">&gt;</span> <span class="mi">0</span>
 
         <span class="k">if</span> <span class="n">gravitational_potential_load</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
             <span class="n">loads_present</span> <span class="o">=</span> <span class="kc">True</span>
-            <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">_check_field</span><span class="p">(</span><span class="n">gravitational_potential_load</span><span class="p">)</span>
-            <span class="n">gravitational_potential_load_lm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_expand_field</span><span class="p">(</span>
+            <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">check_field</span><span class="p">(</span><span class="n">gravitational_potential_load</span><span class="p">)</span>
+            <span class="n">gravitational_potential_load_lm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">expand_field</span><span class="p">(</span>
                 <span class="n">gravitational_potential_load</span>
             <span class="p">)</span>
             <span class="n">non_zero_rhs</span> <span class="o">=</span> <span class="p">(</span>
@@ -833,7 +774,7 @@
         <span class="n">count_print</span> <span class="o">=</span> <span class="mi">0</span>
         <span class="k">while</span> <span class="n">err</span> <span class="o">&gt;</span> <span class="n">rtol</span><span class="p">:</span>
 
-            <span class="n">displacement_lm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_expand_field</span><span class="p">(</span><span class="n">load</span><span class="p">)</span>
+            <span class="n">displacement_lm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">expand_field</span><span class="p">(</span><span class="n">load</span><span class="p">)</span>
             <span class="n">gravity_potential_change_lm</span> <span class="o">=</span> <span class="n">displacement_lm</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
 
             <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">lmax</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
@@ -879,8 +820,8 @@
                     <span class="n">r</span> <span class="o">*</span> <span class="n">angular_velocity_change</span>
                 <span class="p">)</span>
 
-            <span class="n">displacement</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_expand_coefficient</span><span class="p">(</span><span class="n">displacement_lm</span><span class="p">)</span>
-            <span class="n">gravity_potential_change</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_expand_coefficient</span><span class="p">(</span>
+            <span class="n">displacement</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">expand_coefficient</span><span class="p">(</span><span class="n">displacement_lm</span><span class="p">)</span>
+            <span class="n">gravity_potential_change</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">expand_coefficient</span><span class="p">(</span>
                 <span class="n">gravity_potential_change_lm</span>
             <span class="p">)</span>
 
@@ -919,7 +860,7 @@
         <span class="n">centrifugal_potential_change_lm</span><span class="o">.</span><span class="n">coeffs</span><span class="p">[:,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">_rotation_factor</span> <span class="o">*</span> <span class="n">angular_velocity_change</span>
         <span class="p">)</span>
-        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_expand_coefficient</span><span class="p">(</span><span class="n">centrifugal_potential_change_lm</span><span class="p">)</span></div>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">expand_coefficient</span><span class="p">(</span><span class="n">centrifugal_potential_change_lm</span><span class="p">)</span></div>
 
 
 <div class="viewcode-block" id="FingerPrint.gravity_potential_change_to_gravitational_potential_change">
@@ -928,11 +869,11 @@
         <span class="bp">self</span><span class="p">,</span> <span class="n">gravity_potential_change</span><span class="p">:</span> <span class="n">SHGrid</span><span class="p">,</span> <span class="n">angular_velocity_change</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Subtracts the centrifugal potential to isolate the gravitational potential.&quot;&quot;&quot;</span>
-        <span class="n">gravitational_potential_change_lm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_expand_field</span><span class="p">(</span><span class="n">gravity_potential_change</span><span class="p">)</span>
+        <span class="n">gravitational_potential_change_lm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">expand_field</span><span class="p">(</span><span class="n">gravity_potential_change</span><span class="p">)</span>
         <span class="n">gravitational_potential_change_lm</span><span class="o">.</span><span class="n">coeffs</span><span class="p">[:,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">-=</span> <span class="p">(</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">_rotation_factor</span> <span class="o">*</span> <span class="n">angular_velocity_change</span>
         <span class="p">)</span>
-        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_expand_coefficient</span><span class="p">(</span><span class="n">gravitational_potential_change_lm</span><span class="p">)</span></div>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">expand_coefficient</span><span class="p">(</span><span class="n">gravitational_potential_change_lm</span><span class="p">)</span></div>
 
 
 <div class="viewcode-block" id="FingerPrint.gravitational_potential_change_to_gravity_potential_change">
@@ -943,51 +884,114 @@
         <span class="n">angular_velocity_change</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Adds the centrifugal potential to get the total gravity potential.&quot;&quot;&quot;</span>
-        <span class="n">gravity_potential_change_lm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_expand_field</span><span class="p">(</span><span class="n">gravitational_potential_change</span><span class="p">)</span>
+        <span class="n">gravity_potential_change_lm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">expand_field</span><span class="p">(</span><span class="n">gravitational_potential_change</span><span class="p">)</span>
         <span class="n">gravity_potential_change_lm</span><span class="o">.</span><span class="n">coeffs</span><span class="p">[:,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">+=</span> <span class="p">(</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">_rotation_factor</span> <span class="o">*</span> <span class="n">angular_velocity_change</span>
         <span class="p">)</span>
-        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_expand_coefficient</span><span class="p">(</span><span class="n">gravity_potential_change_lm</span><span class="p">)</span></div>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">expand_coefficient</span><span class="p">(</span><span class="n">gravity_potential_change_lm</span><span class="p">)</span></div>
 
 
 <div class="viewcode-block" id="FingerPrint.ocean_projection">
 <a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.ocean_projection">[docs]</a>
-    <span class="k">def</span><span class="w"> </span><span class="nf">ocean_projection</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Returns a grid that is 1 over oceans and `value` elsewhere.&quot;&quot;&quot;</span>
-        <span class="k">return</span> <span class="n">SHGrid</span><span class="o">.</span><span class="n">from_array</span><span class="p">(</span>
-            <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ocean_function</span><span class="o">.</span><span class="n">data</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">value</span><span class="p">),</span> <span class="n">grid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">grid</span>
-        <span class="p">)</span></div>
+    <span class="k">def</span><span class="w"> </span><span class="nf">ocean_projection</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="o">/</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">,</span> <span class="n">exclude_ice_shelves</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns a grid that is 1 over oceans and `value` elsewhere.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            value: The value to assign outside the ocean. Default is NaN.</span>
+<span class="sd">            exclude_ice_shelves: If True, exclude ice shelves from the projection.</span>
+<span class="sd">                                 Default is False.</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">exclude_ice_shelves</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">SHGrid</span><span class="o">.</span><span class="n">from_array</span><span class="p">(</span>
+                <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span>
+                    <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ocean_function</span><span class="o">.</span><span class="n">data</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ice_thickness</span><span class="o">.</span><span class="n">data</span> <span class="o">==</span> <span class="mi">0</span><span class="p">),</span>
+                    <span class="mi">1</span><span class="p">,</span>
+                    <span class="n">value</span><span class="p">,</span>
+                <span class="p">),</span>
+                <span class="n">grid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">grid</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">SHGrid</span><span class="o">.</span><span class="n">from_array</span><span class="p">(</span>
+                <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ocean_function</span><span class="o">.</span><span class="n">data</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">value</span><span class="p">),</span> <span class="n">grid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">grid</span>
+            <span class="p">)</span></div>
 
 
 <div class="viewcode-block" id="FingerPrint.ice_projection">
 <a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.ice_projection">[docs]</a>
-    <span class="k">def</span><span class="w"> </span><span class="nf">ice_projection</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Returns a grid that is 1 over ice sheets and `value` elsewhere.&quot;&quot;&quot;</span>
-        <span class="k">return</span> <span class="n">SHGrid</span><span class="o">.</span><span class="n">from_array</span><span class="p">(</span>
-            <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ice_thickness</span><span class="o">.</span><span class="n">data</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">value</span><span class="p">),</span> <span class="n">grid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">grid</span>
-        <span class="p">)</span></div>
+    <span class="k">def</span><span class="w"> </span><span class="nf">ice_projection</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="o">/</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">,</span> <span class="n">exclude_ice_shelves</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns a grid that is 1 over ice sheets and `value` elsewhere.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            value: The value to assign outside the ice sheet. Default is NaN.</span>
+<span class="sd">            exclude_ice_shelves: If True, exclude ice shelves from the projection.</span>
+<span class="sd">                                 Default is False.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="k">if</span> <span class="n">exclude_ice_shelves</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">SHGrid</span><span class="o">.</span><span class="n">from_array</span><span class="p">(</span>
+                <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span>
+                    <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ice_thickness</span><span class="o">.</span><span class="n">data</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ocean_function</span><span class="o">.</span><span class="n">data</span> <span class="o">==</span> <span class="mi">0</span><span class="p">),</span>
+                    <span class="mi">1</span><span class="p">,</span>
+                    <span class="n">value</span><span class="p">,</span>
+                <span class="p">),</span>
+                <span class="n">grid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">grid</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">SHGrid</span><span class="o">.</span><span class="n">from_array</span><span class="p">(</span>
+                <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ice_thickness</span><span class="o">.</span><span class="n">data</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">value</span><span class="p">),</span> <span class="n">grid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">grid</span>
+            <span class="p">)</span></div>
 
 
 <div class="viewcode-block" id="FingerPrint.land_projection">
 <a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.land_projection">[docs]</a>
-    <span class="k">def</span><span class="w"> </span><span class="nf">land_projection</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Returns a grid that is 1 over land and `value` elsewhere.&quot;&quot;&quot;</span>
-        <span class="k">return</span> <span class="n">SHGrid</span><span class="o">.</span><span class="n">from_array</span><span class="p">(</span>
-            <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ocean_function</span><span class="o">.</span><span class="n">data</span> <span class="o">==</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">value</span><span class="p">),</span> <span class="n">grid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">grid</span>
-        <span class="p">)</span></div>
+    <span class="k">def</span><span class="w"> </span><span class="nf">land_projection</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="o">/</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">,</span> <span class="n">exclude_ice</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns a grid that is 1 over land and `value` elsewhere.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            value: The value to assign outside the land. Default is NaN.</span>
+<span class="sd">            exclude_ice: If True, exclude ice from the projection. Default is False.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">exclude_ice</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">SHGrid</span><span class="o">.</span><span class="n">from_array</span><span class="p">(</span>
+                <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span>
+                    <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ice_thickness</span><span class="o">.</span><span class="n">data</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ocean_function</span><span class="o">.</span><span class="n">data</span> <span class="o">==</span> <span class="mi">0</span><span class="p">),</span>
+                    <span class="mi">1</span><span class="p">,</span>
+                    <span class="n">value</span><span class="p">,</span>
+                <span class="p">),</span>
+                <span class="n">grid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">grid</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">SHGrid</span><span class="o">.</span><span class="n">from_array</span><span class="p">(</span>
+                <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ocean_function</span><span class="o">.</span><span class="n">data</span> <span class="o">==</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">value</span><span class="p">),</span> <span class="n">grid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">grid</span>
+            <span class="p">)</span></div>
 
 
 <div class="viewcode-block" id="FingerPrint.northern_hemisphere_projection">
 <a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.northern_hemisphere_projection">[docs]</a>
-    <span class="k">def</span><span class="w"> </span><span class="nf">northern_hemisphere_projection</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Returns a grid that is 1 in the Northern Hemisphere and `value` elsewhere.&quot;&quot;&quot;</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">northern_hemisphere_projection</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">/</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns a grid that is 1 in the Northern Hemisphere and `value` elsewhere.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            value: The value to assign outside the Northern Hemisphere. Default is NaN.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
         <span class="n">lats</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">meshgrid</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">lats</span><span class="p">(),</span> <span class="bp">self</span><span class="o">.</span><span class="n">lons</span><span class="p">(),</span> <span class="n">indexing</span><span class="o">=</span><span class="s2">&quot;ij&quot;</span><span class="p">)</span>
         <span class="k">return</span> <span class="n">SHGrid</span><span class="o">.</span><span class="n">from_array</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">lats</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">value</span><span class="p">),</span> <span class="n">grid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">grid</span><span class="p">)</span></div>
 
 
 <div class="viewcode-block" id="FingerPrint.southern_hemisphere_projection">
 <a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.southern_hemisphere_projection">[docs]</a>
-    <span class="k">def</span><span class="w"> </span><span class="nf">southern_hemisphere_projection</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">southern_hemisphere_projection</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">/</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Returns a grid that is 1 in the Southern Hemisphere and `value` elsewhere.&quot;&quot;&quot;</span>
         <span class="n">lats</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">meshgrid</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">lats</span><span class="p">(),</span> <span class="bp">self</span><span class="o">.</span><span class="n">lons</span><span class="p">(),</span> <span class="n">indexing</span><span class="o">=</span><span class="s2">&quot;ij&quot;</span><span class="p">)</span>
         <span class="k">return</span> <span class="n">SHGrid</span><span class="o">.</span><span class="n">from_array</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">lats</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">value</span><span class="p">),</span> <span class="n">grid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">grid</span><span class="p">)</span></div>
@@ -996,7 +1000,12 @@
 <div class="viewcode-block" id="FingerPrint.altimetry_projection">
 <a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.altimetry_projection">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">altimetry_projection</span><span class="p">(</span>
-        <span class="bp">self</span><span class="p">,</span> <span class="n">latitude1</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="o">-</span><span class="mf">66.0</span><span class="p">,</span> <span class="n">latitude2</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">66.0</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="o">/</span><span class="p">,</span>
+        <span class="o">*</span><span class="p">,</span>
+        <span class="n">latitude_min</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="o">-</span><span class="mi">66</span><span class="p">,</span>
+        <span class="n">latitude_max</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mi">66</span><span class="p">,</span>
+        <span class="n">value</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Returns a grid that is 1 in the oceans between specified latitudes</span>
@@ -1004,7 +1013,7 @@
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="n">lats</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">meshgrid</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">lats</span><span class="p">(),</span> <span class="bp">self</span><span class="o">.</span><span class="n">lons</span><span class="p">(),</span> <span class="n">indexing</span><span class="o">=</span><span class="s2">&quot;ij&quot;</span><span class="p">)</span>
         <span class="n">ocean_mask</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">ocean_function</span><span class="o">.</span><span class="n">data</span> <span class="o">&gt;</span> <span class="mi">0</span>
-        <span class="n">lat_mask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">logical_and</span><span class="p">(</span><span class="n">lats</span> <span class="o">&gt;</span> <span class="n">latitude1</span><span class="p">,</span> <span class="n">lats</span> <span class="o">&lt;</span> <span class="n">latitude2</span><span class="p">)</span>
+        <span class="n">lat_mask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">logical_and</span><span class="p">(</span><span class="n">lats</span> <span class="o">&gt;</span> <span class="n">latitude_min</span><span class="p">,</span> <span class="n">lats</span> <span class="o">&lt;</span> <span class="n">latitude_max</span><span class="p">)</span>
         <span class="k">return</span> <span class="n">SHGrid</span><span class="o">.</span><span class="n">from_array</span><span class="p">(</span>
             <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">logical_and</span><span class="p">(</span><span class="n">ocean_mask</span><span class="p">,</span> <span class="n">lat_mask</span><span class="p">),</span> <span class="mi">1</span><span class="p">,</span> <span class="n">value</span><span class="p">),</span> <span class="n">grid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">grid</span>
         <span class="p">)</span></div>
@@ -1035,51 +1044,13 @@
         <span class="p">)</span></div>
 
 
-<div class="viewcode-block" id="FingerPrint.point_load">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.point_load">[docs]</a>
-    <span class="k">def</span><span class="w"> </span><span class="nf">point_load</span><span class="p">(</span>
-        <span class="bp">self</span><span class="p">,</span>
-        <span class="n">latitude</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
-        <span class="n">longitude</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
-        <span class="n">amplitude</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">,</span>
-        <span class="n">smoothing_angle</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">        Return a point load, optionally smoothed with a Gaussian kernel.</span>
-
-<span class="sd">        Args:</span>
-<span class="sd">            latitude: Latitude of the point load in degrees.</span>
-<span class="sd">            longitude: Longitude of the point load in degrees.</span>
-<span class="sd">            amplitude: Amplitude of the load.</span>
-<span class="sd">            smoothing_angle: Angle in degrees for Gaussian smoothing.</span>
-<span class="sd">        &quot;&quot;&quot;</span>
-        <span class="n">theta</span> <span class="o">=</span> <span class="mf">90.0</span> <span class="o">-</span> <span class="n">latitude</span>
-        <span class="n">point_load_lm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">zero_coefficients</span><span class="p">()</span>
-        <span class="n">ylm</span> <span class="o">=</span> <span class="n">pysh</span><span class="o">.</span><span class="n">expand</span><span class="o">.</span><span class="n">spharm</span><span class="p">(</span>
-            <span class="n">point_load_lm</span><span class="o">.</span><span class="n">lmax</span><span class="p">,</span> <span class="n">theta</span><span class="p">,</span> <span class="n">longitude</span><span class="p">,</span> <span class="n">normalization</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">normalization</span>
-        <span class="p">)</span>
-        <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">point_load_lm</span><span class="o">.</span><span class="n">lmax</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
-            <span class="n">point_load_lm</span><span class="o">.</span><span class="n">coeffs</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="n">l</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">+=</span> <span class="n">ylm</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="n">l</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span>
-            <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">l</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
-                <span class="n">point_load_lm</span><span class="o">.</span><span class="n">coeffs</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="n">l</span><span class="p">,</span> <span class="n">m</span><span class="p">]</span> <span class="o">+=</span> <span class="n">ylm</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="n">l</span><span class="p">,</span> <span class="n">m</span><span class="p">]</span>
-                <span class="n">point_load_lm</span><span class="o">.</span><span class="n">coeffs</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="n">l</span><span class="p">,</span> <span class="n">m</span><span class="p">]</span> <span class="o">+=</span> <span class="n">ylm</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="n">l</span><span class="p">,</span> <span class="n">m</span><span class="p">]</span>
-        <span class="k">if</span> <span class="n">smoothing_angle</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-            <span class="n">th</span> <span class="o">=</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="n">smoothing_angle</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mf">180.0</span>
-            <span class="n">t</span> <span class="o">=</span> <span class="n">th</span> <span class="o">*</span> <span class="n">th</span>
-            <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">point_load_lm</span><span class="o">.</span><span class="n">lmax</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
-                <span class="n">fac</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="n">l</span> <span class="o">*</span> <span class="p">(</span><span class="n">l</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="n">t</span><span class="p">)</span>
-                <span class="n">point_load_lm</span><span class="o">.</span><span class="n">coeffs</span><span class="p">[:,</span> <span class="n">l</span><span class="p">,</span> <span class="p">:]</span> <span class="o">*=</span> <span class="n">fac</span>
-        <span class="n">point_load_lm</span> <span class="o">*=</span> <span class="mi">1</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">mean_sea_floor_radius</span><span class="o">**</span><span class="mi">2</span>
-        <span class="k">return</span> <span class="n">amplitude</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_expand_coefficient</span><span class="p">(</span><span class="n">point_load_lm</span><span class="p">)</span></div>
-
-
 <div class="viewcode-block" id="FingerPrint.direct_load_from_ice_thickness_change">
 <a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.direct_load_from_ice_thickness_change">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">direct_load_from_ice_thickness_change</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span> <span class="n">ice_thickness_change</span><span class="p">:</span> <span class="n">SHGrid</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Converts an ice thickness change into the associated surface mass load.&quot;&quot;&quot;</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_check_field</span><span class="p">(</span><span class="n">ice_thickness_change</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">check_field</span><span class="p">(</span><span class="n">ice_thickness_change</span><span class="p">)</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">ice_density</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">one_minus_ocean_function</span> <span class="o">*</span> <span class="n">ice_thickness_change</span></div>
 
 
@@ -1088,7 +1059,9 @@
     <span class="k">def</span><span class="w"> </span><span class="nf">northern_hemisphere_load</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fraction</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Returns a load from melting a fraction of Northern Hemisphere ice.&quot;&quot;&quot;</span>
         <span class="n">ice_change</span> <span class="o">=</span> <span class="p">(</span>
-            <span class="o">-</span><span class="n">fraction</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">ice_thickness</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">northern_hemisphere_projection</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+            <span class="o">-</span><span class="n">fraction</span>
+            <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">ice_thickness</span>
+            <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">northern_hemisphere_projection</span><span class="p">(</span><span class="n">value</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
         <span class="p">)</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">direct_load_from_ice_thickness_change</span><span class="p">(</span><span class="n">ice_change</span><span class="p">)</span></div>
 
@@ -1098,64 +1071,11 @@
     <span class="k">def</span><span class="w"> </span><span class="nf">southern_hemisphere_load</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fraction</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Returns a load from melting a fraction of Southern Hemisphere ice.&quot;&quot;&quot;</span>
         <span class="n">ice_change</span> <span class="o">=</span> <span class="p">(</span>
-            <span class="o">-</span><span class="n">fraction</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">ice_thickness</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">southern_hemisphere_projection</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+            <span class="o">-</span><span class="n">fraction</span>
+            <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">ice_thickness</span>
+            <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">southern_hemisphere_projection</span><span class="p">(</span><span class="n">value</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
         <span class="p">)</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">direct_load_from_ice_thickness_change</span><span class="p">(</span><span class="n">ice_change</span><span class="p">)</span></div>
-
-
-<div class="viewcode-block" id="FingerPrint.adjoint_loads_for_sea_level_point_measurement">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.adjoint_loads_for_sea_level_point_measurement">[docs]</a>
-    <span class="k">def</span><span class="w"> </span><span class="nf">adjoint_loads_for_sea_level_point_measurement</span><span class="p">(</span>
-        <span class="bp">self</span><span class="p">,</span> <span class="n">latitude</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">longitude</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">smoothing_angle</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
-    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">SHGrid</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">]:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Returns the adjoint loads for a sea level point measurement.&quot;&quot;&quot;</span>
-        <span class="n">direct_load</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">point_load</span><span class="p">(</span>
-            <span class="n">latitude</span><span class="p">,</span> <span class="n">longitude</span><span class="p">,</span> <span class="n">smoothing_angle</span><span class="o">=</span><span class="n">smoothing_angle</span>
-        <span class="p">)</span>
-        <span class="k">return</span> <span class="n">direct_load</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span></div>
-
-
-<div class="viewcode-block" id="FingerPrint.adjoint_loads_for_displacement_point_measurement">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.adjoint_loads_for_displacement_point_measurement">[docs]</a>
-    <span class="k">def</span><span class="w"> </span><span class="nf">adjoint_loads_for_displacement_point_measurement</span><span class="p">(</span>
-        <span class="bp">self</span><span class="p">,</span> <span class="n">latitude</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">longitude</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">smoothing_angle</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
-    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="n">SHGrid</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">]:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Returns the adjoint loads for a displacement point measurement.&quot;&quot;&quot;</span>
-        <span class="n">displacement_load</span> <span class="o">=</span> <span class="o">-</span><span class="mf">1.0</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">point_load</span><span class="p">(</span>
-            <span class="n">latitude</span><span class="p">,</span> <span class="n">longitude</span><span class="p">,</span> <span class="n">smoothing_angle</span><span class="o">=</span><span class="n">smoothing_angle</span>
-        <span class="p">)</span>
-        <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="n">displacement_load</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span></div>
-
-
-<div class="viewcode-block" id="FingerPrint.adjoint_loads_for_gravity_potential_coefficient">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.adjoint_loads_for_gravity_potential_coefficient">[docs]</a>
-    <span class="k">def</span><span class="w"> </span><span class="nf">adjoint_loads_for_gravity_potential_coefficient</span><span class="p">(</span>
-        <span class="bp">self</span><span class="p">,</span> <span class="n">l</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">m</span><span class="p">:</span> <span class="nb">int</span>
-    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="n">SHGrid</span><span class="p">,</span> <span class="kc">None</span><span class="p">]:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Returns adjoint loads for an observation of a gravity potential coefficient.&quot;&quot;&quot;</span>
-        <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="mi">0</span> <span class="o">&lt;=</span> <span class="n">l</span> <span class="o">&lt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">lmax</span> <span class="ow">and</span> <span class="o">-</span><span class="n">l</span> <span class="o">&lt;=</span> <span class="n">m</span> <span class="o">&lt;=</span> <span class="n">l</span><span class="p">):</span>
-            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;(l,m)=(</span><span class="si">{</span><span class="n">l</span><span class="si">}</span><span class="s2">,</span><span class="si">{</span><span class="n">m</span><span class="si">}</span><span class="s2">) is out of bounds for lmax=</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">lmax</span><span class="si">}</span><span class="s2">.&quot;</span><span class="p">)</span>
-        <span class="n">g</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">gravitational_acceleration</span>
-        <span class="n">b</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">mean_sea_floor_radius</span>
-        <span class="n">adjoint_load_lm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">zero_coefficients</span><span class="p">()</span>
-        <span class="n">adjoint_load_lm</span><span class="o">.</span><span class="n">coeffs</span><span class="p">[</span><span class="mi">0</span> <span class="k">if</span> <span class="n">m</span> <span class="o">&gt;=</span> <span class="mi">0</span> <span class="k">else</span> <span class="mi">1</span><span class="p">,</span> <span class="n">l</span><span class="p">,</span> <span class="nb">abs</span><span class="p">(</span><span class="n">m</span><span class="p">)]</span> <span class="o">=</span> <span class="o">-</span><span class="n">g</span> <span class="o">/</span> <span class="n">b</span><span class="o">**</span><span class="mi">2</span>
-        <span class="n">adjoint_load</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_expand_coefficient</span><span class="p">(</span><span class="n">adjoint_load_lm</span><span class="p">)</span>
-        <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="n">adjoint_load</span><span class="p">,</span> <span class="kc">None</span></div>
-
-
-<div class="viewcode-block" id="FingerPrint.adjoint_loads_for_gravitational_potential_coefficient">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.adjoint_loads_for_gravitational_potential_coefficient">[docs]</a>
-    <span class="k">def</span><span class="w"> </span><span class="nf">adjoint_loads_for_gravitational_potential_coefficient</span><span class="p">(</span>
-        <span class="bp">self</span><span class="p">,</span> <span class="n">l</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">m</span><span class="p">:</span> <span class="nb">int</span>
-    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="n">SHGrid</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Returns adjoint loads for an observation of a gravitational potential coefficient.&quot;&quot;&quot;</span>
-        <span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">adjoint_load</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">adjoint_loads_for_gravity_potential_coefficient</span><span class="p">(</span>
-            <span class="n">l</span><span class="p">,</span> <span class="n">m</span>
-        <span class="p">)</span>
-        <span class="n">angular_momentum_change</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">angular_momentum_change_from_potential</span><span class="p">(</span>
-            <span class="n">adjoint_load</span>
-        <span class="p">)</span>
-        <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="n">adjoint_load</span><span class="p">,</span> <span class="n">angular_momentum_change</span></div>
 
 
 <div class="viewcode-block" id="FingerPrint.angular_momentum_change_from_potential">
@@ -1164,7 +1084,7 @@
         <span class="bp">self</span><span class="p">,</span> <span class="n">gravitational_potential_load</span><span class="p">:</span> <span class="n">SHGrid</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Returns the adjoint angular momentum change for a given gravitational potential load.&quot;&quot;&quot;</span>
-        <span class="n">gravitational_potential_load_lm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_expand_field</span><span class="p">(</span>
+        <span class="n">gravitational_potential_load_lm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">expand_field</span><span class="p">(</span>
             <span class="n">gravitational_potential_load</span><span class="p">,</span> <span class="n">lmax_calc</span><span class="o">=</span><span class="mi">2</span>
         <span class="p">)</span>
         <span class="n">r</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rotation_factor</span>
@@ -1172,84 +1092,141 @@
         <span class="k">return</span> <span class="o">-</span><span class="n">r</span> <span class="o">*</span> <span class="n">b</span> <span class="o">*</span> <span class="n">b</span> <span class="o">*</span> <span class="n">gravitational_potential_load_lm</span><span class="o">.</span><span class="n">coeffs</span><span class="p">[:,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span></div>
 
 
-<div class="viewcode-block" id="FingerPrint.gaussian_averaging_function">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.gaussian_averaging_function">[docs]</a>
-    <span class="k">def</span><span class="w"> </span><span class="nf">gaussian_averaging_function</span><span class="p">(</span>
-        <span class="bp">self</span><span class="p">,</span> <span class="n">r</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">latitude</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">longitude</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">cut</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
-    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
+<div class="viewcode-block" id="FingerPrint.lebesgue_load_space">
+<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.lebesgue_load_space">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">lebesgue_load_space</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Lebesgue</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">        Returns a Gaussian averaging function centered at a point.</span>
+<span class="sd">        Defines the mathematical space for square-integrable surface mass loads.</span>
 
-<span class="sd">        Args:</span>
-<span class="sd">            r: Radius of the averaging function in kilometers.</span>
-<span class="sd">            latitude: Latitude of the center in degrees.</span>
-<span class="sd">            longitude: Longitude of the center in degrees.</span>
-<span class="sd">            cut: If true, the function is high-pass filtered by removing l&lt;2.</span>
-<span class="sd">        &quot;&quot;&quot;</span>
-        <span class="n">th0</span> <span class="o">=</span> <span class="p">(</span><span class="mf">90.0</span> <span class="o">-</span> <span class="n">latitude</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mf">180.0</span>
-        <span class="n">ph0</span> <span class="o">=</span> <span class="n">longitude</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mf">180.0</span>
-        <span class="n">c</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="mi">1000</span> <span class="o">*</span> <span class="n">r</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">mean_sea_floor_radius</span><span class="p">))</span>
-        <span class="n">fac</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span> <span class="o">*</span> <span class="n">c</span><span class="p">))</span>
-        <span class="n">fac</span> <span class="o">=</span> <span class="n">c</span> <span class="o">/</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">mean_sea_floor_radius</span><span class="o">**</span><span class="mi">2</span> <span class="o">*</span> <span class="n">fac</span><span class="p">)</span>
-        <span class="n">w</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">zero_grid</span><span class="p">()</span>
-        <span class="n">lats</span><span class="p">,</span> <span class="n">lons</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">lats</span><span class="p">(),</span> <span class="bp">self</span><span class="o">.</span><span class="n">lons</span><span class="p">()</span>
-        <span class="k">for</span> <span class="n">ilat</span><span class="p">,</span> <span class="n">lat</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">lats</span><span class="p">):</span>
-            <span class="n">th</span> <span class="o">=</span> <span class="p">(</span><span class="mf">90.0</span> <span class="o">-</span> <span class="n">lat</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mf">180.0</span>
-            <span class="n">fac1</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">th</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">th0</span><span class="p">)</span>
-            <span class="n">fac2</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">th</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">th0</span><span class="p">)</span>
-            <span class="k">for</span> <span class="n">ilon</span><span class="p">,</span> <span class="n">lon</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">lons</span><span class="p">):</span>
-                <span class="n">ph</span> <span class="o">=</span> <span class="n">lon</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mf">180.0</span>
-                <span class="n">calpha</span> <span class="o">=</span> <span class="n">fac1</span> <span class="o">+</span> <span class="n">fac2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">ph</span> <span class="o">-</span> <span class="n">ph0</span><span class="p">)</span>
-                <span class="n">w</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="n">ilat</span><span class="p">,</span> <span class="n">ilon</span><span class="p">]</span> <span class="o">=</span> <span class="n">fac</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="n">c</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">calpha</span><span class="p">))</span>
-        <span class="k">if</span> <span class="n">cut</span><span class="p">:</span>
-            <span class="n">w_lm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_expand_field</span><span class="p">(</span><span class="n">w</span><span class="p">)</span>
-            <span class="n">w_lm</span><span class="o">.</span><span class="n">coeffs</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">2</span><span class="p">,</span> <span class="p">:]</span> <span class="o">=</span> <span class="mf">0.0</span>
-            <span class="n">w</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_expand_coefficient</span><span class="p">(</span><span class="n">w_lm</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">w</span></div>
-
-
-<div class="viewcode-block" id="FingerPrint.as_linear_operator">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.as_linear_operator">[docs]</a>
-    <span class="k">def</span><span class="w"> </span><span class="nf">as_linear_operator</span><span class="p">(</span>
-        <span class="bp">self</span><span class="p">,</span>
-        <span class="n">order</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
-        <span class="n">scale</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
-        <span class="o">/</span><span class="p">,</span>
-        <span class="o">*</span><span class="p">,</span>
-        <span class="n">rotational_feedbacks</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
-        <span class="n">rtol</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1e-6</span><span class="p">,</span>
-    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">inf</span><span class="o">.</span><span class="n">LinearOperator</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">        Returns the sea level fingerprint model as a pygeoinf LinearOperator.</span>
-
-<span class="sd">        This method wraps the instance&#39;s physical forward model (the __call__ method)</span>
-<span class="sd">        and its corresponding adjoint into a formal mathematical operator, which can</span>
-<span class="sd">        be used in the solution of inverse problems.</span>
-
-<span class="sd">        Args:</span>
-<span class="sd">            order: The Sobolev order, defining the smoothness of the input load space.</span>
-<span class="sd">            scale: The Sobolev scale, defining the characteristic length scale of</span>
-<span class="sd">                features in the input load space.</span>
-<span class="sd">            rotational_feedbacks: Configures the operator to include the effects of</span>
-<span class="sd">                polar wander in the forward and adjoint calculations.</span>
-<span class="sd">            rtol: The relative tolerance passed to the underlying iterative solver.</span>
+<span class="sd">        This method returns an instance of a pygeoinf Lebesgue space ($L^2$),</span>
+<span class="sd">        which represents scalar functions on the sphere with a finite integral</span>
+<span class="sd">        of their square. It is the natural function space for defining loads</span>
+<span class="sd">        without imposing any prior assumptions about their smoothness.</span>
 
 <span class="sd">        Returns:</span>
-<span class="sd">            A pygeoinf.LinearOperator object that encapsulates the forward mapping,</span>
-<span class="sd">            the adjoint mapping, and the mathematical spaces (domain and codomain).</span>
+<span class="sd">            An instance of `pygeoinf.symmetric_space.sphere.Lebesgue`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Lebesgue</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">lmax</span><span class="p">,</span>
+            <span class="n">radius</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">mean_sea_floor_radius</span><span class="p">,</span>
+            <span class="n">grid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_grid_name</span><span class="p">(),</span>
+        <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="FingerPrint.lebesgue_response_space">
+<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.lebesgue_response_space">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">lebesgue_response_space</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">HilbertSpaceDirectSum</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Defines the mathematical space for the physical response fields.</span>
+
+<span class="sd">        This method returns a direct sum of Hilbert spaces, where each component</span>
+<span class="sd">        corresponds to a distinct physical field resulting from the sea-level</span>
+<span class="sd">        calculation. This composite space serves as the codomain for the</span>
+<span class="sd">        Lebesgue-space sea-level operator.</span>
+
+<span class="sd">        The components of the direct sum are:</span>
+<span class="sd">        1. Sea-level change (a Lebesgue $L^2$ space).</span>
+<span class="sd">        2. Vertical surface displacement (a Lebesgue $L^2$ space).</span>
+<span class="sd">        3. Gravitational potential change (a Lebesgue $L^2$ space).</span>
+<span class="sd">        4. Angular velocity change (a 2D Euclidean space for [ω_x, ω_y]).</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            An instance of `pygeoinf.HilbertSpaceDirectSum`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">field_space</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">lebesgue_load_space</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">HilbertSpaceDirectSum</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">field_space</span><span class="p">,</span> <span class="n">field_space</span><span class="p">,</span> <span class="n">field_space</span><span class="p">,</span> <span class="n">EuclideanSpace</span><span class="p">(</span><span class="mi">2</span><span class="p">)]</span>
+        <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="FingerPrint.sobolev_load_space">
+<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.sobolev_load_space">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">sobolev_load_space</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">order</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Sobolev</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Defines a Sobolev space for surface mass loads with smoothness constraints.</span>
+
+<span class="sd">        This space is primarily used to regularize inverse problems. By seeking</span>
+<span class="sd">        a solution within a Sobolev space, we implicitly penalize roughness,</span>
+<span class="sd">        leading to a more physically plausible (i.e., smoother) estimate of</span>
+<span class="sd">        the unknown surface load.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            order: The Sobolev order (s &gt; 0), which controls the degree of</span>
+<span class="sd">                smoothness. Higher orders enforce greater smoothness.</span>
+<span class="sd">            scale: The Sobolev scale (λ &gt; 0), a characteristic length scale.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            An instance of `pygeoinf.symmetric_space.sphere.Sobolev`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Sobolev</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">lmax</span><span class="p">,</span>
+            <span class="n">order</span><span class="p">,</span>
+            <span class="n">scale</span><span class="p">,</span>
+            <span class="n">radius</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">mean_sea_floor_radius</span><span class="p">,</span>
+            <span class="n">grid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_grid_name</span><span class="p">(),</span>
+        <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="FingerPrint.sobolev_response_space">
+<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.sobolev_response_space">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">sobolev_response_space</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">order</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="nb">float</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">HilbertSpaceDirectSum</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Defines the response space corresponding to a Sobolev load space.</span>
+
+<span class="sd">        When the input load is defined in a Sobolev space of order `s`, the</span>
+<span class="sd">        resulting physical fields have order `s+1`, this following from</span>
+<span class="sd">        elliptic regularity.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            order: The Sobolev order `s` of the corresponding load space.</span>
+<span class="sd">            scale: The Sobolev scale `λ` of the corresponding load space.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            An instance of `pygeoinf.HilbertSpaceDirectSum` where the field</span>
+<span class="sd">            components are Sobolev spaces of order `s+1`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">field_space</span> <span class="o">=</span> <span class="n">Sobolev</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">lmax</span><span class="p">,</span>
+            <span class="n">order</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span>
+            <span class="n">scale</span><span class="p">,</span>
+            <span class="n">radius</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">mean_sea_floor_radius</span><span class="p">,</span>
+            <span class="n">grid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_grid_name</span><span class="p">(),</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">HilbertSpaceDirectSum</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">field_space</span><span class="p">,</span> <span class="n">field_space</span><span class="p">,</span> <span class="n">field_space</span><span class="p">,</span> <span class="n">EuclideanSpace</span><span class="p">(</span><span class="mi">2</span><span class="p">)]</span>
+        <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="FingerPrint.as_lebesgue_linear_operator">
+<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.as_lebesgue_linear_operator">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">as_lebesgue_linear_operator</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="o">/</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">rotational_feedbacks</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">rtol</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1e-6</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">LinearOperator</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Wraps the physical model as a LinearOperator between Lebesgue spaces.</span>
+
+<span class="sd">        This method provides the fundamental mathematical representation of the</span>
+<span class="sd">        sea-level fingerprint problem. It encapsulates the forward mapping</span>
+<span class="sd">        (from a surface mass load to the response fields) and its corresponding</span>
+<span class="sd">        adjoint mapping into a single `pygeoinf.LinearOperator` object. This</span>
+<span class="sd">        operator acts on simple, square-integrable functions ($L^2$) without</span>
+<span class="sd">        any smoothness priors.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            rotational_feedbacks: If True, include polar wander effects in the</span>
+<span class="sd">                forward and adjoint calculations. Defaults to True.</span>
+<span class="sd">            rtol: The relative tolerance for the underlying iterative solver.</span>
+<span class="sd">                Defaults to 1e-6.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            A `pygeoinf.LinearOperator` that maps from the Lebesgue load</span>
+<span class="sd">            space to the Lebesgue response space.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
 
-        <span class="n">grid</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">grid</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sampling</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="s2">&quot;DH2&quot;</span>
-
-        <span class="n">load_space</span> <span class="o">=</span> <span class="n">Sobolev</span><span class="p">(</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">lmax</span><span class="p">,</span> <span class="n">order</span><span class="p">,</span> <span class="n">scale</span><span class="p">,</span> <span class="n">radius</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">mean_sea_floor_radius</span><span class="p">,</span> <span class="n">grid</span><span class="o">=</span><span class="n">grid</span>
-        <span class="p">)</span>
-        <span class="n">response_space</span> <span class="o">=</span> <span class="n">Sobolev</span><span class="p">(</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">lmax</span><span class="p">,</span> <span class="n">order</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">scale</span><span class="p">,</span> <span class="n">radius</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">mean_sea_floor_radius</span><span class="p">,</span> <span class="n">grid</span><span class="o">=</span><span class="n">grid</span>
-        <span class="p">)</span>
-        <span class="n">codomain</span> <span class="o">=</span> <span class="n">inf</span><span class="o">.</span><span class="n">HilbertSpaceDirectSum</span><span class="p">(</span>
-            <span class="p">[</span><span class="n">response_space</span><span class="p">,</span> <span class="n">response_space</span><span class="p">,</span> <span class="n">response_space</span><span class="p">,</span> <span class="n">inf</span><span class="o">.</span><span class="n">EuclideanSpace</span><span class="p">(</span><span class="mi">2</span><span class="p">)]</span>
-        <span class="p">)</span>
+        <span class="n">domain</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">lebesgue_load_space</span><span class="p">()</span>
+        <span class="n">codomain</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">lebesgue_response_space</span><span class="p">()</span>
 
         <span class="k">def</span><span class="w"> </span><span class="nf">mapping</span><span class="p">(</span><span class="n">u</span><span class="p">:</span> <span class="n">SHGrid</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">Union</span><span class="p">[</span><span class="n">SHGrid</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]]:</span>
 <span class="w">            </span><span class="sd">&quot;&quot;&quot;The forward mapping from a load to the sea level response fields.&quot;&quot;&quot;</span>
@@ -1278,8 +1255,8 @@
                 <span class="n">angular_velocity_change</span><span class="p">,</span>
             <span class="p">]</span>
 
-        <span class="k">def</span><span class="w"> </span><span class="nf">formal_adjoint_mapping</span><span class="p">(</span><span class="n">response</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Union</span><span class="p">[</span><span class="n">SHGrid</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
-<span class="w">            </span><span class="sd">&quot;&quot;&quot;The formal adjoint mapping from response fields to the adjoint load.&quot;&quot;&quot;</span>
+        <span class="k">def</span><span class="w"> </span><span class="nf">adjoint_mapping</span><span class="p">(</span><span class="n">response</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Union</span><span class="p">[</span><span class="n">SHGrid</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
+<span class="w">            </span><span class="sd">&quot;&quot;&quot;The adjoint mapping from response fields to the adjoint load.&quot;&quot;&quot;</span>
             <span class="n">g</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">gravitational_acceleration</span>
             <span class="n">adjoint_direct_load</span> <span class="o">=</span> <span class="n">response</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
             <span class="n">adjoint_displacement_load</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span> <span class="o">*</span> <span class="n">response</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
@@ -1303,12 +1280,58 @@
             <span class="p">)</span>
             <span class="k">return</span> <span class="n">adjoint_sea_level</span>
 
-        <span class="k">return</span> <span class="n">inf</span><span class="o">.</span><span class="n">LinearOperator</span><span class="p">(</span>
-            <span class="n">load_space</span><span class="p">,</span>
-            <span class="n">codomain</span><span class="p">,</span>
-            <span class="n">mapping</span><span class="p">,</span>
-            <span class="n">formal_adjoint_mapping</span><span class="o">=</span><span class="n">formal_adjoint_mapping</span><span class="p">,</span>
+        <span class="k">return</span> <span class="n">LinearOperator</span><span class="p">(</span>
+            <span class="n">domain</span><span class="p">,</span> <span class="n">codomain</span><span class="p">,</span> <span class="n">mapping</span><span class="p">,</span> <span class="n">adjoint_mapping</span><span class="o">=</span><span class="n">adjoint_mapping</span>
         <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="FingerPrint.as_sobolev_linear_operator">
+<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.as_sobolev_linear_operator">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">as_sobolev_linear_operator</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">order</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+        <span class="n">scale</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+        <span class="o">/</span><span class="p">,</span>
+        <span class="o">*</span><span class="p">,</span>
+        <span class="n">rotational_feedbacks</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+        <span class="n">rtol</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1e-6</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">LinearOperator</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Constructs the sea-level model as a LinearOperator between Sobolev spaces.</span>
+
+<span class="sd">        This is the primary tool for solving regularized inverse problems. By</span>
+<span class="sd">        defining the operator on Sobolev spaces, we frame the problem to seek a</span>
+<span class="sd">        spatially smooth surface load, which is often a necessary physical</span>
+<span class="sd">        constraint to obtain a unique and stable solution from noisy or</span>
+<span class="sd">        incomplete data. This approach is equivalent to a form of Tikhonov</span>
+<span class="sd">        regularization.</span>
+
+<span class="sd">        The operator correctly handles the transformation between the underlying</span>
+<span class="sd">        Lebesgue representation (where the physics is calculated) and the</span>
+<span class="sd">        Sobolev representation (where the problem is posed) by internally</span>
+<span class="sd">        managing the &quot;mass matrices&quot; that define the Sobolev inner products.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            order: The Sobolev order (s &gt; 0), controlling the degree of</span>
+<span class="sd">                smoothness of the input load space.</span>
+<span class="sd">            scale: The Sobolev scale (λ &gt; 0), a characteristic length scale</span>
+<span class="sd">                that defines the spatial scale at which the smoothness is enforced.</span>
+<span class="sd">            rotational_feedbacks: If True, include polar wander effects. Defaults to True.</span>
+<span class="sd">            rtol: Relative tolerance for the underlying iterative solver. Defaults to 1e-6.</span>
+
+<span class="sd">            Returns:</span>
+<span class="sd">                A `pygeoinf.LinearOperator` that maps from the Sobolev load</span>
+<span class="sd">                space to the Sobolev response space.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">domain</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">sobolev_load_space</span><span class="p">(</span><span class="n">order</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span>
+        <span class="n">codomain</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">sobolev_response_space</span><span class="p">(</span><span class="n">order</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span>
+
+        <span class="n">lebesgue_operator</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">as_lebesgue_linear_operator</span><span class="p">(</span>
+            <span class="n">rotational_feedbacks</span><span class="o">=</span><span class="n">rotational_feedbacks</span><span class="p">,</span> <span class="n">rtol</span><span class="o">=</span><span class="n">rtol</span>
+        <span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">LinearOperator</span><span class="o">.</span><span class="n">from_formal_adjoint</span><span class="p">(</span><span class="n">domain</span><span class="p">,</span> <span class="n">codomain</span><span class="p">,</span> <span class="n">lebesgue_operator</span><span class="p">)</span></div>
 </div>
 
 </pre></div>

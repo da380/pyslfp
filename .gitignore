@@ -17,9 +17,7 @@ htmlcov/
 # Sphinx documentation build output
 docs/build/
 
-# Auto-generated API documentation (if using sphinx-apidoc)
-# Adjust this path if you place these files elsewhere.
-docs/source/api/
+
 
 
 

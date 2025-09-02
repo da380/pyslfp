@@ -198,19 +198,19 @@
 <div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
   <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="../../tutorials/t1.html">Tutorial 1 - Computing a sea level fingerprint</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../tutorials/t2.html">Tutorial 2 - Exploring some options in the FingerPrint Class</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../tutorials/t3.html">Tutorial 3 - Sensitivity kernels for sea level point measurements.</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../tutorials/t4.html">Tutorial 4 - Sensitivity kernels for displacement point measurements.</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../tutorials/t5.html">Tutorial 5 - Sensitivity kernels for gravitational potential coefficients.</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../tutorials/t6.html">Tutorial 6 - Inversion of tide gauge data</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial1.html">Tutorial 1: Calculating a Basic Sea Level Fingerprint</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial2.html">Tutorial 2: A Deeper Dive into the Sea Level Equation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial3.html">Tutorial 3: Reciprocity and Generalised Sea Level Forcing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial4.html">Tutorial 4: Adjoints and Sensitivity Kernels with <code class="docutils literal notranslate"><span class="pre">pygeoinf</span></code></a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial5.html">Tutorial 5: A Bayesian Inverse Problem - Inferring Ice Melt from Tide Gauges</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial6.html">Tutorial 6: Implementing and investigating the WMB method</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="../../api/physical_parameters.html">pyslfp.physical_parameters</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../api/ice_ng.html">pyslfp.ice_ng</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../api/finger_print.html">pyslfp.finger_print</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../api/plotting.html">pyslfp.plotting</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../api/modules.html">pyslfp</a><input class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><div class="visually-hidden">Toggle navigation of pyslfp</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/pyslfp.html">pyslfp package</a></li>
+</ul>
+</li>
 </ul>
 
 </div>
@@ -253,6 +253,8 @@
 
 <span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
 
+<span class="kn">import</span><span class="w"> </span><span class="nn">inspect</span>
+
 <span class="c1"># =====================================================================</span>
 <span class="c1"># Default Earth Model Physical Parameters</span>
 <span class="c1"># Based on the Preliminary Reference Earth Model (PREM) and other</span>
@@ -283,7 +285,7 @@
 
 
 <div class="viewcode-block" id="EarthModelParameters">
-<a class="viewcode-back" href="../../api/physical_parameters.html#pyslfp.physical_parameters.EarthModelParameters">[docs]</a>
+<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.physical_parameters.EarthModelParameters">[docs]</a>
 <span class="k">class</span><span class="w"> </span><span class="nc">EarthModelParameters</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    A data class for storing Earth model parameters and a non-dimensionalisation scheme.</span>
@@ -370,7 +372,7 @@
         <span class="bp">self</span><span class="o">.</span><span class="n">_ice_density</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">ice_density</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">density_scale</span>
 
 <div class="viewcode-block" id="EarthModelParameters.from_standard_non_dimensionalisation">
-<a class="viewcode-back" href="../../api/physical_parameters.html#pyslfp.physical_parameters.EarthModelParameters.from_standard_non_dimensionalisation">[docs]</a>
+<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.physical_parameters.EarthModelParameters.from_standard_non_dimensionalisation">[docs]</a>
     <span class="nd">@staticmethod</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">from_standard_non_dimensionalisation</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="s2">&quot;EarthModelParameters&quot;</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
@@ -382,6 +384,38 @@
             <span class="n">length_scale</span><span class="o">=</span><span class="mf">6371000.0</span><span class="p">,</span> <span class="n">density_scale</span><span class="o">=</span><span class="mf">1000.0</span><span class="p">,</span> <span class="n">time_scale</span><span class="o">=</span><span class="mi">3600</span>
         <span class="p">)</span></div>
 
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_get_init_kwargs_from_instance</span><span class="p">(</span>
+        <span class="n">emp_instance</span><span class="p">:</span> <span class="s2">&quot;EarthModelParameters&quot;</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Extracts __init__ keyword arguments from an existing EarthModelParameters instance.</span>
+
+<span class="sd">        This is a helper method to facilitate re-initializing a subclass with</span>
+<span class="sd">        the parameters of an existing parent class instance.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            emp_instance: An instance of EarthModelParameters or its subclass.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            A dictionary of keyword arguments suitable for initializing a new</span>
+<span class="sd">            EarthModelParameters instance.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">signature</span> <span class="o">=</span> <span class="n">inspect</span><span class="o">.</span><span class="n">signature</span><span class="p">(</span><span class="n">EarthModelParameters</span><span class="o">.</span><span class="fm">__init__</span><span class="p">)</span>
+        <span class="n">param_names</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="n">p</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">signature</span><span class="o">.</span><span class="n">parameters</span> <span class="k">if</span> <span class="n">p</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;self&quot;</span><span class="p">,</span> <span class="s2">&quot;args&quot;</span><span class="p">,</span> <span class="s2">&quot;kwargs&quot;</span><span class="p">)</span>
+        <span class="p">]</span>
+        <span class="n">scale_names</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;length_scale&quot;</span><span class="p">,</span> <span class="s2">&quot;density_scale&quot;</span><span class="p">,</span> <span class="s2">&quot;time_scale&quot;</span><span class="p">}</span>
+
+        <span class="n">kwargs</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">param_names</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">scale_names</span><span class="p">:</span>
+                <span class="n">kwargs</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">emp_instance</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># Assumes a corresponding &#39;_si&#39; property for other parameters</span>
+                <span class="n">kwargs</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">emp_instance</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">_si&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">kwargs</span>
 
     <span class="nd">@property</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">length_scale</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>

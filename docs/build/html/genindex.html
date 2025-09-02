@@ -197,12 +197,12 @@
 <div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
   <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="tutorials/t1.html">Tutorial 1 - Computing a sea level fingerprint</a></li>
-<li class="toctree-l1"><a class="reference internal" href="tutorials/t2.html">Tutorial 2 - Exploring some options in the FingerPrint Class</a></li>
-<li class="toctree-l1"><a class="reference internal" href="tutorials/t3.html">Tutorial 3 - Sensitivity kernels for sea level point measurements.</a></li>
-<li class="toctree-l1"><a class="reference internal" href="tutorials/t4.html">Tutorial 4 - Sensitivity kernels for displacement point measurements.</a></li>
-<li class="toctree-l1"><a class="reference internal" href="tutorials/t5.html">Tutorial 5 - Sensitivity kernels for gravitational potential coefficients.</a></li>
-<li class="toctree-l1"><a class="reference internal" href="tutorials/t6.html">Tutorial 6 - Inversion of tide gauge data</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials/tutorial1.html">Tutorial 1: Calculating a Basic Sea Level Fingerprint</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials/tutorial2.html">Tutorial 2: A Deeper Dive into the Sea Level Equation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials/tutorial3.html">Tutorial 3: Reciprocity and Generalised Sea Level Forcing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials/tutorial4.html">Tutorial 4: Adjoints and Sensitivity Kernels with <code class="docutils literal notranslate"><span class="pre">pygeoinf</span></code></a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials/tutorial5.html">Tutorial 5: A Bayesian Inverse Problem - Inferring Ice Melt from Tide Gauges</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials/tutorial6.html">Tutorial 6: Implementing and investigating the WMB method</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul>
@@ -247,7 +247,7 @@
           
 <section class="genindex-section">
   <h1 id="index">Index</h1>
-  <div class="genindex-jumpbox"><a href="#A"><strong>A</strong></a> | <a href="#B"><strong>B</strong></a> | <a href="#C"><strong>C</strong></a> | <a href="#D"><strong>D</strong></a> | <a href="#E"><strong>E</strong></a> | <a href="#F"><strong>F</strong></a> | <a href="#G"><strong>G</strong></a> | <a href="#I"><strong>I</strong></a> | <a href="#L"><strong>L</strong></a> | <a href="#M"><strong>M</strong></a> | <a href="#N"><strong>N</strong></a> | <a href="#O"><strong>O</strong></a> | <a href="#P"><strong>P</strong></a> | <a href="#R"><strong>R</strong></a> | <a href="#S"><strong>S</strong></a> | <a href="#T"><strong>T</strong></a> | <a href="#V"><strong>V</strong></a> | <a href="#W"><strong>W</strong></a> | <a href="#Z"><strong>Z</strong></a></div>
+  <div class="genindex-jumpbox"><a href="#A"><strong>A</strong></a> | <a href="#B"><strong>B</strong></a> | <a href="#C"><strong>C</strong></a> | <a href="#D"><strong>D</strong></a> | <a href="#E"><strong>E</strong></a> | <a href="#F"><strong>F</strong></a> | <a href="#G"><strong>G</strong></a> | <a href="#H"><strong>H</strong></a> | <a href="#I"><strong>I</strong></a> | <a href="#K"><strong>K</strong></a> | <a href="#L"><strong>L</strong></a> | <a href="#M"><strong>M</strong></a> | <a href="#N"><strong>N</strong></a> | <a href="#O"><strong>O</strong></a> | <a href="#P"><strong>P</strong></a> | <a href="#R"><strong>R</strong></a> | <a href="#S"><strong>S</strong></a> | <a href="#T"><strong>T</strong></a> | <a href="#U"><strong>U</strong></a> | <a href="#V"><strong>V</strong></a> | <a href="#W"><strong>W</strong></a> | <a href="#Z"><strong>Z</strong></a></div>
 </section>
 <section id="A" class="genindex-section">
   <h2>A</h2>
@@ -255,23 +255,17 @@
     <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="api/pyslfp.html#pyslfp.physical_parameters.EarthModelParameters.acceleration_scale">acceleration_scale (pyslfp.physical_parameters.EarthModelParameters property)</a>
 </li>
-        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.adjoint_loads_for_displacement_point_measurement">adjoint_loads_for_displacement_point_measurement() (pyslfp.finger_print.FingerPrint method)</a>
-</li>
-        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.adjoint_loads_for_gravitational_potential_coefficient">adjoint_loads_for_gravitational_potential_coefficient() (pyslfp.finger_print.FingerPrint method)</a>
-</li>
-        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.adjoint_loads_for_gravity_potential_coefficient">adjoint_loads_for_gravity_potential_coefficient() (pyslfp.finger_print.FingerPrint method)</a>
-</li>
-    </ul></td>
-    <td style="width: 33%; vertical-align: top;"><ul>
-        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.adjoint_loads_for_sea_level_point_measurement">adjoint_loads_for_sea_level_point_measurement() (pyslfp.finger_print.FingerPrint method)</a>
-</li>
         <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.altimetry_projection">altimetry_projection() (pyslfp.finger_print.FingerPrint method)</a>
 </li>
         <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.angular_momentum_change_from_potential">angular_momentum_change_from_potential() (pyslfp.finger_print.FingerPrint method)</a>
 </li>
-        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.as_linear_operator">as_linear_operator() (pyslfp.finger_print.FingerPrint method)</a>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.as_lebesgue_linear_operator">as_lebesgue_linear_operator() (pyslfp.finger_print.FingerPrint method)</a>
 </li>
-        <li><a href="api/pyslfp.html#pyslfp.operators.AveragingOperator">AveragingOperator (class in pyslfp.operators)</a>
+        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.as_sobolev_linear_operator">as_sobolev_linear_operator() (pyslfp.finger_print.FingerPrint method)</a>
+</li>
+        <li><a href="api/pyslfp.html#pyslfp.operators.averaging_operator">averaging_operator() (in module pyslfp.operators)</a>
 </li>
     </ul></td>
   </tr></table>
@@ -293,10 +287,18 @@
     <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.centrifugal_potential_change">centrifugal_potential_change() (pyslfp.finger_print.FingerPrint method)</a>
 </li>
-        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.coefficient_evaluation">coefficient_evaluation() (pyslfp.finger_print.FingerPrint method)</a>
+        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.check_coefficient">check_coefficient() (pyslfp.finger_print.FingerPrint method)</a>
+</li>
+        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.check_field">check_field() (pyslfp.finger_print.FingerPrint method)</a>
+</li>
+        <li><a href="api/pyslfp.html#pyslfp.operators.check_load_space">check_load_space() (in module pyslfp.operators)</a>
 </li>
     </ul></td>
     <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="api/pyslfp.html#pyslfp.operators.check_response_space">check_response_space() (in module pyslfp.operators)</a>
+</li>
+        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.coefficient_evaluation">coefficient_evaluation() (pyslfp.finger_print.FingerPrint method)</a>
+</li>
         <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.constant_grid">constant_grid() (pyslfp.finger_print.FingerPrint method)</a>
 </li>
         <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.csphase">csphase (pyslfp.finger_print.FingerPrint property)</a>
@@ -311,13 +313,11 @@
     <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="api/pyslfp.html#pyslfp.physical_parameters.EarthModelParameters.density_scale">density_scale (pyslfp.physical_parameters.EarthModelParameters property)</a>
 </li>
-        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.direct_load_from_ice_thickness_change">direct_load_from_ice_thickness_change() (pyslfp.finger_print.FingerPrint method)</a>
-</li>
     </ul></td>
     <td style="width: 33%; vertical-align: top;"><ul>
-        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.disk_load">disk_load() (pyslfp.finger_print.FingerPrint method)</a>
+        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.direct_load_from_ice_thickness_change">direct_load_from_ice_thickness_change() (pyslfp.finger_print.FingerPrint method)</a>
 </li>
-        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.displacement_love_numbers">displacement_love_numbers() (pyslfp.finger_print.FingerPrint method)</a>
+        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.disk_load">disk_load() (pyslfp.finger_print.FingerPrint method)</a>
 </li>
     </ul></td>
   </tr></table>
@@ -333,11 +333,15 @@
 </li>
         <li><a href="api/pyslfp.html#pyslfp.physical_parameters.EarthModelParameters.equatorial_moment_of_inertia_si">equatorial_moment_of_inertia_si (pyslfp.physical_parameters.EarthModelParameters property)</a>
 </li>
-    </ul></td>
-    <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="api/pyslfp.html#pyslfp.physical_parameters.EarthModelParameters.equatorial_radius">equatorial_radius (pyslfp.physical_parameters.EarthModelParameters property)</a>
 </li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="api/pyslfp.html#pyslfp.physical_parameters.EarthModelParameters.equatorial_radius_si">equatorial_radius_si (pyslfp.physical_parameters.EarthModelParameters property)</a>
+</li>
+        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.expand_coefficient">expand_coefficient() (pyslfp.finger_print.FingerPrint method)</a>
+</li>
+        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.expand_field">expand_field() (pyslfp.finger_print.FingerPrint method)</a>
 </li>
         <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.extend">extend (pyslfp.finger_print.FingerPrint property)</a>
 </li>
@@ -349,17 +353,19 @@
   <h2>F</h2>
   <table style="width: 100%" class="indextable genindextable"><tr>
     <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="api/pyslfp.html#pyslfp.operators.field_to_sh_coefficient_operator">field_to_sh_coefficient_operator() (in module pyslfp.operators)</a>
+</li>
         <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint">FingerPrint (class in pyslfp.finger_print)</a>
-</li>
-        <li><a href="api/pyslfp.html#pyslfp.operators.SeaLevelOperator.fingerprint">fingerprint (pyslfp.operators.SeaLevelOperator property)</a>
-</li>
-    </ul></td>
-    <td style="width: 33%; vertical-align: top;"><ul>
-        <li><a href="api/pyslfp.html#pyslfp.operators.ObservationOperator.forward_operator">forward_operator (pyslfp.operators.ObservationOperator property)</a>
 </li>
         <li><a href="api/pyslfp.html#pyslfp.physical_parameters.EarthModelParameters.frequency_scale">frequency_scale (pyslfp.physical_parameters.EarthModelParameters property)</a>
 </li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="api/pyslfp.html#pyslfp.operators.WMBMethod.from_finger_print">from_finger_print() (pyslfp.operators.WMBMethod static method)</a>
+</li>
         <li><a href="api/pyslfp.html#pyslfp.physical_parameters.EarthModelParameters.from_standard_non_dimensionalisation">from_standard_non_dimensionalisation() (pyslfp.physical_parameters.EarthModelParameters static method)</a>
+</li>
+        <li><a href="api/pyslfp.html#pyslfp.utils.SHVectorConverter.from_vector">from_vector() (pyslfp.utils.SHVectorConverter method)</a>
 </li>
     </ul></td>
   </tr></table>
@@ -369,8 +375,6 @@
   <h2>G</h2>
   <table style="width: 100%" class="indextable genindextable"><tr>
     <td style="width: 33%; vertical-align: top;"><ul>
-        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.gaussian_averaging_function">gaussian_averaging_function() (pyslfp.finger_print.FingerPrint method)</a>
-</li>
         <li><a href="api/pyslfp.html#pyslfp.ice_ng.IceNG.get_ice_thickness">get_ice_thickness() (pyslfp.ice_ng.IceNG method)</a>
 </li>
         <li><a href="api/pyslfp.html#pyslfp.ice_ng.IceNG.get_ice_thickness_and_sea_level">get_ice_thickness_and_sea_level() (pyslfp.ice_ng.IceNG method)</a>
@@ -381,7 +385,7 @@
 </li>
         <li><a href="api/pyslfp.html#pyslfp.ice_ng.IceNG.get_topography">get_topography() (pyslfp.ice_ng.IceNG method)</a>
 </li>
-        <li><a href="api/pyslfp.html#pyslfp.operators.GraceObservationOperator">GraceObservationOperator (class in pyslfp.operators)</a>
+        <li><a href="api/pyslfp.html#pyslfp.operators.grace_operator">grace_operator() (in module pyslfp.operators)</a>
 </li>
     </ul></td>
     <td style="width: 33%; vertical-align: top;"><ul>
@@ -391,8 +395,6 @@
 </li>
         <li><a href="api/pyslfp.html#pyslfp.physical_parameters.EarthModelParameters.gravitational_constant">gravitational_constant (pyslfp.physical_parameters.EarthModelParameters property)</a>
 </li>
-        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.gravitational_love_numbers">gravitational_love_numbers() (pyslfp.finger_print.FingerPrint method)</a>
-</li>
         <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.gravitational_potential_change_to_gravity_potential_change">gravitational_potential_change_to_gravity_potential_change() (pyslfp.finger_print.FingerPrint method)</a>
 </li>
         <li><a href="api/pyslfp.html#pyslfp.physical_parameters.EarthModelParameters.gravitational_potential_scale">gravitational_potential_scale (pyslfp.physical_parameters.EarthModelParameters property)</a>
@@ -400,6 +402,20 @@
         <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.gravity_potential_change_to_gravitational_potential_change">gravity_potential_change_to_gravitational_potential_change() (pyslfp.finger_print.FingerPrint method)</a>
 </li>
         <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.grid">grid (pyslfp.finger_print.FingerPrint property)</a>
+</li>
+    </ul></td>
+  </tr></table>
+</section>
+
+<section id="H" class="genindex-section">
+  <h2>H</h2>
+  <table style="width: 100%" class="indextable genindextable"><tr>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="api/pyslfp.html#pyslfp.love_numbers.LoveNumbers.h">h (pyslfp.love_numbers.LoveNumbers property)</a>
+</li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="api/pyslfp.html#pyslfp.love_numbers.LoveNumbers.ht">ht (pyslfp.love_numbers.LoveNumbers property)</a>
 </li>
     </ul></td>
   </tr></table>
@@ -419,11 +435,15 @@
 </li>
         <li><a href="api/pyslfp.html#pyslfp.physical_parameters.EarthModelParameters.ice_density_si">ice_density_si (pyslfp.physical_parameters.EarthModelParameters property)</a>
 </li>
-    </ul></td>
-    <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.ice_projection">ice_projection() (pyslfp.finger_print.FingerPrint method)</a>
 </li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="api/pyslfp.html#pyslfp.operators.ice_projection_operator">ice_projection_operator() (in module pyslfp.operators)</a>
+</li>
         <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.ice_thickness">ice_thickness (pyslfp.finger_print.FingerPrint property)</a>
+</li>
+        <li><a href="api/pyslfp.html#pyslfp.operators.ice_thickness_change_to_load_operator">ice_thickness_change_to_load_operator() (in module pyslfp.operators)</a>
 </li>
         <li><a href="api/pyslfp.html#pyslfp.ice_ng.IceModel">IceModel (class in pyslfp.ice_ng)</a>
 </li>
@@ -435,25 +455,47 @@
   </tr></table>
 </section>
 
+<section id="K" class="genindex-section">
+  <h2>K</h2>
+  <table style="width: 100%" class="indextable genindextable"><tr>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="api/pyslfp.html#pyslfp.love_numbers.LoveNumbers.k">k (pyslfp.love_numbers.LoveNumbers property)</a>
+</li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="api/pyslfp.html#pyslfp.love_numbers.LoveNumbers.kt">kt (pyslfp.love_numbers.LoveNumbers property)</a>
+</li>
+    </ul></td>
+  </tr></table>
+</section>
+
 <section id="L" class="genindex-section">
   <h2>L</h2>
   <table style="width: 100%" class="indextable genindextable"><tr>
     <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.land_projection">land_projection() (pyslfp.finger_print.FingerPrint method)</a>
 </li>
+        <li><a href="api/pyslfp.html#pyslfp.operators.land_projection_operator">land_projection_operator() (in module pyslfp.operators)</a>
+</li>
         <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.lats">lats() (pyslfp.finger_print.FingerPrint method)</a>
 </li>
-        <li><a href="api/pyslfp.html#pyslfp.physical_parameters.EarthModelParameters.length_scale">length_scale (pyslfp.physical_parameters.EarthModelParameters property)</a>
+        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.lebesgue_load_space">lebesgue_load_space() (pyslfp.finger_print.FingerPrint method)</a>
+</li>
+        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.lebesgue_response_space">lebesgue_response_space() (pyslfp.finger_print.FingerPrint method)</a>
 </li>
     </ul></td>
     <td style="width: 33%; vertical-align: top;"><ul>
-        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.lmax">lmax (pyslfp.finger_print.FingerPrint property)</a>
+        <li><a href="api/pyslfp.html#pyslfp.physical_parameters.EarthModelParameters.length_scale">length_scale (pyslfp.physical_parameters.EarthModelParameters property)</a>
 </li>
-        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.load_response">load_response() (pyslfp.finger_print.FingerPrint method)</a>
+        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.lmax">lmax (pyslfp.finger_print.FingerPrint property)</a>
 </li>
         <li><a href="api/pyslfp.html#pyslfp.physical_parameters.EarthModelParameters.load_scale">load_scale (pyslfp.physical_parameters.EarthModelParameters property)</a>
 </li>
         <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.lons">lons() (pyslfp.finger_print.FingerPrint method)</a>
+</li>
+        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.love_number_file">love_number_file (pyslfp.finger_print.FingerPrint property)</a>
+</li>
+        <li><a href="api/pyslfp.html#pyslfp.love_numbers.LoveNumbers">LoveNumbers (class in pyslfp.love_numbers)</a>
 </li>
     </ul></td>
   </tr></table>
@@ -477,17 +519,19 @@
 </li>
         <li><a href="api/pyslfp.html#pyslfp.physical_parameters.EarthModelParameters.mean_sea_floor_radius_si">mean_sea_floor_radius_si (pyslfp.physical_parameters.EarthModelParameters property)</a>
 </li>
-    </ul></td>
-    <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.mean_sea_level_change">mean_sea_level_change() (pyslfp.finger_print.FingerPrint method)</a>
 </li>
         <li>
     module
 
         <ul>
+          <li><a href="api/pyslfp.html#module-pyslfp">pyslfp</a>
+</li>
           <li><a href="api/pyslfp.html#module-pyslfp.finger_print">pyslfp.finger_print</a>
 </li>
           <li><a href="api/pyslfp.html#module-pyslfp.ice_ng">pyslfp.ice_ng</a>
+</li>
+          <li><a href="api/pyslfp.html#module-pyslfp.love_numbers">pyslfp.love_numbers</a>
 </li>
           <li><a href="api/pyslfp.html#module-pyslfp.operators">pyslfp.operators</a>
 </li>
@@ -495,7 +539,11 @@
 </li>
           <li><a href="api/pyslfp.html#module-pyslfp.plotting">pyslfp.plotting</a>
 </li>
+          <li><a href="api/pyslfp.html#module-pyslfp.utils">pyslfp.utils</a>
+</li>
         </ul></li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="api/pyslfp.html#pyslfp.physical_parameters.EarthModelParameters.moment_of_inertia_scale">moment_of_inertia_scale (pyslfp.physical_parameters.EarthModelParameters property)</a>
 </li>
     </ul></td>
@@ -522,7 +570,7 @@
   <h2>O</h2>
   <table style="width: 100%" class="indextable genindextable"><tr>
     <td style="width: 33%; vertical-align: top;"><ul>
-        <li><a href="api/pyslfp.html#pyslfp.operators.ObservationOperator">ObservationOperator (class in pyslfp.operators)</a>
+        <li><a href="api/pyslfp.html#pyslfp.operators.WMBMethod.observation_degree">observation_degree (pyslfp.operators.WMBMethod property)</a>
 </li>
         <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.ocean_area">ocean_area (pyslfp.finger_print.FingerPrint property)</a>
 </li>
@@ -533,6 +581,8 @@
         <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.ocean_function">ocean_function (pyslfp.finger_print.FingerPrint property)</a>
 </li>
         <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.ocean_projection">ocean_projection() (pyslfp.finger_print.FingerPrint method)</a>
+</li>
+        <li><a href="api/pyslfp.html#pyslfp.operators.ocean_projection_operator">ocean_projection_operator() (in module pyslfp.operators)</a>
 </li>
         <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.one_minus_ocean_function">one_minus_ocean_function (pyslfp.finger_print.FingerPrint property)</a>
 </li>
@@ -548,8 +598,6 @@
 </li>
         <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.point_evaluation">point_evaluation() (pyslfp.finger_print.FingerPrint method)</a>
 </li>
-        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.point_load">point_load() (pyslfp.finger_print.FingerPrint method)</a>
-</li>
         <li><a href="api/pyslfp.html#pyslfp.physical_parameters.EarthModelParameters.polar_moment_of_inertia">polar_moment_of_inertia (pyslfp.physical_parameters.EarthModelParameters property)</a>
 </li>
         <li><a href="api/pyslfp.html#pyslfp.physical_parameters.EarthModelParameters.polar_moment_of_inertia_si">polar_moment_of_inertia_si (pyslfp.physical_parameters.EarthModelParameters property)</a>
@@ -558,6 +606,21 @@
 </li>
         <li><a href="api/pyslfp.html#pyslfp.physical_parameters.EarthModelParameters.polar_radius_si">polar_radius_si (pyslfp.physical_parameters.EarthModelParameters property)</a>
 </li>
+        <li><a href="api/pyslfp.html#pyslfp.operators.WMBMethod.potential_coefficient_to_load_average_operator">potential_coefficient_to_load_average_operator() (pyslfp.operators.WMBMethod method)</a>
+</li>
+        <li><a href="api/pyslfp.html#pyslfp.operators.WMBMethod.potential_coefficient_to_load_operator">potential_coefficient_to_load_operator() (pyslfp.operators.WMBMethod method)</a>
+</li>
+        <li><a href="api/pyslfp.html#pyslfp.operators.WMBMethod.potential_field_to_load_average_operator">potential_field_to_load_average_operator() (pyslfp.operators.WMBMethod method)</a>
+</li>
+        <li><a href="api/pyslfp.html#pyslfp.operators.WMBMethod.potential_field_to_load_operator">potential_field_to_load_operator() (pyslfp.operators.WMBMethod method)</a>
+</li>
+        <li>
+    pyslfp
+
+        <ul>
+          <li><a href="api/pyslfp.html#module-pyslfp">module</a>
+</li>
+        </ul></li>
         <li>
     pyslfp.finger_print
 
@@ -572,6 +635,13 @@
 
         <ul>
           <li><a href="api/pyslfp.html#module-pyslfp.ice_ng">module</a>
+</li>
+        </ul></li>
+        <li>
+    pyslfp.love_numbers
+
+        <ul>
+          <li><a href="api/pyslfp.html#module-pyslfp.love_numbers">module</a>
 </li>
         </ul></li>
         <li>
@@ -595,6 +665,13 @@
           <li><a href="api/pyslfp.html#module-pyslfp.plotting">module</a>
 </li>
         </ul></li>
+        <li>
+    pyslfp.utils
+
+        <ul>
+          <li><a href="api/pyslfp.html#module-pyslfp.utils">module</a>
+</li>
+        </ul></li>
     </ul></td>
   </tr></table>
 </section>
@@ -603,10 +680,12 @@
   <h2>R</h2>
   <table style="width: 100%" class="indextable genindextable"><tr>
     <td style="width: 33%; vertical-align: top;"><ul>
-        <li><a href="api/pyslfp.html#pyslfp.physical_parameters.EarthModelParameters.rotation_frequency">rotation_frequency (pyslfp.physical_parameters.EarthModelParameters property)</a>
+        <li><a href="api/pyslfp.html#pyslfp.utils.read_gloss_tide_gauge_data">read_gloss_tide_gauge_data() (in module pyslfp.utils)</a>
 </li>
     </ul></td>
     <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="api/pyslfp.html#pyslfp.physical_parameters.EarthModelParameters.rotation_frequency">rotation_frequency (pyslfp.physical_parameters.EarthModelParameters property)</a>
+</li>
         <li><a href="api/pyslfp.html#pyslfp.physical_parameters.EarthModelParameters.rotation_frequency_si">rotation_frequency_si (pyslfp.physical_parameters.EarthModelParameters property)</a>
 </li>
     </ul></td>
@@ -619,17 +698,25 @@
     <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.sea_level">sea_level (pyslfp.finger_print.FingerPrint property)</a>
 </li>
-        <li><a href="api/pyslfp.html#pyslfp.operators.SeaLevelOperator">SeaLevelOperator (class in pyslfp.operators)</a>
-</li>
         <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.set_state_from_ice_ng">set_state_from_ice_ng() (pyslfp.finger_print.FingerPrint method)</a>
+</li>
+        <li><a href="api/pyslfp.html#pyslfp.operators.sh_coefficient_to_field_operator">sh_coefficient_to_field_operator() (in module pyslfp.operators)</a>
+</li>
+        <li><a href="api/pyslfp.html#pyslfp.utils.SHVectorConverter">SHVectorConverter (class in pyslfp.utils)</a>
+</li>
+        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.sobolev_load_space">sobolev_load_space() (pyslfp.finger_print.FingerPrint method)</a>
 </li>
     </ul></td>
     <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.sobolev_response_space">sobolev_response_space() (pyslfp.finger_print.FingerPrint method)</a>
+</li>
         <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.solver_counter">solver_counter (pyslfp.finger_print.FingerPrint property)</a>
 </li>
         <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.southern_hemisphere_load">southern_hemisphere_load() (pyslfp.finger_print.FingerPrint method)</a>
 </li>
         <li><a href="api/pyslfp.html#pyslfp.finger_print.FingerPrint.southern_hemisphere_projection">southern_hemisphere_projection() (pyslfp.finger_print.FingerPrint method)</a>
+</li>
+        <li><a href="api/pyslfp.html#pyslfp.operators.spatial_mutliplication_operator">spatial_mutliplication_operator() (in module pyslfp.operators)</a>
 </li>
     </ul></td>
   </tr></table>
@@ -639,11 +726,23 @@
   <h2>T</h2>
   <table style="width: 100%" class="indextable genindextable"><tr>
     <td style="width: 33%; vertical-align: top;"><ul>
-        <li><a href="api/pyslfp.html#pyslfp.operators.TideGaugeObservationOperator">TideGaugeObservationOperator (class in pyslfp.operators)</a>
+        <li><a href="api/pyslfp.html#pyslfp.operators.tide_gauge_operator">tide_gauge_operator() (in module pyslfp.operators)</a>
 </li>
     </ul></td>
     <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="api/pyslfp.html#pyslfp.physical_parameters.EarthModelParameters.time_scale">time_scale (pyslfp.physical_parameters.EarthModelParameters property)</a>
+</li>
+        <li><a href="api/pyslfp.html#pyslfp.utils.SHVectorConverter.to_vector">to_vector() (pyslfp.utils.SHVectorConverter method)</a>
+</li>
+    </ul></td>
+  </tr></table>
+</section>
+
+<section id="U" class="genindex-section">
+  <h2>U</h2>
+  <table style="width: 100%" class="indextable genindextable"><tr>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="api/pyslfp.html#pyslfp.operators.underlying_space">underlying_space() (in module pyslfp.operators)</a>
 </li>
     </ul></td>
   </tr></table>
@@ -663,17 +762,13 @@
   <h2>W</h2>
   <table style="width: 100%" class="indextable genindextable"><tr>
     <td style="width: 33%; vertical-align: top;"><ul>
-        <li><a href="api/pyslfp.html#pyslfp.operators.WahrOperator">WahrOperator (class in pyslfp.operators)</a>
-</li>
         <li><a href="api/pyslfp.html#pyslfp.physical_parameters.EarthModelParameters.water_density">water_density (pyslfp.physical_parameters.EarthModelParameters property)</a>
 </li>
     </ul></td>
     <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="api/pyslfp.html#pyslfp.physical_parameters.EarthModelParameters.water_density_si">water_density_si (pyslfp.physical_parameters.EarthModelParameters property)</a>
 </li>
-        <li><a href="api/pyslfp.html#pyslfp.operators.AveragingOperator.weighting_components">weighting_components (pyslfp.operators.AveragingOperator property)</a>
-</li>
-        <li><a href="api/pyslfp.html#pyslfp.operators.AveragingOperator.weighting_functions">weighting_functions (pyslfp.operators.AveragingOperator property)</a>
+        <li><a href="api/pyslfp.html#pyslfp.operators.WMBMethod">WMBMethod (class in pyslfp.operators)</a>
 </li>
     </ul></td>
   </tr></table>

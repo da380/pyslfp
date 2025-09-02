@@ -1269,6 +1269,19 @@ MarkupSafe = ">=2.0"
 i18n = ["Babel (>=2.7)"]
 
 [[package]]
+name = "joblib"
+version = "1.5.2"
+description = "Lightweight pipelining with Python functions"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+markers = "python_version == \"3.11\" or python_version >= \"3.12\""
+files = [
+    {file = "joblib-1.5.2-py3-none-any.whl", hash = "sha256:4e1f0bdbb987e6d843c70cf43714cb276623def372df3c22fe5266b2670bc241"},
+    {file = "joblib-1.5.2.tar.gz", hash = "sha256:3faa5c39054b2f03ca547da9b2f52fde67c06240c31853f306aea97f13647b55"},
+]
+
+[[package]]
 name = "json5"
 version = "0.12.0"
 description = "A Python implementation of the JSON5 data format."
@@ -2578,19 +2591,20 @@ test = ["pytest", "pytest-doctestplus (>=0.7)"]
 
 [[package]]
 name = "pygeoinf"
-version = "1.1.8"
+version = "1.2.0"
 description = "A package for solving geophysical inference and inverse problems"
 optional = false
 python-versions = ">=3.11"
 groups = ["main"]
 markers = "python_version == \"3.11\" or python_version >= \"3.12\""
 files = [
-    {file = "pygeoinf-1.1.8-py3-none-any.whl", hash = "sha256:f4c419aff6492e943a3cf584fdc1db9b3214082b9dc9129509bd8e6be8f7c428"},
-    {file = "pygeoinf-1.1.8.tar.gz", hash = "sha256:cd362589e697d487523a489bc1d909d6189d37a38037a722a5cfc6124cd19ab3"},
+    {file = "pygeoinf-1.2.0-py3-none-any.whl", hash = "sha256:4121f3ed70087c238552fcd3700062786a610f083c67ba755962d5f9f974ab6e"},
+    {file = "pygeoinf-1.2.0.tar.gz", hash = "sha256:434cc6288d1780f950c9dbcb8c995772fb065360dc71f8d0733440a0e1e67554"},
 ]
 
 [package.dependencies]
 Cartopy = ">=0.23.0,<0.24.0"
+joblib = ">=1.5.2,<2.0.0"
 matplotlib = ">=3.0.0"
 numpy = ">=1.26.0"
 pyqt6 = ">=6.0.0"
@@ -3950,4 +3964,4 @@ viz = ["matplotlib", "nc-time-axis", "seaborn"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11"
-content-hash = "7759497e569c821e207f02283e72e0ef9c39700596d540fb8ffd1092c757734e"
+content-hash = "8a60a1da9bd113111072a538d57df951ddcc427ca28642d6f5b73fc395a75c7d"

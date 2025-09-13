@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pyslfp"
-version = "1.0.4"
+version = "1.0.5"
 description = "Package for computing elastic sea level fingerprints"
 authors = ["David Al-Attar and Dan Heathcote"]
 readme = "README.md"
@@ -16,6 +16,8 @@ matplotlib = ">=3.0.0"
 pyqt6 = ">=6.0.0"
 Cartopy = "^0.23.0"
 pygeoinf = ">=1.2.0"
+regionmask = "^0.13.0"
+cf-xarray = "^0.10.9"
 
 
 [tool.poetry.group.tests]

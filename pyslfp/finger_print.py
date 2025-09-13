@@ -9,6 +9,7 @@ from typing import Optional, Tuple, List, Union
 import inspect
 
 import numpy as np
+import regionmask
 
 import pyshtools as pysh
 from pyshtools import SHGrid, SHCoeffs
@@ -49,6 +50,7 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         earth_model_parameters: Optional[EarthModelParameters] = None,
         grid: str = "DH",
         love_number_file: str = DATADIR + "/love_numbers/PREM_4096.dat",
+        exclude_caspian_sea_from_ocean: bool = True,
     ) -> None:
         """
         Args:
@@ -59,6 +61,8 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
             extend: If True, the spatial grid is extended to include 360
                 degrees longitude. Defaults to True.
             love_number_file: Path to the file containing the Love numbers.
+            exclude_caspian_sea_from_ocean: If True, the Caspian Sea will be
+            treated as land in the ocean function. Defaults to True.
         """
         # Set up the earth model parameters
         if earth_model_parameters is None:
@@ -71,6 +75,7 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
 
         # Set options.
         self._lmax: int = lmax
+        self._exclude_caspian_sea = exclude_caspian_sea_from_ocean
 
         if grid == "DH2":
             self._grid = "DH"
@@ -118,6 +123,8 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         self._ice_thickness: Optional[SHGrid] = None
         self._ocean_function: Optional[SHGrid] = None
         self._ocean_area: Optional[float] = None
+
+        self._ar6_regions = regionmask.defined_regions.ar6.all
 
         # Initialise the counter for number of solver calls.
         self._solver_counter: int = 0
@@ -226,14 +233,24 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
             raise AttributeError(
                 "Sea level and ice thickness must be set before computing ocean function."
             )
+
+        # Perform the initial ocean calculation based on physical properties
+        ocean_data = np.where(
+            self.water_density * self.sea_level.data
+            - self.ice_density * self.ice_thickness.data
+            > 0,
+            1,
+            0,
+        )
+
+        # If the exclusion flag is set, subtract the Caspian Sea mask
+        if self._exclude_caspian_sea:
+            caspian_mask_data = self.caspian_sea_projection(value=0).data
+            # Ensure the result is still just 0s and 1s
+            ocean_data = np.where(ocean_data - caspian_mask_data > 0, 1, 0)
+
         self._ocean_function = SHGrid.from_array(
-            np.where(
-                self.water_density * self.sea_level.data
-                - self.ice_density * self.ice_thickness.data
-                > 0,
-                1,
-                0,
-            ),
+            ocean_data,
             grid=self.grid,
         )
 
@@ -697,6 +714,91 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
             np.where(np.logical_and(ocean_mask, lat_mask), 1, value), grid=self.grid
         )
 
+    def regionmask_projection(
+        self, region_name: str, /, *, value: float = np.nan
+    ) -> SHGrid:
+        """
+        Returns a grid that is 1 for a specific AR6 region and `value` elsewhere.
+
+        This method uses the `regionmask` library to generate masks for the
+        IPCC AR6 reference regions.
+
+        Args:
+            region_name: The name or abbreviation of the AR6 region (e.g.,
+                         "Greenland" or "GRL").
+            value: The value to assign outside the region. Default is NaN.
+
+        Returns:
+            An SHGrid object representing the regional mask.
+        """
+        # Get the integer ID for the named region
+        try:
+            region_id = self._ar6_regions.map_keys(region_name)
+        except KeyError:
+            raise ValueError(
+                f"Region '{region_name}' not found in the AR6 dataset. "
+                "Check regionmask.defined_regions.ar6.all.names for available regions."
+            )
+
+        # Get the grid coordinates
+        lons = self.lons()
+        lats = self.lats()
+
+        # Create the mask using a longitude array that excludes the duplicate
+        # endpoint (360 deg) to avoid the ValueError in regionmask.
+        mask_unextended = self._ar6_regions.mask(lons[:-1], lats)
+
+        masked_data_unextended = np.where(mask_unextended.data == region_id, 1, value)
+
+        # Re-extend the grid for pyshtools by copying the 0-deg longitude
+        # column to the 360-deg longitude position.
+        masked_data = np.hstack(
+            (masked_data_unextended, masked_data_unextended[:, 0:1])
+        )
+
+        return SHGrid.from_array(masked_data, grid=self.grid)
+
+    def greenland_projection(self, /, *, value: float = np.nan) -> SHGrid:
+        """
+        Returns a grid that is 1 over the AR6 Greenland region and `value` elsewhere.
+        """
+        return self.regionmask_projection("Greenland/Iceland", value=value)
+
+    def west_antarctic_projection(self, /, *, value: float = np.nan) -> SHGrid:
+        """
+        Returns a grid that is 1 over the AR6 West Antarctica region and `value` elsewhere.
+        """
+        return self.regionmask_projection("W.Antarctica", value=value)
+
+    def east_antarctic_projection(self, /, *, value: float = np.nan) -> SHGrid:
+        """
+        Returns a grid that is 1 over the AR6 East Antarctica region and `value` elsewhere.
+        """
+        return self.regionmask_projection("E.Antarctica", value=value)
+
+    # Add this method to your FingerPrint class in finger_print.py
+
+    def caspian_sea_projection(self, /, *, value: float = np.nan) -> SHGrid:
+        """
+        Returns a simple rectangular grid that is 1 over the approximate
+        location of the Caspian Sea and `value` elsewhere.
+        """
+
+        # Get 2D grid of coordinates
+        lats, lons = np.meshgrid(self.lats(), self.lons(), indexing="ij")
+
+        # Define the bounding box for the Caspian Sea
+        lat_mask = np.logical_and(lats > 36, lats < 49.5)
+        lon_mask = np.logical_and(lons > 45.5, lons < 55)
+
+        # Combine the masks to define the rectangle
+        caspian_mask = np.logical_and(lat_mask, lon_mask)
+
+        return SHGrid.from_array(
+            np.where(caspian_mask, 1, value),
+            grid=self.grid,
+        )
+
     def disk_load(
         self, delta: float, latitude: float, longitude: float, amplitude: float
     ) -> SHGrid:
@@ -741,6 +843,25 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
             -fraction
             * self.ice_thickness
             * self.southern_hemisphere_projection(value=0)
+        )
+        return self.direct_load_from_ice_thickness_change(ice_change)
+
+    def greenland_load(self, fraction: float = 1.0) -> SHGrid:
+        """Returns a load from melting a fraction of the Greenland ice sheet."""
+        ice_change = -fraction * self.ice_thickness * self.greenland_projection(value=0)
+        return self.direct_load_from_ice_thickness_change(ice_change)
+
+    def west_antarctic_load(self, fraction: float = 1.0) -> SHGrid:
+        """Returns a load from melting a fraction of the West Antartic ice sheet."""
+        ice_change = (
+            -fraction * self.ice_thickness * self.west_antarctic_projection(value=0)
+        )
+        return self.direct_load_from_ice_thickness_change(ice_change)
+
+    def east_antarctic_load(self, fraction: float = 1.0) -> SHGrid:
+        """Returns a load from melting a fraction of the East Antartic ice sheet."""
+        ice_change = (
+            -fraction * self.ice_thickness * self.east_antarctic_projection(value=0)
         )
         return self.direct_load_from_ice_thickness_change(ice_change)
 

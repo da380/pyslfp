@@ -1,5 +1,5 @@
 """
-Module collecting some small helper functions or classes. 
+Module collecting some small helper functions or classes.
 """
 
 import numpy as np
@@ -110,17 +110,18 @@ def read_gloss_tide_gauge_data() -> Tuple[List[str], List[float], List[float]]:
         - A list of latitudes (float).
         - A list of longitudes (float).
     """
-    file_path = DATADIR + "/tide_gauge/gloss.txt"
-    names = []
+    file_path = DATADIR + "/tide_gauge/gloss_full.txt"
+    # names = []
     lats = []
     lons = []
 
     with open(file_path, "r") as f:
         for line in f:
             parts = line.strip().split()
-            if len(parts) == 3:
-                names.append(parts[0])
-                lats.append(float(parts[1]))
-                lons.append(float(parts[2]))
+            if len(parts) == 2:
+                #          names.append(parts[0])
+                lats.append(float(parts[0]))
+                lons.append(float(parts[1]))
 
-    return names, lats, lons
+    # return names, lats, lons
+    return lats, lons

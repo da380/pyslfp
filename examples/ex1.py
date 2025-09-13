@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 from pyslfp import FingerPrint, plot, IceModel
 
+
 # 1. Initialise the fingerprint model
 # lmax sets the spherical harmonic resolution.
 fp = FingerPrint(lmax=256)
@@ -9,10 +10,11 @@ fp = FingerPrint(lmax=256)
 # This uses the built-in ICE-7G model loader.
 fp.set_state_from_ice_ng(version=IceModel.ICE7G, date=0.0)
 
+
 # 3. Define a surface mass load
 # This function calculates the load corresponding to melting 10% of
 # the Northern Hemisphere's ice mass.
-direct_load = fp.northern_hemisphere_load(fraction=0.1)
+direct_load = fp.west_antarctic_load(fraction=1)
 
 # 4. Solve the sea level equation for the given load
 # This returns the sea level change, surface displacement, gravity change,

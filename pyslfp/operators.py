@@ -545,6 +545,39 @@ class WMBMethod(EarthModelParameters, LoveNumbers):
         """The maximum degree of the SH coefficient observations."""
         return self._observation_degree
 
+    def direct_load_to_load_operator(self, load_space: Union[Lebesgue, Sobolev]):
+        """
+        Returns a LinearOperator that maps a direct load to an approximation
+        of the total load.
+
+        Args:
+            load_space: The HilbertSpace for the load field.
+
+        Returns:
+            A LinearOperator object.
+        """
+
+        if not isinstance(load_space, (Lebesgue, Sobolev)):
+            raise TypeError("load_space must be a Lebesgue or Sobolev space.")
+
+        l2_load_space = underlying_space(load_space)
+
+        def scaling_function(k: (int, int)) -> float:
+            l, _ = k
+            return (
+                -(2 * l + 1)
+                * self.k[l]
+                / (4 * np.pi * self.gravitational_constant * self.mean_sea_floor_radius)
+                if 1 < l <= self.observation_degree
+                else 0
+            )
+
+        l2_operator = l2_load_space.invariant_automorphism_from_index_function(
+            scaling_function
+        )
+
+        return LinearOperator.from_formally_self_adjoint(load_space, l2_operator)
+
     def potential_field_to_load_operator(
         self,
         potential_space: Union[Lebesgue, Sobolev],

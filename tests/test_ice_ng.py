@@ -129,7 +129,7 @@ def test_sea_level_calculation_sanity_check():
     lon_idx_g = np.argmin(angular_dist)
 
     greenland_ice = ice.data[lat_idx_g, lon_idx_g]
-    greenland_sl = sea_level.data[lat_idx_g, lon_idx_g]
+    # greenland_sl = sea_level.data[lat_idx_g, lon_idx_g]
 
     assert greenland_ice > 1000
 

@@ -3,13 +3,11 @@ Module for defining some operators related to the sea level problem.
 """
 
 from __future__ import annotations
-from typing import Optional, Tuple, List, Union, Callable
+from typing import Optional, List, Union
 
-import inspect
 
 import numpy as np
 
-from scipy.sparse import diags
 
 
 from pyshtools import SHGrid, SHCoeffs
@@ -177,7 +175,7 @@ def field_to_sh_coefficient_operator(
 
     def mapping(u: SHGrid) -> np.ndarray:
         """L2 forward mapping: Grid -> Coefficients -> Vector"""
-        ulm = l2_space.to_coefficient(u)
+        ulm = l2_space.to_coefficients(u)
         return converter.to_vector(ulm.coeffs)
 
     def adjoint_mapping(data: np.ndarray) -> SHGrid:
@@ -188,7 +186,7 @@ def field_to_sh_coefficient_operator(
             normalization=l2_space.normalization,
             csphase=l2_space.csphase,
         )
-        return l2_space.from_coefficient(ulm) / l2_space.radius**2
+        return l2_space.from_coefficients(ulm) / l2_space.radius**2
 
     l2_operator = LinearOperator(
         l2_space, codomain, mapping, adjoint_mapping=adjoint_mapping
@@ -242,10 +240,10 @@ def sh_coefficient_to_field_operator(
             normalization=l2_space.normalization,
             csphase=l2_space.csphase,
         )
-        return l2_space.from_coefficient(ulm)
+        return l2_space.from_coefficients(ulm)
 
     def adjoint_mapping(u: SHGrid) -> np.ndarray:
-        ulm = l2_space.to_coefficient(u)
+        ulm = l2_space.to_coefficients(u)
         return converter.to_vector(ulm.coeffs) * l2_space.radius**2
 
     l2_operator = LinearOperator(

@@ -1,9 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
-import random
 import pyslfp as sl
 import pygeoinf as inf
-import cartopy.crs as ccrs
 import scipy.stats as stats
 import matplotlib.colors as colors
 

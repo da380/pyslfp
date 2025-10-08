@@ -19,31 +19,32 @@ pygeoinf = ">=1.2.0"
 regionmask = "^0.13.0"
 cf-xarray = "^0.10.9"
 
-
-[tool.poetry.group.tests]
+[tool.poetry.group.dev]
 optional = true
 
-[tool.poetry.group.tests.dependencies]
+[tool.poetry.group.dev.dependencies]
 pytest = "^8.3.5"
 pytest-cov = "^6.2.1"
-
-
-[tool.poetry.group.tutorials]
-optional = true
-
-[tool.poetry.group.tutorials.dependencies]
 jupyter = "^1.1.1"
-
-[tool.poetry.group.docs]
-optional = true
-
-[tool.poetry.group.docs.dependencies]
 furo = "^2025.7.19"
 sphinx = "<8.2"
 nbsphinx = "^0.9.7"
-
+ruff = "^0.5.5"
 
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+
+# --- Added Ruff Configuration ---
+[tool.ruff]
+
+[tool.ruff.lint.per-file-ignores]
+# For any file in the "tests/" directory, ignore the lambda assignment warning (E731).
+"*/*" = ["E731", "E741"]
+"pyslfp/*" = ["E731", "E741"]
+
+# For the sphere.py file, where 'l' is a common variable name for spherical
+# harmonic degree, ignore the ambiguous variable name warning (E741).
+#"pygeoinf/symmetric_space/sphere.py" = ["E741"]

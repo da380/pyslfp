@@ -12,7 +12,8 @@ import bisect
 from scipy.interpolate import RegularGridInterpolator
 from enum import Enum
 
-from . import DATADIR
+
+from .config import DATADIR
 
 
 class IceModel(Enum):

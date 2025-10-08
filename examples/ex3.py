@@ -1,19 +1,13 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from pyslfp import FingerPrint, plot, IceModel, EarthModelParameters
+from pyslfp import FingerPrint, plot, EarthModelParameters
 import pygeoinf as inf
-from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
-from pygeoinf import LinearOperator, EuclideanSpace, GaussianMeasure
-from pyshtools import SHGrid, SHCoeffs
-from pyslfp.utils import SHVectorConverter
+from pyshtools import SHGrid
 
-import cartopy.crs as ccrs
 
 from pyslfp.operators import (
     grace_operator,
-    field_to_sh_coefficient_operator,
-    sh_coefficient_to_field_operator,
     WMBMethod,
 )
 

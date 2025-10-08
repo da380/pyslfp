@@ -3,20 +3,15 @@ Module for plotting functions using matplotlib and cartopy.
 """
 
 from typing import Tuple, Optional, List, Union
-import numpy as np
 from pyshtools import SHGrid
 
 from pygeoinf.symmetric_space.sphere import SphereHelper
 
-import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
 from matplotlib.figure import Figure
 from matplotlib.collections import QuadMesh
 from matplotlib.contour import QuadContourSet
 
 import cartopy.crs as ccrs
-import cartopy.feature as cfeature
-from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
 from cartopy.mpl.geoaxes import GeoAxes
 
 

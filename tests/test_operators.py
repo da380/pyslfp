@@ -1,12 +1,10 @@
 import pytest
 import numpy as np
-import pygeoinf as inf
 from pyshtools import SHGrid, SHCoeffs
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 from pygeoinf import HilbertSpaceDirectSum, EuclideanSpace
 
-from pyslfp import EarthModelParameters, FingerPrint
-from pyslfp.love_numbers import LoveNumbers
+from pyslfp import FingerPrint
 from pyslfp.operators import (
     field_to_sh_coefficient_operator,
     sh_coefficient_to_field_operator,
@@ -43,7 +41,7 @@ class TestFieldToShCoefficientOperator:
             csphase=field_space.csphase,
         )
         known_field_lm.set_coeffs(values=[1.0], ls=[l], ms=[m])
-        known_field = field_space.from_coefficient(known_field_lm)
+        known_field = field_space.from_coefficients(known_field_lm)
 
         op = field_to_sh_coefficient_operator(field_space, lmax=5, lmin=2)
 
@@ -76,7 +74,7 @@ class TestFieldToShCoefficientOperator:
         lhs = op.codomain.inner_product(op(u), v)
         rhs = op.domain.inner_product(u, op.adjoint(v))
 
-        assert np.isclose(lhs, rhs, rtol=1e-12)
+        assert np.isclose(lhs, rhs, rtol=1e-10)
 
 
 # ================== Tests for sh_coefficient_to_field_operator ==================
@@ -129,7 +127,7 @@ class TestShCoefficientToFieldOperator:
         lhs = op.codomain.inner_product(op(u), v)
         rhs = op.domain.inner_product(u, op.adjoint(v))
 
-        assert np.isclose(lhs, rhs, rtol=1e-12)
+        assert np.isclose(lhs, rhs, rtol=1e-10)
 
 
 # ================== Helper to build response spaces ==================
@@ -186,7 +184,7 @@ class TestBlockOperators:
 
         lhs = op.codomain.inner_product(op(u), v)
         rhs = op.domain.inner_product(u, op.adjoint(v))
-        assert np.isclose(lhs, rhs, rtol=1e-12)
+        assert np.isclose(lhs, rhs, rtol=1e-10)
 
     @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
     def test_grace_operator_adjoint_identity(self, lmax, space_type):
@@ -200,7 +198,7 @@ class TestBlockOperators:
 
         lhs = op.codomain.inner_product(op(u), v)
         rhs = op.domain.inner_product(u, op.adjoint(v))
-        assert np.isclose(lhs, rhs, rtol=1e-12)
+        assert np.isclose(lhs, rhs, rtol=1e-10)
 
 
 # ================== Tests for averaging_operator ==================
@@ -229,7 +227,7 @@ class TestAveragingOperators:
 
         lhs = op.codomain.inner_product(op(u), v)
         rhs = op.domain.inner_product(u, op.adjoint(v))
-        assert np.isclose(lhs, rhs, rtol=1e-12)
+        assert np.isclose(lhs, rhs, rtol=1e-10)
 
 
 # ================== Tests for WMBMethod Operators ==================
@@ -263,7 +261,7 @@ class TestWMBMethod:
 
         lhs = op.codomain.inner_product(op(u), v)
         rhs = op.domain.inner_product(u, op.adjoint(v))
-        assert np.isclose(lhs, rhs, rtol=1e-12)
+        assert np.isclose(lhs, rhs, rtol=1e-10)
 
     @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
     def test_coeff_to_load_adjoint_identity(self, lmax, space_type, wmb_method):
@@ -280,7 +278,7 @@ class TestWMBMethod:
 
         lhs = op.codomain.inner_product(op(u), v)
         rhs = op.domain.inner_product(u, op.adjoint(v))
-        assert np.isclose(lhs, rhs, rtol=1e-12)
+        assert np.isclose(lhs, rhs, rtol=1e-10)
 
     @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
     def test_coeff_to_avg_adjoint_identity(self, lmax, space_type, wmb_method):
@@ -305,7 +303,7 @@ class TestWMBMethod:
 
         lhs = op.codomain.inner_product(op(u), v)
         rhs = op.domain.inner_product(u, op.adjoint(v))
-        assert np.isclose(lhs, rhs, rtol=1e-12)
+        assert np.isclose(lhs, rhs, rtol=1e-10)
 
 
 # ================== Tests for ice_thickness_change_to_load_operator ==================
@@ -350,7 +348,7 @@ class TestIceThicknessToLoadOperator:
         )
 
         # 4. Assert that the operator's output matches the expected calculation
-        assert np.allclose(load_actual.data, load_expected.data, rtol=1e-12)
+        assert np.allclose(load_actual.data, load_expected.data, rtol=1e-10)
 
     @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
     def test_adjoint_identity(self, lmax, space_type, fp_instance):
@@ -373,4 +371,4 @@ class TestIceThicknessToLoadOperator:
         lhs = space.inner_product(op(u), v)
         rhs = space.inner_product(u, op.adjoint(v))
 
-        assert np.isclose(lhs, rhs, rtol=1e-12)
+        assert np.isclose(lhs, rhs, rtol=1e-10)

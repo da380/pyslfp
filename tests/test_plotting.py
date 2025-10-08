@@ -1,7 +1,7 @@
 import pytest
 import numpy as np
 import matplotlib
-from pyshtools import SHGrid, SHCoeffs
+from pyshtools import SHCoeffs
 
 # Use a non-interactive backend for testing to prevent plot windows
 matplotlib.use("Agg")

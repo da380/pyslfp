@@ -6,12 +6,10 @@ and adjoint elastic fingerprint calculations.
 from __future__ import annotations
 from typing import Optional, Tuple, List, Union
 
-import inspect
 
 import numpy as np
 import regionmask
 
-import pyshtools as pysh
 from pyshtools import SHGrid, SHCoeffs
 
 from pygeoinf import (

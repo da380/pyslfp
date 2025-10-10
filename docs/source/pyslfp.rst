@@ -4,6 +4,14 @@ pyslfp package
 Submodules
 ----------
 
+pyslfp.config module
+--------------------
+
+.. automodule:: pyslfp.config
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 pyslfp.finger\_print module
 ---------------------------
 

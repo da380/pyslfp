@@ -203,7 +203,6 @@
 <li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial3.html">Tutorial 3: Reciprocity and Generalised Sea Level Forcing</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial4.html">Tutorial 4: Adjoints and Sensitivity Kernels with <code class="docutils literal notranslate"><span class="pre">pygeoinf</span></code></a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial5.html">Tutorial 5: A Bayesian Inverse Problem - Inferring Ice Melt from Tide Gauges</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../tutorials/tutorial6.html">Tutorial 6: Implementing and investigating the WMB method</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul>
@@ -254,11 +253,10 @@
 <span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Union</span>
 
-<span class="kn">import</span><span class="w"> </span><span class="nn">inspect</span>
 
 <span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">regionmask</span>
 
-<span class="kn">import</span><span class="w"> </span><span class="nn">pyshtools</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pysh</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">pyshtools</span><span class="w"> </span><span class="kn">import</span> <span class="n">SHGrid</span><span class="p">,</span> <span class="n">SHCoeffs</span>
 
 <span class="kn">from</span><span class="w"> </span><span class="nn">pygeoinf</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
@@ -277,7 +275,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint">[docs]</a>
 <span class="k">class</span><span class="w"> </span><span class="nc">FingerPrint</span><span class="p">(</span><span class="n">EarthModelParameters</span><span class="p">,</span> <span class="n">LoveNumbers</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Computes elastic sea level &quot;fingerprints&quot; for a given surface load.</span>
@@ -299,6 +297,7 @@
         <span class="n">earth_model_parameters</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">EarthModelParameters</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">grid</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;DH&quot;</span><span class="p">,</span>
         <span class="n">love_number_file</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">DATADIR</span> <span class="o">+</span> <span class="s2">&quot;/love_numbers/PREM_4096.dat&quot;</span><span class="p">,</span>
+        <span class="n">exclude_caspian_sea_from_ocean</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Args:</span>
@@ -309,6 +308,8 @@
 <span class="sd">            extend: If True, the spatial grid is extended to include 360</span>
 <span class="sd">                degrees longitude. Defaults to True.</span>
 <span class="sd">            love_number_file: Path to the file containing the Love numbers.</span>
+<span class="sd">            exclude_caspian_sea_from_ocean: If True, the Caspian Sea will be</span>
+<span class="sd">            treated as land in the ocean function. Defaults to True.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="c1"># Set up the earth model parameters</span>
         <span class="k">if</span> <span class="n">earth_model_parameters</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
@@ -321,6 +322,7 @@
 
         <span class="c1"># Set options.</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_lmax</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">lmax</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_exclude_caspian_sea</span> <span class="o">=</span> <span class="n">exclude_caspian_sea_from_ocean</span>
 
         <span class="k">if</span> <span class="n">grid</span> <span class="o">==</span> <span class="s2">&quot;DH2&quot;</span><span class="p">:</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">_grid</span> <span class="o">=</span> <span class="s2">&quot;DH&quot;</span>
@@ -368,6 +370,8 @@
         <span class="bp">self</span><span class="o">.</span><span class="n">_ice_thickness</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">SHGrid</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_ocean_function</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">SHGrid</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_ocean_area</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_ar6_regions</span> <span class="o">=</span> <span class="n">regionmask</span><span class="o">.</span><span class="n">defined_regions</span><span class="o">.</span><span class="n">ar6</span><span class="o">.</span><span class="n">all</span>
 
         <span class="c1"># Initialise the counter for number of solver calls.</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_solver_counter</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span>
@@ -476,14 +480,24 @@
             <span class="k">raise</span> <span class="ne">AttributeError</span><span class="p">(</span>
                 <span class="s2">&quot;Sea level and ice thickness must be set before computing ocean function.&quot;</span>
             <span class="p">)</span>
+
+        <span class="c1"># Perform the initial ocean calculation based on physical properties</span>
+        <span class="n">ocean_data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">water_density</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">sea_level</span><span class="o">.</span><span class="n">data</span>
+            <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">ice_density</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">ice_thickness</span><span class="o">.</span><span class="n">data</span>
+            <span class="o">&gt;</span> <span class="mi">0</span><span class="p">,</span>
+            <span class="mi">1</span><span class="p">,</span>
+            <span class="mi">0</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="c1"># If the exclusion flag is set, subtract the Caspian Sea mask</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_exclude_caspian_sea</span><span class="p">:</span>
+            <span class="n">caspian_mask_data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">caspian_sea_projection</span><span class="p">(</span><span class="n">value</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">data</span>
+            <span class="c1"># Ensure the result is still just 0s and 1s</span>
+            <span class="n">ocean_data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">ocean_data</span> <span class="o">-</span> <span class="n">caspian_mask_data</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+
         <span class="bp">self</span><span class="o">.</span><span class="n">_ocean_function</span> <span class="o">=</span> <span class="n">SHGrid</span><span class="o">.</span><span class="n">from_array</span><span class="p">(</span>
-            <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span>
-                <span class="bp">self</span><span class="o">.</span><span class="n">water_density</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">sea_level</span><span class="o">.</span><span class="n">data</span>
-                <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">ice_density</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">ice_thickness</span><span class="o">.</span><span class="n">data</span>
-                <span class="o">&gt;</span> <span class="mi">0</span><span class="p">,</span>
-                <span class="mi">1</span><span class="p">,</span>
-                <span class="mi">0</span><span class="p">,</span>
-            <span class="p">),</span>
+            <span class="n">ocean_data</span><span class="p">,</span>
             <span class="n">grid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">grid</span><span class="p">,</span>
         <span class="p">)</span>
 
@@ -498,21 +512,21 @@
     <span class="c1"># --------------------------------------------------------#</span>
 
 <div class="viewcode-block" id="FingerPrint.lats">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.lats">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.lats">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">lats</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the latitudes for the spatial grid.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">zero_grid</span><span class="p">()</span><span class="o">.</span><span class="n">lats</span><span class="p">()</span></div>
 
 
 <div class="viewcode-block" id="FingerPrint.lons">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.lons">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.lons">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">lons</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the longitudes for the spatial grid.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">zero_grid</span><span class="p">()</span><span class="o">.</span><span class="n">lons</span><span class="p">()</span></div>
 
 
 <div class="viewcode-block" id="FingerPrint.check_field">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.check_field">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.check_field">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">check_field</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">f</span><span class="p">:</span> <span class="n">SHGrid</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Checks if an SHGrid object is compatible with instance settings.&quot;&quot;&quot;</span>
         <span class="n">is_compatible</span> <span class="o">=</span> <span class="p">(</span>
@@ -526,7 +540,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.check_coefficient">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.check_coefficient">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.check_coefficient">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">check_coefficient</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">f</span><span class="p">:</span> <span class="n">SHCoeffs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Checks if an SHCoeffs object is compatible with instance settings.&quot;&quot;&quot;</span>
         <span class="n">is_compatible</span> <span class="o">=</span> <span class="p">(</span>
@@ -542,7 +556,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.expand_field">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.expand_field">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.expand_field">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">expand_field</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span> <span class="n">f</span><span class="p">:</span> <span class="n">SHGrid</span><span class="p">,</span> <span class="o">/</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">lmax_calc</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHCoeffs</span><span class="p">:</span>
@@ -554,7 +568,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.expand_coefficient">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.expand_coefficient">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.expand_coefficient">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">expand_coefficient</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">f</span><span class="p">:</span> <span class="n">SHCoeffs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Expands spherical harmonic coefficients into an SHGrid object.&quot;&quot;&quot;</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">check_coefficient</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
@@ -563,7 +577,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.integrate">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.integrate">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.integrate">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">integrate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">f</span><span class="p">:</span> <span class="n">SHGrid</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Integrate a function over the surface of the sphere.</span>
@@ -580,7 +594,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.point_evaluation">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.point_evaluation">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.point_evaluation">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">point_evaluation</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span> <span class="n">f</span><span class="p">:</span> <span class="n">SHGrid</span><span class="p">,</span> <span class="n">latitude</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">longitude</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">degrees</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
@@ -601,7 +615,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.coefficient_evaluation">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.coefficient_evaluation">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.coefficient_evaluation">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">coefficient_evaluation</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">f</span><span class="p">:</span> <span class="n">SHGrid</span><span class="p">,</span> <span class="n">l</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">m</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Return the (l,m)-th spherical harmonic coefficient of a function.</span>
@@ -621,7 +635,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.zero_grid">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.zero_grid">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.zero_grid">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">zero_grid</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Return a grid of zeros with compatible dimensions.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="n">SHGrid</span><span class="o">.</span><span class="n">from_zeros</span><span class="p">(</span>
@@ -630,7 +644,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.constant_grid">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.constant_grid">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.constant_grid">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">constant_grid</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Return a grid of a constant value.&quot;&quot;&quot;</span>
         <span class="n">f</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">zero_grid</span><span class="p">()</span>
@@ -639,7 +653,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.zero_coefficients">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.zero_coefficients">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.zero_coefficients">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">zero_coefficients</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHCoeffs</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Return a set of zero spherical harmonic coefficients.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="n">SHCoeffs</span><span class="o">.</span><span class="n">from_zeros</span><span class="p">(</span>
@@ -648,14 +662,14 @@
 
 
 <div class="viewcode-block" id="FingerPrint.ocean_average">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.ocean_average">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.ocean_average">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">ocean_average</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">f</span><span class="p">:</span> <span class="n">SHGrid</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the average of a function over the oceans.&quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">integrate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ocean_function</span> <span class="o">*</span> <span class="n">f</span><span class="p">)</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">ocean_area</span></div>
 
 
 <div class="viewcode-block" id="FingerPrint.set_state_from_ice_ng">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.set_state_from_ice_ng">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.set_state_from_ice_ng">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">set_state_from_ice_ng</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span> <span class="o">/</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">version</span><span class="p">:</span> <span class="n">IceModel</span> <span class="o">=</span> <span class="n">IceModel</span><span class="o">.</span><span class="n">ICE7G</span><span class="p">,</span> <span class="n">date</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.0</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
@@ -675,7 +689,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.mean_sea_level_change">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.mean_sea_level_change">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.mean_sea_level_change">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">mean_sea_level_change</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">direct_load</span><span class="p">:</span> <span class="n">SHGrid</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Returns the mean sea level change from a direct load (eustatic change).</span>
@@ -851,7 +865,7 @@
         <span class="p">)</span>
 
 <div class="viewcode-block" id="FingerPrint.centrifugal_potential_change">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.centrifugal_potential_change">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.centrifugal_potential_change">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">centrifugal_potential_change</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span> <span class="n">angular_velocity_change</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
@@ -864,7 +878,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.gravity_potential_change_to_gravitational_potential_change">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.gravity_potential_change_to_gravitational_potential_change">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.gravity_potential_change_to_gravitational_potential_change">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">gravity_potential_change_to_gravitational_potential_change</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span> <span class="n">gravity_potential_change</span><span class="p">:</span> <span class="n">SHGrid</span><span class="p">,</span> <span class="n">angular_velocity_change</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
@@ -877,7 +891,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.gravitational_potential_change_to_gravity_potential_change">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.gravitational_potential_change_to_gravity_potential_change">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.gravitational_potential_change_to_gravity_potential_change">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">gravitational_potential_change_to_gravity_potential_change</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">gravitational_potential_change</span><span class="p">:</span> <span class="n">SHGrid</span><span class="p">,</span>
@@ -892,7 +906,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.ocean_projection">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.ocean_projection">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.ocean_projection">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">ocean_projection</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span> <span class="o">/</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">,</span> <span class="n">exclude_ice_shelves</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
@@ -921,7 +935,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.ice_projection">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.ice_projection">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.ice_projection">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">ice_projection</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span> <span class="o">/</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">,</span> <span class="n">exclude_ice_shelves</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
@@ -950,7 +964,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.land_projection">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.land_projection">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.land_projection">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">land_projection</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span> <span class="o">/</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">,</span> <span class="n">exclude_ice</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
@@ -977,7 +991,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.northern_hemisphere_projection">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.northern_hemisphere_projection">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.northern_hemisphere_projection">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">northern_hemisphere_projection</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">/</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Returns a grid that is 1 in the Northern Hemisphere and `value` elsewhere.</span>
@@ -990,7 +1004,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.southern_hemisphere_projection">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.southern_hemisphere_projection">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.southern_hemisphere_projection">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">southern_hemisphere_projection</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">/</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Returns a grid that is 1 in the Southern Hemisphere and `value` elsewhere.&quot;&quot;&quot;</span>
         <span class="n">lats</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">meshgrid</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">lats</span><span class="p">(),</span> <span class="bp">self</span><span class="o">.</span><span class="n">lons</span><span class="p">(),</span> <span class="n">indexing</span><span class="o">=</span><span class="s2">&quot;ij&quot;</span><span class="p">)</span>
@@ -998,7 +1012,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.altimetry_projection">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.altimetry_projection">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.altimetry_projection">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">altimetry_projection</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
         <span class="o">/</span><span class="p">,</span>
@@ -1019,8 +1033,108 @@
         <span class="p">)</span></div>
 
 
+<div class="viewcode-block" id="FingerPrint.regionmask_projection">
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.regionmask_projection">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">regionmask_projection</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">region_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="o">/</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns a grid that is 1 for a specific AR6 region and `value` elsewhere.</span>
+
+<span class="sd">        This method uses the `regionmask` library to generate masks for the</span>
+<span class="sd">        IPCC AR6 reference regions.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            region_name: The name or abbreviation of the AR6 region (e.g.,</span>
+<span class="sd">                         &quot;Greenland&quot; or &quot;GRL&quot;).</span>
+<span class="sd">            value: The value to assign outside the region. Default is NaN.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            An SHGrid object representing the regional mask.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Get the integer ID for the named region</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">region_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ar6_regions</span><span class="o">.</span><span class="n">map_keys</span><span class="p">(</span><span class="n">region_name</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Region &#39;</span><span class="si">{</span><span class="n">region_name</span><span class="si">}</span><span class="s2">&#39; not found in the AR6 dataset. &quot;</span>
+                <span class="s2">&quot;Check regionmask.defined_regions.ar6.all.names for available regions.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="c1"># Get the grid coordinates</span>
+        <span class="n">lons</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">lons</span><span class="p">()</span>
+        <span class="n">lats</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">lats</span><span class="p">()</span>
+
+        <span class="c1"># Create the mask using a longitude array that excludes the duplicate</span>
+        <span class="c1"># endpoint (360 deg) to avoid the ValueError in regionmask.</span>
+        <span class="n">mask_unextended</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ar6_regions</span><span class="o">.</span><span class="n">mask</span><span class="p">(</span><span class="n">lons</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">lats</span><span class="p">)</span>
+
+        <span class="n">masked_data_unextended</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">mask_unextended</span><span class="o">.</span><span class="n">data</span> <span class="o">==</span> <span class="n">region_id</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span>
+
+        <span class="c1"># Re-extend the grid for pyshtools by copying the 0-deg longitude</span>
+        <span class="c1"># column to the 360-deg longitude position.</span>
+        <span class="n">masked_data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">hstack</span><span class="p">(</span>
+            <span class="p">(</span><span class="n">masked_data_unextended</span><span class="p">,</span> <span class="n">masked_data_unextended</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">:</span><span class="mi">1</span><span class="p">])</span>
+        <span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">SHGrid</span><span class="o">.</span><span class="n">from_array</span><span class="p">(</span><span class="n">masked_data</span><span class="p">,</span> <span class="n">grid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">grid</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="FingerPrint.greenland_projection">
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.greenland_projection">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">greenland_projection</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">/</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns a grid that is 1 over the AR6 Greenland region and `value` elsewhere.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">regionmask_projection</span><span class="p">(</span><span class="s2">&quot;Greenland/Iceland&quot;</span><span class="p">,</span> <span class="n">value</span><span class="o">=</span><span class="n">value</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="FingerPrint.west_antarctic_projection">
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.west_antarctic_projection">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">west_antarctic_projection</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">/</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns a grid that is 1 over the AR6 West Antarctica region and `value` elsewhere.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">regionmask_projection</span><span class="p">(</span><span class="s2">&quot;W.Antarctica&quot;</span><span class="p">,</span> <span class="n">value</span><span class="o">=</span><span class="n">value</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="FingerPrint.east_antarctic_projection">
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.east_antarctic_projection">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">east_antarctic_projection</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">/</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns a grid that is 1 over the AR6 East Antarctica region and `value` elsewhere.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">regionmask_projection</span><span class="p">(</span><span class="s2">&quot;E.Antarctica&quot;</span><span class="p">,</span> <span class="n">value</span><span class="o">=</span><span class="n">value</span><span class="p">)</span></div>
+
+
+    <span class="c1"># Add this method to your FingerPrint class in finger_print.py</span>
+
+<div class="viewcode-block" id="FingerPrint.caspian_sea_projection">
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.caspian_sea_projection">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">caspian_sea_projection</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">/</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns a simple rectangular grid that is 1 over the approximate</span>
+<span class="sd">        location of the Caspian Sea and `value` elsewhere.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="c1"># Get 2D grid of coordinates</span>
+        <span class="n">lats</span><span class="p">,</span> <span class="n">lons</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">meshgrid</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">lats</span><span class="p">(),</span> <span class="bp">self</span><span class="o">.</span><span class="n">lons</span><span class="p">(),</span> <span class="n">indexing</span><span class="o">=</span><span class="s2">&quot;ij&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Define the bounding box for the Caspian Sea</span>
+        <span class="n">lat_mask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">logical_and</span><span class="p">(</span><span class="n">lats</span> <span class="o">&gt;</span> <span class="mi">36</span><span class="p">,</span> <span class="n">lats</span> <span class="o">&lt;</span> <span class="mf">49.5</span><span class="p">)</span>
+        <span class="n">lon_mask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">logical_and</span><span class="p">(</span><span class="n">lons</span> <span class="o">&gt;</span> <span class="mf">45.5</span><span class="p">,</span> <span class="n">lons</span> <span class="o">&lt;</span> <span class="mi">55</span><span class="p">)</span>
+
+        <span class="c1"># Combine the masks to define the rectangle</span>
+        <span class="n">caspian_mask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">logical_and</span><span class="p">(</span><span class="n">lat_mask</span><span class="p">,</span> <span class="n">lon_mask</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">SHGrid</span><span class="o">.</span><span class="n">from_array</span><span class="p">(</span>
+            <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">caspian_mask</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">value</span><span class="p">),</span>
+            <span class="n">grid</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">grid</span><span class="p">,</span>
+        <span class="p">)</span></div>
+
+
 <div class="viewcode-block" id="FingerPrint.disk_load">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.disk_load">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.disk_load">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">disk_load</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span> <span class="n">delta</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">latitude</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">longitude</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">amplitude</span><span class="p">:</span> <span class="nb">float</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
@@ -1045,7 +1159,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.direct_load_from_ice_thickness_change">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.direct_load_from_ice_thickness_change">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.direct_load_from_ice_thickness_change">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">direct_load_from_ice_thickness_change</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span> <span class="n">ice_thickness_change</span><span class="p">:</span> <span class="n">SHGrid</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
@@ -1055,7 +1169,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.northern_hemisphere_load">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.northern_hemisphere_load">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.northern_hemisphere_load">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">northern_hemisphere_load</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fraction</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Returns a load from melting a fraction of Northern Hemisphere ice.&quot;&quot;&quot;</span>
         <span class="n">ice_change</span> <span class="o">=</span> <span class="p">(</span>
@@ -1067,7 +1181,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.southern_hemisphere_load">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.southern_hemisphere_load">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.southern_hemisphere_load">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">southern_hemisphere_load</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fraction</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Returns a load from melting a fraction of Southern Hemisphere ice.&quot;&quot;&quot;</span>
         <span class="n">ice_change</span> <span class="o">=</span> <span class="p">(</span>
@@ -1078,8 +1192,36 @@
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">direct_load_from_ice_thickness_change</span><span class="p">(</span><span class="n">ice_change</span><span class="p">)</span></div>
 
 
+<div class="viewcode-block" id="FingerPrint.greenland_load">
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.greenland_load">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">greenland_load</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fraction</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Returns a load from melting a fraction of the Greenland ice sheet.&quot;&quot;&quot;</span>
+        <span class="n">ice_change</span> <span class="o">=</span> <span class="o">-</span><span class="n">fraction</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">ice_thickness</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">greenland_projection</span><span class="p">(</span><span class="n">value</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">direct_load_from_ice_thickness_change</span><span class="p">(</span><span class="n">ice_change</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="FingerPrint.west_antarctic_load">
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.west_antarctic_load">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">west_antarctic_load</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fraction</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Returns a load from melting a fraction of the West Antartic ice sheet.&quot;&quot;&quot;</span>
+        <span class="n">ice_change</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="o">-</span><span class="n">fraction</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">ice_thickness</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">west_antarctic_projection</span><span class="p">(</span><span class="n">value</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">direct_load_from_ice_thickness_change</span><span class="p">(</span><span class="n">ice_change</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="FingerPrint.east_antarctic_load">
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.east_antarctic_load">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">east_antarctic_load</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fraction</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SHGrid</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Returns a load from melting a fraction of the East Antartic ice sheet.&quot;&quot;&quot;</span>
+        <span class="n">ice_change</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="o">-</span><span class="n">fraction</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">ice_thickness</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">east_antarctic_projection</span><span class="p">(</span><span class="n">value</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">direct_load_from_ice_thickness_change</span><span class="p">(</span><span class="n">ice_change</span><span class="p">)</span></div>
+
+
 <div class="viewcode-block" id="FingerPrint.angular_momentum_change_from_potential">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.angular_momentum_change_from_potential">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.angular_momentum_change_from_potential">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">angular_momentum_change_from_potential</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span> <span class="n">gravitational_potential_load</span><span class="p">:</span> <span class="n">SHGrid</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
@@ -1093,7 +1235,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.lebesgue_load_space">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.lebesgue_load_space">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.lebesgue_load_space">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">lebesgue_load_space</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Lebesgue</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Defines the mathematical space for square-integrable surface mass loads.</span>
@@ -1114,7 +1256,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.lebesgue_response_space">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.lebesgue_response_space">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.lebesgue_response_space">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">lebesgue_response_space</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">HilbertSpaceDirectSum</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Defines the mathematical space for the physical response fields.</span>
@@ -1140,7 +1282,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.sobolev_load_space">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.sobolev_load_space">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.sobolev_load_space">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">sobolev_load_space</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">order</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Sobolev</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Defines a Sobolev space for surface mass loads with smoothness constraints.</span>
@@ -1168,7 +1310,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.sobolev_response_space">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.sobolev_response_space">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.sobolev_response_space">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">sobolev_response_space</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span> <span class="n">order</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="nb">float</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">HilbertSpaceDirectSum</span><span class="p">:</span>
@@ -1200,7 +1342,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.as_lebesgue_linear_operator">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.as_lebesgue_linear_operator">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.as_lebesgue_linear_operator">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">as_lebesgue_linear_operator</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span> <span class="o">/</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">rotational_feedbacks</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">rtol</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1e-6</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">LinearOperator</span><span class="p">:</span>
@@ -1286,7 +1428,7 @@
 
 
 <div class="viewcode-block" id="FingerPrint.as_sobolev_linear_operator">
-<a class="viewcode-back" href="../../api/pyslfp.html#pyslfp.finger_print.FingerPrint.as_sobolev_linear_operator">[docs]</a>
+<a class="viewcode-back" href="../../pyslfp.html#pyslfp.finger_print.FingerPrint.as_sobolev_linear_operator">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">as_sobolev_linear_operator</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">order</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>

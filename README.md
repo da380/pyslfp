@@ -37,7 +37,11 @@ Alternatively, for development purposes, you can install pyslfp using Poetry. Fi
 poetry install 
 ```
 
-Optionally, tests and tutorials can be included using ```-with tests, tutorials```.
+To include the development dependencies (for running tests, building documentation, etc.), use the `--with dev` flag:
+
+```bash
+poetry install --with dev
+```
 
 ---
 
@@ -52,6 +56,22 @@ Additionally, please cite the appropriate ice history model if you use the `IceN
 *   [Peltier group data sets](https://www.atmosp.physics.utoronto.ca/~peltier/data.php)
 
 ---
+
+
+## Tutorials
+
+You can run the interactive tutorials directly in Google Colab to get started with the core concepts of the library.
+
+
+| Tutorial Name                 | Link to Colab                                                                                                                                                                                                                                    |
+| :---------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tutorial 1 -  Calculating a Basic Sea Level Fingerprint | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/docs/source/tutorials/tutorial1.ipynb)                                                                                  |
+| Tutorial 2 - A Deeper Dive into the Sea Level Equation   | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/docs/source/tutorials/tutorial2.ipynb)                                                                                  |
+| Tutorial 3 - Reciprocity and Generalised Sea Level Forcing  | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/docs/source/tutorials/tutorial3.ipynb)                                                                                  |
+| Tutorial 4 -  Adjoints and Sensitivity Kernels with `pygeoinf` | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/docs/source/tutorials/tutorial4.ipynb)                                                                                  |
+| Tutorial 5 - A Bayesian Inverse Problem - Inferring Ice Melt from Tide Gauges | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/docs/source/tutorials/tutorial5.ipynb)                                                                                  |
+
+
 
 ## Quick Start
 
@@ -117,14 +137,17 @@ The output of the above script will look similar to the following figure:
 
 `pyslfp` is built on top of a robust stack of scientific Python packages:
 
-* numpy & scipy: For numerical operations.
+* **numpy & scipy**: For numerical operations.
 
-* pyshtools: For spherical harmonic transforms and grid representations.
+* **pyshtools**: For spherical harmonic transforms and grid representations.
 
-* pygeoinf: For formulating and solving associated inverse problems
+* **pygeoinf**: For formulating and solving associated inverse problems
 
-* Cartopy & matplotlib: For creating high-quality map projections and plots.
+* **Cartopy & matplotlib**: For creating high-quality map projections and plots.
 
+* **regionmask & cf-xarray**: For working with geospatial masks.
+ 
+* **pyqt6**: As a backend for interactive plotting.
 ---
 
 ## License

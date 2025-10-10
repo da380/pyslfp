@@ -36,6 +36,6 @@ The core of the library is the `FingerPrint` class, which implements an iterativ
    :caption: API Reference
    :hidden:
 
-   api/modules
+   modules
 
    

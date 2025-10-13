@@ -11,9 +11,17 @@ import numpy as np
 import bisect
 from scipy.interpolate import RegularGridInterpolator
 from enum import Enum
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+
+import cartopy.crs as ccrs
+from cartopy.mpl.geoaxes import GeoAxes
 
 
 from .config import DATADIR
+from .plotting import plot
 
 
 class IceModel(Enum):
@@ -259,3 +267,195 @@ class IceNG:
             date, lmax, grid=grid, sampling=sampling, extend=extend
         )
         return topography
+
+    def animate(
+        self,
+        output_file: str,
+        /,
+        *,
+        field: str = "ice_thickness",
+        start_date_ka: float = 26.0,
+        end_date_ka: float = 0.0,
+        num_frames: int = 261,
+        fps: int = 15,
+        lmax: int = 180,
+        **plot_kwargs,
+    ):
+        """
+        Generates and saves an animation of this ice model over time.
+
+        Args:
+            output_file (str): Path for the output video (e.g., 'anim.mp4').
+            field (str): Data field to animate. Must be one of
+                'ice_thickness', 'sea_level', or 'topography'.
+            start_date_ka (float): Start date in thousands of years before present.
+            end_date_ka (float): End date in thousands of years before present.
+            num_frames (int): Total number of frames in the animation.
+            fps (int): Frames per second for the output video.
+            lmax (int): Max spherical harmonic degree for the data grids.
+            **plot_kwargs: Additional keyword arguments passed to the plot
+                function (e.g., cmap, projection).
+        """
+        print(f"Initializing animation for {self._version.name}...")
+        valid_fields = ("ice_thickness", "sea_level", "topography")
+        if field not in valid_fields:
+            raise ValueError(f"Field must be one of {valid_fields}, not '{field}'.")
+
+        dates = np.linspace(start_date_ka, end_date_ka, num_frames)
+
+        # Helper to get data by calling the appropriate method of this instance
+        def get_data_for_date(date: float):
+            method_name = f"get_{field}"
+            return getattr(self, method_name)(date, lmax)
+
+        # Create the initial plot (the first frame)
+        print("Generating initial frame...")
+        initial_data = get_data_for_date(dates[0])
+
+        if "symmetric" not in plot_kwargs and field == "sea_level":
+            plot_kwargs["symmetric"] = True
+
+        fig, ax, artist = plot(initial_data, **plot_kwargs)
+
+        cbar = fig.colorbar(
+            artist, ax=ax, orientation="horizontal", pad=0.05, shrink=0.7
+        )
+        cbar.set_label("Meters")
+        title = ax.set_title(f"Date: {dates[0]:.2f} ka")
+
+        # Define the update function for the animation
+        def update(frame_num: int):
+            current_date = dates[frame_num]
+            print(
+                f"  -> Processing frame {frame_num + 1}/{num_frames} (Date: {current_date:.2f} ka)"
+            )
+
+            new_data = get_data_for_date(current_date)
+            artist.set_array(new_data.data.ravel())
+            title.set_text(f"Date: {current_date:.2f} ka")
+            return [artist, title]
+
+        # Create and save the animation
+        print("Creating animation object...")
+        ani = FuncAnimation(fig, func=update, frames=num_frames, blit=False)
+
+        Path(output_file).parent.mkdir(parents=True, exist_ok=True)
+        print(f"\nSaving animation to '{output_file}'... (This may take a while)")
+        ani.save(output_file, writer="ffmpeg", fps=fps, dpi=150)
+        print("Done!")
+        plt.close(fig)
+
+    def animate_joint(
+        self,
+        output_file: str,
+        /,
+        *,
+        start_date_ka: float = 26.0,
+        end_date_ka: float = 0.0,
+        num_frames: int = 261,
+        fps: int = 15,
+        lmax: int = 180,
+        projection: ccrs.Projection = ccrs.Robinson(),
+        ice_plot_kwargs: dict = None,
+        sl_plot_kwargs: dict = None,
+    ):
+        """
+        Generates a side-by-side animation of ice thickness and sea level.
+
+        This function creates a video with two synchronized maps, allowing for
+        a direct comparison of how ice sheet changes drive sea level response.
+
+        Args:
+            output_file (str): Path for the output video (e.g., 'joint_anim.mp4').
+            start_date_ka (float): Start date in thousands of years before present.
+            end_date_ka (float): End date in thousands of years before present.
+            num_frames (int): Total number of frames in the animation.
+            fps (int): Frames per second for the output video.
+            lmax (int): Max spherical harmonic degree for the data grids.
+            projection (ccrs.Projection): The cartopy projection to use for both maps.
+            ice_plot_kwargs (dict, optional): Kwargs for the ice thickness plot,
+                passed to `ax.pcolormesh`. E.g., {'cmap': 'Blues', 'vmax': 4000}.
+            sl_plot_kwargs (dict, optional): Kwargs for the sea level plot.
+                E.g., {'cmap': 'RdBu_r', 'vmin': -150, 'vmax': 150}.
+        """
+        print(f"Initializing joint animation for {self._version.name}...")
+
+        # 1. Setup dates and initial data
+        dates = np.linspace(start_date_ka, end_date_ka, num_frames)
+        initial_ice, initial_sl = self.get_ice_thickness_and_sea_level(dates[0], lmax)
+        lons, lats = initial_ice.lons(), initial_ice.lats()
+
+        # 2. Setup plotting kwargs with sensible defaults
+        ice_kwargs = {"cmap": "Blues", "vmin": 0}
+        if ice_plot_kwargs:
+            ice_kwargs.update(ice_plot_kwargs)
+
+        sl_kwargs = {"cmap": "RdBu_r"}
+        if sl_plot_kwargs:
+            sl_kwargs.update(sl_plot_kwargs)
+        # Ensure sea level colormap is symmetric if not specified
+        if "vmin" in sl_kwargs and "vmax" not in sl_kwargs:
+            sl_kwargs["vmax"] = -sl_kwargs["vmin"]
+        elif "vmax" in sl_kwargs and "vmin" not in sl_kwargs:
+            sl_kwargs["vmin"] = -sl_kwargs["vmax"]
+
+        # 3. Create the figure with two subplots
+        print("Generating initial frame...")
+        fig, (ax1, ax2) = plt.subplots(
+            1,
+            2,
+            figsize=(14, 6),
+            subplot_kw={"projection": projection},
+            layout="constrained",
+        )
+
+        def setup_ax(ax: GeoAxes, title: str):
+            """Helper to format each map axis."""
+            ax.set_title(title, fontsize=14)
+            ax.coastlines()
+            ax.gridlines(linestyle="--", alpha=0.5)
+            ax.set_global()
+
+        # 4. Plot initial data on each subplot
+        setup_ax(ax1, "Ice Thickness")
+        artist_ice = ax1.pcolormesh(
+            lons, lats, initial_ice.data, transform=ccrs.PlateCarree(), **ice_kwargs
+        )
+        cbar_ice = fig.colorbar(
+            artist_ice, ax=ax1, orientation="horizontal", pad=0.05, shrink=0.8
+        )
+        cbar_ice.set_label("Ice Thickness (m)")
+
+        setup_ax(ax2, "Sea Level")
+        artist_sl = ax2.pcolormesh(
+            lons, lats, initial_sl.data, transform=ccrs.PlateCarree(), **sl_kwargs
+        )
+        cbar_sl = fig.colorbar(
+            artist_sl, ax=ax2, orientation="horizontal", pad=0.05, shrink=0.8
+        )
+        cbar_sl.set_label("Sea Level relative to present (m)")
+
+        main_title = fig.suptitle(f"Date: {dates[0]:.2f} ka", fontsize=16)
+
+        # 5. Define the animation update function
+        def update(frame_num: int):
+            current_date = dates[frame_num]
+            print(
+                f"  -> Processing frame {frame_num + 1}/{num_frames} (Date: {current_date:.2f} ka)"
+            )
+
+            new_ice, new_sl = self.get_ice_thickness_and_sea_level(current_date, lmax)
+            artist_ice.set_array(new_ice.data.ravel())
+            artist_sl.set_array(new_sl.data.ravel())
+            main_title.set_text(f"Date: {current_date:.2f} ka")
+            return [artist_ice, artist_sl, main_title]
+
+        # 6. Create and save the animation
+        print("Creating animation object...")
+        ani = FuncAnimation(fig, func=update, frames=num_frames, blit=False)
+
+        Path(output_file).parent.mkdir(parents=True, exist_ok=True)
+        print(f"\nSaving animation to '{output_file}'... (This may take a while)")
+        ani.save(output_file, writer="ffmpeg", fps=fps, dpi=180)
+        print("Done!")
+        plt.close(fig)

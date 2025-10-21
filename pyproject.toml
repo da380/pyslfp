@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pyslfp"
-version = "1.0.8"
+version = "1.0.9"
 description = "Package for computing elastic sea level fingerprints"
 authors = ["David Al-Attar and Dan Heathcote"]
 readme = "README.md"

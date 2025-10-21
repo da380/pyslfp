@@ -602,6 +602,34 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         )
         return self.expand_coefficient(gravity_potential_change_lm)
 
+    def sea_surface_height_change(
+        self,
+        sea_level_change: SHGrid,
+        displacement: SHGrid,
+        angular_velocity_change: np.ndarray,
+    ) -> SHGrid:
+        """
+        Given appropriate inputs, returns the sea surface height change.
+
+        Args:
+            sea_level_change: The sea level change.
+            displacement: The vertical displacement.
+            angular_velocity_change: The angular velocity change.
+
+        Returns:
+            The sea surface height change.
+        """
+
+        centrifugal_potential_change = self.centrifugal_potential_change(
+            angular_velocity_change
+        )
+
+        return (
+            sea_level_change
+            + displacement
+            + centrifugal_potential_change / self.gravitational_acceleration
+        )
+
     def ocean_projection(
         self, /, *, value: float = np.nan, exclude_ice_shelves: bool = False
     ) -> SHGrid:

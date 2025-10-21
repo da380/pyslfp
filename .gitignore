@@ -17,6 +17,11 @@ htmlcov/
 # Sphinx documentation build output
 docs/build/
 
+# ignore content in local examples folder
+work/*
+
+
+
 
 
 

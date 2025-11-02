@@ -21,6 +21,8 @@ from pyslfp.operators import (
     ocean_projection_operator,
     land_projection_operator,
     spatial_mutliplication_operator,
+    sea_level_change_to_load_operator,
+    sea_surface_height_operator,
 )
 
 
@@ -49,4 +51,6 @@ __all__ = [
     "plot",
     "read_gloss_tide_gauge_data",
     "SHVectorConverter",
+    "sea_level_change_to_load_operator",
+    "sea_surface_height_operator",
 ]

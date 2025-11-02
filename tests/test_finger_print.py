@@ -1,3 +1,11 @@
+"""
+UPDATED test suite for the FingerPrint class.
+
+This version is simplified to use the pygeoinf
+LinearOperator.check() method for comprehensive axiom validation
+of the as_..._linear_operator() factory methods.
+"""
+
 import pytest
 import numpy as np
 from pyslfp.finger_print import FingerPrint, EarthModelParameters, IceModel
@@ -27,8 +35,8 @@ equatorial_nondim = EarthModelParameters(
     ids=[
         "lmax64-ICE7G-DH-standard",
         "lmax64-ICE7G-DH-equatorial",
-        "lmax128-ICE7G-DH-standard",
-        "lmax128-ICE6G-DH-standard",
+        "lmax100-ICE7G-DH-standard",
+        "lmax100-ICE6G-DH-standard",
         "lmax64-ICE7G-DH2-standard",
         "lmax64-ICE7G-GLQ-standard",
     ],
@@ -330,7 +338,9 @@ def test_incompatible_grid_raises_error(fingerprint: FingerPrint):
     object that is not compatible with the FingerPrint instance's settings.
     """
     # Create a grid with a different lmax
-    incompatible_grid = SHGrid.from_zeros(lmax=16, grid=fingerprint.grid)
+    incompatible_grid = SHGrid.from_zeros(
+        lmax=fingerprint.lmax + 1, grid=fingerprint.grid
+    )
 
     with pytest.raises(ValueError, match="not compatible"):
         fingerprint.integrate(incompatible_grid)

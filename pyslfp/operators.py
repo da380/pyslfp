@@ -9,7 +9,6 @@ from typing import Optional, List, Union
 import numpy as np
 
 
-
 from pyshtools import SHGrid, SHCoeffs
 
 from pygeoinf import (
@@ -298,6 +297,84 @@ def grace_operator(
     )
 
 
+def sea_surface_height_operator(
+    finger_print: FingerPrint,
+    response_space: HilbertSpaceDirectSum,
+    /,
+    *,
+    remove_rotational_contribution: bool = True,
+):
+    """
+    Returns as a LinearOperator the mapping from the response space for the fingerprint operator
+    to the sea surface height.
+
+    Args:
+        finger_print: The FingerPrint object.
+        response_space: The response space, for the fingerprint operator, this being
+            a HilbertSpaceDirectSum whose elements take the form [SL, u, phi, omega]
+        remove_rotational_contribution: If True, rotational contribution
+                is removed from the sea surface height. Default is True
+
+    Returns:
+        A LinearOperator object.
+
+    Note:
+        This operator returns only the sea surface height change associated with the
+        gravitationally induced sea level change resulting from a given direct load.
+        When that direct load has a component linked to ocean dynamic topography,
+        the dynamic topography must added to obtain the full sea surface height change.
+    """
+
+    check_response_space(response_space)
+
+    domain = response_space
+    codomain = response_space.subspace(0)
+
+    l2_domain = underlying_space(domain)
+    l2_codomain = underlying_space(codomain)
+
+    ocean_projection = ocean_projection_operator(finger_print, codomain)
+
+    def mapping(response):
+        sea_level_change, displacement, _, angular_velocity_change = response
+        sea_surface_height_change = finger_print.sea_surface_height_change(
+            sea_level_change,
+            displacement,
+            angular_velocity_change,
+            remove_rotational_contribution=remove_rotational_contribution,
+        )
+        return ocean_projection(sea_surface_height_change)
+
+    def adjoint_mapping(sea_surface_height_change):
+        projected_sea_surface_height_change = ocean_projection(
+            sea_surface_height_change
+        )
+
+        if remove_rotational_contribution:
+            angular_momentum_change = (
+                -finger_print.angular_momentum_change_from_potential(
+                    projected_sea_surface_height_change
+                )
+                / finger_print.gravitational_acceleration
+            )
+
+        else:
+            angular_momentum_change = np.zeros(2)
+
+        return [
+            projected_sea_surface_height_change,
+            projected_sea_surface_height_change,
+            codomain.zero,
+            angular_momentum_change,
+        ]
+
+    l2_operator = LinearOperator(
+        l2_domain, l2_codomain, mapping, adjoint_mapping=adjoint_mapping
+    )
+
+    return LinearOperator.from_formal_adjoint(domain, codomain, l2_operator)
+
+
 def averaging_operator(
     load_space: Union[Lebesgue, Sobolev], weighting_functions: List[SHGrid]
 ) -> LinearOperator:
@@ -471,6 +548,31 @@ def ice_thickness_change_to_load_operator(
 
     def mapping(ice_thicknes_change: SHGrid) -> SHGrid:
         return finger_print.direct_load_from_ice_thickness_change(ice_thicknes_change)
+
+    l2_load_space = underlying_space(load_space)
+
+    l2_operator = LinearOperator.self_adjoint(l2_load_space, mapping)
+
+    return LinearOperator.from_formally_self_adjoint(load_space, l2_operator)
+
+
+def sea_level_change_to_load_operator(
+    finger_print: FingerPrint,
+    load_space: Union[Lebesgue, Sobolev],
+):
+    """
+    Returns a LinearOperator that maps a sea level change to a load.
+
+    Args:
+        finger_print: The FingerPrint object.
+        load_space: The Hilbert space for the load.
+
+    Returns:
+        A LinearOperator object.
+    """
+
+    def mapping(ice_thicknes_change: SHGrid) -> SHGrid:
+        return finger_print.direct_load_from_sea_level_change(ice_thicknes_change)
 
     l2_load_space = underlying_space(load_space)
 

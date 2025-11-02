@@ -607,6 +607,9 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         sea_level_change: SHGrid,
         displacement: SHGrid,
         angular_velocity_change: np.ndarray,
+        /,
+        *,
+        remove_rotational_contribution: bool = True,
     ) -> SHGrid:
         """
         Given appropriate inputs, returns the sea surface height change.
@@ -615,20 +618,24 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
             sea_level_change: The sea level change.
             displacement: The vertical displacement.
             angular_velocity_change: The angular velocity change.
+            remove_rotational_contribution: If True, rotational contribution
+                is removed from the sea surface height. Default is True
 
         Returns:
             The sea surface height change.
         """
 
-        centrifugal_potential_change = self.centrifugal_potential_change(
-            angular_velocity_change
-        )
+        sea_surface_height_change = sea_level_change + displacement
 
-        return (
-            sea_level_change
-            + displacement
-            + centrifugal_potential_change / self.gravitational_acceleration
-        )
+        if remove_rotational_contribution:
+            centrifugal_potential_change = self.centrifugal_potential_change(
+                angular_velocity_change
+            )
+            sea_surface_height_change += (
+                centrifugal_potential_change / self.gravitational_acceleration
+            )
+
+        return sea_surface_height_change
 
     def ocean_projection(
         self, /, *, value: float = np.nan, exclude_ice_shelves: bool = False
@@ -760,11 +767,11 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         # Get the integer ID for the named region
         try:
             region_id = self._ar6_regions.map_keys(region_name)
-        except KeyError:
+        except KeyError as exc:
             raise ValueError(
                 f"Region '{region_name}' not found in the AR6 dataset. "
                 "Check regionmask.defined_regions.ar6.all.names for available regions."
-            )
+            ) from exc
 
         # Get the grid coordinates
         lons = self.lons()
@@ -801,8 +808,6 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         Returns a grid that is 1 over the AR6 East Antarctica region and `value` elsewhere.
         """
         return self.regionmask_projection("E.Antarctica", value=value)
-
-    # Add this method to your FingerPrint class in finger_print.py
 
     def caspian_sea_projection(self, /, *, value: float = np.nan) -> SHGrid:
         """
@@ -853,6 +858,11 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         """Converts an ice thickness change into the associated surface mass load."""
         self.check_field(ice_thickness_change)
         return self.ice_density * self.one_minus_ocean_function * ice_thickness_change
+
+    def direct_load_from_sea_level_change(self, sea_level_change: SHGrid) -> SHGrid:
+        """Converts a sea level change into the associated surface mass load."""
+        self.check_field(sea_level_change)
+        return self.water_density * self.ocean_function * sea_level_change
 
     def northern_hemisphere_load(self, fraction: float = 1.0) -> SHGrid:
         """Returns a load from melting a fraction of Northern Hemisphere ice."""
@@ -1007,8 +1017,7 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         sea-level fingerprint problem. It encapsulates the forward mapping
         (from a surface mass load to the response fields) and its corresponding
         adjoint mapping into a single `pygeoinf.LinearOperator` object. This
-        operator acts on simple, square-integrable functions ($L^2$) without
-        any smoothness priors.
+        operator acts on square-integrable functions ($L^2$).
 
         Args:
             rotational_feedbacks: If True, include polar wander effects in the

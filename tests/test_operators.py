@@ -28,6 +28,7 @@ from pyslfp.operators import (
     ocean_projection_operator,
     land_projection_operator,
     sea_level_change_to_load_operator,
+    remove_ocean_average_operator,
 )
 
 # Use standard non-dimensionalisation for sensible numbers
@@ -400,3 +401,47 @@ class TestSeaSurfaceHeightOperator:
         )
 
         op.check(n_checks=3)
+
+
+# ================== NEW: Tests for ocean averate operator ==================
+
+
+@pytest.mark.parametrize("lmax", [16, 32])
+class TestRemoveOceanAverageOperator:
+    """A test suite for the remove_ocean_average_operator."""
+
+    @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
+    def test_axiom_checks(
+        self,
+        lmax,
+        space_type,
+        fp_instance,
+    ):
+        """Tests the operator axioms using the pygeoinf check() method."""
+        load_space = get_load_space(fp_instance, space_type)
+        op = remove_ocean_average_operator(
+            fp_instance,
+            load_space,
+        )
+
+        op.check(n_checks=3)
+
+    @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
+    def test_result(
+        self,
+        lmax,
+        space_type,
+        fp_instance,
+    ):
+        """Tests the operator axioms using the pygeoinf check() method."""
+        load_space = get_load_space(fp_instance, space_type)
+        op = remove_ocean_average_operator(
+            fp_instance,
+            load_space,
+        )
+
+        u = load_space.project_function(lambda point: 1)
+        v = op(u)
+        int = fp_instance.ocean_average(v)
+
+        np.testing.assert_allclose(int, 0, rtol=1e-8)

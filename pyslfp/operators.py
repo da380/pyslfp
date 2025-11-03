@@ -581,6 +581,36 @@ def sea_level_change_to_load_operator(
     return LinearOperator.from_formally_self_adjoint(load_space, l2_operator)
 
 
+def remove_ocean_average_operator(
+    finger_print: FingerPrint, load_space: Union[Lebesgue, Sobolev]
+):
+    """
+    Returns a LinearOperator that takes a scalar function defined on the Earth's surface, and
+    outputs this function adjusted so that its integral over the oceans is zero
+    """
+
+    l2_load_space = underlying_space(load_space)
+
+    ocean_function = finger_print.ocean_function
+    ocean_area = finger_print.ocean_area
+
+    def mapping(load):
+        ocean_average = finger_print.integrate(ocean_function * load) / ocean_area
+        new_load = load.copy()
+        new_load.data -= ocean_average
+        return new_load
+
+    def adjoint_mapping(load):
+        average = finger_print.integrate(load)
+        return load - average * ocean_function / ocean_area
+
+    l2_operator = LinearOperator(
+        l2_load_space, l2_load_space, mapping, adjoint_mapping=adjoint_mapping
+    )
+
+    return LinearOperator.from_formal_adjoint(load_space, load_space, l2_operator)
+
+
 class WMBMethod(EarthModelParameters, LoveNumbers):
     """
     A class that groups together functions linked to the method of Wahr, Molenaar, & Bryan (1998)

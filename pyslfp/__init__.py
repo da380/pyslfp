@@ -23,6 +23,7 @@ from pyslfp.operators import (
     spatial_mutliplication_operator,
     sea_level_change_to_load_operator,
     sea_surface_height_operator,
+    remove_ocean_average_operator,
 )
 
 
@@ -53,4 +54,5 @@ __all__ = [
     "SHVectorConverter",
     "sea_level_change_to_load_operator",
     "sea_surface_height_operator",
+    "remove_ocean_average_operator",
 ]

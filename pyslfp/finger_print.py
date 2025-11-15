@@ -734,17 +734,51 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         *,
         latitude_min: float = -66,
         latitude_max: float = 66,
+        longitude_min: float | None = None,
+        longitude_max: float | None = None,
         value: float = np.nan,
     ) -> SHGrid:
         """
         Returns a grid that is 1 in the oceans between specified latitudes
         (typical for satellite altimetry) and `value` elsewhere.
+        
+        Parameters
+        ----------
+        latitude_min : float
+            Minimum latitude in degrees. Default is -66.
+        latitude_max : float
+            Maximum latitude in degrees. Default is 66.
+        longitude_min : float, optional
+            Minimum longitude in degrees [-180, 180]. If None, no longitude 
+            restriction is applied.
+        longitude_max : float, optional
+            Maximum longitude in degrees [-180, 180]. If None, no longitude 
+            restriction is applied.
+        value : float
+            Value to assign outside the region. Default is NaN.
+            
+        Returns
+        -------
+        SHGrid
+            Grid with 1 in the specified ocean region and `value` elsewhere.
         """
-        lats, _ = np.meshgrid(self.lats(), self.lons(), indexing="ij")
+        lats, lons = np.meshgrid(self.lats(), self.lons(), indexing="ij")
         ocean_mask = self.ocean_function.data > 0
         lat_mask = np.logical_and(lats > latitude_min, lats < latitude_max)
+        
+        # Combine with longitude mask if specified
+        if longitude_min is not None and longitude_max is not None:
+            if longitude_min < longitude_max:
+                lon_mask = np.logical_and(lons >= longitude_min, lons < longitude_max)
+            else:
+                # Handle wrap-around (e.g., longitude_min=170, longitude_max=-170)
+                lon_mask = np.logical_or(lons >= longitude_min, lons < longitude_max)
+            combined_mask = np.logical_and(ocean_mask, np.logical_and(lat_mask, lon_mask))
+        else:
+            combined_mask = np.logical_and(ocean_mask, lat_mask)
+        
         return SHGrid.from_array(
-            np.where(np.logical_and(ocean_mask, lat_mask), 1, value), grid=self.grid
+            np.where(combined_mask, 1, value), grid=self.grid
         )
 
     def regionmask_projection(

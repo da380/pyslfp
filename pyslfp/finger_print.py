@@ -863,6 +863,11 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         """Converts a sea level change into the associated surface mass load."""
         self.check_field(sea_level_change)
         return self.water_density * self.ocean_function * sea_level_change
+    
+    def direct_load_from_density_change(self, density_change: SHGrid) -> SHGrid:
+        """Converts a density change into the associated surface mass load."""
+        self.check_field(density_change)
+        return self.sea_level * self.ocean_function * density_change
 
     def northern_hemisphere_load(self, fraction: float = 1.0) -> SHGrid:
         """Returns a load from melting a fraction of Northern Hemisphere ice."""

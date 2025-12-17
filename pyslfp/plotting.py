@@ -28,6 +28,11 @@ def plot(
     map_extent: Optional[List[float]] = None,
     gridlines: bool = True,
     symmetric: bool = False,
+    colorbar: bool = True,
+    colorbar_label: Optional[str] = None,
+    colorbar_orientation: str = "horizontal",
+    colorbar_pad: float = 0.05,
+    colorbar_shrink: float = 0.7,
     **kwargs,
 ) -> Tuple[Figure, GeoAxes, Union[QuadMesh, QuadContourSet]]:
     """
@@ -55,6 +60,16 @@ def plot(
         symmetric (bool): If True, the color scale is set symmetrically
             around zero. This is overridden if 'vmin' or 'vmax' are provided
             in kwargs. Defaults to False.
+        colorbar (bool): If True, a colorbar is added to the plot. 
+            Defaults to True.
+        colorbar_label (Optional[str]): Label for the colorbar. 
+            Defaults to None (no label).
+        colorbar_orientation (str): Orientation of the colorbar 
+            ('horizontal' or 'vertical'). Defaults to 'horizontal'.
+        colorbar_pad (float): Padding between the axes and the colorbar. 
+            Defaults to 0.05.
+        colorbar_shrink (float): Fraction by which to multiply the size 
+            of the colorbar. Defaults to 0.7.
         **kwargs: Additional keyword arguments are forwarded to the underlying
             matplotlib plotting function (ax.pcolormesh or ax.contourf).
 
@@ -86,4 +101,17 @@ def plot(
     plot_options.update(kwargs)
 
     # Call the underlying plot method, unpacking the collected options.
-    return sphere_helper.plot(f, **plot_options)
+    fig, ax, im = sphere_helper.plot(f, **plot_options)
+    
+    # Add colorbar if requested
+    if colorbar:
+        fig.colorbar(
+            im, 
+            ax=ax, 
+            orientation=colorbar_orientation, 
+            pad=colorbar_pad, 
+            shrink=colorbar_shrink, 
+            label=colorbar_label
+        )
+    
+    return fig, ax, im

@@ -8,7 +8,7 @@ from typing import Optional, List, Union
 
 import numpy as np
 
-
+import pyshtools as pysh
 from pyshtools import SHGrid, SHCoeffs
 
 from pygeoinf import (
@@ -581,6 +581,31 @@ def sea_level_change_to_load_operator(
     return LinearOperator.from_formally_self_adjoint(load_space, l2_operator)
 
 
+def density_change_to_load_operator(
+    finger_print: FingerPrint,
+    load_space: Union[Lebesgue, Sobolev],
+):
+    """
+    Returns a LinearOperator that maps a density change to a load.
+
+    Args:
+        finger_print: The FingerPrint object.
+        load_space: The Hilbert space for the load.
+
+    Returns:
+        A LinearOperator object.
+    """
+
+    def mapping(density_change: SHGrid) -> SHGrid:
+        return finger_print.direct_load_from_density_change(density_change)
+
+    l2_load_space = underlying_space(load_space)
+
+    l2_operator = LinearOperator.self_adjoint(l2_load_space, mapping)
+
+    return LinearOperator.from_formally_self_adjoint(load_space, l2_operator)
+
+
 def remove_ocean_average_operator(
     finger_print: FingerPrint, load_space: Union[Lebesgue, Sobolev]
 ):
@@ -837,3 +862,60 @@ class WMBMethod(EarthModelParameters, LoveNumbers):
         )
 
         return load_to_load_averages_operator @ coefficient_to_load_opeator
+
+
+def remove_degrees_from_pyshtools_coeffs(coeffs, degrees_to_remove: list[int]):
+    """Remove specified spherical harmonic degrees from pyshtools coefficients.
+    
+    Parameters
+    ----------
+    coeffs : np.ndarray
+        Pyshtools coefficients array with shape (2, lmax+1, lmax+1).
+    degrees_to_remove : list[int]
+        List of spherical harmonic degrees to remove.
+    
+    Returns
+    -------
+    np.ndarray
+        Modified coefficients with specified degrees set to zero.
+    """
+    # Create a copy of the coefficients
+    modified_coeffs = coeffs.copy()
+    
+    # Set specified degrees to zero
+    for degree in degrees_to_remove:
+        if degree < coeffs.shape[1]:  # Check if degree exists in the array
+            modified_coeffs[0, degree, :] = 0.0  # Cosine coefficients
+            modified_coeffs[1, degree, :] = 0.0  # Sine coefficients
+    
+    return modified_coeffs
+
+
+def remove_degrees_from_shgrid(grid, degrees_to_remove: list[int]):
+    """Remove specified degrees from a pyshtools SHGrid object.
+        
+    Parameters
+    ----------
+    grid : pyshtools.SHGrid
+        The input grid from which to remove degrees.
+    degrees_to_remove : list[int]
+        List of spherical harmonic degrees to remove.
+        
+    Returns
+    -------
+    pyshtools.SHGrid
+        Modified grid with specified degrees set to zero.
+    """
+    # Convert grid to coefficients
+    coeffs = grid.expand()
+    
+    # Remove specified degrees
+    modified_coeffs = remove_degrees_from_pyshtools_coeffs(coeffs.coeffs, degrees_to_remove)
+    
+    # Create new coefficients object 
+    modified_shcoeffs = pysh.SHCoeffs.from_array(modified_coeffs)
+    
+    # Convert back to grid
+    modified_grid = modified_shcoeffs.expand(grid=grid.grid, extend=grid.extend)
+    
+    return modified_grid

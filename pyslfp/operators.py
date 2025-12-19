@@ -10,6 +10,7 @@ import numpy as np
 
 import pyshtools as pysh
 from pyshtools import SHGrid, SHCoeffs
+from pygeoinf.symmetric_space.sh_tools import SHVectorConverter
 
 from pygeoinf import (
     LinearOperator,
@@ -24,7 +25,6 @@ from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
 
 from . import DATADIR
-from .utils import SHVectorConverter
 from .physical_parameters import EarthModelParameters
 from .love_numbers import LoveNumbers
 from .finger_print import FingerPrint
@@ -138,123 +138,6 @@ def tide_gauge_operator(
     )
 
 
-def field_to_sh_coefficient_operator(
-    field_space: Union[Lebesgue, Sobolev], lmax: int, lmin: int = 0
-) -> LinearOperator:
-    """
-    Maps a scalar field to a vector of its spherical harmonic coefficients.
-
-    The output coefficients are ordered in the following manner:
-
-    u_{00}, u_{1-1}, u_{10}, u_{11}, u_{2-2}, u_{2-1}, u_{20}, u_{21}, u_{22}, ...
-
-    in this case assuming lmin = 0.
-
-    If lmax is larger than the field's lmax, the output will be padded by zeros.
-
-    This operator can act on both Lebesgue (L2) and Sobolev spaces.
-
-    Args:
-        field_space: The domain space for the scalar field.
-        lmax: The maximum spherical harmonic degree to include in the output.
-        lmin: The minimum spherical harmonic degree to include in the output.
-            Defaults to 0.
-
-    Returns:
-        A LinearOperator that maps an SHGrid to a NumPy vector of coefficients.
-    """
-    if not isinstance(field_space, (Lebesgue, Sobolev)):
-        raise TypeError("field_space must be a Lebesgue or Sobolev space.")
-
-    is_sobolev = isinstance(field_space, Sobolev)
-    l2_space = field_space.underlying_space if is_sobolev else field_space
-
-    converter = SHVectorConverter(lmax=lmax, lmin=lmin)
-    codomain = EuclideanSpace(converter.vector_size)
-
-    def mapping(u: SHGrid) -> np.ndarray:
-        """L2 forward mapping: Grid -> Coefficients -> Vector"""
-        ulm = l2_space.to_coefficients(u)
-        return converter.to_vector(ulm.coeffs)
-
-    def adjoint_mapping(data: np.ndarray) -> SHGrid:
-        """L2 adjoint mapping: Vector -> Coefficients -> Grid"""
-        coeffs = converter.from_vector(data, output_lmax=l2_space.lmax)
-        ulm = SHCoeffs.from_array(
-            coeffs,
-            normalization=l2_space.normalization,
-            csphase=l2_space.csphase,
-        )
-        return l2_space.from_coefficients(ulm) / l2_space.radius**2
-
-    l2_operator = LinearOperator(
-        l2_space, codomain, mapping, adjoint_mapping=adjoint_mapping
-    )
-
-    if is_sobolev:
-        return LinearOperator.from_formal_adjoint(field_space, codomain, l2_operator)
-    else:
-        return l2_operator
-
-
-def sh_coefficient_to_field_operator(
-    field_space: Union[Lebesgue, Sobolev], lmax: int, lmin: int = 0
-) -> LinearOperator:
-    """
-    Maps a vector spherical harmonic coefficients to a scalar field,
-    padding by zero for absent coefficients. This is the right inverse
-    of the field_to_sh_coefficient_operator.
-
-    The input coefficients are ordered in the following manner:
-
-    u_{00}, u_{1-1}, u_{10}, u_{11}, u_{2-2}, u_{2-1}, u_{20}, u_{21}, u_{22}, ...
-
-    in this case assuming lmin = 0.
-
-    This operator can map to both Lebesgue (L2) and Sobolev spaces.
-
-    Args:
-        field_space: The domain space for the scalar field.
-        lmax: The maximum spherical harmonic degree to include in the output.
-        lmin: The minimum spherical harmonic degree to include in the output.
-            Defaults to 0.
-
-    Returns:
-        A LinearOperator that maps an SHGrid to a NumPy vector of coefficients.
-    """
-
-    if not isinstance(field_space, (Lebesgue, Sobolev)):
-        raise TypeError("field_space must be a Lebesgue or Sobolev space.")
-
-    is_sobolev = isinstance(field_space, Sobolev)
-    l2_space = field_space.underlying_space if is_sobolev else field_space
-
-    converter = SHVectorConverter(lmax=lmax, lmin=lmin)
-    domain = EuclideanSpace(converter.vector_size)
-
-    def mapping(data: np.ndarray) -> SHGrid:
-        coeffs = converter.from_vector(data, output_lmax=l2_space.lmax)
-        ulm = SHCoeffs.from_array(
-            coeffs,
-            normalization=l2_space.normalization,
-            csphase=l2_space.csphase,
-        )
-        return l2_space.from_coefficients(ulm)
-
-    def adjoint_mapping(u: SHGrid) -> np.ndarray:
-        ulm = l2_space.to_coefficients(u)
-        return converter.to_vector(ulm.coeffs) * l2_space.radius**2
-
-    l2_operator = LinearOperator(
-        domain, l2_space, mapping, adjoint_mapping=adjoint_mapping
-    )
-
-    if is_sobolev:
-        return LinearOperator.from_formal_adjoint(domain, field_space, l2_operator)
-    else:
-        return l2_operator
-
-
 def grace_operator(
     response_space: HilbertSpaceDirectSum,
     observation_degree: int,
@@ -277,9 +160,10 @@ def grace_operator(
 
     # Define the non-zero block of the operator by calling the new factory
     grav_potential_space = response_space.subspace(2)
-    partial_op = field_to_sh_coefficient_operator(
-        grav_potential_space, lmax=observation_degree, lmin=2
+    partial_op = grav_potential_space.to_coefficient_operator(
+        observation_degree, lmin=2
     )
+
     codomain = partial_op.codomain
 
     # Get the correct field/euclidean spaces for the zero operators
@@ -792,9 +676,8 @@ class WMBMethod(EarthModelParameters, LoveNumbers):
 
         if not isinstance(load_space, (Lebesgue, Sobolev)):
             raise TypeError("load_space must be a Lebesgue or Sobolev space.")
-
-        coeff_to_field_operator = sh_coefficient_to_field_operator(
-            load_space, self.observation_degree, lmin=2
+        coeff_to_field_operator = load_space.from_coefficient_operator(
+            self.observation_degree, lmin=2
         )
 
         potential_field_to_load_operator = self.potential_field_to_load_operator(
@@ -866,14 +749,14 @@ class WMBMethod(EarthModelParameters, LoveNumbers):
 
 def remove_degrees_from_pyshtools_coeffs(coeffs, degrees_to_remove: list[int]):
     """Remove specified spherical harmonic degrees from pyshtools coefficients.
-    
+
     Parameters
     ----------
     coeffs : np.ndarray
         Pyshtools coefficients array with shape (2, lmax+1, lmax+1).
     degrees_to_remove : list[int]
         List of spherical harmonic degrees to remove.
-    
+
     Returns
     -------
     np.ndarray
@@ -881,26 +764,26 @@ def remove_degrees_from_pyshtools_coeffs(coeffs, degrees_to_remove: list[int]):
     """
     # Create a copy of the coefficients
     modified_coeffs = coeffs.copy()
-    
+
     # Set specified degrees to zero
     for degree in degrees_to_remove:
         if degree < coeffs.shape[1]:  # Check if degree exists in the array
             modified_coeffs[0, degree, :] = 0.0  # Cosine coefficients
             modified_coeffs[1, degree, :] = 0.0  # Sine coefficients
-    
+
     return modified_coeffs
 
 
 def remove_degrees_from_shgrid(grid, degrees_to_remove: list[int]):
     """Remove specified degrees from a pyshtools SHGrid object.
-        
+
     Parameters
     ----------
     grid : pyshtools.SHGrid
         The input grid from which to remove degrees.
     degrees_to_remove : list[int]
         List of spherical harmonic degrees to remove.
-        
+
     Returns
     -------
     pyshtools.SHGrid
@@ -908,14 +791,16 @@ def remove_degrees_from_shgrid(grid, degrees_to_remove: list[int]):
     """
     # Convert grid to coefficients
     coeffs = grid.expand()
-    
+
     # Remove specified degrees
-    modified_coeffs = remove_degrees_from_pyshtools_coeffs(coeffs.coeffs, degrees_to_remove)
-    
-    # Create new coefficients object 
+    modified_coeffs = remove_degrees_from_pyshtools_coeffs(
+        coeffs.coeffs, degrees_to_remove
+    )
+
+    # Create new coefficients object
     modified_shcoeffs = pysh.SHCoeffs.from_array(modified_coeffs)
-    
+
     # Convert back to grid
     modified_grid = modified_shcoeffs.expand(grid=grid.grid, extend=grid.extend)
-    
+
     return modified_grid

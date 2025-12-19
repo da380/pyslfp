@@ -9,8 +9,7 @@ from typing import Optional, List, Union
 import numpy as np
 
 import pyshtools as pysh
-from pyshtools import SHGrid, SHCoeffs
-from pygeoinf.symmetric_space.sh_tools import SHVectorConverter
+from pyshtools import SHGrid
 
 from pygeoinf import (
     LinearOperator,

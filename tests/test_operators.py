@@ -16,8 +16,6 @@ from pygeoinf import EuclideanSpace
 from pyslfp import FingerPrint
 from pyslfp.finger_print import IceModel, EarthModelParameters
 from pyslfp.operators import (
-    field_to_sh_coefficient_operator,
-    sh_coefficient_to_field_operator,
     tide_gauge_operator,
     grace_operator,
     averaging_operator,
@@ -82,98 +80,6 @@ def get_response_space(fp_instance, space_type):
         return fp_instance.sobolev_response_space(
             2, 0.5 * fp_instance.mean_sea_floor_radius
         )
-
-
-# ================== Tests for field_to_sh_coefficient_operator ==================
-
-
-@pytest.mark.parametrize("lmax", [16, 32])
-class TestFieldToShCoefficientOperator:
-    """A test suite for the field_to_sh_coefficient_operator factory."""
-
-    @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
-    def test_forward_mapping_known_input(self, lmax, space_type, fp_instance):
-        """Tests the forward mapping with a known spherical harmonic field."""
-        field_space = get_load_space(fp_instance, space_type)
-
-        l, m = 3, 2
-        known_field_lm = SHCoeffs.from_zeros(
-            lmax=lmax,
-            normalization=field_space.normalization,
-            csphase=field_space.csphase,
-        )
-        known_field_lm.set_coeffs(values=[1.0], ls=[l], ms=[m])
-        known_field = field_space.from_coefficients(known_field_lm)
-
-        op = field_to_sh_coefficient_operator(field_space, lmax=5, lmin=2)
-
-        result_vec = op(known_field)
-
-        expected_vec = op.codomain.zero
-        idx = (l**2 - 2**2) + (m + l)
-        expected_vec[idx] = 1.0
-
-        assert np.allclose(result_vec, expected_vec)
-
-    @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
-    @pytest.mark.parametrize("lmax_obs", [8, 16])
-    @pytest.mark.parametrize("lmin_obs", [0, 2])
-    def test_axiom_checks(self, lmax, space_type, fp_instance, lmax_obs, lmin_obs):
-        """Tests the operator axioms using the pygeoinf check() method."""
-        if lmax_obs > lmax:
-            pytest.skip("Observation degree exceeds grid resolution.")
-
-        field_space = get_load_space(fp_instance, space_type)
-
-        op = field_to_sh_coefficient_operator(field_space, lmax=lmax_obs, lmin=lmin_obs)
-
-        op.check(n_checks=3)
-
-
-# ================== Tests for sh_coefficient_to_field_operator ==================
-
-
-@pytest.mark.parametrize("lmax", [16, 32])
-class TestShCoefficientToFieldOperator:
-    """A test suite for the sh_coefficient_to_field_operator factory."""
-
-    @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
-    def test_right_inverse_property(self, lmax, space_type, fp_instance):
-        """Tests that applying synthesis then analysis returns the original vector."""
-        field_space = get_load_space(fp_instance, space_type)
-        lmax_obs, lmin_obs = 8, 2
-        if lmax_obs > lmax:
-            pytest.skip("Observation degree exceeds grid resolution.")
-
-        op_synthesis = sh_coefficient_to_field_operator(
-            field_space, lmax=lmax_obs, lmin=lmin_obs
-        )
-        op_analysis = field_to_sh_coefficient_operator(
-            field_space, lmax=lmax_obs, lmin=lmin_obs
-        )
-
-        v_initial = op_synthesis.domain.random()
-        v_final = op_analysis(op_synthesis(v_initial))
-
-        assert np.isclose(
-            op_synthesis.domain.norm(v_initial - v_final)
-            / (op_synthesis.domain.norm(v_initial) + 1e-12),
-            0.0,
-            atol=1e-9,
-        )
-        assert np.allclose(v_initial, v_final)
-
-    @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
-    def test_axiom_checks(self, lmax, space_type, fp_instance):
-        """Tests the operator axioms using the pygeoinf check() method."""
-        field_space = get_load_space(fp_instance, space_type)
-        lmax_obs, lmin_obs = 8, 2
-        if lmax_obs > lmax:
-            pytest.skip("Observation degree exceeds grid resolution.")
-
-        op = sh_coefficient_to_field_operator(field_space, lmax=lmax_obs, lmin=lmin_obs)
-
-        op.check(n_checks=3)
 
 
 # ================== Tests for block operators ==================
@@ -467,7 +373,9 @@ class TestRemoveOceanAverageOperator:
 
         np.testing.assert_allclose(int, 0, rtol=1e-8)
 
+
 # ================== Tests for remove_degrees functions ==================
+
 
 class TestRemoveDegreesFunctions:
     """A test suite for the remove_degrees_from_pyshtools_coeffs and remove_degrees_from_shgrid functions."""
@@ -476,14 +384,14 @@ class TestRemoveDegreesFunctions:
         """Tests removing a single degree from pyshtools coefficients."""
         lmax = 10
         coeffs = np.random.rand(2, lmax + 1, lmax + 1)
-        
+
         # Remove degree 3
         modified_coeffs = remove_degrees_from_pyshtools_coeffs(coeffs, [3])
-        
+
         # Check that degree 3 is zeroed out
         assert np.allclose(modified_coeffs[0, 3, :], 0.0)
         assert np.allclose(modified_coeffs[1, 3, :], 0.0)
-        
+
         # Check that other degrees are unchanged
         for l in range(lmax + 1):
             if l != 3:
@@ -494,16 +402,18 @@ class TestRemoveDegreesFunctions:
         """Tests removing multiple degrees from pyshtools coefficients."""
         lmax = 10
         coeffs = np.random.rand(2, lmax + 1, lmax + 1)
-        
+
         # Remove degrees 0, 1, and 5
         degrees_to_remove = [0, 1, 5]
-        modified_coeffs = remove_degrees_from_pyshtools_coeffs(coeffs, degrees_to_remove)
-        
+        modified_coeffs = remove_degrees_from_pyshtools_coeffs(
+            coeffs, degrees_to_remove
+        )
+
         # Check that specified degrees are zeroed out
         for degree in degrees_to_remove:
             assert np.allclose(modified_coeffs[0, degree, :], 0.0)
             assert np.allclose(modified_coeffs[1, degree, :], 0.0)
-        
+
         # Check that other degrees are unchanged
         for l in range(lmax + 1):
             if l not in degrees_to_remove:
@@ -515,10 +425,10 @@ class TestRemoveDegreesFunctions:
         lmax = 10
         coeffs = np.random.rand(2, lmax + 1, lmax + 1)
         coeffs_original = coeffs.copy()
-        
+
         # Remove degree 2
         remove_degrees_from_pyshtools_coeffs(coeffs, [2])
-        
+
         # Check that original is unchanged
         assert np.allclose(coeffs, coeffs_original)
 
@@ -526,10 +436,10 @@ class TestRemoveDegreesFunctions:
         """Tests that out-of-range degrees are handled gracefully."""
         lmax = 10
         coeffs = np.random.rand(2, lmax + 1, lmax + 1)
-        
+
         # Try to remove degree beyond lmax (should be ignored)
         modified_coeffs = remove_degrees_from_pyshtools_coeffs(coeffs, [20])
-        
+
         # All coefficients should be unchanged
         assert np.allclose(modified_coeffs, coeffs)
 
@@ -541,12 +451,12 @@ class TestRemoveDegreesFunctions:
         for l in range(lmax + 1):
             for m in range(l + 1):
                 coeffs.set_coeffs(values=[np.random.rand()], ls=[l], ms=[m])
-        
+
         grid = coeffs.expand()
-        
+
         # Remove degrees 0 and 1
         modified_grid = remove_degrees_from_shgrid(grid, [0, 1])
-        
+
         # Check that grid properties are preserved
         assert modified_grid.grid == grid.grid
         assert modified_grid.lmax >= lmax
@@ -557,27 +467,27 @@ class TestRemoveDegreesFunctions:
         """Tests that specified degrees are correctly zeroed in the grid."""
         # Create a known field with specific degrees
         coeffs = SHCoeffs.from_zeros(lmax=lmax)
-        
+
         # Set specific coefficients
         coeffs.set_coeffs(values=[1.0], ls=[0], ms=[0])  # Degree 0
         coeffs.set_coeffs(values=[2.0], ls=[1], ms=[0])  # Degree 1
         coeffs.set_coeffs(values=[3.0], ls=[2], ms=[0])  # Degree 2
         coeffs.set_coeffs(values=[4.0], ls=[3], ms=[1])  # Degree 3
-        
+
         grid = coeffs.expand()
-        
+
         # Remove degrees 0 and 1
         modified_grid = remove_degrees_from_shgrid(grid, [0, 1])
-        
+
         # Expand back to coefficients to check
         modified_coeffs = modified_grid.expand()
-        
+
         # Check that degrees 0 and 1 are zero
         assert np.isclose(modified_coeffs.coeffs[0, 0, 0], 0.0)
         assert np.isclose(modified_coeffs.coeffs[0, 1, 0], 0.0)
         assert np.isclose(modified_coeffs.coeffs[0, 1, 1], 0.0)
         assert np.isclose(modified_coeffs.coeffs[1, 1, 1], 0.0)
-        
+
         # Check that degrees 2 and 3 are non-zero (approximately)
         assert not np.isclose(modified_coeffs.coeffs[0, 2, 0], 0.0)
         assert not np.isclose(modified_coeffs.coeffs[0, 3, 1], 0.0)
@@ -587,12 +497,12 @@ class TestRemoveDegreesFunctions:
         lmax = 8
         coeffs = SHCoeffs.from_zeros(lmax=lmax)
         coeffs.set_coeffs(values=[1.0], ls=[2], ms=[1])
-        
+
         grid = coeffs.expand()
         grid_data_original = grid.data.copy()
-        
+
         # Remove degree 2
         remove_degrees_from_shgrid(grid, [2])
-        
+
         # Check that original grid is unchanged
         assert np.allclose(grid.data, grid_data_original)

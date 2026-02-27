@@ -23,7 +23,7 @@ direct_load = fp.greenland_load(fraction=1)
 # This returns the sea level change, surface displacement, gravity change,
 # and angular velocity change. In this instance, only the first of the
 # returned fields is used.
-sea_level_change, _, _, _ = fp(direct_load=direct_load)
+sea_level_change, _, _, omega = fp(direct_load=direct_load)
 
 mean_sea_level_change = fp.mean_sea_level_change(direct_load)
 sea_level_change /= mean_sea_level_change
@@ -44,4 +44,4 @@ cbar = fig.colorbar(im, ax=ax, orientation="horizontal", pad=0.05, shrink=0.7)
 cbar.set_label("Normalised Sea Level Change")
 cbar.set_ticks([-8, -6, -4, -2, 0, 2])
 
-plt.show()
+# plt.show()

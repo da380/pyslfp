@@ -1,0 +1,29 @@
+__pycache__
+.ipynb_checkpoints
+*~
+dist/*
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Pytest cache
+.pytest_cache/
+
+# Coverage reports
+.coverage
+htmlcov/
+
+# Sphinx documentation build output
+docs/build/
+
+# ignore content in local examples folder
+work/*
+
+
+
+
+
+
+
+

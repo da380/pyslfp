@@ -1,6 +1,5 @@
-import matplotlib.pyplot as plt
 import numpy as np
-from pyslfp import FingerPrint, plot, IceModel
+from pyslfp import FingerPrint, IceModel
 
 
 # 1. Initialise the fingerprint model

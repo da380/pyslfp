@@ -1,4 +1,3 @@
-import matplotlib.pyplot as plt
 import numpy as np
 from pyslfp import FingerPrint, plot, IceModel
 

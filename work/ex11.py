@@ -1,16 +1,9 @@
-import matplotlib.pyplot as plt
 import numpy as np
-import random
 import pyslfp as sl
-import pygeoinf as inf
-import cartopy.crs as ccrs
-import scipy.stats as stats
-import matplotlib.colors as colors
-from pygeoinf import plot_1d_distributions, plot_corner_distributions
 
 # Initialize the core fingerprint model - lower lmax to reduce calculation times for this tutorial.
 fp = sl.FingerPrint(
-    lmax=32,
+    lmax=128,
     earth_model_parameters=sl.EarthModelParameters.from_standard_non_dimensionalisation(),
 )
 fp.set_state_from_ice_ng()
@@ -21,20 +14,19 @@ order = 2.0
 scale_km = 250.0
 scale = scale_km * 1000 / fp.length_scale
 
-model_space = inf.symmetric_space.sphere.Sobolev(
-    fp.lmax, order, scale, radius=fp.mean_sea_floor_radius
-)
-
 
 # Set up the forward operator
+fingerprint_operator = fp.as_sobolev_linear_operator(order, scale)
+
+model_space = fingerprint_operator.domain
+response_space = fingerprint_operator.codomain
+
 ice_projection_operator = sl.ice_projection_operator(fp, model_space)
 ice_thickness_change_to_load_operator = sl.ice_thickness_change_to_load_operator(
     fp, model_space
 )
-fingerprint_operator = fp.as_sobolev_linear_operator(order, scale, rtol=1e-9)
 
-response_space = fingerprint_operator.codomain
-observation_degree = 4
+observation_degree = 16
 grace_operator = sl.grace_operator(response_space, observation_degree)
 
 forward_operator = (
@@ -45,22 +37,48 @@ forward_operator = (
 )
 data_space = forward_operator.codomain
 
-
 # Set up the prior model
 pointwise_std_m = 0.1
 pointwise_std = pointwise_std_m / fp.length_scale
-initial_model_prior_measure = (
-    model_space.point_value_scaled_heat_kernel_gaussian_measure(scale, pointwise_std)
+
+
+initial_model_prior_measure = model_space.heat_kernel_gaussian_measure(scale)
+
+dirac = model_space.dirac_representation((0, 0))
+pointwise_var = model_space.inner_product(
+    initial_model_prior_measure.covariance(dirac), dirac
 )
-model_prior_measure = initial_model_prior_measure.affine_mapping(
-    operator=ice_projection_operator
+
+
+model_prior_measure = (
+    initial_model_prior_measure.affine_mapping(operator=ice_projection_operator)
+    * pointwise_std
+    / np.sqrt(pointwise_var)
 )
 
+model = model_prior_measure.sample()
 
-data_prior_measure = model_prior_measure.affine_mapping(operator=forward_operator)
 
-data_samples = data_prior_measure.samples(10)
-data_error_measure = 0.1 * inf.GaussianMeasure.from_samples(data_space, data_samples)
+prior_diagonal = model_space._degree_dependent_scaling_values()
+
+
+"""
+
+# Set random field for generation of the noise model
+noise_scale = 0.5 * scale
+noise_std = 0.05 * pointwise_std * fp.water_density
+noise_field = model_space.point_value_scaled_heat_kernel_gaussian_measure(
+    noise_scale, noise_std
+)
+
+# Set the data error measure
+data_error_measure = noise_field.affine_mapping(
+    operator=grace_operator @ fingerprint_operator
+)
+error_samples = data_error_measure.samples(10)
+data_error_measure = inf.GaussianMeasure.from_samples(data_space, error_samples)
+
+
 
 
 # Set the forward problem
@@ -74,27 +92,27 @@ model_true, data = forward_problem.synthetic_model_and_data(model_prior_measure)
 # Set up the inverse problem
 bayesian_inversion = inf.LinearBayesianInversion(forward_problem, model_prior_measure)
 
-
-normal_operator = bayesian_inversion.normal_operator
-
-preconditioner = inf.JacobiPreconditioningMethod(num_samples=20, method="fixed")(
-    normal_operator
-)
-
-data_in = data_space.random()
-data_out = (preconditioner @ normal_operator)(data)
-print(data_space.norm(data_in - data_out) / data_space.norm(data_in))
-
+"""
 
 """
 
 # Solve for the posterior measure
 model_posterior_measure = bayesian_inversion.model_posterior_measure(
     data,
-    inf.CGSolver(preconditioning_method=inf.JacobiPreconditioningMethod()),
+    inf.CGSolver,
 )
 model_posterior_expectation = model_posterior_measure.expectation
 
+
+fig1, ax1, im1 = sl.plot(model)
+
+fig2, ax2, im2 = sl.plot(model_posterior_expectation)
+
+plt.show()
+
+"""
+
+"""
 
 # --- Calculate a shared, symmetric color scale for the ice thickness plots ---
 max_abs_ice_change = (

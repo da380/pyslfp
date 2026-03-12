@@ -1,7 +1,5 @@
 import pygeoinf as inf
 import pyslfp as sl
-import numpy as np
-import matplotlib.pyplot as plt
 
 
 lmax = 64

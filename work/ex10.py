@@ -1,5 +1,3 @@
-import numpy as np
-import matplotlib.pyplot as plt
 import pyslfp as sl
 
 fp = sl.FingerPrint(

@@ -8,14 +8,14 @@ license = "BSD-3-Clause"
 
 
 [tool.poetry.dependencies]
-python = ">=3.11"
+python = ">=3.12"
 numpy = ">=1.26.0"
 scipy = ">=1.0.0"
 pyshtools = ">=4.0.0"
 matplotlib = ">=3.0.0"
 pyqt6 = ">=6.0.0"
 Cartopy = "^0.23.0"
-pygeoinf = ">=1.3.8"
+pygeoinf = ">=1.4.5"
 regionmask = "^0.13.0"
 cf-xarray = "^0.10.9"
 

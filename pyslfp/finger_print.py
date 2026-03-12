@@ -435,6 +435,7 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
                 - `gravity_potential_change` (SHGrid): Change in gravity potential.
                 - `angular_velocity_change` (np.ndarray): Change in angular velocity `[ω_x, ω_y]`.
         """
+
         loads_present = False
         non_zero_rhs = False
 
@@ -664,7 +665,11 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
             )
 
     def ice_projection(
-        self, /, *, value: float = np.nan, exclude_ice_shelves: bool = False,
+        self,
+        /,
+        *,
+        value: float = np.nan,
+        exclude_ice_shelves: bool = False,
         exclude_glaciers: bool = True,
     ) -> SHGrid:
         """
@@ -683,12 +688,12 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
             ice_mask = (self.ice_thickness.data > 0) & (self.ocean_function.data == 0)
         else:
             ice_mask = self.ice_thickness.data > 0
-        
+
         # Apply glacier exclusion if requested
         if exclude_glaciers:
             glacier_mask = self.glacier_projection(value=0).data == 1
             ice_mask = ice_mask & ~glacier_mask
-        
+
         return SHGrid.from_array(
             np.where(ice_mask, 1, value),
             grid=self.grid,
@@ -839,7 +844,7 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         """
         Returns a grid that is 1 over glacier regions and `value` elsewhere.
         Uses a simple rectangular mask for North American glaciers.
-        
+
         Args:
             value: The value to assign outside glacier regions. Default is NaN.
         """
@@ -887,7 +892,7 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         """Converts a sea level change into the associated surface mass load."""
         self.check_field(sea_level_change)
         return self.water_density * self.ocean_function * sea_level_change
-    
+
     def direct_load_from_density_change(self, density_change: SHGrid) -> SHGrid:
         """Converts a density change into the associated surface mass load."""
         self.check_field(density_change)

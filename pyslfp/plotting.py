@@ -5,7 +5,7 @@ Module for plotting functions using matplotlib and cartopy.
 from typing import Tuple, Optional, List, Union
 from pyshtools import SHGrid
 
-from pygeoinf.symmetric_space.sphere import SphereHelper
+from pygeoinf.symmetric_space import sphere
 
 from matplotlib.figure import Figure
 from matplotlib.collections import QuadMesh
@@ -60,15 +60,15 @@ def plot(
         symmetric (bool): If True, the color scale is set symmetrically
             around zero. This is overridden if 'vmin' or 'vmax' are provided
             in kwargs. Defaults to False.
-        colorbar (bool): If True, a colorbar is added to the plot. 
+        colorbar (bool): If True, a colorbar is added to the plot.
             Defaults to True.
-        colorbar_label (Optional[str]): Label for the colorbar. 
+        colorbar_label (Optional[str]): Label for the colorbar.
             Defaults to None (no label).
-        colorbar_orientation (str): Orientation of the colorbar 
+        colorbar_orientation (str): Orientation of the colorbar
             ('horizontal' or 'vertical'). Defaults to 'horizontal'.
-        colorbar_pad (float): Padding between the axes and the colorbar. 
+        colorbar_pad (float): Padding between the axes and the colorbar.
             Defaults to 0.05.
-        colorbar_shrink (float): Fraction by which to multiply the size 
+        colorbar_shrink (float): Fraction by which to multiply the size
             of the colorbar. Defaults to 0.7.
         **kwargs: Additional keyword arguments are forwarded to the underlying
             matplotlib plotting function (ax.pcolormesh or ax.contourf).
@@ -81,9 +81,6 @@ def plot(
 
     if not isinstance(f, SHGrid):
         raise ValueError("must be of SHGrid type.")
-
-    # Instantiate the helper class from pygeoinf.
-    sphere_helper = SphereHelper(f.lmax, 1, f.grid, f.extend)
 
     # --- Create a dictionary to hold all keyword arguments ---
     plot_options = {
@@ -101,17 +98,17 @@ def plot(
     plot_options.update(kwargs)
 
     # Call the underlying plot method, unpacking the collected options.
-    fig, ax, im = sphere_helper.plot(f, **plot_options)
-    
+    fig, ax, im = sphere.plot(f, **plot_options)
+
     # Add colorbar if requested
     if colorbar:
         fig.colorbar(
-            im, 
-            ax=ax, 
-            orientation=colorbar_orientation, 
-            pad=colorbar_pad, 
-            shrink=colorbar_shrink, 
-            label=colorbar_label
+            im,
+            ax=ax,
+            orientation=colorbar_orientation,
+            pad=colorbar_pad,
+            shrink=colorbar_shrink,
+            label=colorbar_label,
         )
-    
+
     return fig, ax, im

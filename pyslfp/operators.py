@@ -20,6 +20,7 @@ from pygeoinf import (
     MassWeightedHilbertSpace,
 )
 
+from pygeoinf.symmetric_space.symmetric_space import InvariantLinearAutomorphism
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
 
@@ -610,8 +611,8 @@ class WMBMethod(EarthModelParameters, LoveNumbers):
                 else 0
             )
 
-        l2_operator = l2_load_space.invariant_automorphism_from_index_function(
-            scaling_function
+        l2_operator = InvariantLinearAutomorphism.from_index_function(
+            l2_load_space, scaling_function
         )
 
         return LinearOperator.from_formally_self_adjoint(load_space, l2_operator)
@@ -645,8 +646,8 @@ class WMBMethod(EarthModelParameters, LoveNumbers):
             l, _ = k
             return 1 / self.k[l] if 1 < l <= self.observation_degree else 0
 
-        l2_operator = l2_potential_space.invariant_automorphism_from_index_function(
-            scaling_function
+        l2_operator = InvariantLinearAutomorphism.from_index_function(
+            l2_potential_space, scaling_function
         )
 
         return LinearOperator.from_formal_adjoint(

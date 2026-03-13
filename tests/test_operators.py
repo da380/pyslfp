@@ -54,7 +54,7 @@ def fp_instance(lmax):
 def wmb_method(lmax):
     """Provides a configured WMBMethod instance for testing."""
     fp = FingerPrint(lmax=lmax, earth_model_parameters=standard_nondim)
-    return WMBMethod.from_finger_print(observation_degree=lmax, finger_print=fp)
+    return WMBMethod.from_finger_print(fp, lmax)
 
 
 # ================== Helper Functions for Spaces ==================
@@ -202,6 +202,18 @@ class TestWMBMethod:
         """NEW TEST: Tests the WMB direct_load_to_load_operator."""
         load_space = get_load_space(fp_instance, space_type)
         op = wmb_method.direct_load_to_load_operator(load_space)
+
+        op.check(n_checks=3)
+
+    def test_load_coeff_to_potential_coeff_axiom_checks(self, lmax, wmb_method):
+        """Tests the load coefficients -> potential coefficients operator."""
+        op = wmb_method.load_coefficient_to_potential_coefficient_operator(lmax)
+
+        op.check(n_checks=3)
+
+    def test_potential_coeff_to_load_coeff_axiom_checks(self, lmax, wmb_method):
+        """Tests the potential coefficients -> load coefficients operator."""
+        op = wmb_method.potential_coefficient_to_load_coefficient_operator(lmax)
 
         op.check(n_checks=3)
 

@@ -1042,7 +1042,12 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         )
 
     def as_lebesgue_linear_operator(
-        self, /, *, rotational_feedbacks: bool = True, rtol: float = 1e-6
+        self,
+        /,
+        *,
+        rotational_feedbacks: bool = True,
+        rtol: float = 1e-6,
+        verbose: bool = False,
     ) -> LinearOperator:
         """
         Wraps the physical model as a LinearOperator between Lebesgue spaces.
@@ -1058,6 +1063,7 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
                 forward and adjoint calculations. Defaults to True.
             rtol: The relative tolerance for the underlying iterative solver.
                 Defaults to 1e-6.
+            verbose: Prints convergence information is True.
 
         Returns:
             A `pygeoinf.LinearOperator` that maps from the Lebesgue load
@@ -1075,7 +1081,9 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
                 gravity_potential_change,
                 angular_velocity_change,
             ) = self(
-                direct_load=u, rotational_feedbacks=rotational_feedbacks, rtol=rtol
+                direct_load=u,
+                rotational_feedbacks=rotational_feedbacks,
+                rtol=rtol,
             )
 
             if rotational_feedbacks:
@@ -1086,6 +1094,9 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
                 )
             else:
                 gravitational_potential_change = gravity_potential_change
+
+            if verbose:
+                print(f"Number of sea level solves = {self.solver_counter}")
 
             return [
                 sea_level_change,
@@ -1117,6 +1128,10 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
                 rotational_feedbacks=rotational_feedbacks,
                 rtol=rtol,
             )
+
+            if verbose:
+                print(f"Number of sea level solves = {self.solver_counter}")
+
             return adjoint_sea_level
 
         return LinearOperator(
@@ -1131,6 +1146,7 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         *,
         rotational_feedbacks: bool = True,
         rtol: float = 1e-6,
+        verbose: bool = False,
     ) -> LinearOperator:
         """
         Constructs the sea-level model as a LinearOperator between Sobolev spaces.
@@ -1154,6 +1170,7 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
                 that defines the spatial scale at which the smoothness is enforced.
             rotational_feedbacks: If True, include polar wander effects. Defaults to True.
             rtol: Relative tolerance for the underlying iterative solver. Defaults to 1e-6.
+            verbose: Prints convergence information is True.
 
             Returns:
                 A `pygeoinf.LinearOperator` that maps from the Sobolev load
@@ -1164,7 +1181,7 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         codomain = self.sobolev_response_space(order, scale)
 
         lebesgue_operator = self.as_lebesgue_linear_operator(
-            rotational_feedbacks=rotational_feedbacks, rtol=rtol
+            rotational_feedbacks=rotational_feedbacks, rtol=rtol, verbose=verbose
         )
 
         return LinearOperator.from_formal_adjoint(domain, codomain, lebesgue_operator)

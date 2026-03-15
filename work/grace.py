@@ -5,10 +5,10 @@ import pygeoinf as inf
 
 
 # Truncation degree for simulations.
-lmax = 128
+lmax = 256
 
 # Observation degree for GRACE data
-lmax_obs = 40
+lmax_obs = 100
 
 
 # Set  up the fingerprint instance.
@@ -76,4 +76,7 @@ print(f"number of sea level solutions = {count2-count1}")
 load_max = np.max(np.abs(load.data))
 fig1, ax1, im1 = sl.plot(load, vmin=-load_max, vmax=load_max)
 fig2, ax2, im2 = sl.plot(load_posterior.expectation, vmin=-load_max, vmax=load_max)
+fig3, ax3, im3 = sl.plot(
+    100 * (load_posterior.expectation - load) / load_max, symmetric=True
+)
 plt.show()

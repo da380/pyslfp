@@ -27,7 +27,11 @@ from .operators import (
 
 from .plotting import plot
 
-from .utils import read_gloss_tide_gauge_data, partition_points_by_grid
+from .utils import (
+    read_gloss_tide_gauge_data,
+    partition_points_by_grid,
+    get_spherical_harmonic_degree_blocks,
+)
 
 
 __all__ = [
@@ -48,6 +52,7 @@ __all__ = [
     "plot",
     "read_gloss_tide_gauge_data",
     "partition_points_by_grid",
+    "get_spherical_harmonic_degree_blocks",
     "sea_level_change_to_load_operator",
     "sea_surface_height_operator",
     "remove_ocean_average_operator",

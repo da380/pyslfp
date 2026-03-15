@@ -14,11 +14,11 @@ import pygeoinf as inf
 from pygeoinf import plot_1d_distributions, plot_corner_distributions
 
 # ==========================================
-# Step 1: Setup and Initialization
+# Setup and Initialization
 # ==========================================
 print("Initializing FingerPrint model...")
-lmax = 128  # Simulation degree (reduced slightly for script speed)
-lmax_obs = 60  # GRACE maximum observation degree
+lmax = 256
+lmax_obs = 100
 
 fp = sl.FingerPrint(
     lmax=lmax,
@@ -27,25 +27,24 @@ fp = sl.FingerPrint(
 fp.set_state_from_ice_ng()
 
 # ==========================================
-# Step 2: Defining the Model Space
+# Defining the Model Space
 # ==========================================
 # The unknown is the global pattern of ice thickness change.
 order = 2.0
 scale_km = 250.0
 scale = scale_km * 1000 / fp.length_scale
 
-model_space = inf.symmetric_space.sphere.Sobolev(
-    fp.lmax, order, scale, radius=fp.mean_sea_floor_radius
-)
+model_space = fp.sobolev_load_space(order, scale)
+
 
 # ==========================================
-# Step 3: Defining the Forward Operator
+# Defining the Forward Operator
 # ==========================================
 # A = Grace Observation @ Fingerprint @ Thickness-to-Load @ Ice Projection
 print("Building the forward operator chain...")
 op1 = sl.ice_projection_operator(fp, model_space)
 op2 = sl.ice_thickness_change_to_load_operator(fp, model_space)
-op3 = fp.as_sobolev_linear_operator(order, scale, rtol=1e-9)
+op3 = fp.as_sobolev_linear_operator(order, scale, verbose=True)
 response_space = op3.codomain
 op4 = sl.grace_operator(response_space, lmax_obs)
 
@@ -53,24 +52,7 @@ A = op4 @ op3 @ op2 @ op1
 data_space = A.codomain
 
 # ==========================================
-# Step 4: Data Error Model (GRACE Noise)
-# ==========================================
-# We use the WMBMethod to generate a realistic noise model. We start with an
-# invariant load measure that is rougher (scale/4) than our expected signal.
-print("Setting up observational noise model...")
-wmb = sl.WMBMethod.from_finger_print(fp, lmax_obs)
-
-noise_std_m = 0.02  # 2 cm equivalent water height error at small scales
-noise_load_measure = model_space.point_value_scaled_heat_kernel_gaussian_measure(
-    scale / 4, std=noise_std_m / fp.length_scale
-)
-
-# Map this load noise directly into the observation space covariance
-data_error_measure = wmb.load_measure_to_observation_measure(noise_load_measure)
-forward_problem = inf.LinearForwardProblem(A, data_error_measure=data_error_measure)
-
-# ==========================================
-# Step 5: Prior Model and Synthetic Data
+# Prior Model
 # ==========================================
 print("Generating synthetic ground truth and data...")
 pointwise_std_m = 0.1  # 10 cm typical ice thickness change
@@ -84,10 +66,32 @@ initial_model_prior_measure = (
 )
 model_prior_measure = initial_model_prior_measure.affine_mapping(operator=op1)
 
+# ==========================================
+# Data Error Model (GRACE Noise)
+# ==========================================
+# We use the WMBMethod to generate a realistic noise model. We start with an
+# invariant load measure that is rougher (scale/4) than our expected signal.
+print("Setting up observational noise model...")
+wmb = sl.WMBMethod.from_finger_print(fp, lmax_obs)
+
+noise_std_fac = 0.1 * fp.water_density
+noise_scale_fac = 0.25
+noise_load_measure = model_space.point_value_scaled_heat_kernel_gaussian_measure(
+    noise_scale_fac * scale, std=noise_std_fac * pointwise_std
+)
+
+# Map this load noise directly into the observation space covariance
+data_error_measure = wmb.load_measure_to_observation_measure(noise_load_measure)
+
+
+# ==========================================
+# Generate synthetic data
+# ==========================================
+forward_problem = inf.LinearForwardProblem(A, data_error_measure=data_error_measure)
 model_true, data = forward_problem.synthetic_model_and_data(model_prior_measure)
 
 # ==========================================
-# Step 6: WMB Preconditioner
+# WMB Preconditioner
 # ==========================================
 # The preconditioner needs an *invariant* load measure to stay diagonal.
 # We approximate our spatially-masked ice thickness prior by simply multiplying
@@ -100,7 +104,7 @@ normal_preconditioner = wmb.bayesian_normal_operator_preconditioner(
 )
 
 # ==========================================
-# Step 7: Solving the Bayesian Inverse Problem
+# Solving the Bayesian Inverse Problem
 # ==========================================
 print("Solving the Bayesian inverse problem...")
 inverse_problem = inf.LinearBayesianInversion(forward_problem, model_prior_measure)
@@ -118,7 +122,7 @@ print(f"Number of full Sea Level Equation solutions required: {count2 - count1}"
 model_posterior_expectation = model_posterior_measure.expectation
 
 # ==========================================
-# Step 8: Visualizing the Inferred Ice Melt
+# Visualizing the Inferred Ice Melt
 # ==========================================
 print("Plotting ice thickness results...")
 max_abs_ice_change = (
@@ -154,26 +158,9 @@ fig2, ax2, im2 = sl.plot(
 ax2.set_title("b) Posterior Expectation (from GRACE)")
 plt.show()
 
-# ==========================================
-# Step 9: Visualizing Uncertainty (Pointwise STD)
-# ==========================================
-print("Calculating pointwise standard deviation (drawing samples)...")
-pointwise_variance = model_posterior_measure.sample_pointwise_variance(10)
-
-pointwise_std_field = pointwise_variance.copy()
-pointwise_std_field.data[:, :] = np.sqrt(pointwise_variance.data[:, :])
-
-fig3, ax3, im3 = sl.plot(
-    1000 * pointwise_std_field * fp.length_scale,
-    coasts=True,
-    cmap="Reds",
-    colorbar_label="Standard Deviation (mm)",
-)
-ax3.set_title("Posterior Pointwise Standard Deviation")
-plt.show()
 
 # ==========================================
-# Step 10: Mapping to GMSL and Regional Contributions
+# Mapping to GMSL and Regional Contributions
 # ==========================================
 print("Mapping posterior to GMSL contributions...")
 

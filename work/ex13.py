@@ -19,7 +19,7 @@ model_space = inf.symmetric_space.sphere.Sobolev(
     fp.lmax, 2.0, 0.1, radius=fp.mean_sea_floor_radius
 )
 
-n_points = 100000
+n_points = 10000
 grid_size_degrees = 10
 
 print(f"Generating {n_points} random points...")
@@ -40,7 +40,7 @@ fig, ax = plt.subplots(figsize=(12, 6), subplot_kw={"projection": ccrs.PlateCarr
 
 ax.set_global()
 ax.coastlines(linewidth=0.5, zorder=1)
-ax.add_feature(cfeature.BORDERS, linestyle=":", linewidth=0.5, zorder=1)
+ax.add_feature(cfeature.BORDERS, linestyle=":", linewidth=0.5, zorder=10)
 ax.gridlines(linestyle="--", draw_labels=True, alpha=0.5, zorder=0)
 
 # Two shades of a single color (dark blue and light blue)

@@ -536,17 +536,18 @@ class WMBMethod(EarthModelParameters, LoveNumbers):
         observation_degree: int,
         /,
         *,
+        minimum_degree: int = 2,
         earth_model_parameters: Optional[EarthModelParameters] = None,
         love_number_file: str = DATADIR + "/love_numbers/PREM_4096.dat",
-        minimum_degree: int = 2,
     ):
         """
         Args:
             observation_degree: The maximum degree of the SH coefficient observations.
+            minimum_degree: Minimum observed degree. Default is 2.
             earth_model_parameters: Parameters for the Earth model. If None,
                 default parameters are used.
             love_number_file: Path to the file containing the Love numbers.
-            minimum_degree: Minimum observed degree. Default is 2.
+
         """
 
         if earth_model_parameters is None:

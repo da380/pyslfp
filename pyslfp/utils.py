@@ -73,3 +73,18 @@ def partition_points_by_grid(
         bins[(lat_idx, lon_idx)].append(i)
 
     return list(bins.values())
+
+
+def get_spherical_harmonic_degree_blocks(
+    lmax_obs: int, min_degree: int = 0
+) -> list[list[int]]:
+    """
+    Generates index blocks grouping spherical harmonic coefficients by degree l.
+    Assumes standard ordering where degree l coefficients start at index l^2.
+    """
+    blocks = []
+    for l in range(min_degree, lmax_obs + 1):
+        start_idx = l**2 - min_degree**2
+        end_idx = (l + 1) ** 2 - min_degree**2
+        blocks.append(list(range(start_idx, end_idx)))
+    return blocks

@@ -71,7 +71,9 @@ forward_problem = inf.LinearForwardProblem(A, data_error_measure=data_error_meas
 pointwise_std_m = 0.1
 pointwise_std = pointwise_std_m / fp.length_scale
 initial_model_prior_measure = (
-    model_space.point_value_scaled_heat_kernel_gaussian_measure(scale, pointwise_std)
+    model_space.point_value_scaled_heat_kernel_gaussian_measure(
+        scale, std=pointwise_std
+    )
 )
 model_prior_measure = initial_model_prior_measure.affine_mapping(operator=op1)
 

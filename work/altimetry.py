@@ -23,7 +23,8 @@ model_space = inf.symmetric_space.sphere.Sobolev(
     fp.lmax, order, scale, radius=fp.mean_sea_floor_radius
 )
 
-altimetry_points = fp.ocean_altimetry_points(spacing_degrees=1)
+# Set the altimetry locations
+altimetry_points = fp.ocean_altimetry_points(spacing_degrees=4)
 lats = [p[0] for p in altimetry_points]
 lons = [p[1] for p in altimetry_points]
 print(f"Using {len(altimetry_points)} altimetry points for the inversion.")
@@ -80,7 +81,7 @@ model_true, data = forward_problem.synthetic_model_and_data(model_prior_measure)
 # Set up the Bayesian inversion method
 bayesian_inversion = inf.LinearBayesianInversion(forward_problem, model_prior_measure)
 
-
+# Set up the diagonal preconditioner
 blocks = sl.partition_points_by_grid(altimetry_points, 10)
 print(f"Forming the preconditioner (blocks = {len(blocks)})")
 preconditioner = bayesian_inversion.diagonal_normal_preconditioner(
@@ -130,7 +131,7 @@ ax1.plot(lons, lats, "m^", markersize=5, transform=ccrs.PlateCarree())
 ax1.set_title("a) True Ice Thickness Change")
 
 
-# --- Plot 2: The Posterior Expectation (Our Best Estimate) ---
+# --- Plot 2: The Posterior Expectation ---
 fig2, ax2, im2 = sl.plot(
     1000 * model_posterior_expectation * fp.length_scale,
     coasts=True,
@@ -180,7 +181,7 @@ ax3.set_title("a) True Sea surface height change")
 ax3.plot(lons, lats, "m^", markersize=5, transform=ccrs.PlateCarree())
 
 
-# --- Plot 4: The Sea-Level Field Predicted by the Inversion ---
+# --- Plot 4: The SSH Field Predicted by the Inversion ---
 fig4, ax4, im4 = sl.plot(
     1000 * ssh_posterior * fp.ocean_projection() * fp.length_scale,
     coasts=True,

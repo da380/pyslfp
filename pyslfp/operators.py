@@ -3,7 +3,7 @@ Module for defining some operators related to the sea level problem.
 """
 
 from __future__ import annotations
-from typing import Optional, List, Union
+from typing import Optional, List, Union, Tuple
 
 
 import numpy as np
@@ -108,7 +108,7 @@ def check_response_space(
 
 
 def tide_gauge_operator(
-    response_space: HilbertSpaceDirectSum, points
+    response_space: HilbertSpaceDirectSum, points: List[Tuple[float, float]]
 ) -> LinearOperator:
     """
     Maps the response fields to a vector of sea level change values at
@@ -262,6 +262,44 @@ def sea_surface_height_operator(
     )
 
     return LinearOperator.from_formal_adjoint(domain, codomain, l2_operator)
+
+
+def ocean_altimetry_operator(
+    finger_print: FingerPrint,
+    response_space: HilbertSpaceDirectSum,
+    points: List[Tuple[float, float]],
+    /,
+    *,
+    remove_rotational_contribution: bool = True,
+):
+    """
+    Returns as a LinearOperator the mapping from the response space for the fingerprint operator
+    to the sea surface height at a given set of points.
+
+    Args:
+        finger_print: The FingerPrint object.
+        response_space: The response space, for the fingerprint operator, this being
+            a HilbertSpaceDirectSum whose elements take the form [SL, u, phi, omega]
+        points: A list of (lat,lon) points at which the SHH is observed.
+        remove_rotational_contribution: If True, rotational contribution
+                is removed from the sea surface height. Default is True
+
+    Returns:
+        A LinearOperator object.
+
+    Note:
+        This operator returns only the sea surface height change associated with the
+        gravitationally induced sea level change resulting from a given direct load.
+        When that direct load has a component linked to ocean dynamic topography,
+        the dynamic topography must added to obtain the full sea surface height change.
+    """
+    response_to_ssh = sea_surface_height_operator(
+        finger_print,
+        response_space,
+        remove_rotational_contribution=remove_rotational_contribution,
+    )
+    ssh_to_points = response_to_ssh.codomain.point_evaluation_operator(points)
+    return ssh_to_points @ response_to_ssh
 
 
 def averaging_operator(
@@ -445,7 +483,7 @@ def ice_thickness_change_to_load_operator(
     return LinearOperator.from_formally_self_adjoint(load_space, l2_operator)
 
 
-def sea_level_change_to_load_operator(
+def ocean_thickness_change_to_load_operator(
     finger_print: FingerPrint,
     load_space: Union[Lebesgue, Sobolev],
 ):

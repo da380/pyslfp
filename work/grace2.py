@@ -17,7 +17,7 @@ from pygeoinf import plot_corner_distributions
 # Setup and Initialization
 # ==========================================
 print("Initializing FingerPrint model...")
-lmax = 256
+lmax = 128
 lmax_obs = 100
 
 fp = sl.FingerPrint(

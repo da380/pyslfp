@@ -3,9 +3,8 @@ Module collecting some small helper functions or classes.
 """
 
 from collections import defaultdict
-from typing import Optional, Tuple, List
+from typing import Tuple, List
 
-import numpy as np
 
 from . import DATADIR
 

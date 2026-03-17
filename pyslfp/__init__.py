@@ -19,9 +19,10 @@ from .operators import (
     ocean_projection_operator,
     land_projection_operator,
     spatial_mutliplication_operator,
-    sea_level_change_to_load_operator,
+    ocean_thickness_change_to_load_operator,
     sea_surface_height_operator,
     remove_ocean_average_operator,
+    ocean_altimetry_operator,
 )
 
 
@@ -53,7 +54,8 @@ __all__ = [
     "read_gloss_tide_gauge_data",
     "partition_points_by_grid",
     "get_spherical_harmonic_degree_blocks",
-    "sea_level_change_to_load_operator",
+    "ocean_thickness_change_to_load_operator",
     "sea_surface_height_operator",
     "remove_ocean_average_operator",
+    "ocean_altimetry_operator",
 ]

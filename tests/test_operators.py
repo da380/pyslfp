@@ -25,7 +25,7 @@ from pyslfp.operators import (
     ice_projection_operator,
     ocean_projection_operator,
     land_projection_operator,
-    sea_level_change_to_load_operator,
+    ocean_thickness_change_to_load_operator,
     density_change_to_load_operator,
     remove_ocean_average_operator,
     remove_degrees_from_pyshtools_coeffs,
@@ -54,7 +54,7 @@ def fp_instance(lmax):
 def wmb_method(lmax):
     """Provides a configured WMBMethod instance for testing."""
     fp = FingerPrint(lmax=lmax, earth_model_parameters=standard_nondim)
-    return WMBMethod.from_finger_print(observation_degree=lmax, finger_print=fp)
+    return WMBMethod.from_finger_print(fp, lmax)
 
 
 # ================== Helper Functions for Spaces ==================
@@ -205,6 +205,18 @@ class TestWMBMethod:
 
         op.check(n_checks=3)
 
+    def test_load_coeff_to_potential_coeff_axiom_checks(self, lmax, wmb_method):
+        """Tests the load coefficients -> potential coefficients operator."""
+        op = wmb_method.load_coefficient_to_potential_coefficient_operator(lmax)
+
+        op.check(n_checks=3)
+
+    def test_potential_coeff_to_load_coeff_axiom_checks(self, lmax, wmb_method):
+        """Tests the potential coefficients -> load coefficients operator."""
+        op = wmb_method.potential_coefficient_to_load_coefficient_operator(lmax)
+
+        op.check(n_checks=3)
+
 
 # ================== Tests for ice_thickness_change_to_load_operator ==================
 
@@ -240,12 +252,12 @@ class TestIceThicknessToLoadOperator:
         op.check(n_checks=3)
 
 
-# ================== Tests for sea_level_change_to_load_operator ==================
+# ================== Tests for ocean_thickness_change_to_load_operator ==================
 
 
 @pytest.mark.parametrize("lmax", [16, 32])
 class TestSeaLevelChangeToLoadOperator:
-    """A test suite for the sea_level_change_to_load_operator."""
+    """A test suite for the ocean_thickness_change_to_load_operator."""
 
     @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
     def test_axiom_checks(self, lmax, space_type, fp_instance):
@@ -253,7 +265,7 @@ class TestSeaLevelChangeToLoadOperator:
         Tests the operator axioms using the pygeoinf check() method.
         """
         space = get_load_space(fp_instance, space_type)
-        op = sea_level_change_to_load_operator(fp_instance, space)
+        op = ocean_thickness_change_to_load_operator(fp_instance, space)
 
         op.check(n_checks=3)
 

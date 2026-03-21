@@ -10,6 +10,8 @@ from typing import Optional, Tuple, List, Union
 import numpy as np
 import regionmask
 
+from scipy.interpolate import RegularGridInterpolator
+
 from pyshtools import SHGrid, SHCoeffs
 
 from pygeoinf import (
@@ -257,6 +259,33 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         if self._ocean_function is None:
             self._compute_ocean_function()
         self._ocean_area = self.integrate(self._ocean_function)
+
+    def _filter_independent_points(
+        self, points: np.ndarray, mask: SHGrid
+    ) -> List[Tuple[float, float]]:
+        """
+        Interpolates an internal SHGrid mask at arbitrary (lat, lon) coordinates
+        and returns only the points that fall within the masked region.
+        """
+        grid_lats = mask.lats()
+        grid_lons = mask.lons()
+
+        # pyshtools grids go from 90 to -90.
+        # RegularGridInterpolator requires strictly ascending coordinates.
+        lats_asc = grid_lats[::-1]
+        data_asc = mask.data[::-1, :]
+
+        interpolator = RegularGridInterpolator(
+            (lats_asc, grid_lons), data_asc, bounds_error=False, fill_value=0.0
+        )
+
+        # Interpolate the binary mask at the requested points
+        mask_values = interpolator(points)
+
+        # Keep points where the interpolated mask is > 0.5
+        valid_points = points[mask_values > 0.5]
+
+        return [(float(lat), float(lon)) for lat, lon in valid_points]
 
     # --------------------------------------------------------#
     #                       Public methods                    #
@@ -745,17 +774,21 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         latitude_min: float = -66,
         latitude_max: float = 66,
         value: float = np.nan,
+        ice_threshold: float = 0.0,
     ) -> SHGrid:
         """
-        Returns a grid that is 1 in the oceans between specified latitudes
-        (typical for satellite altimetry) and `value` elsewhere.
+            Returns a grid that is 1 in the oceans between specified latitudes
+        (typical for satellite altimetry) where there is no sea ice,
+        and `value` elsewhere.
         """
         lats, _ = np.meshgrid(self.lats(), self.lons(), indexing="ij")
+
         ocean_mask = self.ocean_function.data > 0
         lat_mask = np.logical_and(lats > latitude_min, lats < latitude_max)
-        return SHGrid.from_array(
-            np.where(np.logical_and(ocean_mask, lat_mask), 1, value), grid=self.grid
-        )
+        ice_free_mask = self.ice_thickness.data <= ice_threshold
+        combined_mask = ocean_mask & lat_mask & ice_free_mask
+
+        return SHGrid.from_array(np.where(combined_mask, 1, value), grid=self.grid)
 
     def regionmask_projection(
         self, region_name: str, /, *, value: float = np.nan
@@ -1042,7 +1075,12 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         )
 
     def as_lebesgue_linear_operator(
-        self, /, *, rotational_feedbacks: bool = True, rtol: float = 1e-6
+        self,
+        /,
+        *,
+        rotational_feedbacks: bool = True,
+        rtol: float = 1e-6,
+        verbose: bool = False,
     ) -> LinearOperator:
         """
         Wraps the physical model as a LinearOperator between Lebesgue spaces.
@@ -1058,6 +1096,7 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
                 forward and adjoint calculations. Defaults to True.
             rtol: The relative tolerance for the underlying iterative solver.
                 Defaults to 1e-6.
+            verbose: Prints convergence information is True.
 
         Returns:
             A `pygeoinf.LinearOperator` that maps from the Lebesgue load
@@ -1075,7 +1114,9 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
                 gravity_potential_change,
                 angular_velocity_change,
             ) = self(
-                direct_load=u, rotational_feedbacks=rotational_feedbacks, rtol=rtol
+                direct_load=u,
+                rotational_feedbacks=rotational_feedbacks,
+                rtol=rtol,
             )
 
             if rotational_feedbacks:
@@ -1086,6 +1127,9 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
                 )
             else:
                 gravitational_potential_change = gravity_potential_change
+
+            if verbose:
+                print(f"Number of sea level solves = {self.solver_counter}")
 
             return [
                 sea_level_change,
@@ -1117,6 +1161,10 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
                 rotational_feedbacks=rotational_feedbacks,
                 rtol=rtol,
             )
+
+            if verbose:
+                print(f"Number of sea level solves = {self.solver_counter}")
+
             return adjoint_sea_level
 
         return LinearOperator(
@@ -1131,6 +1179,7 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         *,
         rotational_feedbacks: bool = True,
         rtol: float = 1e-6,
+        verbose: bool = False,
     ) -> LinearOperator:
         """
         Constructs the sea-level model as a LinearOperator between Sobolev spaces.
@@ -1154,6 +1203,7 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
                 that defines the spatial scale at which the smoothness is enforced.
             rotational_feedbacks: If True, include polar wander effects. Defaults to True.
             rtol: Relative tolerance for the underlying iterative solver. Defaults to 1e-6.
+            verbose: Prints convergence information is True.
 
             Returns:
                 A `pygeoinf.LinearOperator` that maps from the Sobolev load
@@ -1164,7 +1214,70 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         codomain = self.sobolev_response_space(order, scale)
 
         lebesgue_operator = self.as_lebesgue_linear_operator(
-            rotational_feedbacks=rotational_feedbacks, rtol=rtol
+            rotational_feedbacks=rotational_feedbacks, rtol=rtol, verbose=verbose
         )
 
         return LinearOperator.from_formal_adjoint(domain, codomain, lebesgue_operator)
+
+    def ocean_altimetry_points(
+        self,
+        /,
+        *,
+        spacing_degrees: float = 2.0,
+        latitude_min: float = -66.0,
+        latitude_max: float = 66.0,
+    ) -> List[Tuple[float, float]]:
+        """
+        Generates a regular grid of points independent of the computational grid,
+        returning only those that lie in the oceans within the latitude limits.
+
+        Args:
+            spacing_degrees: The spatial resolution of the generated points.
+            latitude_min: The southern latitude limit.
+            latitude_max: The northern latitude limit.
+        """
+        # 1. Generate an independent, regular lat/lon mesh
+        lats = np.arange(latitude_min, latitude_max + 1e-9, spacing_degrees)
+        lons = np.arange(0.0, 360.0, spacing_degrees)
+        lat_mesh, lon_mesh = np.meshgrid(lats, lons, indexing="ij")
+
+        # Stack into an (N, 2) array of [lat, lon]
+        candidate_points = np.column_stack((lat_mesh.ravel(), lon_mesh.ravel()))
+
+        # 2. Get the physical ocean mask and filter the points
+        mask = self.altimetry_projection(
+            latitude_min=latitude_min, latitude_max=latitude_max, value=0
+        )
+        return self._filter_independent_points(candidate_points, mask)
+
+    def ice_altimetry_points(
+        self,
+        /,
+        *,
+        spacing_degrees: float = 2.0,
+        exclude_ice_shelves: bool = False,
+        exclude_glaciers: bool = True,
+    ) -> List[Tuple[float, float]]:
+        """
+        Generates a regular grid of points independent of the computational grid,
+        returning only those that lie over ice sheets.
+
+        Args:
+            spacing_degrees: The spatial resolution of the generated points.
+            exclude_ice_shelves: If True, excludes floating ice shelves.
+            exclude_glaciers: If True, excludes smaller glaciers.
+        """
+        # 1. Generate an independent, regular global lat/lon mesh
+        lats = np.arange(-90.0, 90.0 + 1e-9, spacing_degrees)
+        lons = np.arange(0.0, 360.0, spacing_degrees)
+        lat_mesh, lon_mesh = np.meshgrid(lats, lons, indexing="ij")
+
+        candidate_points = np.column_stack((lat_mesh.ravel(), lon_mesh.ravel()))
+
+        # 2. Get the physical ice mask and filter the points
+        mask = self.ice_projection(
+            value=0,
+            exclude_ice_shelves=exclude_ice_shelves,
+            exclude_glaciers=exclude_glaciers,
+        )
+        return self._filter_independent_points(candidate_points, mask)

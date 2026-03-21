@@ -2,98 +2,11 @@
 Module collecting some small helper functions or classes.
 """
 
-import numpy as np
-from typing import Optional, Tuple, List
+from collections import defaultdict
+from typing import Tuple, List
+
 
 from . import DATADIR
-
-
-class SHVectorConverter:
-    """
-    Handles conversion between pyshtools 3D coefficient arrays and 1D vectors.
-
-    This class provides a bridge between the pyshtools data structure for
-    spherical harmonic coefficients, a 3D array of shape (2, lmax+1, lmax+1),
-    and the 1D vector format often used in linear algebra and inverse problems.
-
-    The vector is ordered by degree l, and within each degree, by order m,
-    from -l to +l.
-
-    Args:
-        lmax (int): The maximum spherical harmonic degree to include.
-        lmin (int): The minimum spherical harmonic degree to include. Defaults to 2.
-    """
-
-    def __init__(self, lmax: int, lmin: int = 2):
-        if not isinstance(lmax, int) or not isinstance(lmin, int):
-            raise TypeError("lmax and lmin must be integers.")
-        if lmin > lmax:
-            raise ValueError("lmin cannot be greater than lmax.")
-
-        self.lmax = lmax
-        self.lmin = lmin
-        self.vector_size = (self.lmax + 1) ** 2 - self.lmin**2
-
-    def to_vector(self, coeffs: np.ndarray) -> np.ndarray:
-        """Converts a pyshtools 3D coefficient array to a 1D vector.
-
-        If the input coefficients have a smaller lmax than the converter,
-        the missing high-degree coefficients in the output vector will be zero.
-
-        Args:
-            coeffs (np.ndarray): A pyshtools-compatible coefficient array
-                of shape (2, l_in+1, l_in+1).
-
-        Returns:
-            np.ndarray: A 1D vector of the coefficients from lmin to lmax.
-        """
-        lmax_in = coeffs.shape[1] - 1
-        vec = np.zeros(self.vector_size)
-        loop_lmax = min(self.lmax, lmax_in)
-
-        for l in range(self.lmin, loop_lmax + 1):
-            start_idx = l**2 - self.lmin**2
-            sin_part = coeffs[1, l, 1 : l + 1][::-1]
-            cos_part = coeffs[0, l, 0 : l + 1]
-            vec[start_idx : start_idx + l] = sin_part
-            vec[start_idx + l : start_idx + 2 * l + 1] = cos_part
-
-        return vec
-
-    def from_vector(
-        self, vec: np.ndarray, output_lmax: Optional[int] = None
-    ) -> np.ndarray:
-        """Converts a 1D vector back to a pyshtools 3D coefficient array.
-
-        This method can create an array that is larger (zero-padding) or
-        smaller (truncating) than the lmax of the converter.
-
-        Args:
-            vec (np.ndarray): A 1D vector of coefficients.
-            output_lmax (Optional[int]): The desired lmax for the output array.
-                If None, defaults to the converter's lmax.
-
-        Returns:
-            np.ndarray: A pyshtools-compatible coefficient array.
-        """
-        if vec.size != self.vector_size:
-            raise ValueError("Input vector has incorrect size.")
-
-        # If output_lmax is not specified, default to the converter's lmax
-        lmax_out = output_lmax if output_lmax is not None else self.lmax
-
-        # Create the output array of the desired size, initialized to zeros
-        coeffs = np.zeros((2, lmax_out + 1, lmax_out + 1))
-
-        # Determine the loop range: iterate up to the minimum of the two lmax values
-        loop_lmax = min(self.lmax, lmax_out)
-
-        for l in range(self.lmin, loop_lmax + 1):
-            start_idx = l**2 - self.lmin**2
-            coeffs[1, l, 1 : l + 1] = vec[start_idx : start_idx + l][::-1]
-            coeffs[0, l, 0 : l + 1] = vec[start_idx + l : start_idx + 2 * l + 1]
-
-        return coeffs
 
 
 def read_gloss_tide_gauge_data() -> Tuple[List[str], List[float], List[float]]:
@@ -125,3 +38,52 @@ def read_gloss_tide_gauge_data() -> Tuple[List[str], List[float], List[float]]:
 
     # return names, lats, lons
     return lats, lons
+
+
+def partition_points_by_grid(
+    points: List[Tuple[float, float]], grid_size: float
+) -> List[List[int]]:
+    """
+    Partitions a list of (latitude, longitude) points into geographic bins.
+
+    This is highly efficient for grouping dense observations (like satellite
+    altimetry tracks) into localized blocks. The resulting blocks can be
+    passed to the diagonal_normal_preconditioner in pygeoinf to drastically
+    reduce the number of forward model evaluations.
+
+    Args:
+        points: A list of (latitude, longitude) tuples in degrees.
+        grid_size: The size of the grid cells in degrees.
+
+    Returns:
+        A list of lists, where each sub-list contains the original indices
+        of the points that fall into the same grid cell.
+    """
+    bins = defaultdict(list)
+
+    for i, (lat, lon) in enumerate(points):
+        # Normalize longitude to [0, 360) to avoid boundary wrapping issues
+        lon_norm = lon % 360.0
+
+        # Determine discrete grid cell index using floor division
+        lat_idx = int(lat // grid_size)
+        lon_idx = int(lon_norm // grid_size)
+
+        bins[(lat_idx, lon_idx)].append(i)
+
+    return list(bins.values())
+
+
+def get_spherical_harmonic_degree_blocks(
+    lmax_obs: int, min_degree: int = 0
+) -> list[list[int]]:
+    """
+    Generates index blocks grouping spherical harmonic coefficients by degree l.
+    Assumes standard ordering where degree l coefficients start at index l^2.
+    """
+    blocks = []
+    for l in range(min_degree, lmax_obs + 1):
+        start_idx = l**2 - min_degree**2
+        end_idx = (l + 1) ** 2 - min_degree**2
+        blocks.append(list(range(start_idx, end_idx)))
+    return blocks

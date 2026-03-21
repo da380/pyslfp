@@ -3,7 +3,7 @@ Module for defining some operators related to the sea level problem.
 """
 
 from __future__ import annotations
-from typing import Optional, List, Union
+from typing import Optional, List, Union, Tuple
 
 
 import numpy as np
@@ -18,9 +18,14 @@ from pygeoinf import (
     HilbertSpaceDirectSum,
     RowLinearOperator,
     MassWeightedHilbertSpace,
+    DiagonalSparseMatrixLinearOperator,
+    GaussianMeasure,
 )
 
-from pygeoinf.symmetric_space.symmetric_space import InvariantLinearAutomorphism
+from pygeoinf.symmetric_space.symmetric_space import (
+    InvariantLinearAutomorphism,
+    InvariantGaussianMeasure,
+)
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
 
@@ -103,7 +108,7 @@ def check_response_space(
 
 
 def tide_gauge_operator(
-    response_space: HilbertSpaceDirectSum, points
+    response_space: HilbertSpaceDirectSum, points: List[Tuple[float, float]]
 ) -> LinearOperator:
     """
     Maps the response fields to a vector of sea level change values at
@@ -257,6 +262,44 @@ def sea_surface_height_operator(
     )
 
     return LinearOperator.from_formal_adjoint(domain, codomain, l2_operator)
+
+
+def ocean_altimetry_operator(
+    finger_print: FingerPrint,
+    response_space: HilbertSpaceDirectSum,
+    points: List[Tuple[float, float]],
+    /,
+    *,
+    remove_rotational_contribution: bool = True,
+):
+    """
+    Returns as a LinearOperator the mapping from the response space for the fingerprint operator
+    to the sea surface height at a given set of points.
+
+    Args:
+        finger_print: The FingerPrint object.
+        response_space: The response space, for the fingerprint operator, this being
+            a HilbertSpaceDirectSum whose elements take the form [SL, u, phi, omega]
+        points: A list of (lat,lon) points at which the SHH is observed.
+        remove_rotational_contribution: If True, rotational contribution
+                is removed from the sea surface height. Default is True
+
+    Returns:
+        A LinearOperator object.
+
+    Note:
+        This operator returns only the sea surface height change associated with the
+        gravitationally induced sea level change resulting from a given direct load.
+        When that direct load has a component linked to ocean dynamic topography,
+        the dynamic topography must added to obtain the full sea surface height change.
+    """
+    response_to_ssh = sea_surface_height_operator(
+        finger_print,
+        response_space,
+        remove_rotational_contribution=remove_rotational_contribution,
+    )
+    ssh_to_points = response_to_ssh.codomain.point_evaluation_operator(points)
+    return ssh_to_points @ response_to_ssh
 
 
 def averaging_operator(
@@ -440,7 +483,7 @@ def ice_thickness_change_to_load_operator(
     return LinearOperator.from_formally_self_adjoint(load_space, l2_operator)
 
 
-def sea_level_change_to_load_operator(
+def ocean_thickness_change_to_load_operator(
     finger_print: FingerPrint,
     load_space: Union[Lebesgue, Sobolev],
 ):
@@ -531,15 +574,18 @@ class WMBMethod(EarthModelParameters, LoveNumbers):
         observation_degree: int,
         /,
         *,
+        minimum_degree: int = 2,
         earth_model_parameters: Optional[EarthModelParameters] = None,
         love_number_file: str = DATADIR + "/love_numbers/PREM_4096.dat",
     ):
         """
         Args:
             observation_degree: The maximum degree of the SH coefficient observations.
+            minimum_degree: Minimum observed degree. Default is 2.
             earth_model_parameters: Parameters for the Earth model. If None,
                 default parameters are used.
             love_number_file: Path to the file containing the Love numbers.
+
         """
 
         if earth_model_parameters is None:
@@ -554,6 +600,8 @@ class WMBMethod(EarthModelParameters, LoveNumbers):
 
         self._observation_degree = observation_degree
 
+        self._minimum_degree = minimum_degree
+
         LoveNumbers.__init__(
             self,
             self._observation_degree,
@@ -562,13 +610,20 @@ class WMBMethod(EarthModelParameters, LoveNumbers):
         )
 
     @staticmethod
-    def from_finger_print(observation_degree: int, finger_print: FingerPrint):
+    def from_finger_print(
+        finger_print: FingerPrint,
+        observation_degree: int,
+        /,
+        *,
+        minimum_degree: int = 2,
+    ):
         """
         Creates a WahrMolenaarByranMethod object from a FingerPrint object.
 
         Args:
-            observation_degree: The maximum degree of the SH coefficient observations.
             finger_print: The FingerPrint object.
+            observation_degree: The maximum degree of the SH coefficient observations.
+            minimum_degree: Minimum observed degree. Default is 2.
 
         Returns:
             A WahrMolenaarByranMethod object.
@@ -577,12 +632,137 @@ class WMBMethod(EarthModelParameters, LoveNumbers):
             observation_degree,
             earth_model_parameters=finger_print,
             love_number_file=finger_print.love_number_file,
+            minimum_degree=minimum_degree,
         )
 
     @property
     def observation_degree(self) -> int:
-        """The maximum degree of the SH coefficient observations."""
+        """
+        The maximum degree of the SH coefficient observations.
+        """
         return self._observation_degree
+
+    @property
+    def minimum_degree(self) -> int:
+        """
+        The minimum degree of the SH coefficient observations.
+        """
+        return self._minimum_degree
+
+    @property
+    def observation_dim(self) -> int:
+        """
+        The dimension of the observation vectors.
+        """
+        return (self.observation_degree + 1) ** 2 - self.minimum_degree**2
+
+    def load_coefficient_to_potential_coefficient_operator(
+        self, lmax: int
+    ) -> LinearOperator:
+        """
+        Returns a LinearOperator that maps a set of load coefficients
+        to the resulting gravitational coefficients using the simple
+        Love number theory that neglects induced water loads.
+
+        Args:
+            lmax: The maximum degree for the load coefficients.
+        """
+
+        domain = EuclideanSpace((lmax + 1) ** 2)
+        codomain = EuclideanSpace(self.observation_dim)
+
+        max_mapped_degree = min(lmax, self.observation_degree)
+
+        def mapping(load_coeffs: np.ndarray) -> np.ndarray:
+            potential_coeffs = np.zeros(self.observation_dim)
+
+            for l in range(self.minimum_degree, max_mapped_degree + 1):
+                in_start = l**2
+                in_end = (l + 1) ** 2
+
+                out_start = l**2 - self.minimum_degree**2
+                out_end = (l + 1) ** 2 - self.minimum_degree**2
+
+                potential_coeffs[out_start:out_end] = (
+                    load_coeffs[in_start:in_end] * self.k[l]
+                )
+
+            return potential_coeffs
+
+        def adjoint_mapping(potential_coeffs: np.ndarray) -> np.ndarray:
+            load_coeffs = np.zeros((lmax + 1) ** 2)
+
+            for l in range(self.minimum_degree, max_mapped_degree + 1):
+                in_start = l**2
+                in_end = (l + 1) ** 2
+
+                out_start = l**2 - self.minimum_degree**2
+                out_end = (l + 1) ** 2 - self.minimum_degree**2
+
+                load_coeffs[in_start:in_end] = (
+                    potential_coeffs[out_start:out_end] * self.k[l]
+                )
+
+            return load_coeffs
+
+        return LinearOperator(
+            domain, codomain, mapping, adjoint_mapping=adjoint_mapping
+        )
+
+    def potential_coefficient_to_load_coefficient_operator(
+        self, lmax: int
+    ) -> LinearOperator:
+        """
+        Returns a LinearOperator that maps a set of gravitational potential
+        coefficients to the resulting load coefficients, explicitly handling
+        zero-valued Love numbers at low degrees to avoid division by zero.
+
+        Args:
+            lmax: The maximum degree for the output load coefficients.
+        """
+        domain = EuclideanSpace(self.observation_dim)
+        codomain = EuclideanSpace((lmax + 1) ** 2)
+
+        max_mapped_degree = min(lmax, self.observation_degree)
+
+        def mapping(potential_coeffs: np.ndarray) -> np.ndarray:
+            load_coeffs = np.zeros((lmax + 1) ** 2)
+
+            for l in range(self.minimum_degree, max_mapped_degree + 1):
+                # Safely avoid division by zero for l <= 1 or missing Love numbers
+                if l > 1 and self.k[l] != 0.0:
+                    in_start = l**2 - self.minimum_degree**2
+                    in_end = (l + 1) ** 2 - self.minimum_degree**2
+
+                    out_start = l**2
+                    out_end = (l + 1) ** 2
+
+                    load_coeffs[out_start:out_end] = (
+                        potential_coeffs[in_start:in_end] / self.k[l]
+                    )
+
+            return load_coeffs
+
+        def adjoint_mapping(load_coeffs: np.ndarray) -> np.ndarray:
+            potential_coeffs = np.zeros(self.observation_dim)
+
+            for l in range(self.minimum_degree, max_mapped_degree + 1):
+                if l > 1 and self.k[l] != 0.0:
+                    in_start = l**2
+                    in_end = (l + 1) ** 2
+
+                    out_start = l**2 - self.minimum_degree**2
+                    out_end = (l + 1) ** 2 - self.minimum_degree**2
+
+                    potential_coeffs[out_start:out_end] = (
+                        load_coeffs[in_start:in_end] / self.k[l]
+                    )
+
+            return potential_coeffs
+
+        return LinearOperator(
+            domain, codomain, mapping, adjoint_mapping=adjoint_mapping
+        )
 
     def direct_load_to_load_operator(self, load_space: Union[Lebesgue, Sobolev]):
         """
@@ -623,7 +803,7 @@ class WMBMethod(EarthModelParameters, LoveNumbers):
         load_space: Union[Lebesgue, Sobolev],
     ):
         """
-        Returns as a LinearOperator that maps a gravitational potential field to an
+        Returns a LinearOperator that maps a gravitational potential field to an
         approximation of the causative surface load.
 
         Args:
@@ -745,6 +925,89 @@ class WMBMethod(EarthModelParameters, LoveNumbers):
         )
 
         return load_to_load_averages_operator @ coefficient_to_load_opeator
+
+    def bayesian_normal_operator_preconditioner(
+        self,
+        prior_measure: "InvariantGaussianMeasure",
+        data_error_measure: "GaussianMeasure",
+    ) -> "DiagonalSparseMatrixLinearOperator":
+        """
+        Constructs a diagonal preconditioner for the Bayesian normal operator
+        (A Q A* + R) by approximating the forward operator (A) with the simple
+        WMB spectral scaling.
+
+        Args:
+            prior_measure: An InvariantGaussianMeasure representing the prior
+                uncertainty of the surface load.
+            data_error_measure: A GaussianMeasure representing the data errors.
+                Its covariance operator must allow for efficient extraction
+                of its main diagonal.
+
+        Returns:
+            A DiagonalSparseMatrixLinearOperator representing the inverse of
+            the approximated normal operator.
+        """
+
+        mapped_prior = self.load_measure_to_observation_measure(prior_measure)
+
+        aqa_diag = mapped_prior.covariance.extract_diagonal(galerkin=True)
+
+        r_diag = data_error_measure.covariance.extract_diagonal(galerkin=True)
+
+        normal_diag = aqa_diag + r_diag
+
+        codomain = data_error_measure.domain
+        approx_normal_op = DiagonalSparseMatrixLinearOperator.from_diagonal_values(
+            codomain, codomain, normal_diag, galerkin=True
+        )
+
+        return approx_normal_op.inverse
+
+    def load_measure_to_observation_measure(
+        self, load_measure: InvariantGaussianMeasure
+    ) -> GaussianMeasure:
+        """
+        Maps an invariant Gaussian measure representing a surface load to a
+        Gaussian measure for the observed gravitational potential coefficients.
+
+        This assumes the potential coefficients are related to the load by the
+        simple Love number scaling k_l. The expectation of the input measure
+        is ignored, and the resulting measure has a zero expectation.
+
+        Args:
+            load_measure: An InvariantGaussianMeasure representing the prior
+                uncertainty of the surface load.
+
+        Returns:
+            A GaussianMeasure representing the distribution of the observed
+            potential coefficients, with a diagonal covariance operator.
+        """
+
+        if not isinstance(load_measure, InvariantGaussianMeasure):
+            raise TypeError("load_measure must be an InvariantGaussianMeasure.")
+
+        prior_variances = load_measure.spectral_variances
+
+        prior_lmax = int(np.sqrt(load_measure.domain.dim)) - 1
+        max_mapped_degree = min(prior_lmax, self.observation_degree)
+
+        observed_stds = np.zeros(self.observation_dim)
+
+        for l in range(self.minimum_degree, max_mapped_degree + 1):
+            in_start = l**2
+            in_end = (l + 1) ** 2
+
+            out_start = l**2 - self.minimum_degree**2
+            out_end = (l + 1) ** 2 - self.minimum_degree**2
+
+            prior_stds = np.sqrt(prior_variances[in_start:in_end])
+            observed_stds[out_start:out_end] = prior_stds * abs(self.k[l])
+
+        observation_space = EuclideanSpace(self.observation_dim)
+
+        return GaussianMeasure.from_standard_deviations(
+            observation_space, observed_stds
+        )
 
 
 def remove_degrees_from_pyshtools_coeffs(coeffs, degrees_to_remove: list[int]):

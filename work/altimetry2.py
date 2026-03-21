@@ -2,7 +2,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pygeoinf as inf
 import cartopy.crs as ccrs
-from pygeoinf import plot_1d_distributions, plot_corner_distributions
 
 import pyslfp as sl
 

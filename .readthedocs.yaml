@@ -1,24 +1,19 @@
-# .readthedocs.yaml
-# Read the Docs configuration file
-# See https://docs.readthedocs.io/en/stable/config-file/v2.html for details
-
-# Required
 version: 2
 
-# Set the OS and Python version for the build environment
 build:
   os: ubuntu-22.04
   tools:
-    python: "3.11"
+    python: "3.12"  
+  apt_packages:
+    - libgeos-dev
+    - libproj-dev
+  jobs:
+    post_create_environment:
+      - pip install poetry
+    post_install:
+      - VIRTUAL_ENV=$READTHEDOCS_VIRTUALENV_PATH poetry install --with dev
+      - sphinx-apidoc -f -o docs/source/ pyslfp/
 
-# Specify the path to your Sphinx configuration file
 sphinx:
   configuration: docs/source/conf.py
 
-# Instruct Read the Docs to install your project and its doc dependencies
-# from the generated requirements.txt file.
-python:
-  install:
-    - requirements: docs/requirements.txt
-    - method: pip
-      path: .

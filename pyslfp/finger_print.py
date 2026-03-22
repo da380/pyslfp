@@ -448,22 +448,38 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         """
         Solves the generalized sea level equation for a given load.
 
+        This method employs an iterative solver to determine the self-consistent
+        redistribution of ocean water following changes in surface mass (e.g., ice melt).
+        It accounts for the solid Earth's elastic deformation, gravitational perturbations,
+        and (optionally) rotational feedbacks.
+
         Args:
-            direct_load: The direct surface mass load (e.g., from ice melt).
-            displacement_load: An externally imposed displacement load.
+            direct_load: The direct surface mass load (e.g., from ice melt) represented as an SHGrid.
+            displacement_load: An externally imposed vertical surface displacement load.
             gravitational_potential_load: An externally imposed gravitational potential load.
             angular_momentum_change: An externally imposed change in angular momentum.
-            rotational_feedbacks: If True, include the effects of polar wander.
+            rotational_feedbacks: If True, includes the effects of polar wander (rotational
+                feedbacks) on the sea level solution. Defaults to True.
             rtol: The relative tolerance for the iterative solver to determine convergence.
-            verbose: If True, print the relative error at each iteration.
+                Defaults to 1.0e-6.
+            verbose: If True, prints the relative error at each solver iteration. Defaults to False.
 
         Returns:
-            A tuple containing:
-                - `sea_level_change` (SHGrid): The self-consistent sea level change.
-                - `displacement` (SHGrid): The vertical surface displacement.
-                - `gravity_potential_change` (SHGrid): Change in gravity potential.
-                - `angular_velocity_change` (np.ndarray): Change in angular velocity `[ω_x, ω_y]`.
+            A tuple containing four elements:
+                - `sea_level_change` (SHGrid): The spatially variable, self-consistent sea level change.
+                - `displacement` (SHGrid): The vertical surface displacement of the solid Earth.
+                - `gravity_potential_change` (SHGrid): The total change in the gravity potential.
+                - `angular_velocity_change` (np.ndarray): The change in angular velocity `[ω_x, ω_y]`.
         """
+
+        # --- PRE-COMPUTE BROADCASTING ARRAYS ---
+        # Reshape 1D Love number arrays to (1, lmax+1, 1) for vectorized spectral math
+        h_b = self._h[None, :, None]
+        k_b = self._k[None, :, None]
+        h_u_b = self._h_u[None, :, None]
+        k_u_b = self._k_u[None, :, None]
+        h_phi_b = self._h_phi[None, :, None]
+        k_phi_b = self._k_phi[None, :, None]
 
         loads_present = False
         non_zero_rhs = False
@@ -475,16 +491,24 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
                 self.water_density * self.ocean_area
             )
             non_zero_rhs = non_zero_rhs or np.max(np.abs(direct_load.data)) > 0
-
         else:
             direct_load = self.zero_grid()
             mean_sea_level_change = 0
+
+        # --- PRE-COMPUTE STATIC EXTERNAL LOADS ---
+        static_disp_coeffs = 0.0
+        static_grav_coeffs = 0.0
+        has_static_loads = False
 
         if displacement_load is not None:
             loads_present = True
             assert self.check_field(displacement_load)
             displacement_load_lm = self.expand_field(displacement_load)
             non_zero_rhs = non_zero_rhs or np.max(np.abs(displacement_load.data)) > 0
+
+            static_disp_coeffs += h_u_b * displacement_load_lm.coeffs
+            static_grav_coeffs += k_u_b * displacement_load_lm.coeffs
+            has_static_loads = True
 
         if gravitational_potential_load is not None:
             loads_present = True
@@ -495,6 +519,10 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
             non_zero_rhs = (
                 non_zero_rhs or np.max(np.abs(gravitational_potential_load.data)) > 0
             )
+
+            static_disp_coeffs += h_phi_b * gravitational_potential_load_lm.coeffs
+            static_grav_coeffs += k_phi_b * gravitational_potential_load_lm.coeffs
+            has_static_loads = True
 
         if angular_momentum_change is not None:
             loads_present = True
@@ -519,41 +547,33 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         ht = self._ht[2]
         kt = self._kt[2]
 
-        err = 1
+        # --- PRE-ALLOCATE ARRAYS FOR IN-PLACE MATH ---
+        sea_level_change = self.zero_grid()
+        slc_data = sea_level_change.data
+        load_data = load.data.copy()
+        direct_load_data = direct_load.data
+        ocean_func_data = self.ocean_function.data
+        water_density = self.water_density
+
+        err = 1.0
         count = 0
         count_print = 0
+
         while err > rtol:
 
             displacement_lm = self.expand_field(load)
             gravity_potential_change_lm = displacement_lm.copy()
 
-            for l in range(self.lmax + 1):
+            # 1. Vectorized application of main Love numbers
+            displacement_lm.coeffs *= h_b
+            gravity_potential_change_lm.coeffs *= k_b
 
-                displacement_lm.coeffs[:, l, :] *= self._h[l]
-                gravity_potential_change_lm.coeffs[:, l, :] *= self._k[l]
-
-                if displacement_load is not None:
-
-                    displacement_lm.coeffs[:, l, :] += (
-                        self._h_u[l] * displacement_load_lm.coeffs[:, l, :]
-                    )
-
-                    gravity_potential_change_lm.coeffs[:, l, :] += (
-                        self._k_u[l] * displacement_load_lm.coeffs[:, l, :]
-                    )
-
-                if gravitational_potential_load is not None:
-
-                    displacement_lm.coeffs[:, l, :] += (
-                        self._h_phi[l] * gravitational_potential_load_lm.coeffs[:, l, :]
-                    )
-
-                    gravity_potential_change_lm.coeffs[:, l, :] += (
-                        self._k_phi[l] * gravitational_potential_load_lm.coeffs[:, l, :]
-                    )
+            # 2. Add static external loads (if any) once per iteration
+            if has_static_loads:
+                displacement_lm.coeffs += static_disp_coeffs
+                gravity_potential_change_lm.coeffs += static_grav_coeffs
 
             if rotational_feedbacks:
-
                 centrifugal_coeffs = r * angular_velocity_change
 
                 displacement_lm.coeffs[:, 2, 1] += ht * centrifugal_coeffs
@@ -575,22 +595,31 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
                 gravity_potential_change_lm
             )
 
-            sea_level_change = (-1 / g) * (g * displacement + gravity_potential_change)
-            sea_level_change.data += mean_sea_level_change - self.ocean_average(
-                sea_level_change
+            # 3. Fast, in-place spatial domain calculations
+            slc_data[:] = (-1.0 / g) * (
+                g * displacement.data + gravity_potential_change.data
             )
 
-            load_new = (
-                direct_load
-                + self.water_density * self.ocean_function * sea_level_change
+            # Since slc_data modifies sea_level_change.data directly,
+            # self.ocean_average works correctly on the updated object.
+            slc_data += mean_sea_level_change - self.ocean_average(sea_level_change)
+
+            # Calculate new load directly in NumPy
+            load_new_data = direct_load_data + (
+                water_density * ocean_func_data * slc_data
             )
+
             if count > 1 or mean_sea_level_change != 0:
-                err = np.max(np.abs((load_new - load).data)) / np.max(np.abs(load.data))
+                err = np.max(np.abs(load_new_data - load_data)) / np.max(
+                    np.abs(load_data)
+                )
                 if verbose:
                     count_print += 1
                     print(f"Iteration = {count_print}, relative error = {err:6.4e}")
 
-            load = load_new
+            # Update the underlying data arrays for the next iteration
+            load_data[:] = load_new_data
+            load.data[:] = load_new_data
             count += 1
 
         return (

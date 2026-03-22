@@ -54,23 +54,28 @@ forward_problem = inf.LinearForwardProblem(
 load, data = forward_problem.synthetic_model_and_data(load_prior)
 
 
-# Build the preconditioner.
-normal_preconditioner = wmb.bayesian_normal_operator_preconditioner(
-    load_prior, data_error_measure
-)
+# Set up the prior for the load
+load_prior = load_space.point_value_scaled_heat_kernel_gaussian_measure(load_scale)
+
 
 # Set up and solve the inverse problem.
 inverse_problem = inf.LinearBayesianInversion(forward_problem, load_prior)
 
-count1 = fp.solver_counter
+# Build the preconditioner
+print("Building preconditioner")
 
-load_posterior = inverse_problem.model_posterior_measure(
-    data, inf.CGMatrixSolver(), preconditioner=normal_preconditioner
+preconditioner = wmb.bayesian_normal_operator_preconditioner(
+    load_prior, data_error_measure
 )
 
-count2 = fp.solver_counter
+print("Solving linear system")
+solver = inf.CGMatrixSolver()
+load_posterior = inverse_problem.model_posterior_measure(
+    data, solver, preconditioner=preconditioner
+)
 
-print(f"number of sea level solutions = {count2-count1}")
+print(f"Number of iterations = {solver.iterations}")
+
 
 # Compare the true load and the posterior expectation.
 load_max = np.max(np.abs(load.data))
@@ -79,4 +84,4 @@ fig2, ax2, im2 = sl.plot(load_posterior.expectation, vmin=-load_max, vmax=load_m
 fig3, ax3, im3 = sl.plot(
     100 * (load_posterior.expectation - load) / load_max, symmetric=True
 )
-plt.show()
+# plt.show()

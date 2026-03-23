@@ -1,3 +1,45 @@
+"""
+WMB Method Bias Evaluation
+==========================
+
+This script quantifies the systematic bias introduced by the Wahr, Molenaar, & Bryan (1998)
+(WMB) method when estimating regional surface mass changes from satellite gravimetry
+(e.g., GRACE / GRACE-FO).
+
+The WMB method isolates surface mass anomalies by applying a purely spectral scaling
+(via load Love numbers) to observed gravitational potential coefficients. However, this
+approach inherently neglects gravitational self-attraction and loading (SAL) effects—most
+notably the induced redistribution of water mass across the global ocean (governed by the
+sea-level equation).
+
+Methodology:
+------------
+This script evaluates the resulting estimation bias within a rigorous Bayesian statistical
+framework using infinite-dimensional Gaussian measures:
+    1. Defines a spatial prior for the "true" direct surface mass load and a colored
+       observational noise model.
+    2. Constructs a forward physical block-operator that computes the true total load
+       (direct load + induced ocean response) and the resulting truncated satellite observations.
+    3. Applies the WMB estimation operator to the simulated observations.
+    4. Derives the exact analytical probability density functions (PDFs) of the estimation
+       error (True Regional Average - WMB Estimated Average) for predefined IPCC AR6 regions.
+
+Outputs:
+--------
+- Computes the exact analytical covariances and means of the WMB estimation errors.
+- Generates visualizations overlaying the theoretical error PDFs onto Monte Carlo sample
+  histograms.
+- Evaluates the magnitude of the estimation error relative to the natural standard deviation
+  of the region's true mass signal.
+- Optionally plots spatial maps demonstrating the physical reality of the induced ocean load.
+
+Usage:
+------
+Run `python WMB_bias.py --help` to see all available command-line configuration options,
+including spherical harmonic resolution limits, noise scaling factors, and Monte Carlo
+sampling flags.
+"""
+
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
@@ -30,12 +72,17 @@ def parse_arguments():
         action="store_true",
         help="Plot a map showing a spatial sample of the direct load and the induced difference.",
     )
+    parser.add_argument(
+        "--sample-expectation",
+        action="store_true",
+        help="Sample a non-zero expectation (mean) for the direct load measure from its own prior.",
+    )
 
     # --- Resolution Parameters ---
     parser.add_argument(
         "--lmax",
         type=int,
-        default=256,
+        default=128,
         help="Maximum spherical harmonic degree for the Earth model.",
     )
     parser.add_argument(
@@ -136,6 +183,14 @@ def main():
         direct_load_measure
     )
 
+    if args.sample_expectation:
+        print("Sampling a non-zero expectation for the direct load...")
+        sampled_mean = direct_load_measure.sample()
+        # Translate the measure to center it on the sampled expectation
+        direct_load_measure = direct_load_measure.affine_mapping(
+            translation=sampled_mean
+        )
+
     noise_load_measure_scale = args.noise_scale_factor * direct_load_measure_scale
     noise_load_measure_std = args.noise_std_factor * direct_load_measure_std
 
@@ -183,7 +238,6 @@ def main():
         sea_level_to_load @ sea_level_projection @ finger_print_operator
     )
 
-    # Maps [Direct Load, Noise] -> [Total True Load, GRACE Obs]
     op1 = inf.BlockLinearOperator(
         [
             [load_space.identity_operator(), data_space.zero_operator(load_space)],
@@ -277,9 +331,9 @@ def main():
         )
 
     # =========================================================================
-    # 6. Extract Analytical Covariances
+    # 6. Extract Analytical Covariances & Means
     # =========================================================================
-    print("Determining analytical covariances")
+    print("Determining analytical covariances and means...")
 
     true_averages_covariance = true_averages_measure.covariance.matrix(dense=True)
     error_covariance = error_measure.covariance.matrix(dense=True)
@@ -290,6 +344,8 @@ def main():
     error_variances = np.diag(error_covariance)
     error_stds_mm = np.sqrt(error_variances) * fp.length_scale * 1000
 
+    error_means_mm = error_measure.expectation * fp.length_scale * 1000
+
     # =========================================================================
     # 7. Monte Carlo Sampling & Histogram Visualization
     # =========================================================================
@@ -297,16 +353,17 @@ def main():
 
     if args.samples > 0:
         print(f"Drawing {args.samples} Monte Carlo samples...")
-        wmb_errors_samples = np.zeros((args.samples, n_regions))
 
-        for i in range(args.samples):
-            # Sample directly from the final error measure
-            wmb_errors_samples[i, :] = error_measure.sample()
+        raw_samples_list = error_measure.samples(args.samples)
+
+        wmb_errors_samples = np.vstack(raw_samples_list)
 
     print("Generating histogram plots...")
 
-    def gaussian_pdf(x, std):
-        return (1.0 / (std * np.sqrt(2 * np.pi))) * np.exp(-0.5 * (x / std) ** 2)
+    def gaussian_pdf(x, mean, std):
+        return (1.0 / (std * np.sqrt(2 * np.pi))) * np.exp(
+            -0.5 * ((x - mean) / std) ** 2
+        )
 
     def make_forward(std_true):
         return lambda x: (x / std_true) * 100
@@ -314,49 +371,49 @@ def main():
     def make_inverse(std_true):
         return lambda percent: (percent / 100.0) * std_true
 
-    # --- 2x2 Grid Layout ---
-    # Calculates the required number of rows for however many regions are defined
     ncols = 2
     nrows = int(np.ceil(n_regions / ncols))
 
     fig, axes = plt.subplots(
         nrows=nrows, ncols=ncols, figsize=(14, 5 * nrows), layout="constrained"
     )
-
-    # Flatten the 2D axes array so we can iterate through it easily in a 1D loop
     axes_flat = axes.flatten()
 
     for i, region in enumerate(region_names):
         ax_errs = axes_flat[i]
+
+        mean_val = error_means_mm[i]
+        std_val = error_stds_mm[i]
 
         if args.samples > 0:
             err_mm = wmb_errors_samples[:, i] * fp.length_scale * 1000
             ax_errs.hist(
                 err_mm,
                 bins=50,
-                alpha=0.5,
+                alpha=0.3,
                 color="red",
                 density=True,
                 label="MC Samples",
             )
 
-        x_err = np.linspace(-4 * error_stds_mm[i], 4 * error_stds_mm[i], 200)
-        y_err = gaussian_pdf(x_err, error_stds_mm[i])
+        x_err = np.linspace(mean_val - 4 * std_val, mean_val + 4 * std_val, 200)
+        y_err = gaussian_pdf(x_err, mean_val, std_val)
+
         ax_errs.plot(
             x_err,
             y_err,
             "r-",
             linewidth=2,
-            label=rf"Theory ($\sigma$={error_stds_mm[i]:.3f} mm)",
+            label=rf"$\mu$={mean_val:.3f}, $\sigma$={std_val:.3f} mm",
         )
 
         ax_errs.set_title(f"{region}", fontsize=14)
         ax_errs.set_xlabel("Error (mm)", fontsize=12)
         ax_errs.grid(True, linestyle=":", alpha=0.6)
         ax_errs.legend()
+
         ax_errs.axvline(0, color="black", linestyle="--", linewidth=1.5)
 
-        # --- Secondary X-Axis for Relative Error ---
         sec_ax = ax_errs.secondary_xaxis(
             "top",
             functions=(make_forward(true_stds_mm[i]), make_inverse(true_stds_mm[i])),
@@ -366,12 +423,11 @@ def main():
         )
         sec_ax.tick_params(axis="x", colors="darkred")
 
-    # Hide any unused subplots (e.g., if you had 3 or 5 regions)
     for j in range(i + 1, len(axes_flat)):
         axes_flat[j].set_visible(False)
 
     plt.suptitle(
-        "WMB Method: Distribution of Estimation Errors (True - WMB)",
+        "WMB Method: Distribution of Estimation Errors",
         fontsize=18,
         fontweight="bold",
     )

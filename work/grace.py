@@ -81,7 +81,5 @@ print(f"Number of iterations = {solver.iterations}")
 load_max = np.max(np.abs(load.data))
 fig1, ax1, im1 = sl.plot(load, vmin=-load_max, vmax=load_max)
 fig2, ax2, im2 = sl.plot(load_posterior.expectation, vmin=-load_max, vmax=load_max)
-fig3, ax3, im3 = sl.plot(
-    100 * (load_posterior.expectation - load) / load_max, symmetric=True
-)
-# plt.show()
+
+plt.show()

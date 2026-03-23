@@ -473,8 +473,8 @@ def ice_thickness_change_to_load_operator(
         A LinearOperator object.
     """
 
-    def mapping(ice_thicknes_change: SHGrid) -> SHGrid:
-        return finger_print.direct_load_from_ice_thickness_change(ice_thicknes_change)
+    def mapping(ice_thickness_change: SHGrid) -> SHGrid:
+        return finger_print.direct_load_from_ice_thickness_change(ice_thickness_change)
 
     l2_load_space = underlying_space(load_space)
 
@@ -483,8 +483,9 @@ def ice_thickness_change_to_load_operator(
     return LinearOperator.from_formally_self_adjoint(load_space, l2_operator)
 
 
-def ocean_thickness_change_to_load_operator(
+def sea_level_change_to_load_operator(
     finger_print: FingerPrint,
+    sea_level_space: Union[Lebesgue, Sobolev],
     load_space: Union[Lebesgue, Sobolev],
 ):
     """
@@ -492,20 +493,24 @@ def ocean_thickness_change_to_load_operator(
 
     Args:
         finger_print: The FingerPrint object.
+        sea_level_space: The Hilbert space for the sea level.
         load_space: The Hilbert space for the load.
 
     Returns:
         A LinearOperator object.
     """
 
-    def mapping(ice_thicknes_change: SHGrid) -> SHGrid:
-        return finger_print.direct_load_from_sea_level_change(ice_thicknes_change)
+    def mapping(sea_level_change: SHGrid) -> SHGrid:
+        return finger_print.direct_load_from_sea_level_change(sea_level_change)
 
+    l2_sea_level_space = underlying_space(sea_level_space)
     l2_load_space = underlying_space(load_space)
 
-    l2_operator = LinearOperator.self_adjoint(l2_load_space, mapping)
+    l2_operator = LinearOperator(
+        l2_sea_level_space, l2_load_space, mapping, adjoint_mapping=mapping
+    )
 
-    return LinearOperator.from_formally_self_adjoint(load_space, l2_operator)
+    return LinearOperator.from_formal_adjoint(sea_level_space, load_space, l2_operator)
 
 
 def density_change_to_load_operator(
@@ -565,8 +570,14 @@ def remove_ocean_average_operator(
 
 class WMBMethod(EarthModelParameters, LoveNumbers):
     """
-    A class that groups together functions linked to the method of Wahr, Molenaar, & Bryan (1998)
-    for estimating surface loads from GRACE data.
+    A class implementing the method of Wahr, Molenaar, & Bryan (1998)
+    for estimating surface mass loads from satellite gravimetry (e.g., GRACE/FO).
+
+    The WMB method provides a purely spectral approach to isolating surface mass
+    changes by dividing observed gravitational potential coefficients by the
+    load Love numbers ($k_l$). This class provides highly optimized `LinearOperator`
+    mappings between continuous physical spaces (Lebesgue/Sobolev) and the
+    truncated Euclidean spaces of satellite observations.
     """
 
     def __init__(
@@ -579,15 +590,17 @@ class WMBMethod(EarthModelParameters, LoveNumbers):
         love_number_file: str = DATADIR + "/love_numbers/PREM_4096.dat",
     ):
         """
+        Initializes the WMBMethod instance.
+
         Args:
-            observation_degree: The maximum degree of the SH coefficient observations.
-            minimum_degree: Minimum observed degree. Default is 2.
-            earth_model_parameters: Parameters for the Earth model. If None,
-                default parameters are used.
-            love_number_file: Path to the file containing the Love numbers.
-
+            observation_degree: The maximum spherical harmonic degree of the
+                observed potential coefficients (e.g., 60 or 96 for GRACE).
+            minimum_degree: The minimum spherical harmonic degree in the observed
+                data. Defaults to 2 (omitting degrees 0 and 1).
+            earth_model_parameters: Parameters defining the non-dimensionalization
+                and basic Earth structure. Defaults to standard PREM values.
+            love_number_file: Path to the data file containing the elastic Love numbers.
         """
-
         if earth_model_parameters is None:
             super().__init__()
         else:
@@ -597,9 +610,7 @@ class WMBMethod(EarthModelParameters, LoveNumbers):
             super().__init__(**init_kwargs)
 
         self._love_number_file = love_number_file
-
         self._observation_degree = observation_degree
-
         self._minimum_degree = minimum_degree
 
         LoveNumbers.__init__(
@@ -616,17 +627,18 @@ class WMBMethod(EarthModelParameters, LoveNumbers):
         /,
         *,
         minimum_degree: int = 2,
-    ):
+    ) -> "WMBMethod":
         """
-        Creates a WahrMolenaarByranMethod object from a FingerPrint object.
+        Alternative constructor to initialize the WMB method directly from an
+        existing `FingerPrint` instance.
 
         Args:
-            finger_print: The FingerPrint object.
-            observation_degree: The maximum degree of the SH coefficient observations.
-            minimum_degree: Minimum observed degree. Default is 2.
+            finger_print: An initialized `FingerPrint` model.
+            observation_degree: The maximum observed spherical harmonic degree.
+            minimum_degree: The minimum observed spherical harmonic degree. Defaults to 2.
 
         Returns:
-            A WahrMolenaarByranMethod object.
+            A configured `WMBMethod` instance.
         """
         return WMBMethod(
             observation_degree,
@@ -637,151 +649,163 @@ class WMBMethod(EarthModelParameters, LoveNumbers):
 
     @property
     def observation_degree(self) -> int:
-        """
-        The maximum degree of the SH coefficient observations.
-        """
+        """The maximum spherical harmonic degree of the observations."""
         return self._observation_degree
 
     @property
     def minimum_degree(self) -> int:
-        """
-        The minimum degree of the SH coefficient observations.
-        """
+        """The minimum spherical harmonic degree of the observations."""
         return self._minimum_degree
 
     @property
     def observation_dim(self) -> int:
-        """
-        The dimension of the observation vectors.
-        """
+        """The total number of observed spherical harmonic coefficients."""
         return (self.observation_degree + 1) ** 2 - self.minimum_degree**2
 
-    def load_coefficient_to_potential_coefficient_operator(
-        self, lmax: int
-    ) -> LinearOperator:
+    # ---------------------------------------------------------#
+    #             Core Euclidean Coefficient Operators         #
+    # ---------------------------------------------------------#
+
+    def load_coefficient_to_potential_coefficient_operator(self) -> LinearOperator:
         """
-        Returns a LinearOperator that maps a set of load coefficients
-        to the resulting gravitational coefficients using the simple
-        Love number theory that neglects induced water loads.
+        Constructs a diagonal scaling operator in the truncated observation space.
 
-        Args:
-            lmax: The maximum degree for the load coefficients.
-        """
-
-        domain = EuclideanSpace((lmax + 1) ** 2)
-        codomain = EuclideanSpace(self.observation_dim)
-
-        max_mapped_degree = min(lmax, self.observation_degree)
-
-        def mapping(load_coeffs: np.ndarray) -> np.ndarray:
-            potential_coeffs = np.zeros(self.observation_dim)
-
-            for l in range(self.minimum_degree, max_mapped_degree + 1):
-                in_start = l**2
-                in_end = (l + 1) ** 2
-
-                out_start = l**2 - self.minimum_degree**2
-                out_end = (l + 1) ** 2 - self.minimum_degree**2
-
-                potential_coeffs[out_start:out_end] = (
-                    load_coeffs[in_start:in_end] * self.k[l]
-                )
-
-            return potential_coeffs
-
-        def adjoint_mapping(potential_coeffs: np.ndarray) -> np.ndarray:
-            load_coeffs = np.zeros((lmax + 1) ** 2)
-
-            for l in range(self.minimum_degree, max_mapped_degree + 1):
-                in_start = l**2
-                in_end = (l + 1) ** 2
-
-                out_start = l**2 - self.minimum_degree**2
-                out_end = (l + 1) ** 2 - self.minimum_degree**2
-
-                load_coeffs[in_start:in_end] = (
-                    potential_coeffs[out_start:out_end] * self.k[l]
-                )
-
-            return load_coeffs
-
-        return LinearOperator(
-            domain, codomain, mapping, adjoint_mapping=adjoint_mapping
-        )
-
-    def potential_coefficient_to_load_coefficient_operator(
-        self, lmax: int
-    ) -> LinearOperator:
-        """
-        Returns a LinearOperator that maps a set of gravitational potential
-        coefficients to the resulting load coefficients, explicitly handling
-        zero-valued Love numbers at low degrees to avoid division by zero.
-
-        Args:
-            lmax: The maximum degree for the output load coefficients.
-        """
-        domain = EuclideanSpace(self.observation_dim)
-        codomain = EuclideanSpace((lmax + 1) ** 2)
-
-        max_mapped_degree = min(lmax, self.observation_degree)
-
-        def mapping(potential_coeffs: np.ndarray) -> np.ndarray:
-            load_coeffs = np.zeros((lmax + 1) ** 2)
-
-            for l in range(self.minimum_degree, max_mapped_degree + 1):
-                # Safely avoid division by zero for l <= 1 or missing Love numbers
-                if l > 1 and self.k[l] != 0.0:
-                    in_start = l**2 - self.minimum_degree**2
-                    in_end = (l + 1) ** 2 - self.minimum_degree**2
-
-                    out_start = l**2
-                    out_end = (l + 1) ** 2
-
-                    load_coeffs[out_start:out_end] = (
-                        potential_coeffs[in_start:in_end] / self.k[l]
-                    )
-
-            return load_coeffs
-
-        def adjoint_mapping(load_coeffs: np.ndarray) -> np.ndarray:
-            potential_coeffs = np.zeros(self.observation_dim)
-
-            for l in range(self.minimum_degree, max_mapped_degree + 1):
-                if l > 1 and self.k[l] != 0.0:
-                    in_start = l**2
-                    in_end = (l + 1) ** 2
-
-                    out_start = l**2 - self.minimum_degree**2
-                    out_end = (l + 1) ** 2 - self.minimum_degree**2
-
-                    potential_coeffs[out_start:out_end] = (
-                        load_coeffs[in_start:in_end] / self.k[l]
-                    )
-
-            return potential_coeffs
-
-        return LinearOperator(
-            domain, codomain, mapping, adjoint_mapping=adjoint_mapping
-        )
-
-    def direct_load_to_load_operator(self, load_space: Union[Lebesgue, Sobolev]):
-        """
-        Returns a LinearOperator that maps a direct load to an approximation
-        of the total load.
-
-        Args:
-            load_space: The HilbertSpace for the load field.
+        This operator maps spherical harmonic coefficients of a mass load to the
+        corresponding coefficients of the gravitational potential by multiplying
+        each degree $l$ by the elastic Love number $k_l$.
 
         Returns:
-            A LinearOperator object.
+            A `DiagonalSparseMatrixLinearOperator` acting on `EuclideanSpace`.
         """
+        domain = EuclideanSpace(self.observation_dim)
+        scaling_factors = np.zeros(self.observation_dim)
 
+        for l in range(self.minimum_degree, self.observation_degree + 1):
+            idx_start = l**2 - self.minimum_degree**2
+            idx_end = (l + 1) ** 2 - self.minimum_degree**2
+            scaling_factors[idx_start:idx_end] = self.k[l]
+
+        return DiagonalSparseMatrixLinearOperator.from_diagonal_values(
+            domain, domain, scaling_factors
+        )
+
+    def potential_coefficient_to_load_coefficient_operator(self) -> LinearOperator:
+        """
+        Constructs the inverse diagonal scaling operator in the observation space.
+
+        This operator isolates the mass load coefficients from observed potential
+        coefficients by applying the inverse Love number scaling ($1 / k_l$).
+
+        Returns:
+            A `DiagonalSparseMatrixLinearOperator` acting on `EuclideanSpace`.
+        """
+        return self.load_coefficient_to_potential_coefficient_operator().inverse
+
+    # ---------------------------------------------------------#
+    #               Bridge Spatial/Coefficient Operators       #
+    # ---------------------------------------------------------#
+
+    def load_to_potential_coefficient_operator(
+        self, load_space: Union[Lebesgue, Sobolev]
+    ) -> LinearOperator:
+        """
+        Maps a continuous surface mass load field to a truncated vector of
+        observed gravitational potential coefficients.
+
+        This operator chains the spherical harmonic expansion of the continuous
+        field with the forward WMB Love number scaling ($k_l$).
+
+        Args:
+            load_space: The function space (`Lebesgue` or `Sobolev`) of the input load.
+
+        Returns:
+            A `LinearOperator` mapping from the `load_space` to `EuclideanSpace`.
+        """
         if not isinstance(load_space, (Lebesgue, Sobolev)):
             raise TypeError("load_space must be a Lebesgue or Sobolev space.")
 
-        l2_load_space = underlying_space(load_space)
+        load_to_coeffs = load_space.to_coefficient_operator(
+            self.observation_degree, lmin=self.minimum_degree
+        )
+        scaling_operator = self.load_coefficient_to_potential_coefficient_operator()
 
-        def scaling_function(k: (int, int)) -> float:
+        return scaling_operator @ load_to_coeffs
+
+    def potential_coefficient_to_load_operator(
+        self, load_space: Union[Lebesgue, Sobolev]
+    ) -> LinearOperator:
+        """
+        Maps a vector of observed gravitational potential coefficients to an
+        approximation of the causative continuous surface mass load.
+
+        This operator applies the inverse WMB scaling ($1 / k_l$) in the coefficient
+        domain, and then evaluates the resulting truncated spherical harmonic
+        series onto the spatial grid defined by the `load_space`.
+
+        Args:
+            load_space: The function space (`Lebesgue` or `Sobolev`) for the output load.
+
+        Returns:
+            A `LinearOperator` mapping from `EuclideanSpace` to the `load_space`.
+        """
+        if not isinstance(load_space, (Lebesgue, Sobolev)):
+            raise TypeError("load_space must be a Lebesgue or Sobolev space.")
+
+        coeffs_to_load = load_space.from_coefficient_operator(
+            self.observation_degree, lmin=self.minimum_degree
+        )
+        scaling_operator = self.potential_coefficient_to_load_coefficient_operator()
+
+        return coeffs_to_load @ scaling_operator
+
+    # ---------------------------------------------------------#
+    #                  Composite Output Operators              #
+    # ---------------------------------------------------------#
+
+    def potential_coefficient_to_load_average_operator(
+        self, load_space: Union[Lebesgue, Sobolev], weighting_functions: List[SHGrid]
+    ) -> LinearOperator:
+        """
+        Maps a vector of observed gravitational potential coefficients directly
+        to a set of regional scalar averages (e.g., basin-scale mass changes).
+
+        This operator composes the inverse WMB scaling expansion with the spatial
+        inner products defined by the provided weighting functions.
+
+        Args:
+            load_space: The intermediate function space of the load.
+            weighting_functions: A list of `SHGrid` objects representing the spatial
+                masks/regions to average over.
+
+        Returns:
+            A `LinearOperator` mapping from `EuclideanSpace` to a vector of averages.
+        """
+        coefficient_to_load_operator = self.potential_coefficient_to_load_operator(
+            load_space
+        )
+        load_to_load_averages_operator = averaging_operator(
+            load_space, weighting_functions
+        )
+
+        return load_to_load_averages_operator @ coefficient_to_load_operator
+
+    def direct_load_to_load_operator(
+        self, load_space: Union[Lebesgue, Sobolev]
+    ) -> LinearOperator:
+        """
+        Approximates the total surface load (direct load + induced water load)
+        from a given direct load using a purely spectral scaling.
+
+        Args:
+            load_space: The function space (`Lebesgue` or `Sobolev`) of the load.
+
+        Returns:
+            An `InvariantLinearAutomorphism` acting on the `load_space`.
+        """
+        if not isinstance(load_space, (Lebesgue, Sobolev)):
+            raise TypeError("load_space must be a Lebesgue or Sobolev space.")
+
+        def scaling_function(k: tuple[int, int]) -> float:
             l, _ = k
             return (
                 -(2 * l + 1)
@@ -791,204 +815,36 @@ class WMBMethod(EarthModelParameters, LoveNumbers):
                 else 0
             )
 
-        l2_operator = InvariantLinearAutomorphism.from_index_function(
-            l2_load_space, scaling_function
+        return InvariantLinearAutomorphism.from_index_function(
+            load_space, scaling_function
         )
 
-        return LinearOperator.from_formally_self_adjoint(load_space, l2_operator)
-
-    def potential_field_to_load_operator(
-        self,
-        potential_space: Union[Lebesgue, Sobolev],
-        load_space: Union[Lebesgue, Sobolev],
-    ):
-        """
-        Returns a LinearOperator that maps a gravitational potential field to an
-        approximation of the causative surface load.
-
-        Args:
-            potential_space: The HilbertSpace for the potential field.
-            load_space: The HilbertSpace for the load field.
-
-        Returns:
-            A LinearOperator object.
-        """
-
-        if not isinstance(potential_space, (Lebesgue, Sobolev)):
-            raise TypeError("potential_space must be a Lebesgue or Sobolev space.")
-
-        if not isinstance(load_space, (Lebesgue, Sobolev)):
-            raise TypeError("load_space must be a Lebesgue or Sobolev space.")
-
-        l2_potential_space = underlying_space(potential_space)
-
-        def scaling_function(k: (int, int)) -> float:
-            l, _ = k
-            return 1 / self.k[l] if 1 < l <= self.observation_degree else 0
-
-        l2_operator = InvariantLinearAutomorphism.from_index_function(
-            l2_potential_space, scaling_function
-        )
-
-        return LinearOperator.from_formal_adjoint(
-            potential_space, load_space, l2_operator
-        )
-
-    def potential_coefficient_to_load_operator(
-        self, load_space: Union[Lebesgue, Sobolev]
-    ):
-        """
-        Returns as a LinearOperator the approximate mapping between a vector of gravitational potential
-        coefficients and an approximation to the causative surface load.
-
-        Args:
-            load_space: The load_space: The HilbertSpace for the load field.
-
-        Returns:
-            A LinearOperator object.
-
-        Notes:
-
-            The input coefficients are ordered in the following manner:
-
-            u_{2-2}, u_{2-1}, u_{20}, u_{21}, u_{22}, u_{3,-3}, u_{3-2},...
-        """
-
-        if not isinstance(load_space, (Lebesgue, Sobolev)):
-            raise TypeError("load_space must be a Lebesgue or Sobolev space.")
-        coeff_to_field_operator = load_space.from_coefficient_operator(
-            self.observation_degree, lmin=2
-        )
-
-        potential_field_to_load_operator = self.potential_field_to_load_operator(
-            load_space, load_space
-        )
-
-        return potential_field_to_load_operator @ coeff_to_field_operator
-
-    def potential_field_to_load_average_operator(
-        self, potential_space, load_space, weighting_functions
-    ):
-        """
-        Returns as a LinearOperator a mapping from a vector of gravitational potential
-        field to averages of the causative load.
-
-        Args:
-            load_space: The HilbertSpace for the load field.
-            weighting_functions: A list of weighting functions.
-
-        Returns:
-            A LinearOperator object.
-
-        Notes:
-
-            The input coefficients are ordered in the following manner:
-
-            u_{2-2}, u_{2-1}, u_{20}, u_{21}, u_{22}, u_{3,-3}, u_{3-2},...
-        """
-
-        potential_field_to_load_operator = self.potential_field_to_load_operator(
-            potential_space, load_space
-        )
-        load_to_load_averages_operator = averaging_operator(
-            load_space, weighting_functions
-        )
-
-        return load_to_load_averages_operator @ potential_field_to_load_operator
-
-    def potential_coefficient_to_load_average_operator(
-        self, load_space: Union[Lebesgue, Sobolev], weighting_functions: List[SHGrid]
-    ):
-        """
-        Returns as a LinearOperator a mapping from a vector of gravitational potential
-        coefficients to averages of the causative load.
-
-        Args:
-            load_space: The HilbertSpace for the load field.
-            weighting_functions: A list of weighting functions.
-
-        Returns:
-            A LinearOperator object.
-
-        Notes:
-
-            The input coefficients are ordered in the following manner:
-
-            u_{2-2}, u_{2-1}, u_{20}, u_{21}, u_{22}, u_{3,-3}, u_{3-2},...
-        """
-
-        coefficient_to_load_opeator = self.potential_coefficient_to_load_operator(
-            load_space
-        )
-        load_to_load_averages_operator = averaging_operator(
-            load_space, weighting_functions
-        )
-
-        return load_to_load_averages_operator @ coefficient_to_load_opeator
-
-    def bayesian_normal_operator_preconditioner(
-        self,
-        prior_measure: "InvariantGaussianMeasure",
-        data_error_measure: "GaussianMeasure",
-    ) -> "DiagonalSparseMatrixLinearOperator":
-        """
-        Constructs a diagonal preconditioner for the Bayesian normal operator
-        (A Q A* + R) by approximating the forward operator (A) with the simple
-        WMB spectral scaling.
-
-        Args:
-            prior_measure: An InvariantGaussianMeasure representing the prior
-                uncertainty of the surface load.
-            data_error_measure: A GaussianMeasure representing the data errors.
-                Its covariance operator must allow for efficient extraction
-                of its main diagonal.
-
-        Returns:
-            A DiagonalSparseMatrixLinearOperator representing the inverse of
-            the approximated normal operator.
-        """
-
-        mapped_prior = self.load_measure_to_observation_measure(prior_measure)
-
-        aqa_diag = mapped_prior.covariance.extract_diagonal(galerkin=True)
-
-        r_diag = data_error_measure.covariance.extract_diagonal(galerkin=True)
-
-        normal_diag = aqa_diag + r_diag
-
-        codomain = data_error_measure.domain
-        approx_normal_op = DiagonalSparseMatrixLinearOperator.from_diagonal_values(
-            codomain, codomain, normal_diag, galerkin=True
-        )
-
-        return approx_normal_op.inverse
+    # ---------------------------------------------------------#
+    #                     Bayesian Helpers                     #
+    # ---------------------------------------------------------#
 
     def load_measure_to_observation_measure(
         self, load_measure: InvariantGaussianMeasure
     ) -> GaussianMeasure:
         """
-        Maps an invariant Gaussian measure representing a surface load to a
-        Gaussian measure for the observed gravitational potential coefficients.
+        Pushes a prior Gaussian measure defined on the continuous load space
+        forward into the truncated observation space.
 
-        This assumes the potential coefficients are related to the load by the
-        simple Love number scaling k_l. The expectation of the input measure
-        is ignored, and the resulting measure has a zero expectation.
+        This propagates the spectral variances of the mass load into the
+        expected variances of the observed potential coefficients by scaling
+        them with the Love numbers.
 
         Args:
-            load_measure: An InvariantGaussianMeasure representing the prior
-                uncertainty of the surface load.
+            load_measure: An `InvariantGaussianMeasure` defining the prior load.
 
         Returns:
-            A GaussianMeasure representing the distribution of the observed
-            potential coefficients, with a diagonal covariance operator.
+            A `GaussianMeasure` acting on the Euclidean observation space.
         """
-
         if not isinstance(load_measure, InvariantGaussianMeasure):
             raise TypeError("load_measure must be an InvariantGaussianMeasure.")
 
         prior_variances = load_measure.spectral_variances
-
-        prior_lmax = int(np.sqrt(load_measure.domain.dim)) - 1
+        prior_lmax = load_measure.domain.lmax
         max_mapped_degree = min(prior_lmax, self.observation_degree)
 
         observed_stds = np.zeros(self.observation_dim)
@@ -1008,6 +864,52 @@ class WMBMethod(EarthModelParameters, LoveNumbers):
         return GaussianMeasure.from_standard_deviations(
             observation_space, observed_stds
         )
+
+    def bayesian_normal_operator_preconditioner(
+        self,
+        prior_measure: InvariantGaussianMeasure,
+        data_error_measure: GaussianMeasure,
+        /,
+        *,
+        parallel: bool = False,
+        n_jobs: int = -1,
+    ) -> DiagonalSparseMatrixLinearOperator:
+        """
+        Constructs a computationally efficient diagonal preconditioner for solving
+        the Bayesian normal equations.
+
+        In a Bayesian inversion, solving the system $(A Q A^* + R)x = y$ can be
+        expensive if the forward operator $A$ involves the full sea-level equation.
+        This method approximates $A$ using the simple WMB spectral scaling to form
+        an extremely fast diagonal preconditioner, accelerating iterative solvers.
+
+        Args:
+            prior_measure: The Gaussian prior on the surface load.
+            data_error_measure: The Gaussian noise model for the observations.
+            parallel: If True, extracts diagonal from data error covariance
+                in parallel. Default is False.
+            n_jobs: The number of processors to use for parallel calcualtions.
+                Default is -1, which means all available cpus.
+
+        Returns:
+            A `DiagonalSparseMatrixLinearOperator` representing the inverse of
+            the approximated normal operator.
+        """
+        mapped_prior = self.load_measure_to_observation_measure(prior_measure)
+
+        aqa_diag = mapped_prior.covariance.extract_diagonal(
+            parallel=parallel, n_jobs=n_jobs
+        )
+        r_diag = data_error_measure.covariance.extract_diagonal()
+
+        normal_diag = aqa_diag + r_diag
+
+        codomain = data_error_measure.domain
+        approx_normal_op = DiagonalSparseMatrixLinearOperator.from_diagonal_values(
+            codomain, codomain, normal_diag
+        )
+
+        return approx_normal_op.inverse
 
 
 def remove_degrees_from_pyshtools_coeffs(coeffs, degrees_to_remove: list[int]):

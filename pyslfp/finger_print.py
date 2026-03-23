@@ -1147,10 +1147,8 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
                 angular_momentum_change=adjoint_angular_momentum_change,
                 rotational_feedbacks=rotational_feedbacks,
                 rtol=rtol,
+                verbose=verbose,
             )
-
-            if verbose:
-                print(f"Number of sea level solves = {self.solver_counter}")
 
             return adjoint_sea_level
 

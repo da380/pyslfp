@@ -15,7 +15,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pygeoinf as inf
 import cartopy.crs as ccrs
-from pygeoinf import plot_1d_distributions
+from pygeoinf import plot_1d_distributions, plot_corner_distributions
 
 import pyslfp as sl
 
@@ -375,8 +375,6 @@ def main():
         show_plot=False,
     )
 
-    """
-
     # --- Corner Plot for Ice Sheet Contributions ---
     GLI_weighting_function = (
         -exact_fp.ice_density
@@ -417,8 +415,6 @@ def main():
         title="Joint Posterior Distributions of GMSL Contributions",
         show_plot=False,
     )
-
-    """
 
     plt.show()
 

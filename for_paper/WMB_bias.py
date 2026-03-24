@@ -122,12 +122,6 @@ def parse_arguments():
 
     # --- Noise Measure Parameters ---
     parser.add_argument(
-        "--noise-order",
-        type=float,
-        default=1.5,
-        help="Sobolev order for the noise load measure.",
-    )
-    parser.add_argument(
         "--noise-scale-factor",
         type=float,
         default=0.25,
@@ -193,9 +187,8 @@ def main():
 
     noise_load_measure_scale = args.noise_scale_factor * direct_load_measure_scale
     noise_load_measure_std = args.noise_std_factor * direct_load_measure_std
-
-    noise_load_measure = load_space.point_value_scaled_sobolev_kernel_gaussian_measure(
-        args.noise_order, noise_load_measure_scale, std=noise_load_measure_std
+    noise_load_measure = load_space.point_value_scaled_heat_kernel_gaussian_measure(
+        noise_load_measure_scale, std=noise_load_measure_std
     )
 
     # =========================================================================

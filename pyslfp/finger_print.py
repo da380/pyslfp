@@ -234,7 +234,6 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
                 "Sea level and ice thickness must be set before computing ocean function."
             )
 
-        # Perform the initial ocean calculation based on physical properties
         ocean_data = np.where(
             self.water_density * self.sea_level.data
             - self.ice_density * self.ice_thickness.data
@@ -243,10 +242,8 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
             0,
         )
 
-        # If the exclusion flag is set, subtract the Caspian Sea mask
         if self._exclude_caspian_sea:
             caspian_mask_data = self.caspian_sea_projection(value=0).data
-            # Ensure the result is still just 0s and 1s
             ocean_data = np.where(ocean_data - caspian_mask_data > 0, 1, 0)
 
         self._ocean_function = SHGrid.from_array(
@@ -270,8 +267,6 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         grid_lats = mask.lats()
         grid_lons = mask.lons()
 
-        # pyshtools grids go from 90 to -90.
-        # RegularGridInterpolator requires strictly ascending coordinates.
         lats_asc = grid_lats[::-1]
         data_asc = mask.data[::-1, :]
 
@@ -279,10 +274,8 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
             (lats_asc, grid_lons), data_asc, bounds_error=False, fill_value=0.0
         )
 
-        # Interpolate the binary mask at the requested points
         mask_values = interpolator(points)
 
-        # Keep points where the interpolated mask is > 0.5
         valid_points = points[mask_values > 0.5]
 
         return [(float(lat), float(lon)) for lat, lon in valid_points]
@@ -448,22 +441,36 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         """
         Solves the generalized sea level equation for a given load.
 
+        This method employs an iterative solver to determine the self-consistent
+        redistribution of ocean water following changes in surface mass (e.g., ice melt).
+        It accounts for the solid Earth's elastic deformation, gravitational perturbations,
+        and (optionally) rotational feedbacks.
+
         Args:
-            direct_load: The direct surface mass load (e.g., from ice melt).
-            displacement_load: An externally imposed displacement load.
+            direct_load: The direct surface mass load (e.g., from ice melt) represented as an SHGrid.
+            displacement_load: An externally imposed vertical surface displacement load.
             gravitational_potential_load: An externally imposed gravitational potential load.
             angular_momentum_change: An externally imposed change in angular momentum.
-            rotational_feedbacks: If True, include the effects of polar wander.
+            rotational_feedbacks: If True, includes the effects of polar wander (rotational
+                feedbacks) on the sea level solution. Defaults to True.
             rtol: The relative tolerance for the iterative solver to determine convergence.
-            verbose: If True, print the relative error at each iteration.
+                Defaults to 1.0e-6.
+            verbose: If True, prints the relative error at each solver iteration. Defaults to False.
 
         Returns:
-            A tuple containing:
-                - `sea_level_change` (SHGrid): The self-consistent sea level change.
-                - `displacement` (SHGrid): The vertical surface displacement.
-                - `gravity_potential_change` (SHGrid): Change in gravity potential.
-                - `angular_velocity_change` (np.ndarray): Change in angular velocity `[ω_x, ω_y]`.
+            A tuple containing four elements:
+                - `sea_level_change` (SHGrid): The spatially variable, self-consistent sea level change.
+                - `displacement` (SHGrid): The vertical surface displacement of the solid Earth.
+                - `gravity_potential_change` (SHGrid): The total change in the gravity potential.
+                - `angular_velocity_change` (np.ndarray): The change in angular velocity `[ω_x, ω_y]`.
         """
+
+        h_b = self._h[None, :, None]
+        k_b = self._k[None, :, None]
+        h_u_b = self._h_u[None, :, None]
+        k_u_b = self._k_u[None, :, None]
+        h_phi_b = self._h_phi[None, :, None]
+        k_phi_b = self._k_phi[None, :, None]
 
         loads_present = False
         non_zero_rhs = False
@@ -475,16 +482,23 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
                 self.water_density * self.ocean_area
             )
             non_zero_rhs = non_zero_rhs or np.max(np.abs(direct_load.data)) > 0
-
         else:
             direct_load = self.zero_grid()
             mean_sea_level_change = 0
+
+        static_disp_coeffs = 0.0
+        static_grav_coeffs = 0.0
+        has_static_loads = False
 
         if displacement_load is not None:
             loads_present = True
             assert self.check_field(displacement_load)
             displacement_load_lm = self.expand_field(displacement_load)
             non_zero_rhs = non_zero_rhs or np.max(np.abs(displacement_load.data)) > 0
+
+            static_disp_coeffs += h_u_b * displacement_load_lm.coeffs
+            static_grav_coeffs += k_u_b * displacement_load_lm.coeffs
+            has_static_loads = True
 
         if gravitational_potential_load is not None:
             loads_present = True
@@ -495,6 +509,10 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
             non_zero_rhs = (
                 non_zero_rhs or np.max(np.abs(gravitational_potential_load.data)) > 0
             )
+
+            static_disp_coeffs += h_phi_b * gravitational_potential_load_lm.coeffs
+            static_grav_coeffs += k_phi_b * gravitational_potential_load_lm.coeffs
+            has_static_loads = True
 
         if angular_momentum_change is not None:
             loads_present = True
@@ -519,41 +537,30 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         ht = self._ht[2]
         kt = self._kt[2]
 
-        err = 1
+        sea_level_change = self.zero_grid()
+        slc_data = sea_level_change.data
+        load_data = load.data.copy()
+        direct_load_data = direct_load.data
+        ocean_func_data = self.ocean_function.data
+        water_density = self.water_density
+
+        err = 1.0
         count = 0
         count_print = 0
+
         while err > rtol:
 
             displacement_lm = self.expand_field(load)
             gravity_potential_change_lm = displacement_lm.copy()
 
-            for l in range(self.lmax + 1):
+            displacement_lm.coeffs *= h_b
+            gravity_potential_change_lm.coeffs *= k_b
 
-                displacement_lm.coeffs[:, l, :] *= self._h[l]
-                gravity_potential_change_lm.coeffs[:, l, :] *= self._k[l]
-
-                if displacement_load is not None:
-
-                    displacement_lm.coeffs[:, l, :] += (
-                        self._h_u[l] * displacement_load_lm.coeffs[:, l, :]
-                    )
-
-                    gravity_potential_change_lm.coeffs[:, l, :] += (
-                        self._k_u[l] * displacement_load_lm.coeffs[:, l, :]
-                    )
-
-                if gravitational_potential_load is not None:
-
-                    displacement_lm.coeffs[:, l, :] += (
-                        self._h_phi[l] * gravitational_potential_load_lm.coeffs[:, l, :]
-                    )
-
-                    gravity_potential_change_lm.coeffs[:, l, :] += (
-                        self._k_phi[l] * gravitational_potential_load_lm.coeffs[:, l, :]
-                    )
+            if has_static_loads:
+                displacement_lm.coeffs += static_disp_coeffs
+                gravity_potential_change_lm.coeffs += static_grav_coeffs
 
             if rotational_feedbacks:
-
                 centrifugal_coeffs = r * angular_velocity_change
 
                 displacement_lm.coeffs[:, 2, 1] += ht * centrifugal_coeffs
@@ -575,22 +582,26 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
                 gravity_potential_change_lm
             )
 
-            sea_level_change = (-1 / g) * (g * displacement + gravity_potential_change)
-            sea_level_change.data += mean_sea_level_change - self.ocean_average(
-                sea_level_change
+            slc_data[:] = (-1.0 / g) * (
+                g * displacement.data + gravity_potential_change.data
             )
 
-            load_new = (
-                direct_load
-                + self.water_density * self.ocean_function * sea_level_change
+            slc_data += mean_sea_level_change - self.ocean_average(sea_level_change)
+
+            load_new_data = direct_load_data + (
+                water_density * ocean_func_data * slc_data
             )
+
             if count > 1 or mean_sea_level_change != 0:
-                err = np.max(np.abs((load_new - load).data)) / np.max(np.abs(load.data))
+                err = np.max(np.abs(load_new_data - load_data)) / np.max(
+                    np.abs(load_data)
+                )
                 if verbose:
                     count_print += 1
                     print(f"Iteration = {count_print}, relative error = {err:6.4e}")
 
-            load = load_new
+            load_data[:] = load_new_data
+            load.data[:] = load_new_data
             count += 1
 
         return (
@@ -711,18 +722,13 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
             exclude_glaciers: If True, exclude glaciers from the projection.
                                 Default is True.
         """
-
-        # Start with basic ice thickness mask
         if exclude_ice_shelves:
             ice_mask = (self.ice_thickness.data > 0) & (self.ocean_function.data == 0)
         else:
             ice_mask = self.ice_thickness.data > 0
-
-        # Apply glacier exclusion if requested
         if exclude_glaciers:
             glacier_mask = self.glacier_projection(value=0).data == 1
             ice_mask = ice_mask & ~glacier_mask
-
         return SHGrid.from_array(
             np.where(ice_mask, 1, value),
             grid=self.grid,
@@ -807,7 +813,6 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         Returns:
             An SHGrid object representing the regional mask.
         """
-        # Get the integer ID for the named region
         try:
             region_id = self._ar6_regions.map_keys(region_name)
         except KeyError as exc:
@@ -815,19 +820,10 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
                 f"Region '{region_name}' not found in the AR6 dataset. "
                 "Check regionmask.defined_regions.ar6.all.names for available regions."
             ) from exc
-
-        # Get the grid coordinates
         lons = self.lons()
         lats = self.lats()
-
-        # Create the mask using a longitude array that excludes the duplicate
-        # endpoint (360 deg) to avoid the ValueError in regionmask.
         mask_unextended = self._ar6_regions.mask(lons[:-1], lats)
-
         masked_data_unextended = np.where(mask_unextended.data == region_id, 1, value)
-
-        # Re-extend the grid for pyshtools by copying the 0-deg longitude
-        # column to the 360-deg longitude position.
         masked_data = np.hstack(
             (masked_data_unextended, masked_data_unextended[:, 0:1])
         )
@@ -857,17 +853,10 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         Returns a simple rectangular grid that is 1 over the approximate
         location of the Caspian Sea and `value` elsewhere.
         """
-
-        # Get 2D grid of coordinates
         lats, lons = np.meshgrid(self.lats(), self.lons(), indexing="ij")
-
-        # Define the bounding box for the Caspian Sea
         lat_mask = np.logical_and(lats > 36, lats < 49.5)
         lon_mask = np.logical_and(lons > 45.5, lons < 55)
-
-        # Combine the masks to define the rectangle
         caspian_mask = np.logical_and(lat_mask, lon_mask)
-
         return SHGrid.from_array(
             np.where(caspian_mask, 1, value),
             grid=self.grid,
@@ -1117,6 +1106,7 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
                 direct_load=u,
                 rotational_feedbacks=rotational_feedbacks,
                 rtol=rtol,
+                verbose=verbose,
             )
 
             if rotational_feedbacks:
@@ -1127,9 +1117,6 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
                 )
             else:
                 gravitational_potential_change = gravity_potential_change
-
-            if verbose:
-                print(f"Number of sea level solves = {self.solver_counter}")
 
             return [
                 sea_level_change,
@@ -1160,10 +1147,8 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
                 angular_momentum_change=adjoint_angular_momentum_change,
                 rotational_feedbacks=rotational_feedbacks,
                 rtol=rtol,
+                verbose=verbose,
             )
-
-            if verbose:
-                print(f"Number of sea level solves = {self.solver_counter}")
 
             return adjoint_sea_level
 
@@ -1236,15 +1221,10 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
             latitude_min: The southern latitude limit.
             latitude_max: The northern latitude limit.
         """
-        # 1. Generate an independent, regular lat/lon mesh
         lats = np.arange(latitude_min, latitude_max + 1e-9, spacing_degrees)
         lons = np.arange(0.0, 360.0, spacing_degrees)
         lat_mesh, lon_mesh = np.meshgrid(lats, lons, indexing="ij")
-
-        # Stack into an (N, 2) array of [lat, lon]
         candidate_points = np.column_stack((lat_mesh.ravel(), lon_mesh.ravel()))
-
-        # 2. Get the physical ocean mask and filter the points
         mask = self.altimetry_projection(
             latitude_min=latitude_min, latitude_max=latitude_max, value=0
         )
@@ -1267,14 +1247,10 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
             exclude_ice_shelves: If True, excludes floating ice shelves.
             exclude_glaciers: If True, excludes smaller glaciers.
         """
-        # 1. Generate an independent, regular global lat/lon mesh
         lats = np.arange(-90.0, 90.0 + 1e-9, spacing_degrees)
         lons = np.arange(0.0, 360.0, spacing_degrees)
         lat_mesh, lon_mesh = np.meshgrid(lats, lons, indexing="ij")
-
         candidate_points = np.column_stack((lat_mesh.ravel(), lon_mesh.ravel()))
-
-        # 2. Get the physical ice mask and filter the points
         mask = self.ice_projection(
             value=0,
             exclude_ice_shelves=exclude_ice_shelves,

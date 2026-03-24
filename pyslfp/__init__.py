@@ -19,14 +19,14 @@ from .operators import (
     ocean_projection_operator,
     land_projection_operator,
     spatial_mutliplication_operator,
-    ocean_thickness_change_to_load_operator,
+    sea_level_change_to_load_operator,
     sea_surface_height_operator,
     remove_ocean_average_operator,
     ocean_altimetry_operator,
 )
 
 
-from .plotting import plot
+from .plotting import plot, plot_corner_distributions
 
 from .utils import (
     read_gloss_tide_gauge_data,
@@ -51,10 +51,11 @@ __all__ = [
     "land_projection_operator",
     "spatial_mutliplication_operator",
     "plot",
+    "plot_corner_distributions",
     "read_gloss_tide_gauge_data",
     "partition_points_by_grid",
     "get_spherical_harmonic_degree_blocks",
-    "ocean_thickness_change_to_load_operator",
+    "sea_level_change_to_load_operator",
     "sea_surface_height_operator",
     "remove_ocean_average_operator",
     "ocean_altimetry_operator",

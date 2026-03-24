@@ -25,7 +25,7 @@ from pyslfp.operators import (
     ice_projection_operator,
     ocean_projection_operator,
     land_projection_operator,
-    ocean_thickness_change_to_load_operator,
+    sea_level_change_to_load_operator,
     density_change_to_load_operator,
     remove_ocean_average_operator,
     remove_degrees_from_pyshtools_coeffs,
@@ -78,7 +78,7 @@ def get_response_space(fp_instance, space_type):
     else:  # sobolev
         # Use a consistent order/scale for Sobolev tests
         return fp_instance.sobolev_response_space(
-            2, 0.5 * fp_instance.mean_sea_floor_radius
+            3, 0.5 * fp_instance.mean_sea_floor_radius
         )
 
 
@@ -161,12 +161,12 @@ class TestWMBMethod:
     """A test suite for the WMBMethod class."""
 
     @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
-    def test_potential_to_load_axiom_checks(
+    def test_load_to_potential_coeff_axiom_checks(
         self, lmax, space_type, wmb_method, fp_instance
     ):
-        """Tests the potential field -> load field operator."""
-        space = get_load_space(fp_instance, space_type)
-        op = wmb_method.potential_field_to_load_operator(space, space)
+        """Tests the load field -> potential coefficients operator."""
+        load_space = get_load_space(fp_instance, space_type)
+        op = wmb_method.load_to_potential_coefficient_operator(load_space)
 
         op.check(n_checks=3)
 
@@ -199,7 +199,7 @@ class TestWMBMethod:
     def test_direct_load_to_load_axiom_checks(
         self, lmax, space_type, wmb_method, fp_instance
     ):
-        """NEW TEST: Tests the WMB direct_load_to_load_operator."""
+        """Tests the WMB direct_load_to_load_operator."""
         load_space = get_load_space(fp_instance, space_type)
         op = wmb_method.direct_load_to_load_operator(load_space)
 
@@ -207,13 +207,13 @@ class TestWMBMethod:
 
     def test_load_coeff_to_potential_coeff_axiom_checks(self, lmax, wmb_method):
         """Tests the load coefficients -> potential coefficients operator."""
-        op = wmb_method.load_coefficient_to_potential_coefficient_operator(lmax)
+        op = wmb_method.load_coefficient_to_potential_coefficient_operator()
 
         op.check(n_checks=3)
 
     def test_potential_coeff_to_load_coeff_axiom_checks(self, lmax, wmb_method):
         """Tests the potential coefficients -> load coefficients operator."""
-        op = wmb_method.potential_coefficient_to_load_coefficient_operator(lmax)
+        op = wmb_method.potential_coefficient_to_load_coefficient_operator()
 
         op.check(n_checks=3)
 
@@ -252,20 +252,22 @@ class TestIceThicknessToLoadOperator:
         op.check(n_checks=3)
 
 
-# ================== Tests for ocean_thickness_change_to_load_operator ==================
+# ================== Tests for sea_level_change_to_load_operator ==================
 
 
 @pytest.mark.parametrize("lmax", [16, 32])
 class TestSeaLevelChangeToLoadOperator:
-    """A test suite for the ocean_thickness_change_to_load_operator."""
+    """A test suite for the sea_level_change_to_load_operator."""
 
     @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
     def test_axiom_checks(self, lmax, space_type, fp_instance):
         """
         Tests the operator axioms using the pygeoinf check() method.
         """
-        space = get_load_space(fp_instance, space_type)
-        op = ocean_thickness_change_to_load_operator(fp_instance, space)
+        response_space = get_response_space(fp_instance, space_type)
+        sea_level_space = response_space.subspace(0)
+        load_space = get_load_space(fp_instance, space_type)
+        op = sea_level_change_to_load_operator(fp_instance, sea_level_space, load_space)
 
         op.check(n_checks=3)
 

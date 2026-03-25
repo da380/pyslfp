@@ -105,7 +105,7 @@ def parse_arguments():
         help="Factor scaling the noise standard deviation.",
     )
     parser.add_argument(
-        "--remove-deg-1",
+        "--remove-degree-1",
         action="store_true",
         help="Remove degree 1 components from the prior measure.",
     )
@@ -129,7 +129,7 @@ def main():
         args.direct_std_m,
         args.noise_scale_factor,
         args.noise_std_factor,
-        remove_deg_1=args.remove_deg_1,
+        remove_degree_1=args.remove_degree_1,
     )
 
     if args.prior_mean_shift != 0.0:
@@ -161,6 +161,19 @@ def main():
         sample_direct = cond_prior.sample()
         sample_induced = (sle_to_load @ sea_level_proj @ fp_op)(sample_direct)
 
+        summed_weights = sum(weighting_functions)
+        vmax_w = np.max(np.abs(summed_weights.data))
+
+        fig0, ax0, im0 = sl.plot(
+            summed_weights,
+            colorbar_label="Weight",
+            cmap="Reds",
+            vmin=0,
+            vmax=vmax_w,
+            symmetric=False,
+        )
+        ax0.set_title("Regional Averaging Functions (Smoothed)")
+
         fig1, ax1, im1 = sl.plot(
             sample_direct * scale_mm,
             colorbar_label="EWT (mm)",
@@ -180,7 +193,7 @@ def main():
 
             ar6 = regionmask.defined_regions.ar6.all
             idxs = [ar6.map_keys(r) for r in region_names]
-            for ax in [ax1, ax2]:
+            for ax in [ax0, ax1, ax2]:
                 ar6[idxs].plot(
                     ax=ax,
                     add_label=True,
@@ -237,7 +250,6 @@ def main():
     err_stds = np.sqrt(np.diag(err_meas.covariance.matrix(dense=True))) * scale_mm
     err_means = err_meas.expectation * scale_mm
 
-    # NEW: Calculate the WMB operator's expected noise standard deviation
     wmb_noise_meas = data_err.affine_mapping(operator=wmb_avg_op)
     wmb_stds = np.sqrt(np.diag(wmb_noise_meas.covariance.matrix(dense=True))) * scale_mm
 
@@ -270,7 +282,6 @@ def main():
         ax = axes.flatten()[i]
         mu, std = err_means[i], err_stds[i]
 
-        # Decide which standard deviation to normalize by based on the flag
         norm_std = wmb_stds[i] if args.normalize_wmb else true_stds[i]
         norm_label = (
             r"Error Standardized by WMB Noise $\sigma$"
@@ -288,7 +299,6 @@ def main():
                 label="MC Samples",
             )
 
-        # Dynamically scale plot bounds to show both the bias distribution and the reference bounds
         plot_min = min(mu - 4 * std, -2.5 * norm_std)
         plot_max = max(mu + 4 * std, 2.5 * norm_std)
         x_vals = np.linspace(plot_min, plot_max, 300)
@@ -301,7 +311,6 @@ def main():
             label=rf"Actual Bias ($\mu$={mu:.3f}, $\sigma$={std:.3f})",
         )
 
-        # SHADED REFERENCE ZONES
         ax.axvspan(
             -norm_std,
             norm_std,

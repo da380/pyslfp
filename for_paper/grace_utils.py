@@ -41,7 +41,7 @@ def build_measures(
     direct_std_m,
     noise_scale_factor,
     noise_std_factor,
-    remove_deg_1=False,
+    remove_degree_1=False,
 ):
     """Constructs the prior and noise Gaussian measures."""
     direct_load_measure_scale = direct_scale_km * 1000 / fp.length_scale
@@ -53,7 +53,7 @@ def build_measures(
         )
     )
 
-    constraint_lmax = 1 if remove_deg_1 else 0
+    constraint_lmax = 1 if remove_degree_1 else 0
     constraint_operator = load_space.to_coefficient_operator(constraint_lmax)
     constraint_subspace = inf.LinearSubspace.from_kernel(constraint_operator)
     direct_load_prior = constraint_subspace.condition_gaussian_measure(
@@ -83,7 +83,7 @@ def build_total_load_operator(fp, response_space, load_space, finger_print_opera
 
 def get_regional_averaging(fp, load_space, smoothing_scale_km=None):
     """Sets up the averaging operator, optionally applying a spatial smoothing filter."""
-    sle_factor = -1.0 / (fp.water_density * fp.ocean_area)
+    sle_factor = 1.0 / (fp.water_density * fp.ocean_area)
     selected_regions = [
         "Greenland/Iceland",
         "W.Antarctica",
@@ -98,12 +98,10 @@ def get_regional_averaging(fp, load_space, smoothing_scale_km=None):
     region_names = list(target_regions.keys())
     weighting_functions = list(target_regions.values())
 
-    # Apply spatial smoothing via the strictly unscaled heat kernel covariance
     if smoothing_scale_km is not None and smoothing_scale_km > 0:
         smoothing_scale = smoothing_scale_km * 1000 / fp.length_scale
         smoothing_measure = load_space.heat_kernel_gaussian_measure(smoothing_scale)
         smoothing_operator = smoothing_measure.covariance
-        # Physically smooth the functions before passing them to the averager
         weighting_functions = [smoothing_operator(wf) for wf in weighting_functions]
 
     averaging_operator = sl.averaging_operator(load_space, weighting_functions)

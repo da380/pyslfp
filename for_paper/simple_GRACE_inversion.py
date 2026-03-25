@@ -109,7 +109,7 @@ def parse_arguments():
         help="Factor scaling the noise standard deviation relative to the prior.",
     )
     parser.add_argument(
-        "--remove-deg-1",
+        "--remove-degree-1",
         action="store_true",
         help="Remove degree 1 components from the prior measure.",
     )
@@ -141,7 +141,7 @@ def main():
         args.direct_std_m,
         args.noise_scale_factor,
         args.noise_std_factor,
-        remove_deg_1=args.remove_deg_1,
+        remove_degree_1=args.remove_degree_1,
     )
 
     wmb = sl.WMBMethod.from_finger_print(fp, args.obs_degree)
@@ -165,6 +165,7 @@ def main():
     load_posterior = inverse_problem.model_posterior_measure(
         synthetic_grace_data, solver, preconditioner=preconditioner
     )
+    print(f"Solution in {solver.iterations} iterations")
 
     tot_op = utils.build_total_load_operator(fp, response_space, load_space, fp_op)
     region_names, avg_op, weighting_functions = utils.get_regional_averaging(
@@ -175,107 +176,52 @@ def main():
     wmb_avg_op = wmb.potential_coefficient_to_load_operator(load_space)
     wmb_direct_avg_op = avg_op @ wmb_avg_op
 
-    post_avg_measure = load_posterior.affine_mapping(operator=tot_avg_op)
-    post_stds_mm = (
-        np.sqrt(np.diag(post_avg_measure.covariance.matrix(dense=True))) * scale_mm
-    )
+    if args.plot_pdfs or args.mc_trials > 0:
+        print("Forming load average estimates")
+        post_avg_measure = load_posterior.affine_mapping(operator=tot_avg_op)
+        post_stds_mm = (
+            np.sqrt(np.diag(post_avg_measure.covariance.matrix(dense=True))) * scale_mm
+        )
 
-    wmb_noise_measure = data_error_measure.affine_mapping(operator=wmb_direct_avg_op)
-    wmb_stds_mm = (
-        np.sqrt(np.diag(wmb_noise_measure.covariance.matrix(dense=True))) * scale_mm
-    )
+        wmb_noise_measure = data_error_measure.affine_mapping(
+            operator=wmb_direct_avg_op
+        )
+        wmb_stds_mm = (
+            np.sqrt(np.diag(wmb_noise_measure.covariance.matrix(dense=True))) * scale_mm
+        )
 
     # ------------------ OPTION 1: Maps ------------------
     if args.plot_maps:
         print("Generating spatial maps and residuals...")
 
-        # Plot the Averaging Functions
-        summed_weights = sum(weighting_functions)
-        vmax_w = np.max(np.abs(summed_weights.data))
-        sl.plot(
-            summed_weights,
-            colorbar_label="Weight",
-            cmap="Reds",
-            vmin=0,
-            vmax=vmax_w,
-            symmetric=False,
-        )[1].set_title("Regional Averaging Functions (Smoothed)")
-
-        true_total_load = tot_op(true_direct_load)
-        post_total_load = tot_op(load_posterior.expectation)
-
         true_dir_mm = true_direct_load * scale_mm
         post_dir_mm = load_posterior.expectation * scale_mm
-        true_tot_mm = true_total_load * scale_mm
-        post_tot_mm = post_total_load * scale_mm
-        res_tot_mm = true_tot_mm - post_tot_mm
-
-        try:
-            wmb_spatial_load = wmb.potential_coefficient_to_load_operator(load_space)(
-                synthetic_grace_data
-            )
-            res_wmb_mm = true_tot_mm - (wmb_spatial_load * scale_mm)
-        except AttributeError:
-            res_wmb_mm = None
 
         vmax_dir = max(
             np.max(np.abs(true_dir_mm.data)), np.max(np.abs(post_dir_mm.data))
         )
-        sl.plot(
+        fig1, ax1, im1 = sl.plot(
             true_dir_mm,
             colorbar_label="EWT (mm)",
             vmin=-vmax_dir,
             vmax=vmax_dir,
             symmetric=True,
-        )[1].set_title("True Direct Load")
-        sl.plot(
+        )
+        ax1.set_title("True Direct Load")
+
+        fig2, ax2, im2 = sl.plot(
             post_dir_mm,
             colorbar_label="EWT (mm)",
             vmin=-vmax_dir,
             vmax=vmax_dir,
             symmetric=True,
-        )[1].set_title("Posterior Expectation (Direct Load)")
-
-        vmax_tot = max(
-            np.max(np.abs(true_tot_mm.data)), np.max(np.abs(post_tot_mm.data))
         )
-        sl.plot(
-            true_tot_mm,
-            colorbar_label="EWT (mm)",
-            vmin=-vmax_tot,
-            vmax=vmax_tot,
-            symmetric=True,
-        )[1].set_title("True Total Load (Direct + Induced)")
-        sl.plot(
-            post_tot_mm,
-            colorbar_label="EWT (mm)",
-            vmin=-vmax_tot,
-            vmax=vmax_tot,
-            symmetric=True,
-        )[1].set_title("Posterior Expectation (Total Load)")
-
-        vmax_res = np.max(np.abs(res_tot_mm.data))
-        if res_wmb_mm is not None:
-            vmax_res = max(vmax_res, np.max(np.abs(res_wmb_mm.data)))
-        sl.plot(
-            res_tot_mm,
-            colorbar_label="Error (mm)",
-            vmin=-vmax_res,
-            vmax=vmax_res,
-            symmetric=True,
-        )[1].set_title("Bayesian Estimation Error")
-        if res_wmb_mm is not None:
-            sl.plot(
-                res_wmb_mm,
-                colorbar_label="Error (mm)",
-                vmin=-vmax_res,
-                vmax=vmax_res,
-                symmetric=True,
-            )[1].set_title("WMB Estimation Error")
+        ax2.set_title("Posterior Expectation (Direct Load)")
 
     # ------------------ OPTION 2: PDFs ------------------
     if args.plot_pdfs:
         print("Plotting Head-to-Head PDFs...")
+
         results = {
             "Bayesian": {
                 "means": post_avg_measure.expectation * scale_mm,

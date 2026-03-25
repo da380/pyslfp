@@ -18,6 +18,7 @@ visualizations:
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
 import pygeoinf as inf
 import pyslfp as sl
@@ -487,12 +488,8 @@ def main():
         print(
             f"Estimating posterior pointwise standard deviation using {args.posterior_samples} samples..."
         )
-        pointwise_variance = load_posterior.sample_pointwise_variance(
-            args.posterior_samples
-        )
+        pointwise_std = load_posterior.sample_pointwise_std(args.posterior_samples)
 
-        pointwise_std = pointwise_variance.copy()
-        pointwise_std.data[:, :] = np.sqrt(pointwise_variance.data[:, :])
         pointwise_std_mm = pointwise_std * load_to_water_thickness_mm
 
         vmax_std = np.nanmax(np.abs(pointwise_std_mm.data))

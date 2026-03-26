@@ -39,6 +39,7 @@ def parse_arguments():
     )
     parser.add_argument(
         "--normalize-wmb",
+        default=True,
         action="store_true",
         help="Normalize the secondary x-axis by the WMB estimated noise standard deviation instead of the true signal standard deviation.",
     )
@@ -87,7 +88,7 @@ def parse_arguments():
         help="Pointwise standard deviation (in m EWT) for the prior.",
     )
     parser.add_argument(
-        "--prior-mean-shift",
+        "--prior-shift",
         type=float,
         default=0.0,
         help="Shift the prior expectation by drawing a sample and multiplying by this factor.",
@@ -132,13 +133,13 @@ def main():
         remove_degree_1=args.remove_degree_1,
     )
 
-    if args.prior_mean_shift != 0.0:
+    if args.prior_shift != 0.0:
         print(
-            f"Applying a {args.prior_mean_shift}x mean shift to the underlying mass distribution..."
+            f"Applying a {args.prior_shift}x mean shift to the underlying mass distribution..."
         )
         offset_shape = cond_prior.sample()
         cond_prior = cond_prior.affine_mapping(
-            translation=offset_shape * args.prior_mean_shift
+            translation=offset_shape * args.prior_shift
         )
 
     wmb = sl.WMBMethod.from_finger_print(fp, args.obs_degree)

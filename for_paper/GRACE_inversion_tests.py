@@ -22,20 +22,20 @@ def parse_arguments():
     parser.add_argument(
         "--lmax-truth",
         type=int,
-        default=128,
+        default=256,
         help="High resolution Lmax used to generate the reference 'true' posterior.",
     )
     parser.add_argument(
         "--lmax-test",
         type=int,
         nargs="+",
-        default=[32, 48, 64, 128],
+        default=[128, 196],
         help="List of Lmax values to test in the convergence sweep.",
     )
     parser.add_argument(
         "--obs-degree",
         type=int,
-        default=32,
+        default=100,
         help="Max SH degree of GRACE observations.",
     )
     parser.add_argument(
@@ -47,13 +47,13 @@ def parse_arguments():
     parser.add_argument(
         "--load-scale-km",
         type=float,
-        default=1000.0,
+        default=500.0,
         help="Length scale (in km) defining the load space.",
     )
     parser.add_argument(
         "--direct-scale-km",
         type=float,
-        default=1000.0,
+        default=500.0,
         help="Correlation length scale (in km) for the prior measure.",
     )
     parser.add_argument(

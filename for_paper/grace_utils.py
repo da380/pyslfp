@@ -6,6 +6,9 @@ Shared utilities, physics initializations, and plotting for Bayesian GRACE inver
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import cartopy.crs as ccrs
+import regionmask
 import pygeoinf as inf
 import pyslfp as sl
 
@@ -86,7 +89,6 @@ def get_regional_averaging(fp, load_space, smoothing_scale_km=None):
     sle_factor = 1.0 / (fp.water_density * fp.ocean_area)
     selected_regions = [
         "Greenland/Iceland",
-        "W.Antarctica",
         "S.Indic-Ocean",
         "South-American-Monsoon",
     ]
@@ -109,63 +111,100 @@ def get_regional_averaging(fp, load_space, smoothing_scale_km=None):
     return region_names, averaging_operator, weighting_functions
 
 
-def plot_regional_pdfs(results_dict, title, region_names, true_averages_mm):
-    """Helper function to plot a 2x2 grid of regional PDFs comparing multiple estimators."""
+def plot_regional_pdfs(results_dict, region_names, true_averages_mm, error_map_mm=None):
+    """Helper function to plot a 2x2 grid of regional PDFs comparing multiple estimators,
+    with an optional spatial map plotted in the remaining space.
+    """
 
-    def gaussian_pdf(x, mean, std):
-        return (1.0 / (std * np.sqrt(2 * np.pi))) * np.exp(
-            -0.5 * ((x - mean) / std) ** 2
-        )
+    # Helper class to mimic scipy.stats.multivariate_normal or pygeoinf GaussianMeasure
+    # so it plays nicely with pygeoinf.plot_1d_distributions.
+    class MockMeasure:
+        def __init__(self, m, s):
+            self.mean = np.array([m])
+            self.cov = np.array([[s**2]])
 
     ncols = 2
     nrows = int(np.ceil(len(region_names) / ncols))
-    fig, axes = plt.subplots(
-        nrows=nrows, ncols=ncols, figsize=(14, 5 * nrows), layout="constrained"
-    )
+
+    # Removed layout="constrained" to prevent clash with pygeoinf's internal tight_layout
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(14, 5 * nrows))
     axes_flat = axes.flatten()
 
-    if len(results_dict) == 2 and "Bayesian" in results_dict and "WMB" in results_dict:
-        colors = ["blue", "red"]
-    else:
-        colors = plt.cm.viridis(np.linspace(0.1, 0.9, len(results_dict)))
+    labels = list(results_dict.keys())
 
     for i, region in enumerate(region_names):
         ax = axes_flat[i]
         true_val = true_averages_mm[i]
 
-        all_means = [res["means"][i] for res in results_dict.values()] + [true_val]
-        max_std = max([res["stds"][i] for res in results_dict.values()])
-        plot_min = min(all_means) - 3.5 * max_std
-        plot_max = max(all_means) + 3.5 * max_std
-        x_vals = np.linspace(plot_min, plot_max, 400)
+        # Build dummy measures for pygeoinf API
+        measures = [
+            MockMeasure(res["means"][i], res["stds"][i])
+            for res in results_dict.values()
+        ]
 
-        for c_idx, (label, res) in enumerate(results_dict.items()):
-            mean = res["means"][i]
-            std = res["stds"][i]
-            y_vals = gaussian_pdf(x_vals, mean, std)
-            ax.plot(
-                x_vals,
-                y_vals,
-                color=colors[c_idx],
-                linewidth=2.5,
-                label=rf"{label} ($\mu$={mean:.2f}, $\sigma$={std:.3f})",
-            )
-            ax.fill_between(x_vals, 0, y_vals, color=colors[c_idx], alpha=0.15)
-
-        ax.axvline(
-            true_val,
-            color="black",
-            linestyle="--",
-            linewidth=2,
-            label=f"True Value: {true_val:.2f}",
+        # Delegate to pygeoinf's 1D distribution plotter
+        inf.plot_1d_distributions(
+            measures,
+            true_value=true_val,
+            ax=ax,
+            xlabel="Regional Average Mass (mm EWT)",
+            title=f"{region}",
+            posterior_labels=labels,
         )
-        ax.set_title(f"{region}", fontsize=14)
-        ax.set_xlabel("Regional Average Mass (mm EWT)", fontsize=12)
-        ax.set_ylabel("Probability Density", fontsize=12)
-        ax.grid(True, linestyle=":", alpha=0.6)
-        ax.legend(loc="upper right", fontsize=9)
 
-    for j in range(i + 1, len(axes_flat)):
-        axes_flat[j].set_visible(False)
+    # If an error map is provided and we have an empty axis available
+    if error_map_mm is not None and len(axes_flat) > i + 1:
+        map_ax_idx = i + 1
 
-    fig.suptitle(title, fontsize=18, fontweight="bold")
+        # Grab the grid position, then remove the standard axis
+        gs = axes_flat[map_ax_idx].get_subplotspec()
+        axes_flat[map_ax_idx].remove()
+
+        # Create a nested 3x3 grid to shrink the map and center it.
+        inner_gs = gridspec.GridSpecFromSubplotSpec(
+            3,
+            3,
+            subplot_spec=gs,
+            width_ratios=[0.1, 0.8, 0.1],
+            height_ratios=[0.1, 0.8, 0.1],
+        )
+
+        ax_map = fig.add_subplot(inner_gs[1, 1], projection=ccrs.Robinson())
+
+        vmax = np.max(np.abs(error_map_mm.data))
+        _, im_map = sl.plot(
+            error_map_mm,
+            ax=ax_map,
+            colorbar_label="Error EWT (mm)",
+            cmap="RdBu",
+            vmin=-vmax,
+            vmax=vmax,
+            symmetric=True,
+            colorbar_shrink=0.75,
+            colorbar_pad=0.1,
+            gridlines=False,
+        )
+
+        # ------------------ OVERLAY AR6 REGIONS ------------------
+        ar6 = regionmask.defined_regions.ar6.all
+        idxs = [ar6.map_keys(r) for r in region_names]
+        ar6[idxs].plot(
+            ax=ax_map,
+            add_label=True,
+            label="abbrev",
+            line_kws=dict(color="black", linewidth=2.5, linestyle="-"),
+            text_kws={
+                "color": "black",
+                "fontweight": "bold",
+                "fontsize": 12,
+                "bbox": dict(facecolor="white", alpha=0.7, edgecolor="none", pad=1),
+            },
+        )
+
+        # Hide any remaining unused axes beyond the map
+        for j in range(map_ax_idx + 1, len(axes_flat)):
+            axes_flat[j].set_visible(False)
+    else:
+        # Hide all unused axes if no map is provided
+        for j in range(i + 1, len(axes_flat)):
+            axes_flat[j].set_visible(False)

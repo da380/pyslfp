@@ -16,6 +16,9 @@ sea-level equation).
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import cartopy.crs as ccrs
+import regionmask
 import pygeoinf as inf
 import pyslfp as sl
 import grace_utils as utils
@@ -36,12 +39,6 @@ def parse_arguments():
         "--plot-loads",
         action="store_true",
         help="Plot an example of the direct load and the induced water load with region boxes.",
-    )
-    parser.add_argument(
-        "--normalize-wmb",
-        default=True,
-        action="store_true",
-        help="Normalize the secondary x-axis by the WMB estimated noise standard deviation instead of the true signal standard deviation.",
     )
 
     parser.add_argument(
@@ -65,7 +62,7 @@ def parse_arguments():
     parser.add_argument(
         "--load-scale-km",
         type=float,
-        default=500.0,
+        default=100.0,
         help="Length scale (in km) defining the load space.",
     )
     parser.add_argument(
@@ -78,7 +75,7 @@ def parse_arguments():
     parser.add_argument(
         "--direct-scale-km",
         type=float,
-        default=250.0,
+        default=100.0,
         help="Correlation length scale (in km) for the prior.",
     )
     parser.add_argument(
@@ -162,55 +159,19 @@ def main():
         sample_direct = cond_prior.sample()
         sample_induced = (sle_to_load @ sea_level_proj @ fp_op)(sample_direct)
 
-        summed_weights = sum(weighting_functions)
-        vmax_w = np.max(np.abs(summed_weights.data))
-
-        fig0, ax0, im0 = sl.plot(
-            summed_weights,
-            colorbar_label="Weight",
-            cmap="Reds",
-            vmin=0,
-            vmax=vmax_w,
-            symmetric=False,
-        )
-        ax0.set_title("Regional Averaging Functions (Smoothed)")
-
-        fig1, ax1, im1 = sl.plot(
+        ax1, im1 = sl.plot(
             sample_direct * scale_mm,
             colorbar_label="EWT (mm)",
             symmetric=True,
         )
         ax1.set_title("Example Direct Load Sample")
 
-        fig2, ax2, im2 = sl.plot(
+        ax2, im2 = sl.plot(
             sample_induced * scale_mm,
             colorbar_label="EWT (mm)",
             symmetric=True,
         )
         ax2.set_title("Resulting Induced Water Load")
-
-        try:
-            import regionmask
-
-            ar6 = regionmask.defined_regions.ar6.all
-            idxs = [ar6.map_keys(r) for r in region_names]
-            for ax in [ax0, ax1, ax2]:
-                ar6[idxs].plot(
-                    ax=ax,
-                    add_label=True,
-                    label="abbrev",
-                    line_kws=dict(color="black", linewidth=2.5, linestyle="-"),
-                    text_kws={
-                        "color": "black",
-                        "fontweight": "bold",
-                        "fontsize": 12,
-                        "bbox": dict(
-                            facecolor="white", alpha=0.7, edgecolor="none", pad=1
-                        ),
-                    },
-                )
-        except Exception as e:
-            print(f"Note: Could not overlay region bounding boxes: {e}")
 
     # ------------------ CORE BIAS EVALUATION ------------------
     op1 = inf.BlockLinearOperator(
@@ -283,12 +244,8 @@ def main():
         ax = axes.flatten()[i]
         mu, std = err_means[i], err_stds[i]
 
-        norm_std = wmb_stds[i] if args.normalize_wmb else true_stds[i]
-        norm_label = (
-            r"Error Standardized by WMB Noise $\sigma$"
-            if args.normalize_wmb
-            else r"Error Standardized by True Signal $\sigma$"
-        )
+        norm_std = true_stds[i]
+        norm_label = r"Error Standardized by True Signal $\sigma$"
 
         if args.samples > 0:
             ax.hist(
@@ -300,8 +257,8 @@ def main():
                 label="MC Samples",
             )
 
-        plot_min = min(mu - 4 * std, -2.5 * norm_std)
-        plot_max = max(mu + 4 * std, 2.5 * norm_std)
+        plot_min = mu - 4 * std
+        plot_max = mu + 4 * std
         x_vals = np.linspace(plot_min, plot_max, 300)
 
         ax.plot(
@@ -312,21 +269,12 @@ def main():
             label=rf"Actual Bias ($\mu$={mu:.3f}, $\sigma$={std:.3f})",
         )
 
-        ax.axvspan(
-            -norm_std,
-            norm_std,
-            color="blue",
-            alpha=0.15,
-            zorder=0,
-            label=r"Expected 1$\sigma$",
-        )
-        ax.axvspan(
-            -2 * norm_std,
-            2 * norm_std,
-            color="blue",
-            alpha=0.05,
-            zorder=0,
-            label=r"Expected 2$\sigma$",
+        ax.plot(
+            x_vals,
+            gaussian_pdf(x_vals, 0, wmb_stds[i]),
+            "b-",
+            linewidth=2,
+            label=rf"Theoretical Bias ($\mu$={0:.3f}, $\sigma$={wmb_stds[i]:.3f})",
         )
 
         ax.set_title(region, fontsize=14)
@@ -343,10 +291,46 @@ def main():
 
     for j in range(i + 1, len(axes.flatten())):
         axes.flatten()[j].set_visible(False)
-    fig.suptitle(
-        "WMB Method Bias: Analytical Error Distributions",
-        fontsize=18,
-        fontweight="bold",
+
+    summed_weights = sum(weighting_functions)
+    vmax_w = np.max(np.abs(summed_weights.data))
+
+    gs = axes[1, 1].get_subplotspec()
+    axes[1, 1].remove()
+
+    inner_gs = gridspec.GridSpecFromSubplotSpec(
+        3,
+        3,
+        subplot_spec=gs,
+        width_ratios=[0.1, 0.8, 0.1],
+        height_ratios=[0.1, 0.8, 0.1],
+    )
+
+    ax_map = fig.add_subplot(inner_gs[1, 1], projection=ccrs.Robinson())
+
+    _, im0 = sl.plot(
+        summed_weights,
+        colorbar_label="Weight",
+        cmap="Reds",
+        vmin=0,
+        vmax=vmax_w,
+        symmetric=False,
+        ax=ax_map,
+    )
+
+    ar6 = regionmask.defined_regions.ar6.all
+    idxs = [ar6.map_keys(r) for r in region_names]
+    ar6[idxs].plot(
+        ax=ax_map,
+        add_label=True,
+        label="abbrev",
+        line_kws=dict(color="black", linewidth=2.5, linestyle="-"),
+        text_kws={
+            "color": "black",
+            "fontweight": "bold",
+            "fontsize": 8,
+            "bbox": dict(facecolor="white", alpha=0.7, edgecolor="none", pad=1),
+        },
     )
 
     plt.show()

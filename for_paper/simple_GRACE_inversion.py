@@ -10,6 +10,7 @@ with the standard WMB method.
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
+from cartopy import crs as ccrs
 import pygeoinf as inf
 import pyslfp as sl
 import grace_utils as utils
@@ -62,7 +63,7 @@ def parse_arguments():
     parser.add_argument(
         "--obs-degree",
         type=int,
-        default=100,
+        default=64,
         help="Maximum spherical harmonic degree of the GRACE observations.",
     )
     parser.add_argument(
@@ -161,7 +162,7 @@ def main():
     )
     solver = inf.CGMatrixSolver()
 
-    print("Solving inversion...")
+    print("Solving for posterior...")
     load_posterior = inverse_problem.model_posterior_measure(
         synthetic_grace_data, solver, preconditioner=preconditioner
     )
@@ -178,14 +179,16 @@ def main():
 
     if args.plot_pdfs or args.mc_trials > 0:
         print("Forming load average estimates")
-        post_avg_measure = load_posterior.affine_mapping(operator=tot_avg_op)
+        post_avg_measure = load_posterior.affine_mapping(
+            operator=tot_avg_op
+        ).with_dense_covariance()
         post_stds_mm = (
             np.sqrt(np.diag(post_avg_measure.covariance.matrix(dense=True))) * scale_mm
         )
 
         wmb_noise_measure = data_error_measure.affine_mapping(
             operator=wmb_direct_avg_op
-        )
+        ).with_dense_covariance()
         wmb_stds_mm = (
             np.sqrt(np.diag(wmb_noise_measure.covariance.matrix(dense=True))) * scale_mm
         )
@@ -200,27 +203,40 @@ def main():
         vmax_dir = max(
             np.max(np.abs(true_dir_mm.data)), np.max(np.abs(post_dir_mm.data))
         )
-        fig1, ax1, im1 = sl.plot(
-            true_dir_mm,
-            colorbar_label="EWT (mm)",
-            vmin=-vmax_dir,
-            vmax=vmax_dir,
-            symmetric=True,
-        )
-        ax1.set_title("True Direct Load")
 
-        fig2, ax2, im2 = sl.plot(
-            post_dir_mm,
+        fig_maps, axes_maps = plt.subplots(
+            1, 2, figsize=(14, 5), subplot_kw={"projection": ccrs.Robinson()}
+        )
+
+        sl.plot(
+            true_dir_mm,
+            ax=axes_maps[0],
             colorbar_label="EWT (mm)",
             vmin=-vmax_dir,
             vmax=vmax_dir,
             symmetric=True,
         )
-        ax2.set_title("Posterior Expectation (Direct Load)")
+        axes_maps[0].set_title("True Direct Load")
+
+        sl.plot(
+            post_dir_mm,
+            ax=axes_maps[1],
+            colorbar_label="EWT (mm)",
+            vmin=-vmax_dir,
+            vmax=vmax_dir,
+            symmetric=True,
+        )
+        axes_maps[1].set_title("Posterior Expectation (Direct Load)")
+        fig_maps.tight_layout()
 
     # ------------------ OPTION 2: PDFs ------------------
     if args.plot_pdfs:
         print("Plotting Head-to-Head PDFs...")
+
+        # Calculate the spatial error
+        error_map_mm = (
+            load_posterior.expectation * scale_mm - true_direct_load * scale_mm
+        )
 
         results = {
             "Bayesian": {
@@ -232,11 +248,12 @@ def main():
                 "stds": wmb_stds_mm,
             },
         }
+
         utils.plot_regional_pdfs(
             results,
-            "Bayesian vs. WMB Efficacy: Regional Averages",
             region_names,
             tot_avg_op(true_direct_load) * scale_mm,
+            error_map_mm=error_map_mm,
         )
 
     # ------------------ OPTION 3: Corner Plot ------------------
@@ -247,11 +264,7 @@ def main():
             load_posterior.affine_mapping(operator=deg1_op),
             prior_measure=cond_prior.affine_mapping(operator=deg1_op),
             true_values=deg1_op(true_direct_load),
-            reference_values=[0.0, 0.0, 0.0],
-            reference_label="WMB Assumption (0.0)",
             labels=[r"$C_{1,-1}$ (mm)", r"$C_{1,0}$ (mm)", r"$C_{1,1}$ (mm)"],
-            title="Joint Posterior Distributions of Total Load Degree-1 Coefficients",
-            show_plot=False,
         )
 
     # ------------------ OPTION 4: Samples ------------------
@@ -262,14 +275,18 @@ def main():
         pointwise_std = pointwise_variance.copy()
         pointwise_std.data[:, :] = np.sqrt(pointwise_variance.data[:, :])
         pointwise_std_mm = pointwise_std * scale_mm
-        sl.plot(
+
+        fig_samples, ax_samples = plt.subplots(
+            figsize=(14, 5), subplot_kw={"projection": ccrs.Robinson()}
+        )
+
+        _, im_samples = sl.plot(
             pointwise_std_mm,
             colorbar_label="Std Dev EWT (mm)",
             vmin=0,
             cmap="viridis",
             symmetric=False,
-        )[1].set_title(
-            f"Posterior Pointwise Standard Deviation (N={args.posterior_samples})"
+            ax=ax_samples,
         )
 
     # ------------------ OPTION 5: Monte Carlo ------------------
@@ -293,12 +310,18 @@ def main():
                 tot_avg_op(mc_post.expectation) * scale_mm - mc_true_avgs
             ) / post_stds_mm
 
+        max_err = max(np.max(np.abs(w_errs)), np.max(np.abs(b_errs)))
+        plot_limit = np.ceil(max_err) + 0.5
+
         fig_mc, axes_mc = plt.subplots(
-            nrows=int(np.ceil(len(region_names) / 2)),
-            ncols=2,
-            figsize=(12, 12),
+            nrows=1,
+            ncols=len(region_names),
+            figsize=(18, 6),
+            sharex=False,
+            sharey=True,
             layout="constrained",
         )
+
         for j, region in enumerate(region_names):
             ax = axes_mc.flatten()[j]
             ax.scatter(
@@ -330,19 +353,20 @@ def main():
                 label=r"WMB 1$\sigma$ Expected",
             )
             ax.axvspan(-2, 2, color="red", alpha=0.05, zorder=0)
-            ax.set_aspect("equal", adjustable="datalim")
+
+            ax.set_xlim(-plot_limit, plot_limit)
+            ax.set_ylim(-plot_limit, plot_limit)
+            ax.set_aspect("equal")
+
             ax.set_title(region, fontsize=14)
-            ax.set_xlabel(r"WMB Normalized Error", fontsize=11)
-            ax.set_ylabel(r"Bayes Normalized Error", fontsize=11)
+            if j == 0:
+                ax.set_ylabel(r"Bayes Normalized Error", fontsize=11)
+
             ax.grid(True, linestyle=":", alpha=0.4)
-            ax.legend(loc="best", fontsize=9)
-        for k in range(j + 1, len(axes_mc.flatten())):
-            axes_mc.flatten()[k].set_visible(False)
-        fig_mc.suptitle(
-            "Monte Carlo Validation: Distribution of Normalized Residuals",
-            fontsize=18,
-            fontweight="bold",
-        )
+
+            ax.legend(loc="upper right", fontsize=9)
+
+            ax.set_xlabel(r"WMB Normalized Error", fontsize=11)
 
     if any(
         [

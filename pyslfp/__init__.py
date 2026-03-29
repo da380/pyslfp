@@ -26,7 +26,7 @@ from .operators import (
 )
 
 
-from .plotting import plot, plot_corner_distributions
+from .plotting import plot, plot_corner_distributions, create_map_figure
 
 from .utils import (
     read_gloss_tide_gauge_data,
@@ -52,6 +52,7 @@ __all__ = [
     "spatial_mutliplication_operator",
     "plot",
     "plot_corner_distributions",
+    "create_map_figure",
     "read_gloss_tide_gauge_data",
     "partition_points_by_grid",
     "get_spherical_harmonic_degree_blocks",

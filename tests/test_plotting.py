@@ -8,11 +8,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from cartopy.mpl.geoaxes import GeoAxes
 import cartopy.crs as ccrs
-from matplotlib.collections import QuadMesh
-from matplotlib.contour import QuadContourSet
-from unittest.mock import patch
 
-from pyslfp.plotting import plot, plot_corner_distributions
+from pyslfp.plotting import plot, create_map_figure
 
 
 @pytest.fixture(scope="module")
@@ -27,58 +24,34 @@ def sample_grid():
     return coeffs.expand(grid="DH")
 
 
-@pytest.fixture
-def mock_measure():
-    """
-    Provides a duck-typed mock of a GaussianMeasure for testing
-    the corner plot's secondary axis logic without needing pygeoinf's full setup.
-    """
-
-    class MockCovariance:
-        def matrix(self, **kwargs):
-            return np.array([[1.0, 0.5], [0.5, 1.0]])
-
-    class MockMeasure:
-        def __init__(self):
-            self.expectation = np.array([0.0, 1.0])
-            self.covariance = MockCovariance()
-
-    return MockMeasure()
-
-
 # ==================================================================== #
 #                       Tests for plotting.py                          #
 # ==================================================================== #
 
 
-def test_plot_smoke_test(sample_grid):
+def test_create_map_figure_defaults_to_robinson():
+    """
+    Tests that pyslfp's figure creator defaults to a Robinson projection.
+    """
+    fig, ax = create_map_figure()
+
+    assert isinstance(ax, GeoAxes)
+    assert isinstance(ax.projection, ccrs.Robinson)
+    plt.close(fig)
+
+
+def test_plot_smoke_test_with_pyslfp_defaults(sample_grid):
     """
     A simple smoke test to ensure the plot function runs without errors
-    using default settings, unpacking the updated (ax, im) tuple.
+    using default settings, and verifies pyslfp's colorbar injection.
     """
     try:
         ax, im = plot(sample_grid)
         assert ax is not None
         assert im is not None
-    finally:
-        plt.close("all")
 
-
-def test_plot_return_types(sample_grid):
-    """
-    Tests that the plot function returns the correct object types for both
-    pcolormesh (default) and contour plots.
-    """
-    try:
-        # Test default pcolormesh plot
-        ax_pcm, im_pcm = plot(sample_grid, contour=False)
-        assert isinstance(ax_pcm, GeoAxes)
-        assert isinstance(im_pcm, QuadMesh)
-
-        # Test contour plot
-        ax_cf, im_cf = plot(sample_grid, contour=True)
-        assert isinstance(ax_cf, GeoAxes)
-        assert isinstance(im_cf, QuadContourSet)
+        # Verify pyslfp default of `colorbar=True` worked by checking for a second axis
+        assert len(ax.figure.axes) > 1
     finally:
         plt.close("all")
 
@@ -89,13 +62,14 @@ def test_plot_with_existing_ax(sample_grid):
     create a redundant axis.
     """
     try:
-        fig = plt.figure()
-        ax_in = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
+        # Pass a specific projection to verify it doesn't get overridden
+        proj = ccrs.PlateCarree()
+        fig, ax_in = create_map_figure(projection=proj)
 
-        ax_out, im = plot(sample_grid, ax=ax_in)
+        ax_out, im = plot(sample_grid, ax=ax_in, colorbar=False)
 
-        # Ensure the function used the axis we provided
         assert ax_out is ax_in
+        assert ax_out.projection == proj
     finally:
         plt.close("all")
 
@@ -109,44 +83,5 @@ def test_plot_symmetric_option(sample_grid):
         ax, im = plot(sample_grid, symmetric=True, contour=False)
         vmin, vmax = im.get_clim()
         assert np.isclose(vmin, -vmax)
-    finally:
-        plt.close("all")
-
-
-def test_plot_raises_error_for_wrong_input_type():
-    """
-    Tests that the plot function raises a ValueError when the input
-    is not an SHGrid object.
-    """
-    not_a_grid = np.zeros((10, 10))
-    with pytest.raises(ValueError, match="f must be of SHGrid type"):
-        plot(not_a_grid)
-
-
-@patch("pyslfp.plotting.pygeoinf_corner_plot")
-def test_corner_plot_injects_prior_axis(mock_base_plot, mock_measure):
-    """
-    Tests that plot_corner_distributions correctly injects the custom
-    secondary x-axis when a prior_measure is provided.
-    """
-    try:
-        # Mock the pygeoinf return to be a standard 2x2 axes array
-        fig, axes = plt.subplots(2, 2)
-        mock_base_plot.return_value = axes
-
-        out_axes = plot_corner_distributions(mock_measure, prior_measure=mock_measure)
-
-        # Ensure the mock was called
-        mock_base_plot.assert_called_once()
-
-        # Check that the diagonal axes now have a secondary x-axis injected
-        # In Matplotlib, secondary axes are added as children to the primary axis
-        assert len(out_axes[0, 0].child_axes) > 0
-        assert len(out_axes[1, 1].child_axes) > 0
-
-        # Verify the custom label was applied to the secondary axis
-        sec_ax = out_axes[0, 0].child_axes[0]
-        assert "Distance from Prior Mean" in sec_ax.get_xlabel()
-
     finally:
         plt.close("all")

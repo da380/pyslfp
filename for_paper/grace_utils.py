@@ -116,8 +116,6 @@ def plot_regional_pdfs(results_dict, region_names, true_averages_mm, error_map_m
     with an optional spatial map plotted in the remaining space.
     """
 
-    # Helper class to mimic scipy.stats.multivariate_normal or pygeoinf GaussianMeasure
-    # so it plays nicely with pygeoinf.plot_1d_distributions.
     class MockMeasure:
         def __init__(self, m, s):
             self.mean = np.array([m])
@@ -126,8 +124,10 @@ def plot_regional_pdfs(results_dict, region_names, true_averages_mm, error_map_m
     ncols = 2
     nrows = int(np.ceil(len(region_names) / ncols))
 
-    # Removed layout="constrained" to prevent clash with pygeoinf's internal tight_layout
-    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(14, 5 * nrows))
+    # Re-enable the modern layout engine!
+    fig, axes = plt.subplots(
+        nrows=nrows, ncols=ncols, figsize=(14, 5 * nrows), layout="constrained"
+    )
     axes_flat = axes.flatten()
 
     labels = list(results_dict.keys())
@@ -136,13 +136,11 @@ def plot_regional_pdfs(results_dict, region_names, true_averages_mm, error_map_m
         ax = axes_flat[i]
         true_val = true_averages_mm[i]
 
-        # Build dummy measures for pygeoinf API
         measures = [
             MockMeasure(res["means"][i], res["stds"][i])
             for res in results_dict.values()
         ]
 
-        # Delegate to pygeoinf's 1D distribution plotter
         inf.plot_1d_distributions(
             measures,
             true_value=true_val,
@@ -152,15 +150,12 @@ def plot_regional_pdfs(results_dict, region_names, true_averages_mm, error_map_m
             posterior_labels=labels,
         )
 
-    # If an error map is provided and we have an empty axis available
     if error_map_mm is not None and len(axes_flat) > i + 1:
         map_ax_idx = i + 1
 
-        # Grab the grid position, then remove the standard axis
         gs = axes_flat[map_ax_idx].get_subplotspec()
         axes_flat[map_ax_idx].remove()
 
-        # Create a nested 3x3 grid to shrink the map and center it.
         inner_gs = gridspec.GridSpecFromSubplotSpec(
             3,
             3,
@@ -172,20 +167,20 @@ def plot_regional_pdfs(results_dict, region_names, true_averages_mm, error_map_m
         ax_map = fig.add_subplot(inner_gs[1, 1], projection=ccrs.Robinson())
 
         vmax = np.max(np.abs(error_map_mm.data))
+
         _, im_map = sl.plot(
             error_map_mm,
             ax=ax_map,
-            colorbar_label="Error EWT (mm)",
+            colorbar=True,
+            colorbar_kwargs={"label": "Error EWT (mm)", "shrink": 0.8, "pad": 0.05},
             cmap="RdBu",
             vmin=-vmax,
             vmax=vmax,
             symmetric=True,
-            colorbar_shrink=0.75,
-            colorbar_pad=0.1,
             gridlines=False,
         )
+        ax_map.set_title("Spatial Error Map", pad=15)
 
-        # ------------------ OVERLAY AR6 REGIONS ------------------
         ar6 = regionmask.defined_regions.ar6.all
         idxs = [ar6.map_keys(r) for r in region_names]
         ar6[idxs].plot(
@@ -201,10 +196,9 @@ def plot_regional_pdfs(results_dict, region_names, true_averages_mm, error_map_m
             },
         )
 
-        # Hide any remaining unused axes beyond the map
         for j in range(map_ax_idx + 1, len(axes_flat)):
             axes_flat[j].set_visible(False)
     else:
-        # Hide all unused axes if no map is provided
+
         for j in range(i + 1, len(axes_flat)):
             axes_flat[j].set_visible(False)

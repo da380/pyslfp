@@ -26,7 +26,7 @@ from .operators import (
 )
 
 
-from .plotting import plot, plot_corner_distributions, create_map_figure
+from .plotting import plot, create_map_figure
 
 from .utils import (
     read_gloss_tide_gauge_data,

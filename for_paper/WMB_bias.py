@@ -62,7 +62,7 @@ def parse_arguments():
     parser.add_argument(
         "--load-scale-km",
         type=float,
-        default=100.0,
+        default=250.0,
         help="Length scale (in km) defining the load space.",
     )
     parser.add_argument(
@@ -75,7 +75,7 @@ def parse_arguments():
     parser.add_argument(
         "--direct-scale-km",
         type=float,
-        default=100.0,
+        default=250.0,
         help="Correlation length scale (in km) for the prior.",
     )
     parser.add_argument(
@@ -159,16 +159,20 @@ def main():
         sample_direct = cond_prior.sample()
         sample_induced = (sle_to_load @ sea_level_proj @ fp_op)(sample_direct)
 
-        ax1, im1 = sl.plot(
+        fig1, ax1 = sl.create_map_figure(figsize=(14, 8))
+        _, im1 = sl.plot(
             sample_direct * scale_mm,
-            colorbar_label="EWT (mm)",
+            ax=ax1,
+            colorbar_kwargs={"label": "EWT (mm)"},
             symmetric=True,
         )
         ax1.set_title("Example Direct Load Sample")
 
-        ax2, im2 = sl.plot(
+        fig2, ax2 = sl.create_map_figure(figsize=(14, 8))
+        _, im2 = sl.plot(
             sample_induced * scale_mm,
-            colorbar_label="EWT (mm)",
+            ax=ax2,
+            colorbar_kwargs={"label": "EWT (mm)"},
             symmetric=True,
         )
         ax2.set_title("Resulting Induced Water Load")
@@ -310,7 +314,7 @@ def main():
 
     _, im0 = sl.plot(
         summed_weights,
-        colorbar_label="Weight",
+        colorbar_kwargs={"label": "Weight"},
         cmap="Reds",
         vmin=0,
         vmax=vmax_w,

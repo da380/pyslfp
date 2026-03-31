@@ -9,6 +9,7 @@ with the standard WMB method.
 
 import argparse
 import numpy as np
+import scipy.stats as stats
 import matplotlib.pyplot as plt
 from cartopy import crs as ccrs
 import pygeoinf as inf
@@ -63,7 +64,7 @@ def parse_arguments():
     parser.add_argument(
         "--obs-degree",
         type=int,
-        default=64,
+        default=100,
         help="Maximum spherical harmonic degree of the GRACE observations.",
     )
     parser.add_argument(
@@ -128,7 +129,7 @@ def main():
         if args.posterior_samples == 0:
             args.posterior_samples = 10
         if args.mc_trials == 0:
-            args.mc_trials = 20
+            args.mc_trials = 500
 
     print("Initializing models and operators...")
     fp, load_space, response_space, fp_op, scale_mm = utils.build_physics_components(
@@ -179,23 +180,21 @@ def main():
 
     if args.plot_pdfs or args.mc_trials > 0:
         print("Forming load average estimates")
-        post_avg_measure = load_posterior.affine_mapping(
-            operator=tot_avg_op
-        ).with_dense_covariance()
+        post_avg_measure = load_posterior.affine_mapping(operator=tot_avg_op)
         post_stds_mm = (
             np.sqrt(np.diag(post_avg_measure.covariance.matrix(dense=True))) * scale_mm
         )
 
         wmb_noise_measure = data_error_measure.affine_mapping(
             operator=wmb_direct_avg_op
-        ).with_dense_covariance()
+        )
         wmb_stds_mm = (
             np.sqrt(np.diag(wmb_noise_measure.covariance.matrix(dense=True))) * scale_mm
         )
 
     # ------------------ OPTION 1: Maps ------------------
     if args.plot_maps:
-        print("Generating spatial maps and residuals...")
+        print("Generating spatial maps...")
 
         true_dir_mm = true_direct_load * scale_mm
         post_dir_mm = load_posterior.expectation * scale_mm
@@ -205,13 +204,18 @@ def main():
         )
 
         fig_maps, axes_maps = plt.subplots(
-            1, 2, figsize=(14, 5), subplot_kw={"projection": ccrs.Robinson()}
+            1,
+            2,
+            figsize=(14, 5),
+            subplot_kw={"projection": ccrs.Robinson()},
+            layout="constrained",
         )
 
         sl.plot(
             true_dir_mm,
             ax=axes_maps[0],
-            colorbar_label="EWT (mm)",
+            colorbar=True,
+            colorbar_kwargs={"label": "EWT (mm)"},
             vmin=-vmax_dir,
             vmax=vmax_dir,
             symmetric=True,
@@ -221,19 +225,18 @@ def main():
         sl.plot(
             post_dir_mm,
             ax=axes_maps[1],
-            colorbar_label="EWT (mm)",
+            colorbar=True,
+            colorbar_kwargs={"label": "EWT (mm)"},
             vmin=-vmax_dir,
             vmax=vmax_dir,
             symmetric=True,
         )
         axes_maps[1].set_title("Posterior Expectation (Direct Load)")
-        fig_maps.tight_layout()
 
     # ------------------ OPTION 2: PDFs ------------------
     if args.plot_pdfs:
         print("Plotting Head-to-Head PDFs...")
 
-        # Calculate the spatial error
         error_map_mm = (
             load_posterior.expectation * scale_mm - true_direct_load * scale_mm
         )
@@ -260,11 +263,15 @@ def main():
     if args.plot_corner:
         print("Generating Degree-1 Corner Plot...")
         deg1_op = load_space.to_coefficient_operator(1, lmin=1) * scale_mm @ tot_op
-        sl.plot_corner_distributions(
+        inf.plot_corner_distributions(
             load_posterior.affine_mapping(operator=deg1_op),
             prior_measure=cond_prior.affine_mapping(operator=deg1_op),
             true_values=deg1_op(true_direct_load),
-            labels=[r"$C_{1,-1}$ (mm)", r"$C_{1,0}$ (mm)", r"$C_{1,1}$ (mm)"],
+            labels=[
+                r"$\zeta_{1-1}$ (mm)",
+                r"$\zeta_{10}$ (mm)",
+                r"$\zeta_{11}$ (mm)",
+            ],
         )
 
     # ------------------ OPTION 4: Samples ------------------
@@ -277,38 +284,73 @@ def main():
         pointwise_std_mm = pointwise_std * scale_mm
 
         fig_samples, ax_samples = plt.subplots(
-            figsize=(14, 5), subplot_kw={"projection": ccrs.Robinson()}
+            figsize=(14, 5),
+            subplot_kw={"projection": ccrs.Robinson()},
+            layout="constrained",
         )
 
         _, im_samples = sl.plot(
             pointwise_std_mm,
-            colorbar_label="Std Dev EWT (mm)",
+            ax=ax_samples,
+            colorbar=True,
+            colorbar_kwargs={"label": "Std Dev EWT (mm)"},
             vmin=0,
             cmap="viridis",
             symmetric=False,
-            ax=ax_samples,
         )
 
     # ------------------ OPTION 5: Monte Carlo ------------------
     if args.mc_trials > 0:
-        print(f"Running {args.mc_trials} MC trials...")
+        print(f"Running {args.mc_trials} MC trials via dense joint measure mapping...")
         w_errs, b_errs = np.zeros((args.mc_trials, len(region_names))), np.zeros(
             (args.mc_trials, len(region_names))
         )
 
-        for i in range(args.mc_trials):
-            mc_true, mc_data = forward_problem.synthetic_model_and_data(cond_prior)
-            mc_true_avgs = tot_avg_op(mc_true) * scale_mm
+        post_exp_op = inverse_problem.posterior_expectation_operator(
+            solver, preconditioner=preconditioner
+        )
 
-            w_errs[i, :] = (
-                wmb_direct_avg_op(mc_data) * scale_mm - mc_true_avgs
-            ) / wmb_stds_mm
-            mc_post = inverse_problem.model_posterior_measure(
-                mc_data, solver, preconditioner=preconditioner
-            )
-            b_errs[i, :] = (
-                tot_avg_op(mc_post.expectation) * scale_mm - mc_true_avgs
-            ) / post_stds_mm
+        if isinstance(post_exp_op, inf.AffineOperator):
+            bayes_linear = post_exp_op.linear_part
+            bayes_translation = tot_avg_op(post_exp_op.translation_part)
+        else:
+            bayes_linear = post_exp_op
+            bayes_translation = None
+
+        wmb_err_op = inf.RowLinearOperator([-1 * tot_avg_op, wmb_direct_avg_op])
+        bayes_err_op = inf.RowLinearOperator(
+            [-1 * tot_avg_op, tot_avg_op @ bayes_linear]
+        )
+
+        joint_err_op = inf.ColumnLinearOperator([wmb_err_op, bayes_err_op])
+
+        joint_meas = inverse_problem.joint_prior_measure
+
+        translation = (
+            [avg_op.codomain.zero, bayes_translation]
+            if bayes_translation is not None
+            else None
+        )
+
+        joint_err_meas = joint_meas.affine_mapping(
+            operator=joint_err_op, translation=translation
+        )
+
+        print("Constructing 6x6 dense error covariance...")
+        joint_err_dense = joint_err_meas.with_dense_covariance()
+        samples = joint_err_dense.samples(args.mc_trials)
+
+        for i, (w_err, b_err) in enumerate(samples):
+            w_errs[i, :] = (w_err * scale_mm) / wmb_stds_mm
+            b_errs[i, :] = (b_err * scale_mm) / post_stds_mm
+
+        raw_cov_6x6 = joint_err_dense.covariance.matrix(dense=True) * (scale_mm**2)
+        if joint_err_dense.has_zero_expectation:
+            raw_mean_w = np.zeros(len(region_names))
+            raw_mean_b = np.zeros(len(region_names))
+        else:
+            raw_mean_w = joint_err_dense.expectation[0] * scale_mm
+            raw_mean_b = joint_err_dense.expectation[1] * scale_mm
 
         max_err = max(np.max(np.abs(w_errs)), np.max(np.abs(b_errs)))
         plot_limit = np.ceil(max_err) + 0.5
@@ -316,23 +358,55 @@ def main():
         fig_mc, axes_mc = plt.subplots(
             nrows=1,
             ncols=len(region_names),
-            figsize=(18, 6),
-            sharex=False,
+            figsize=(15, 5),
+            sharex=True,
             sharey=True,
             layout="constrained",
         )
 
         for j, region in enumerate(region_names):
             ax = axes_mc.flatten()[j]
+
             ax.scatter(
                 w_errs[:, j],
                 b_errs[:, j],
-                alpha=0.8,
+                alpha=0.6,
                 color="purple",
                 edgecolor="white",
-                s=50,
+                s=20,
                 zorder=3,
             )
+
+            # --- Analytical 2D PDF Contours ---
+            mu_2d = np.array(
+                [raw_mean_w[j] / wmb_stds_mm[j], raw_mean_b[j] / post_stds_mm[j]]
+            )
+
+            var_w = raw_cov_6x6[j, j] / (wmb_stds_mm[j] ** 2)
+            var_b = raw_cov_6x6[j + 3, j + 3] / (post_stds_mm[j] ** 2)
+            cov_wb = raw_cov_6x6[j, j + 3] / (wmb_stds_mm[j] * post_stds_mm[j])
+            cov_2d = np.array([[var_w, cov_wb], [cov_wb, var_b]])
+
+            x_grid, y_grid = np.mgrid[
+                -plot_limit:plot_limit:500j, -plot_limit:plot_limit:500j
+            ]
+            pos = np.dstack((x_grid, y_grid))
+            rv = stats.multivariate_normal(mu_2d, cov_2d)
+            Z = rv.pdf(pos)
+
+            max_density = rv.pdf(mu_2d)
+            levels = [max_density * np.exp(-0.5 * k**2) for k in [3, 2, 1]]
+            ax.contour(
+                x_grid,
+                y_grid,
+                Z,
+                levels=levels,
+                colors="indigo",
+                linewidths=[0.5, 1.0, 1.5],
+                alpha=0.8,
+                zorder=4,
+            )
+
             ax.axhline(0, color="black", linestyle="-", alpha=0.5, zorder=1)
             ax.axvline(0, color="black", linestyle="-", alpha=0.5, zorder=1)
             ax.axhspan(
@@ -359,14 +433,21 @@ def main():
             ax.set_aspect("equal")
 
             ax.set_title(region, fontsize=14)
-            if j == 0:
-                ax.set_ylabel(r"Bayes Normalized Error", fontsize=11)
-
+            ax.set_xlabel(r"WMB Normalized Error", fontsize=11)
             ax.grid(True, linestyle=":", alpha=0.4)
 
-            ax.legend(loc="upper right", fontsize=9)
+            if j == 0:
+                ax.set_ylabel(r"Bayes Normalized Error", fontsize=11)
+                ax.plot(
+                    [], [], color="indigo", linewidth=1.5, label="Analytical 2D PDF"
+                )
+                ax.legend(loc="upper left", fontsize=9)
 
-            ax.set_xlabel(r"WMB Normalized Error", fontsize=11)
+        fig_mc.suptitle(
+            "Monte Carlo Validation: Distribution of Normalized Residuals",
+            fontsize=18,
+            fontweight="bold",
+        )
 
     if any(
         [

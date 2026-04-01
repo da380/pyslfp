@@ -58,13 +58,13 @@ def parse_arguments():
     parser.add_argument(
         "--lmax",
         type=int,
-        default=128,
+        default=64,
         help="Maximum spherical harmonic degree for the Earth model.",
     )
     parser.add_argument(
         "--obs-degree",
         type=int,
-        default=100,
+        default=32,
         help="Maximum spherical harmonic degree of the GRACE observations.",
     )
     parser.add_argument(
@@ -97,6 +97,12 @@ def parse_arguments():
         type=float,
         default=0.01,
         help="Pointwise standard deviation (in m EWT) for the prior.",
+    )
+    parser.add_argument(
+        "--prior-shift",
+        type=float,
+        default=0.0,
+        help="Shift the prior expectation by drawing a sample and multiplying by this factor.",
     )
     parser.add_argument(
         "--noise-scale-factor",
@@ -144,6 +150,7 @@ def main():
         args.noise_scale_factor,
         args.noise_std_factor,
         remove_degree_1=args.remove_degree_1,
+        prior_shift=args.prior_shift,
     )
 
     wmb = sl.WMBMethod.from_finger_print(fp, args.obs_degree)
@@ -237,10 +244,6 @@ def main():
     if args.plot_pdfs:
         print("Plotting Head-to-Head PDFs...")
 
-        error_map_mm = (
-            load_posterior.expectation * scale_mm - true_direct_load * scale_mm
-        )
-
         results = {
             "Bayesian": {
                 "means": post_avg_measure.expectation * scale_mm,
@@ -256,7 +259,6 @@ def main():
             results,
             region_names,
             tot_avg_op(true_direct_load) * scale_mm,
-            error_map_mm=error_map_mm,
         )
 
     # ------------------ OPTION 3: Corner Plot ------------------
@@ -336,7 +338,7 @@ def main():
             operator=joint_err_op, translation=translation
         )
 
-        print("Constructing 6x6 dense error covariance...")
+        print("Constructing dense error covariance...")
         joint_err_dense = joint_err_meas.with_dense_covariance()
         samples = joint_err_dense.samples(args.mc_trials)
 
@@ -344,10 +346,12 @@ def main():
             w_errs[i, :] = (w_err * scale_mm) / wmb_stds_mm
             b_errs[i, :] = (b_err * scale_mm) / post_stds_mm
 
-        raw_cov_6x6 = joint_err_dense.covariance.matrix(dense=True) * (scale_mm**2)
+        n_reg = len(region_names)
+        raw_cov = joint_err_dense.covariance.matrix(dense=True) * (scale_mm**2)
+
         if joint_err_dense.has_zero_expectation:
-            raw_mean_w = np.zeros(len(region_names))
-            raw_mean_b = np.zeros(len(region_names))
+            raw_mean_w = np.zeros(n_reg)
+            raw_mean_b = np.zeros(n_reg)
         else:
             raw_mean_w = joint_err_dense.expectation[0] * scale_mm
             raw_mean_b = joint_err_dense.expectation[1] * scale_mm
@@ -355,17 +359,25 @@ def main():
         max_err = max(np.max(np.abs(w_errs)), np.max(np.abs(b_errs)))
         plot_limit = np.ceil(max_err) + 0.5
 
+        # --- DYNAMIC GRID CALCULATOR ---
+        ncols = int(np.ceil(np.sqrt(n_reg)))
+        nrows = int(np.ceil(n_reg / ncols))
+
+        # Dynamically size the figure (e.g., 5x5 inches per subplot)
         fig_mc, axes_mc = plt.subplots(
-            nrows=1,
-            ncols=len(region_names),
-            figsize=(15, 5),
+            nrows=nrows,
+            ncols=ncols,
+            figsize=(5 * ncols, 5 * nrows),
             sharex=True,
             sharey=True,
             layout="constrained",
         )
 
+        # Flatten the axes array so we can iterate over it easily in 1D
+        axes_flat = np.atleast_1d(axes_mc).flatten()
+
         for j, region in enumerate(region_names):
-            ax = axes_mc.flatten()[j]
+            ax = axes_flat[j]
 
             ax.scatter(
                 w_errs[:, j],
@@ -382,9 +394,10 @@ def main():
                 [raw_mean_w[j] / wmb_stds_mm[j], raw_mean_b[j] / post_stds_mm[j]]
             )
 
-            var_w = raw_cov_6x6[j, j] / (wmb_stds_mm[j] ** 2)
-            var_b = raw_cov_6x6[j + 3, j + 3] / (post_stds_mm[j] ** 2)
-            cov_wb = raw_cov_6x6[j, j + 3] / (wmb_stds_mm[j] * post_stds_mm[j])
+            # Calculate offsets dynamically based on number of regions (n_reg)
+            var_w = raw_cov[j, j] / (wmb_stds_mm[j] ** 2)
+            var_b = raw_cov[j + n_reg, j + n_reg] / (post_stds_mm[j] ** 2)
+            cov_wb = raw_cov[j, j + n_reg] / (wmb_stds_mm[j] * post_stds_mm[j])
             cov_2d = np.array([[var_w, cov_wb], [cov_wb, var_b]])
 
             x_grid, y_grid = np.mgrid[
@@ -395,7 +408,7 @@ def main():
             Z = rv.pdf(pos)
 
             max_density = rv.pdf(mu_2d)
-            levels = [max_density * np.exp(-0.5 * k**2) for k in [3, 2, 1]]
+            levels = [max_density * np.exp(-0.5 * k**2) for k in [4, 3, 2, 1]]
             ax.contour(
                 x_grid,
                 y_grid,
@@ -433,15 +446,25 @@ def main():
             ax.set_aspect("equal")
 
             ax.set_title(region, fontsize=14)
-            ax.set_xlabel(r"WMB Normalized Error", fontsize=11)
             ax.grid(True, linestyle=":", alpha=0.4)
 
-            if j == 0:
+            # Smart Axis Labeling: Only label the bottom row and left-most column
+            # If the plot is on the bottom row OR there's no plot underneath it:
+            if j >= (nrows - 1) * ncols or (j + ncols >= n_reg):
+                ax.set_xlabel(r"WMB Normalized Error", fontsize=11)
+            # If the plot is on the far-left column:
+            if j % ncols == 0:
                 ax.set_ylabel(r"Bayes Normalized Error", fontsize=11)
+
+            if j == 0:
                 ax.plot(
                     [], [], color="indigo", linewidth=1.5, label="Analytical 2D PDF"
                 )
                 ax.legend(loc="upper left", fontsize=9)
+
+        # Hide any unused subplots in the grid (e.g., if we have 5 regions in a 2x3 grid)
+        for j in range(n_reg, len(axes_flat)):
+            axes_flat[j].set_visible(False)
 
         fig_mc.suptitle(
             "Monte Carlo Validation: Distribution of Normalized Residuals",

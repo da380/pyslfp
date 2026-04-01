@@ -128,16 +128,8 @@ def main():
         args.noise_scale_factor,
         args.noise_std_factor,
         remove_degree_1=args.remove_degree_1,
+        prior_shift=args.prior_shift,
     )
-
-    if args.prior_shift != 0.0:
-        print(
-            f"Applying a {args.prior_shift}x mean shift to the underlying mass distribution..."
-        )
-        offset_shape = cond_prior.sample()
-        cond_prior = cond_prior.affine_mapping(
-            translation=offset_shape * args.prior_shift
-        )
 
     wmb = sl.WMBMethod.from_finger_print(fp, args.obs_degree)
     region_names, avg_op, weighting_functions = utils.get_regional_averaging(
@@ -156,8 +148,12 @@ def main():
     # ------------------ OPTION: PLOT EXAMPLE LOADS ------------------
     if args.plot_loads:
         print("Plotting example direct and induced loads...")
+
         sample_direct = cond_prior.sample()
         sample_induced = (sle_to_load @ sea_level_proj @ fp_op)(sample_direct)
+
+        ar6 = regionmask.defined_regions.ar6.all
+        idxs = [ar6.map_keys(r) for r in region_names]
 
         fig1, ax1 = sl.create_map_figure(figsize=(14, 8))
         _, im1 = sl.plot(
@@ -168,6 +164,19 @@ def main():
         )
         ax1.set_title("Example Direct Load Sample")
 
+        ar6[idxs].plot(
+            ax=ax1,
+            add_label=True,
+            label="abbrev",
+            line_kws=dict(color="black", linewidth=2.5, linestyle="-"),
+            text_kws={
+                "color": "black",
+                "fontweight": "bold",
+                "fontsize": 10,
+                "bbox": dict(facecolor="white", alpha=0.7, edgecolor="none", pad=1),
+            },
+        )
+
         fig2, ax2 = sl.create_map_figure(figsize=(14, 8))
         _, im2 = sl.plot(
             sample_induced * scale_mm,
@@ -176,6 +185,19 @@ def main():
             symmetric=True,
         )
         ax2.set_title("Resulting Induced Water Load")
+
+        ar6[idxs].plot(
+            ax=ax2,
+            add_label=True,
+            label="abbrev",
+            line_kws=dict(color="black", linewidth=2.5, linestyle="-"),
+            text_kws={
+                "color": "black",
+                "fontweight": "bold",
+                "fontsize": 10,
+                "bbox": dict(facecolor="white", alpha=0.7, edgecolor="none", pad=1),
+            },
+        )
 
     # ------------------ CORE BIAS EVALUATION ------------------
     op1 = inf.BlockLinearOperator(
@@ -295,47 +317,6 @@ def main():
 
     for j in range(i + 1, len(axes.flatten())):
         axes.flatten()[j].set_visible(False)
-
-    summed_weights = sum(weighting_functions)
-    vmax_w = np.max(np.abs(summed_weights.data))
-
-    gs = axes[1, 1].get_subplotspec()
-    axes[1, 1].remove()
-
-    inner_gs = gridspec.GridSpecFromSubplotSpec(
-        3,
-        3,
-        subplot_spec=gs,
-        width_ratios=[0.1, 0.8, 0.1],
-        height_ratios=[0.1, 0.8, 0.1],
-    )
-
-    ax_map = fig.add_subplot(inner_gs[1, 1], projection=ccrs.Robinson())
-
-    _, im0 = sl.plot(
-        summed_weights,
-        colorbar_kwargs={"label": "Weight"},
-        cmap="Reds",
-        vmin=0,
-        vmax=vmax_w,
-        symmetric=False,
-        ax=ax_map,
-    )
-
-    ar6 = regionmask.defined_regions.ar6.all
-    idxs = [ar6.map_keys(r) for r in region_names]
-    ar6[idxs].plot(
-        ax=ax_map,
-        add_label=True,
-        label="abbrev",
-        line_kws=dict(color="black", linewidth=2.5, linestyle="-"),
-        text_kws={
-            "color": "black",
-            "fontweight": "bold",
-            "fontsize": 8,
-            "bbox": dict(facecolor="white", alpha=0.7, edgecolor="none", pad=1),
-        },
-    )
 
     plt.show()
 

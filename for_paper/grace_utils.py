@@ -44,7 +44,10 @@ def build_measures(
     direct_std_m,
     noise_scale_factor,
     noise_std_factor,
+    /,
+    *,
     remove_degree_1=False,
+    prior_shift=0.0,
 ):
     """Constructs the prior and noise Gaussian measures."""
     direct_load_measure_scale = direct_scale_km * 1000 / fp.length_scale
@@ -62,6 +65,12 @@ def build_measures(
     direct_load_prior = constraint_subspace.condition_gaussian_measure(
         initial_direct_load_prior
     )
+
+    if prior_shift != 0.0:
+        offset_shape = direct_load_prior.sample()
+        direct_load_prior = direct_load_prior.affine_mapping(
+            translation=offset_shape * prior_shift
+        )
 
     noise_load_measure_scale = noise_scale_factor * direct_load_measure_scale
     noise_load_measure_std = noise_std_factor * direct_load_measure_std
@@ -89,6 +98,7 @@ def get_regional_averaging(fp, load_space, smoothing_scale_km=None):
     sle_factor = 1.0 / (fp.water_density * fp.ocean_area)
     selected_regions = [
         "Greenland/Iceland",
+        "W.Antarctica",
         "S.Indic-Ocean",
         "South-American-Monsoon",
     ]
@@ -111,10 +121,8 @@ def get_regional_averaging(fp, load_space, smoothing_scale_km=None):
     return region_names, averaging_operator, weighting_functions
 
 
-def plot_regional_pdfs(results_dict, region_names, true_averages_mm, error_map_mm=None):
-    """Helper function to plot a 2x2 grid of regional PDFs comparing multiple estimators,
-    with an optional spatial map plotted in the remaining space.
-    """
+def plot_regional_pdfs(results_dict, region_names, true_averages_mm):
+    """Helper function to plot a 2x2 grid of regional PDFs comparing multiple estimators"""
 
     class MockMeasure:
         def __init__(self, m, s):
@@ -124,7 +132,6 @@ def plot_regional_pdfs(results_dict, region_names, true_averages_mm, error_map_m
     ncols = 2
     nrows = int(np.ceil(len(region_names) / ncols))
 
-    # Re-enable the modern layout engine!
     fig, axes = plt.subplots(
         nrows=nrows, ncols=ncols, figsize=(14, 5 * nrows), layout="constrained"
     )
@@ -150,55 +157,5 @@ def plot_regional_pdfs(results_dict, region_names, true_averages_mm, error_map_m
             posterior_labels=labels,
         )
 
-    if error_map_mm is not None and len(axes_flat) > i + 1:
-        map_ax_idx = i + 1
-
-        gs = axes_flat[map_ax_idx].get_subplotspec()
-        axes_flat[map_ax_idx].remove()
-
-        inner_gs = gridspec.GridSpecFromSubplotSpec(
-            3,
-            3,
-            subplot_spec=gs,
-            width_ratios=[0.1, 0.8, 0.1],
-            height_ratios=[0.1, 0.8, 0.1],
-        )
-
-        ax_map = fig.add_subplot(inner_gs[1, 1], projection=ccrs.Robinson())
-
-        vmax = np.max(np.abs(error_map_mm.data))
-
-        _, im_map = sl.plot(
-            error_map_mm,
-            ax=ax_map,
-            colorbar=True,
-            colorbar_kwargs={"label": "Error EWT (mm)", "shrink": 0.8, "pad": 0.05},
-            cmap="RdBu",
-            vmin=-vmax,
-            vmax=vmax,
-            symmetric=True,
-            gridlines=False,
-        )
-        ax_map.set_title("Spatial Error Map", pad=15)
-
-        ar6 = regionmask.defined_regions.ar6.all
-        idxs = [ar6.map_keys(r) for r in region_names]
-        ar6[idxs].plot(
-            ax=ax_map,
-            add_label=True,
-            label="abbrev",
-            line_kws=dict(color="black", linewidth=2.5, linestyle="-"),
-            text_kws={
-                "color": "black",
-                "fontweight": "bold",
-                "fontsize": 12,
-                "bbox": dict(facecolor="white", alpha=0.7, edgecolor="none", pad=1),
-            },
-        )
-
-        for j in range(map_ax_idx + 1, len(axes_flat)):
-            axes_flat[j].set_visible(False)
-    else:
-
-        for j in range(i + 1, len(axes_flat)):
-            axes_flat[j].set_visible(False)
+    for j in range(i + 1, len(axes_flat)):
+        axes_flat[j].set_visible(False)

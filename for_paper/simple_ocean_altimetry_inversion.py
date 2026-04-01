@@ -72,7 +72,7 @@ def main():
         "--lmax", type=int, default=128, help="Exact physics truncation degree"
     )
     parser.add_argument(
-        "--surrogate-degree", type=int, default=32, help="Surrogate truncation degree"
+        "--surrogate-degree", type=int, default=64, help="Surrogate truncation degree"
     )
     parser.add_argument(
         "--spacing", type=float, default=4.0, help="Altimetry points spacing (degrees)"
@@ -85,7 +85,7 @@ def main():
     parser.add_argument(
         "--precond",
         type=str,
-        choices=["none", "block", "banded", "spectral", "sparse"],
+        choices=["none", "dense", "block", "banded", "spectral", "sparse"],
         default="none",
         help="Type of preconditioner to apply",
     )
@@ -93,12 +93,7 @@ def main():
         "--bandwidth", type=int, default=20, help="Bandwidth for banded preconditioner"
     )
     parser.add_argument(
-        "--rank", type=int, default=100, help="Rank for spectral preconditioner"
-    )
-    parser.add_argument(
-        "--incomplete",
-        action="store_true",
-        help="Use Incomplete LU (spilu) instead of exact LU",
+        "--rank", type=int, default=10, help="Rank for spectral preconditioner"
     )
     parser.add_argument(
         "--block-size", type=float, default=10.0, help="Grid size for block partitioner"
@@ -131,7 +126,7 @@ def main():
     order = 2.0
     scale_km = 250.0
     pointwise_std_m = 0.1
-    altimetry_std_dev_m = 0.001
+    altimetry_std_factor = 0.1
 
     # ==========================================
     # Setup Data Grid
@@ -156,10 +151,22 @@ def main():
         args.lmax, altimetry_points, order, scale_km, pointwise_std_m
     )
 
+    GMSL_weighting_function = (
+        -exact_fp.ice_density
+        * exact_fp.one_minus_ocean_function
+        * exact_fp.ice_projection(value=0)
+        / (exact_fp.water_density * exact_fp.ocean_area)
+    )
+
+    B = sl.averaging_operator(model_space, [GMSL_weighting_function])
+    GMSL_prior_measure = model_prior_measure.affine_mapping(operator=B)
+
+    GMSL_prior_std = np.sqrt(GMSL_prior_measure.covariance.matrix(dense=True)[0, 0])
+
     data_space = A.codomain
-    altimetry_std_dev = altimetry_std_dev_m / exact_fp.length_scale
+    altimetry_std = altimetry_std_factor * GMSL_prior_std
     data_error_measure = inf.GaussianMeasure.from_standard_deviation(
-        data_space, altimetry_std_dev
+        data_space, altimetry_std
     )
 
     forward_problem = inf.LinearForwardProblem(A, data_error_measure=data_error_measure)
@@ -204,7 +211,7 @@ def main():
             blocks = sl.partition_points_by_grid(altimetry_points, args.block_size)
             print(f"Forming block preconditioner with {len(blocks)} blocks...")
             solver_wrapper = inf.ExactBlockPreconditioningMethod(
-                blocks, incomplete=args.incomplete
+                blocks, incomplete=True
             )
         elif args.precond == "banded":
             solver_wrapper = inf.BandedPreconditioningMethod(
@@ -212,12 +219,14 @@ def main():
             )
         elif args.precond == "spectral":
             solver_wrapper = inf.SpectralPreconditioningMethod(
-                rank=args.rank, method="fixed"
+                rank=args.rank, method="variable", max_rank=20 * args.rank
             )
         elif args.precond == "sparse":
             solver_wrapper = inf.ColumnThresholdedPreconditioningMethod(
-                1e-3, incomplete=args.incomplete
+                1e-2, max_nnz=100, incomplete=True
             )
+        elif args.precond == "dense":
+            solver_wrapper = inf.CholeskySolver()
 
         preconditioner = solver_wrapper(surrogate_normal_operator)
 
@@ -253,28 +262,46 @@ def main():
         * exact_fp.length_scale
     )
 
-    fig1, ax1, im1 = sl.plot(
+    # Map Group 1: Ice Thickness
+    fig_ice, axes_ice = plt.subplots(
+        1,
+        2,
+        figsize=(14, 5),
+        subplot_kw={"projection": ccrs.Robinson()},
+        layout="constrained",
+    )
+
+    sl.plot(
         1000 * model_true * exact_fp.length_scale,
+        ax=axes_ice[0],
         coasts=True,
         cmap="seismic",
         vmin=-max_abs_ice_change,
         vmax=max_abs_ice_change,
-        colorbar_label="Ice Thickness Change (mm)",
+        colorbar=True,
+        colorbar_kwargs={"label": "Ice Thickness Change (mm)"},
     )
-    ax1.plot(lons, lats, "k^", markersize=5, transform=ccrs.PlateCarree(), alpha=0.1)
-    ax1.set_title("a) True Ice Thickness Change")
+    axes_ice[0].plot(
+        lons, lats, "k^", markersize=5, transform=ccrs.PlateCarree(), alpha=0.1
+    )
+    axes_ice[0].set_title("a) True Ice Thickness Change")
 
-    fig2, ax2, im2 = sl.plot(
+    sl.plot(
         1000 * model_posterior_expectation * exact_fp.length_scale,
+        ax=axes_ice[1],
         coasts=True,
         cmap="seismic",
         vmin=-max_abs_ice_change,
         vmax=max_abs_ice_change,
-        colorbar_label="Ice Thickness Change (mm)",
+        colorbar=True,
+        colorbar_kwargs={"label": "Ice Thickness Change (mm)"},
     )
-    ax2.plot(lons, lats, "k^", markersize=5, transform=ccrs.PlateCarree(), alpha=0.1)
-    ax2.set_title("b) Posterior Expectation")
+    axes_ice[1].plot(
+        lons, lats, "k^", markersize=5, transform=ccrs.PlateCarree(), alpha=0.1
+    )
+    axes_ice[1].set_title("b) Posterior Expectation")
 
+    # Map Group 2: SSH and Residuals
     ssh_posterior = A_ssh(model_posterior_expectation)
     ssh_true = A_ssh(model_true)
     ocean_mask = exact_fp.ocean_projection()
@@ -294,59 +321,71 @@ def main():
         * exact_fp.length_scale
     )
 
-    fig3, ax3, im3 = sl.plot(
+    fig_ssh, axes_ssh = plt.subplots(
+        1,
+        2,
+        figsize=(14, 5),
+        subplot_kw={"projection": ccrs.Robinson()},
+        layout="constrained",
+    )
+
+    sl.plot(
         1000 * ssh_true * ocean_mask * exact_fp.length_scale,
+        ax=axes_ssh[0],
         coasts=True,
         cmap="seismic",
         vmin=-max_abs_sl_change,
         vmax=max_abs_sl_change,
-        colorbar_label="SSH Change (mm)",
+        colorbar=True,
+        colorbar_kwargs={"label": "SSH Change (mm)"},
     )
-    ax3.set_title("a) True Sea surface height change")
+    axes_ssh[0].set_title("a) True Sea surface height change")
 
     # Scale the synthetic data back to millimeters to match the background
     scaled_data = data * 1000 * exact_fp.length_scale
 
     # Scatter the noisy data points using the exact same colormap and limits
-    ax3.scatter(
+    axes_ssh[0].scatter(
         lons,
         lats,
         c=scaled_data,
         cmap="seismic",
         vmin=-max_abs_sl_change,
         vmax=max_abs_sl_change,
-        s=40,  # Slightly larger to see the color clearly
+        s=40,
         marker="^",
-        edgecolors="black",  # Crisp black edge so it doesn't bleed into the background
+        edgecolors="black",
         linewidths=0.5,
         transform=ccrs.PlateCarree(),
-        zorder=5,  # Force it to draw above the continuous field
+        zorder=5,
     )
 
     # Calculate the predicted data and normalized residuals
     predicted_data = A(model_posterior_expectation)
-    normalized_residuals = (data - predicted_data) / altimetry_std_dev
+    normalized_residuals = (data - predicted_data) / altimetry_std
 
-    fig4, ax4, im4 = sl.plot(
+    sl.plot(
         1000 * ssh_posterior * exact_fp.ocean_projection() * exact_fp.length_scale,
+        ax=axes_ssh[1],
         coasts=True,
         cmap="seismic",
         vmin=-max_abs_sl_change,
         vmax=max_abs_sl_change,
-        colorbar_label="SSH Change (mm)",
+        colorbar=True,
+        colorbar_kwargs={"label": "SSH Change (mm)"},
     )
-    ax4.set_title("b) Predicted SSH Fingerprint & Normalized Residuals")
+    axes_ssh[1].set_title("b) Predicted SSH Fingerprint & Normalized Residuals")
 
     # Scatter the normalized residuals on top
-    sc4 = ax4.scatter(
+    sc4 = axes_ssh[1].scatter(
         lons,
         lats,
         c=normalized_residuals,
-        cmap="coolwarm",  # A distinct colormap from the background
+        cmap="coolwarm",
         vmin=-3,
-        vmax=3,  # Clamped to standard +/- 3 sigma bounds
+        vmax=3,
         s=40,
-        marker="o",
+        marker="^",
         edgecolors="black",
         linewidths=0.5,
         transform=ccrs.PlateCarree(),
@@ -354,7 +393,17 @@ def main():
     )
 
     # Add a secondary colorbar specifically for the residuals
-    plt.colorbar(sc4, ax=ax4, label="Normalized Residuals (σ)", fraction=0.03, pad=0.04)
+    fig_ssh.colorbar(
+        sc4,
+        ax=axes_ssh[1],
+        label="Normalized Residuals (σ)",
+        shrink=0.7,
+        pad=0.04,
+        orientation="horizontal",
+    )
+
+    """
+
 
     # --- PDF for GMSL change ---
     print("Extracting PDFs for GMSL and Ice Sheet contributions...")
@@ -371,12 +420,13 @@ def main():
     GMSL_true = B(model_true)
     GMSL_posterior_measure = model_posterior_measure.affine_mapping(operator=B)
 
-    fig5, ax5 = plot_1d_distributions(
+    fig_gmsl, ax_gmsl = plt.subplots(figsize=(8, 6), layout="constrained")
+    plot_1d_distributions(
         GMSL_posterior_measure,
         true_value=GMSL_true[0],
+        ax=ax_gmsl,
         xlabel="GMSL Change (mm)",
         title="Global Mean Sea Level Change Inference from Altimetry",
-        show_plot=False,
     )
 
     # --- Corner Plot for Ice Sheet Contributions ---
@@ -412,13 +462,14 @@ def main():
     property_true = C(model_true)
     property_posterior_measure = model_posterior_measure.affine_mapping(operator=C)
 
-    fig6, axes = plot_corner_distributions(
+    axes_corner = plot_corner_distributions(
         property_posterior_measure,
         true_values=property_true,
         labels=["Greenland (mm)", "West Antarctica (mm)", "East Antarctica (mm)"],
         title="Joint Posterior Distributions of GMSL Contributions",
-        show_plot=False,
     )
+
+    """
 
     plt.show()
 

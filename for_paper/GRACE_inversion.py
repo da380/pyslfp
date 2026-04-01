@@ -38,15 +38,9 @@ def parse_arguments():
         help="Plot spatial maps of true loads, posterior expectations, spatial error residuals, and regional averaging masks.",
     )
     parser.add_argument(
-        "--plot-corner",
+        "--plot-degree-1",
         action="store_true",
         help="Plot a corner plot demonstrating Bayesian recovery of degree-1 coefficients.",
-    )
-    parser.add_argument(
-        "--posterior-samples",
-        type=int,
-        default=0,
-        help="Number of samples to draw from the posterior to estimate pointwise standard deviation.",
     )
     parser.add_argument(
         "--mc-trials",
@@ -58,13 +52,13 @@ def parse_arguments():
     parser.add_argument(
         "--lmax",
         type=int,
-        default=64,
+        default=128,
         help="Maximum spherical harmonic degree for the Earth model.",
     )
     parser.add_argument(
         "--obs-degree",
         type=int,
-        default=32,
+        default=100,
         help="Maximum spherical harmonic degree of the GRACE observations.",
     )
     parser.add_argument(
@@ -131,9 +125,7 @@ def main():
         args.smoothing_scale_km = args.load_scale_km
 
     if args.all:
-        args.plot_pdfs = args.plot_maps = args.plot_corner = True
-        if args.posterior_samples == 0:
-            args.posterior_samples = 10
+        args.plot_pdfs = args.plot_maps = args.plot_degree_1 = True
         if args.mc_trials == 0:
             args.mc_trials = 500
 
@@ -262,7 +254,7 @@ def main():
         )
 
     # ------------------ OPTION 3: Corner Plot ------------------
-    if args.plot_corner:
+    if args.plot_degree_1:
         print("Generating Degree-1 Corner Plot...")
         deg1_op = load_space.to_coefficient_operator(1, lmin=1) * scale_mm @ tot_op
         inf.plot_corner_distributions(
@@ -276,32 +268,7 @@ def main():
             ],
         )
 
-    # ------------------ OPTION 4: Samples ------------------
-    if args.posterior_samples > 0:
-        pointwise_variance = load_posterior.sample_pointwise_variance(
-            args.posterior_samples
-        )
-        pointwise_std = pointwise_variance.copy()
-        pointwise_std.data[:, :] = np.sqrt(pointwise_variance.data[:, :])
-        pointwise_std_mm = pointwise_std * scale_mm
-
-        fig_samples, ax_samples = plt.subplots(
-            figsize=(14, 5),
-            subplot_kw={"projection": ccrs.Robinson()},
-            layout="constrained",
-        )
-
-        _, im_samples = sl.plot(
-            pointwise_std_mm,
-            ax=ax_samples,
-            colorbar=True,
-            colorbar_kwargs={"label": "Std Dev EWT (mm)"},
-            vmin=0,
-            cmap="viridis",
-            symmetric=False,
-        )
-
-    # ------------------ OPTION 5: Monte Carlo ------------------
+    # ------------------ OPTION 4: Monte Carlo ------------------
     if args.mc_trials > 0:
         print(f"Running {args.mc_trials} MC trials via dense joint measure mapping...")
         w_errs, b_errs = np.zeros((args.mc_trials, len(region_names))), np.zeros(
@@ -476,8 +443,7 @@ def main():
         [
             args.plot_maps,
             args.plot_pdfs,
-            args.plot_corner,
-            args.posterior_samples,
+            args.plot_degree_1,
             args.mc_trials,
         ]
     ):

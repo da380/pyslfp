@@ -20,7 +20,18 @@ from pygeoinf import plot_1d_distributions, plot_corner_distributions
 import pyslfp as sl
 
 
-def build_physics_components(lmax, altimetry_points, order, scale_km, pointwise_std_m):
+def build_physics_components(
+    lmax,
+    altimetry_points,
+    order,
+    scale_km,
+    pointwise_std_m,
+    noise_scale_factor,
+    noise_std_factor,
+    /,
+    *,
+    rtol=1e-6,
+):
     """
     Helper function to build the FingerPrint model, Sobolev spaces, forward
     operators, and prior measures for a specific spherical harmonic truncation degree.
@@ -41,7 +52,7 @@ def build_physics_components(lmax, altimetry_points, order, scale_km, pointwise_
     # 3. Construct the network of physical operators
     op1 = sl.ice_projection_operator(fp, model_space)
     op2 = sl.ice_thickness_change_to_load_operator(fp, model_space)
-    op3 = fp.as_sobolev_linear_operator(order, scale)
+    op3 = fp.as_sobolev_linear_operator(order, scale, rtol=rtol)
     op4 = sl.ocean_altimetry_operator(fp, op3.codomain, altimetry_points)
 
     A = op4 @ op3 @ op2 @ op1
@@ -58,7 +69,28 @@ def build_physics_components(lmax, altimetry_points, order, scale_km, pointwise_
     )
     model_prior_measure = initial_model_prior_measure.affine_mapping(operator=op1)
 
-    return fp, model_space, A, A_ssh, model_prior_measure
+    # 5. Set up the noise model
+    GMSL_weighting_function = (
+        -fp.ice_density
+        * fp.one_minus_ocean_function
+        * fp.ice_projection(value=0)
+        / (fp.water_density * fp.ocean_area)
+    )
+
+    B = sl.averaging_operator(model_space, [GMSL_weighting_function])
+    GMSL_prior_measure = model_prior_measure.affine_mapping(operator=B)
+    GMSL_prior_std = np.sqrt(GMSL_prior_measure.covariance.matrix(dense=True)[0, 0])
+
+    data_space = A.codomain
+    noise_scale = noise_scale_factor * scale_km * 1000 / fp.length_scale
+    noise_std = noise_std_factor * GMSL_prior_std
+    noise_field = model_space.point_value_scaled_heat_kernel_gaussian_measure(
+        noise_scale, std=noise_std
+    )
+    P = model_space.point_evaluation_operator(altimetry_points)
+    data_error_measure = noise_field.affine_mapping(operator=P)
+
+    return fp, model_space, A, A_ssh, model_prior_measure, data_error_measure
 
 
 def main():
@@ -69,23 +101,20 @@ def main():
 
     # Physics & Grid Parameters
     parser.add_argument(
-        "--lmax", type=int, default=128, help="Exact physics truncation degree"
+        "--lmax", type=int, default=64, help="Exact physics truncation degree"
     )
     parser.add_argument(
-        "--surrogate-degree", type=int, default=64, help="Surrogate truncation degree"
+        "--surrogate-degree", type=int, default=32, help="Surrogate truncation degree"
     )
     parser.add_argument(
-        "--spacing", type=float, default=4.0, help="Altimetry points spacing (degrees)"
-    )
-    parser.add_argument(
-        "--seed", type=int, default=42, help="Random seed for reproducibility"
+        "--spacing", type=float, default=10.0, help="Altimetry points spacing (degrees)"
     )
 
     # Preconditioner Parameters
     parser.add_argument(
         "--precond",
         type=str,
-        choices=["none", "dense", "block", "banded", "spectral", "sparse"],
+        choices=["none", "dense", "block", "spectral", "sparse"],
         default="none",
         help="Type of preconditioner to apply",
     )
@@ -93,40 +122,20 @@ def main():
         "--bandwidth", type=int, default=20, help="Bandwidth for banded preconditioner"
     )
     parser.add_argument(
-        "--rank", type=int, default=10, help="Rank for spectral preconditioner"
+        "--rank", type=int, default=50, help="Rank for spectral preconditioner"
     )
     parser.add_argument(
         "--block-size", type=float, default=10.0, help="Grid size for block partitioner"
     )
 
-    # Low-Rank Surrogate Parameters
-    parser.add_argument(
-        "--lr-forward",
-        type=int,
-        default=None,
-        help="Rank for low-rank forward operator surrogate",
-    )
-    parser.add_argument(
-        "--lr-prior",
-        type=int,
-        default=None,
-        help="Rank for low-rank prior measure surrogate",
-    )
-    parser.add_argument(
-        "--lr-data-error",
-        type=int,
-        default=None,
-        help="Rank for low-rank data error measure surrogate",
-    )
-
     args = parser.parse_args()
-    np.random.seed(args.seed)
 
     # Physical scaling constants
     order = 2.0
-    scale_km = 250.0
+    scale_km = 200.0
     pointwise_std_m = 0.1
-    altimetry_std_factor = 0.1
+    noise_scale_factor = 0.25
+    noise_std_factor = 0.1
 
     # ==========================================
     # Setup Data Grid
@@ -147,26 +156,16 @@ def main():
     # 1. Exact Problem Components
     # ==========================================
     print(f"Building exact physical operators (lmax={args.lmax})...")
-    exact_fp, model_space, A, A_ssh, model_prior_measure = build_physics_components(
-        args.lmax, altimetry_points, order, scale_km, pointwise_std_m
-    )
-
-    GMSL_weighting_function = (
-        -exact_fp.ice_density
-        * exact_fp.one_minus_ocean_function
-        * exact_fp.ice_projection(value=0)
-        / (exact_fp.water_density * exact_fp.ocean_area)
-    )
-
-    B = sl.averaging_operator(model_space, [GMSL_weighting_function])
-    GMSL_prior_measure = model_prior_measure.affine_mapping(operator=B)
-
-    GMSL_prior_std = np.sqrt(GMSL_prior_measure.covariance.matrix(dense=True)[0, 0])
-
-    data_space = A.codomain
-    altimetry_std = altimetry_std_factor * GMSL_prior_std
-    data_error_measure = inf.GaussianMeasure.from_standard_deviation(
-        data_space, altimetry_std
+    exact_fp, model_space, A, A_ssh, model_prior_measure, data_error_measure = (
+        build_physics_components(
+            args.lmax,
+            altimetry_points,
+            order,
+            scale_km,
+            pointwise_std_m,
+            noise_scale_factor,
+            noise_std_factor,
+        )
     )
 
     forward_problem = inf.LinearForwardProblem(A, data_error_measure=data_error_measure)
@@ -182,22 +181,22 @@ def main():
     # 2. Surrogate Problem Components
     # ==========================================
     print(f"Building spatial surrogate operators (lmax={args.surrogate_degree})...")
-    _, _, surrogate_A, _, surrogate_prior = build_physics_components(
-        args.surrogate_degree, altimetry_points, order, scale_km, pointwise_std_m
+    _, _, surrogate_A, _, surrogate_prior, surrogate_noise = build_physics_components(
+        args.surrogate_degree,
+        altimetry_points,
+        order,
+        scale_km,
+        pointwise_std_m,
+        noise_scale_factor,
+        noise_std_factor,
+        rtol=1e-3,
     )
 
     surrogate_inv = bayesian_inversion.surrogate_inversion(
         alternate_forward_operator=surrogate_A,
         alternate_prior_measure=surrogate_prior,
+        alternate_data_error_measure=surrogate_noise,
     )
-
-    if args.lr_forward or args.lr_prior or args.lr_data_error:
-        print("Applying low-rank approximations to the spatial surrogate...")
-        surrogate_inv = surrogate_inv.low_rank_surrogate(
-            forward_rank=args.lr_forward,
-            prior_rank=args.lr_prior,
-            data_error_rank=args.lr_data_error,
-        )
 
     surrogate_normal_operator = surrogate_inv.normal_operator
 
@@ -213,17 +212,13 @@ def main():
             solver_wrapper = inf.ExactBlockPreconditioningMethod(
                 blocks, incomplete=True
             )
-        elif args.precond == "banded":
-            solver_wrapper = inf.BandedPreconditioningMethod(
-                args.bandwidth, incomplete=args.incomplete
-            )
         elif args.precond == "spectral":
             solver_wrapper = inf.SpectralPreconditioningMethod(
-                rank=args.rank, method="variable", max_rank=20 * args.rank
+                rank=args.rank, method="fixed"
             )
         elif args.precond == "sparse":
             solver_wrapper = inf.ColumnThresholdedPreconditioningMethod(
-                1e-2, max_nnz=100, incomplete=True
+                1e-2, incomplete=True, parallel=True, n_jobs=10
             )
         elif args.precond == "dense":
             solver_wrapper = inf.CholeskySolver()
@@ -360,9 +355,8 @@ def main():
         zorder=5,
     )
 
-    # Calculate the predicted data and normalized residuals
+    # Calculate the predicted data
     predicted_data = A(model_posterior_expectation)
-    normalized_residuals = (data - predicted_data) / altimetry_std
 
     sl.plot(
         1000 * ssh_posterior * exact_fp.ocean_projection() * exact_fp.length_scale,
@@ -380,26 +374,16 @@ def main():
     sc4 = axes_ssh[1].scatter(
         lons,
         lats,
-        c=normalized_residuals,
-        cmap="coolwarm",
-        vmin=-3,
-        vmax=3,
+        c=scaled_data,
+        cmap="seismic",
+        vmin=-max_abs_sl_change,
+        vmax=max_abs_sl_change,
         s=40,
         marker="^",
         edgecolors="black",
         linewidths=0.5,
         transform=ccrs.PlateCarree(),
         zorder=5,
-    )
-
-    # Add a secondary colorbar specifically for the residuals
-    fig_ssh.colorbar(
-        sc4,
-        ax=axes_ssh[1],
-        label="Normalized Residuals (σ)",
-        shrink=0.7,
-        pad=0.04,
-        orientation="horizontal",
     )
 
     """

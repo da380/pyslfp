@@ -27,7 +27,8 @@ def build_physics_components(
     scale_km,
     pointwise_std_m,
     noise_scale_factor,
-    noise_std_factor,
+    obs_noise_std_factor,
+    dyn_noise_std_factor,
     /,
     *,
     rtol=1e-6,
@@ -82,13 +83,24 @@ def build_physics_components(
     GMSL_prior_std = np.sqrt(GMSL_prior_measure.covariance.matrix(dense=True)[0, 0])
 
     data_space = A.codomain
-    noise_scale = noise_scale_factor * scale_km * 1000 / fp.length_scale
-    noise_std = noise_std_factor * GMSL_prior_std
+
+    # Part 1: Observational Error (Uncorrelated White Noise)
+    obs_noise_std = obs_noise_std_factor * GMSL_prior_std
+    obs_error_measure = inf.GaussianMeasure.from_standard_deviation(
+        data_space, obs_noise_std
+    )
+
+    # Part 2: Ocean Dynamic Contribution (Correlated Gaussian Random Field)
+    dyn_noise_std = dyn_noise_std_factor * GMSL_prior_std
+    noise_scale = noise_scale_factor * scale
     noise_field = model_space.point_value_scaled_heat_kernel_gaussian_measure(
-        noise_scale, std=noise_std
+        noise_scale, std=dyn_noise_std
     )
     P = model_space.point_evaluation_operator(altimetry_points)
-    data_error_measure = noise_field.affine_mapping(operator=P)
+    dyn_error_measure = noise_field.affine_mapping(operator=P)
+
+    # Combine them using the overloaded addition operator!
+    data_error_measure = obs_error_measure + dyn_error_measure
 
     return fp, model_space, A, A_ssh, model_prior_measure, data_error_measure
 
@@ -101,10 +113,10 @@ def main():
 
     # Physics & Grid Parameters
     parser.add_argument(
-        "--lmax", type=int, default=64, help="Exact physics truncation degree"
+        "--lmax", type=int, default=128, help="Exact physics truncation degree"
     )
     parser.add_argument(
-        "--surrogate-degree", type=int, default=32, help="Surrogate truncation degree"
+        "--surrogate-degree", type=int, default=64, help="Surrogate truncation degree"
     )
     parser.add_argument(
         "--spacing", type=float, default=10.0, help="Altimetry points spacing (degrees)"
@@ -132,10 +144,11 @@ def main():
 
     # Physical scaling constants
     order = 2.0
-    scale_km = 200.0
+    scale_km = 500.0
     pointwise_std_m = 0.1
-    noise_scale_factor = 0.25
-    noise_std_factor = 0.1
+    noise_scale_factor = 0.1
+    obs_noise_std_factor = 0.5
+    dyn_noise_std_factor = 0.2
 
     # ==========================================
     # Setup Data Grid
@@ -164,7 +177,8 @@ def main():
             scale_km,
             pointwise_std_m,
             noise_scale_factor,
-            noise_std_factor,
+            obs_noise_std_factor,
+            dyn_noise_std_factor,
         )
     )
 
@@ -177,59 +191,74 @@ def main():
     print("Generating synthetic truth and data...")
     model_true, data = forward_problem.synthetic_model_and_data(model_prior_measure)
 
-    # ==========================================
-    # 2. Surrogate Problem Components
-    # ==========================================
-    print(f"Building spatial surrogate operators (lmax={args.surrogate_degree})...")
-    _, _, surrogate_A, _, surrogate_prior, surrogate_noise = build_physics_components(
-        args.surrogate_degree,
-        altimetry_points,
-        order,
-        scale_km,
-        pointwise_std_m,
-        noise_scale_factor,
-        noise_std_factor,
-        rtol=1e-3,
-    )
-
-    surrogate_inv = bayesian_inversion.surrogate_inversion(
-        alternate_forward_operator=surrogate_A,
-        alternate_prior_measure=surrogate_prior,
-        alternate_data_error_measure=surrogate_noise,
-    )
-
-    surrogate_normal_operator = surrogate_inv.normal_operator
-
-    # ==========================================
-    # 3. Preconditioner Routing
-    # ==========================================
     preconditioner = None
     if args.precond != "none":
-        print(f"Initializing {args.precond} preconditioner...")
-        if args.precond == "block":
-            blocks = sl.partition_points_by_grid(altimetry_points, args.block_size)
-            print(f"Forming block preconditioner with {len(blocks)} blocks...")
-            solver_wrapper = inf.ExactBlockPreconditioningMethod(
-                blocks, incomplete=True
-            )
-        elif args.precond == "spectral":
-            solver_wrapper = inf.SpectralPreconditioningMethod(
-                rank=args.rank, method="fixed"
-            )
-        elif args.precond == "sparse":
-            solver_wrapper = inf.ColumnThresholdedPreconditioningMethod(
-                1e-2, incomplete=True, parallel=True, n_jobs=10
-            )
-        elif args.precond == "dense":
-            solver_wrapper = inf.CholeskySolver()
 
-        preconditioner = solver_wrapper(surrogate_normal_operator)
+        # ==========================================
+        # 2. Surrogate Problem Components
+        # ==========================================
+
+        print(f"Building spatial surrogate operators (lmax={args.surrogate_degree})...")
+        # Notice we can pass dummy values for the noise here since we won't use it
+        _, _, surrogate_A, _, surrogate_prior, _ = build_physics_components(
+            args.surrogate_degree,
+            altimetry_points,
+            order,
+            scale_km,
+            pointwise_std_m,
+            noise_scale_factor,
+            obs_noise_std_factor,
+            dyn_noise_std_factor,
+        )
+
+        surrogate_inv = bayesian_inversion.surrogate_inversion(
+            alternate_forward_operator=surrogate_A,
+            alternate_prior_measure=surrogate_prior,
+        )
+
+        surrogate_normal_operator = surrogate_inv.normal_operator
+
+        # ==========================================
+        # 3. Preconditioner Routing
+        # ==========================================
+        if args.precond != "none":
+            print(f"Initializing {args.precond} preconditioner...")
+            if args.precond == "block":
+                blocks = sl.partition_points_by_grid(altimetry_points, args.block_size)
+                print(f"Forming block preconditioner with {len(blocks)} blocks...")
+                solver_wrapper = inf.ExactBlockPreconditioningMethod(
+                    blocks, incomplete=True
+                )
+            elif args.precond == "spectral":
+                solver_wrapper = inf.SpectralPreconditioningMethod(
+                    rank=args.rank, method="fixed"
+                )
+            elif args.precond == "sparse":
+                solver_wrapper = inf.ColumnThresholdedPreconditioningMethod(
+                    1e-3,
+                    incomplete=True,
+                )
+            elif args.precond == "dense":
+                solver_wrapper = inf.CholeskySolver()
+
+            preconditioner = solver_wrapper(surrogate_normal_operator)
 
     # ==========================================
     # 4. Solve the Linear System
     # ==========================================
+
+    class Callback:
+        def __init__(self):
+            self.iteration = 0
+
+        def __call__(self, xk):
+            self.iteration += 1
+            print(f"Working... Iteration {self.iteration}", end="\r")
+
+    callback = Callback()
+
     print("Solving the linear system...")
-    solver = inf.CGMatrixSolver()
+    solver = inf.CGMatrixSolver(callback=callback)
     model_posterior_measure = bayesian_inversion.model_posterior_measure(
         data, solver, preconditioner=preconditioner
     )
@@ -347,7 +376,7 @@ def main():
         cmap="seismic",
         vmin=-max_abs_sl_change,
         vmax=max_abs_sl_change,
-        s=40,
+        s=20,
         marker="^",
         edgecolors="black",
         linewidths=0.5,
@@ -368,7 +397,7 @@ def main():
         colorbar=True,
         colorbar_kwargs={"label": "SSH Change (mm)"},
     )
-    axes_ssh[1].set_title("b) Predicted SSH Fingerprint & Normalized Residuals")
+    axes_ssh[1].set_title("b) Predicted SSH Fingerprint")
 
     # Scatter the normalized residuals on top
     sc4 = axes_ssh[1].scatter(
@@ -378,16 +407,13 @@ def main():
         cmap="seismic",
         vmin=-max_abs_sl_change,
         vmax=max_abs_sl_change,
-        s=40,
+        s=20,
         marker="^",
         edgecolors="black",
         linewidths=0.5,
         transform=ccrs.PlateCarree(),
         zorder=5,
     )
-
-    """
-
 
     # --- PDF for GMSL change ---
     print("Extracting PDFs for GMSL and Ice Sheet contributions...")
@@ -452,8 +478,6 @@ def main():
         labels=["Greenland (mm)", "West Antarctica (mm)", "East Antarctica (mm)"],
         title="Joint Posterior Distributions of GMSL Contributions",
     )
-
-    """
 
     plt.show()
 

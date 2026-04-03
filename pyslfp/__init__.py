@@ -23,6 +23,7 @@ from .operators import (
     sea_surface_height_operator,
     remove_ocean_average_operator,
     ocean_altimetry_operator,
+    altimetry_averaging_operator,
 )
 
 
@@ -60,4 +61,5 @@ __all__ = [
     "sea_surface_height_operator",
     "remove_ocean_average_operator",
     "ocean_altimetry_operator",
+    "altimetry_averaging_operator",
 ]

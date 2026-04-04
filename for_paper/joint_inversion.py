@@ -6,9 +6,10 @@ This script performs a joint Bayesian inversion of synthetic GRACE gravimetry
 and satellite altimetry data to simultaneously estimate ice sheet mass loss
 and ocean dynamic topography.
 
-It leverages a hybrid block-diagonal preconditioner in the data space:
-  - Block 1 (GRACE): Purely spectral WMB analytical approximation.
-  - Block 2 (Altimetry): Sparse matrix approximation of a low-resolution surrogate.
+It offers two preconditioning strategies:
+  1. Hybrid Block-Diagonal: WMB for GRACE, Woodbury for Altimetry.
+  2. Full Woodbury: A monolithic Woodbury preconditioner applied to the entire
+     joint data space, capturing the cross-coupling between gravity and SSH.
 """
 
 import argparse
@@ -23,16 +24,28 @@ def parse_arguments():
     parser = argparse.ArgumentParser(
         description="Joint Bayesian Inversion of GRACE and Altimetry Data."
     )
+    # Plotting and Output Toggles
+    parser.add_argument(
+        "--all", action="store_true", help="Enable all plotting options."
+    )
+    parser.add_argument(
+        "--plot-pdfs", action="store_true", help="Plot 1D analytical PDFs."
+    )
+    parser.add_argument("--plot-maps", action="store_true", help="Plot spatial maps.")
+    parser.add_argument(
+        "--mc-trials", type=int, default=0, help="Number of Monte Carlo trials."
+    )
+
     # Resolution Parameters
-    parser.add_argument("--lmax", type=int, default=64, help="Exact physics lmax.")
+    parser.add_argument("--lmax", type=int, default=128, help="Exact physics lmax.")
     parser.add_argument(
         "--surrogate-degree",
         type=int,
-        default=32,
-        help="Surrogate lmax for altimetry preconditioner.",
+        default=48,
+        help="Surrogate lmax for preconditioner.",
     )
     parser.add_argument(
-        "--obs-degree", type=int, default=32, help="GRACE max observation degree."
+        "--obs-degree", type=int, default=100, help="GRACE max observation degree."
     )
     parser.add_argument(
         "--spacing-degrees",
@@ -55,7 +68,7 @@ def parse_arguments():
     parser.add_argument(
         "--alt-noise-std-factor",
         type=float,
-        default=1.0,
+        default=0.5,
         help="Altimetry noise std factor.",
     )
     parser.add_argument(
@@ -71,20 +84,21 @@ def parse_arguments():
         help="GRACE noise length scale factor.",
     )
 
+    # Preconditioner Toggle
     parser.add_argument(
-        "--sparse-threshold",
-        type=float,
-        default=1e-3,
-        help="Tolerance for sparse altimetry preconditioner.",
+        "--full-woodbury",
+        action="store_true",
+        help="Use a single monolithic Woodbury preconditioner for the entire joint problem.",
     )
 
     return parser.parse_args()
 
 
-def build_joint_physics(lmax, obs_degree, points, args):
+def build_joint_physics(lmax, obs_degree, points, args, is_surrogate=False):
     """
     Constructs the joint physical operators, priors, and noise measures.
-    This function is used to build both the exact High-Res model and the Low-Res Surrogate.
+    If is_surrogate=True, builds a "Physics-Lite" model that bypasses the iterative
+    Sea Level Equation for stability during preconditioner extraction.
     """
     fp = sl.FingerPrint(
         lmax=lmax,
@@ -95,7 +109,12 @@ def build_joint_physics(lmax, obs_degree, points, args):
 
     # ------------------ 1. SPACES & CORE MAPPINGS ------------------
     load_scale = args.load_scale_km * 1000.0 / fp.length_scale
-    fp_op = fp.as_sobolev_linear_operator(args.load_order, load_scale)
+
+    # PHYSICS-LITE TWEAK 1: Limit SLE iterations for the surrogate
+    max_iters = 1 if is_surrogate else None
+    fp_op = fp.as_sobolev_linear_operator(
+        args.load_order, load_scale, max_iterations=max_iters
+    )
 
     load_space = fp_op.domain
     response_space = fp_op.codomain
@@ -104,7 +123,12 @@ def build_joint_physics(lmax, obs_degree, points, args):
     P_ocean = sl.ocean_projection_operator(fp, load_space)
 
     ice_to_load = sl.ice_thickness_change_to_load_operator(fp, load_space)
-    ocean_to_load = sl.sea_level_change_to_load_operator(fp, load_space, load_space)
+
+    # PHYSICS-LITE TWEAK 2: Decouple Ocean Dynamic Topography from the SLE mass load
+    if is_surrogate:
+        ocean_to_load = load_space.zero_operator(load_space)
+    else:
+        ocean_to_load = sl.sea_level_change_to_load_operator(fp, load_space, load_space)
 
     # Operator mapping [Ice, Ocean] -> Total Direct Load
     total_load_op = inf.RowLinearOperator(
@@ -173,7 +197,15 @@ def build_joint_physics(lmax, obs_degree, points, args):
     grace_noise_scale = args.grace_noise_scale_factor * ice_scale
     grace_noise_std = args.grace_noise_std_factor * ice_std
 
-    grace_noise_load = load_space.point_value_scaled_heat_kernel_gaussian_measure(
+    # FIX: Ensure the noise load space extends to the full observation degree
+    # so the mapped observation noise covariance doesn't contain zeros!
+    noise_load_space = (
+        load_space.with_degree(obs_degree)
+        if load_space.lmax < obs_degree
+        else load_space
+    )
+
+    grace_noise_load = noise_load_space.point_value_scaled_heat_kernel_gaussian_measure(
         grace_noise_scale, std=grace_noise_std
     )
     grace_noise = wmb.load_measure_to_observation_measure(grace_noise_load)
@@ -221,7 +253,9 @@ def main():
     # 1. BUILD EXACT PHYSICS
     # ==========================================
     print(f"\nBuilding EXACT joint physical operators (lmax={args.lmax})...")
-    exact = build_joint_physics(args.lmax, args.obs_degree, points, args)
+    exact = build_joint_physics(
+        args.lmax, args.obs_degree, points, args, is_surrogate=False
+    )
 
     print(
         f"Implied GMSL standard deviation from ice prior: {exact['gmsl_std'] * exact['scale_mm']:.3f} mm"
@@ -233,54 +267,66 @@ def main():
     true_model, synthetic_data = fwd_prob.synthetic_model_and_data(exact["model_prior"])
     inv_prob = inf.LinearBayesianInversion(fwd_prob, exact["model_prior"])
 
+    print(f"Data space dimension is {fwd_prob.data_space.dim}")
+
     # ==========================================
-    # 2. HYBRID BLOCK-DIAGONAL PRECONDITIONER
+    # 2. PRECONDITIONER SETUP
     # ==========================================
     print(
-        f"\nBuilding SURROGATE model for preconditioning (lmax={args.surrogate_degree})..."
+        f"\nBuilding 'Physics-Lite' SURROGATE model for preconditioning (lmax={args.surrogate_degree})..."
     )
-    surr_obs_deg = min(args.obs_degree, args.surrogate_degree)
-    surr = build_joint_physics(args.surrogate_degree, surr_obs_deg, points, args)
-
-    print("Constructing GRACE Preconditioner Block (WMB)...")
-    # WMB requires an InvariantGaussianMeasure (no spatial masks) as a proxy for the total load
-    wmb_proxy_prior = surr[
-        "load_space"
-    ].point_value_scaled_heat_kernel_gaussian_measure(
-        surr["ice_scale"], std=surr["ice_std"]
-    )
-    P_grace = surr["wmb"].bayesian_normal_operator_preconditioner(
-        wmb_proxy_prior, surr["grace_noise"]
+    surr_obs_deg = args.obs_degree
+    surr = build_joint_physics(
+        args.surrogate_degree, surr_obs_deg, points, args, is_surrogate=True
     )
 
-    print("Constructing Altimetry Preconditioner Block (Sparse Surrogate)...")
-    surr_alt_fwd = inf.LinearForwardProblem(
-        surr["A_alt"], data_error_measure=surr["alt_noise"]
-    )
-    surr_alt_inv = inf.LinearBayesianInversion(surr_alt_fwd, surr["model_prior"])
+    if args.full_woodbury:
+        print(
+            "Constructing Full Joint Woodbury Preconditioner (This will take a moment to assemble the GRACE blocks)..."
+        )
+        surr_joint_fwd = inf.LinearForwardProblem(
+            surr["A_joint"], data_error_measure=surr["data_noise"]
+        )
+        surr_joint_inv = inf.LinearBayesianInversion(
+            surr_joint_fwd, surr["model_prior"]
+        )
 
-    # P_alt = inf.ColumnThresholdedPreconditioningMethod(
-    #    args.sparse_threshold, incomplete=True
-    # )(surr_alt_inv.normal_operator)
-    P_alt = inf.CholeskySolver()(surr_alt_inv.normal_operator)
+        # This seamlessly rips through the BlockLinearOperator matrices
+        joint_preconditioner = surr_joint_inv.woodbury_data_preconditioner()
 
-    # Combine into a Block Diagonal Matrix
-    print("Fusing blocks into Joint Data-Space Preconditioner...")
-    joint_preconditioner = inf.BlockDiagonalLinearOperator([P_grace, P_alt])
+    else:
+        print("Constructing GRACE Preconditioner Block (WMB)...")
+        # Use the 'exact' WMB method and load space to preserve the full obs_degree data dimension
+        wmb_proxy_prior = exact[
+            "load_space"
+        ].point_value_scaled_heat_kernel_gaussian_measure(
+            exact["ice_scale"], std=exact["ice_std"]
+        )
+        P_grace = exact["wmb"].bayesian_normal_operator_preconditioner(
+            wmb_proxy_prior, exact["grace_noise"]
+        )
+
+        print("Constructing Altimetry Preconditioner Block (Woodbury Surrogate)...")
+        surr_alt_fwd = inf.LinearForwardProblem(
+            surr["A_alt"], data_error_measure=surr["alt_noise"]
+        )
+        surr_alt_inv = inf.LinearBayesianInversion(surr_alt_fwd, surr["model_prior"])
+
+        P_alt = surr_alt_inv.woodbury_data_preconditioner()
+
+        print("Fusing blocks into Joint Data-Space Preconditioner...")
+        joint_preconditioner = inf.BlockDiagonalLinearOperator([P_grace, P_alt])
 
     # ==========================================
     # 3. SOLVE POSTERIOR
     # ==========================================
-    class Callback:
-        def __init__(self):
-            self.iteration = 0
-
-        def __call__(self, xk):
-            self.iteration += 1
-            print(f"CG Iteration: {self.iteration}", end="\r")
-
     print("\nSolving Joint Posterior Equations...")
-    solver = inf.CGMatrixSolver(callback=Callback())
+
+    # Automatically tracks and prints the exact residual ||y - Ax||
+    # tracker = inv_prob.normal_residual_callback(synthetic_data)
+    tracker = inf.ProgressCallback()
+    solver = inf.CGMatrixSolver(callback=tracker)
+
     model_posterior = inv_prob.model_posterior_measure(
         synthetic_data, solver, preconditioner=joint_preconditioner
     )
@@ -293,100 +339,105 @@ def main():
     true_ice, true_ocean = true_model
     post_ice, post_ocean = model_posterior.expectation
 
-    # Calculate GMSL Posteriors
-    true_avg_weight = exact["fp"].ocean_function / exact["fp"].ocean_area
-    true_avg_op = sl.averaging_operator(exact["load_space"], [true_avg_weight])
-    gmsl_op = true_avg_op @ exact["total_ssh_op"]
+    if args.plot_pdfs:
+        # Calculate GMSL Posteriors
+        true_avg_weight = exact["fp"].ocean_function / exact["fp"].ocean_area
+        true_avg_op = sl.averaging_operator(exact["load_space"], [true_avg_weight])
+        gmsl_op = true_avg_op @ exact["total_ssh_op"]
 
-    true_gmsl = gmsl_op(true_model)[0] * scale_mm
-    post_gmsl_meas = model_posterior.affine_mapping(operator=gmsl_op)
-    post_gmsl_mean = post_gmsl_meas.expectation[0] * scale_mm
-    post_gmsl_std = (
-        np.sqrt(post_gmsl_meas.covariance.matrix(dense=True)[0, 0]) * scale_mm
-    )
+        true_gmsl = gmsl_op(true_model)[0] * scale_mm
+        post_gmsl_meas = model_posterior.affine_mapping(operator=gmsl_op)
+        post_gmsl_mean = post_gmsl_meas.expectation[0] * scale_mm
+        post_gmsl_std = (
+            np.sqrt(post_gmsl_meas.covariance.matrix(dense=True)[0, 0]) * scale_mm
+        )
 
-    print(f"\n--- Results ---")
-    print(f"True GMSL:      {true_gmsl:.3f} mm")
-    print(f"Posterior GMSL: {post_gmsl_mean:.3f} ± {post_gmsl_std:.3f} mm")
+        print(f"\n--- Results ---")
+        print(f"True GMSL:      {true_gmsl:.3f} mm")
+        print(f"Posterior GMSL: {post_gmsl_mean:.3f} ± {post_gmsl_std:.3f} mm")
 
     # Plot Maps
-    ocean_mask = scale_mm * exact["fp"].ocean_projection(value=0)
-    ice_mask = scale_mm * exact["fp"].ice_projection(value=0)
+    if args.plot_maps:
+        ocean_mask = scale_mm * exact["fp"].ocean_projection(value=0)
+        ice_mask = scale_mm * exact["fp"].ice_projection(value=0)
 
-    vmax_ice = max(
-        np.max(np.abs(true_ice.data * scale_mm)),
-        np.max(np.abs(post_ice.data * scale_mm)),
-    )
-    vmax_ocean = max(
-        np.max(np.abs(true_ocean.data * scale_mm)),
-        np.max(np.abs(post_ocean.data * scale_mm)),
-    )
+        vmax_ice = max(
+            np.max(np.abs(true_ice.data * scale_mm)),
+            np.max(np.abs(post_ice.data * scale_mm)),
+        )
+        vmax_ocean = max(
+            np.max(np.abs(true_ocean.data * scale_mm)),
+            np.max(np.abs(post_ocean.data * scale_mm)),
+        )
 
-    fig_maps, axes_maps = plt.subplots(
-        2,
-        2,
-        figsize=(14, 10),
-        subplot_kw={"projection": ccrs.Robinson()},
-        layout="constrained",
-    )
+        fig_maps, axes_maps = plt.subplots(
+            2,
+            2,
+            figsize=(14, 10),
+            subplot_kw={"projection": ccrs.Robinson()},
+            layout="constrained",
+        )
 
-    sl.plot(
-        true_ice * ice_mask,
-        ax=axes_maps[0, 0],
-        colorbar=True,
-        vmin=-vmax_ice,
-        vmax=vmax_ice,
-        symmetric=True,
-    )
-    axes_maps[0, 0].set_title("True Ice Thickness Change")
+        sl.plot(
+            true_ice * ice_mask,
+            ax=axes_maps[0, 0],
+            colorbar=True,
+            vmin=-vmax_ice,
+            vmax=vmax_ice,
+            symmetric=True,
+        )
+        axes_maps[0, 0].set_title("True Ice Thickness Change")
 
-    sl.plot(
-        post_ice * ice_mask,
-        ax=axes_maps[0, 1],
-        colorbar=True,
-        vmin=-vmax_ice,
-        vmax=vmax_ice,
-        symmetric=True,
-    )
-    axes_maps[0, 1].set_title("Posterior Expected Ice Thickness")
+        sl.plot(
+            post_ice * ice_mask,
+            ax=axes_maps[0, 1],
+            colorbar=True,
+            vmin=-vmax_ice,
+            vmax=vmax_ice,
+            symmetric=True,
+        )
+        axes_maps[0, 1].set_title("Posterior Expected Ice Thickness")
 
-    sl.plot(
-        true_ocean * ocean_mask,
-        ax=axes_maps[1, 0],
-        colorbar=True,
-        vmin=-vmax_ocean,
-        vmax=vmax_ocean,
-        symmetric=True,
-    )
-    axes_maps[1, 0].set_title("True Dynamic Ocean Topography")
+        sl.plot(
+            true_ocean * ocean_mask,
+            ax=axes_maps[1, 0],
+            colorbar=True,
+            vmin=-vmax_ocean,
+            vmax=vmax_ocean,
+            symmetric=True,
+        )
+        axes_maps[1, 0].set_title("True Dynamic Ocean Topography")
 
-    sl.plot(
-        post_ocean * ocean_mask,
-        ax=axes_maps[1, 1],
-        colorbar=True,
-        vmin=-vmax_ocean,
-        vmax=vmax_ocean,
-        symmetric=True,
-    )
-    axes_maps[1, 1].set_title("Posterior Expected Dynamic Ocean Topography")
+        sl.plot(
+            post_ocean * ocean_mask,
+            ax=axes_maps[1, 1],
+            colorbar=True,
+            vmin=-vmax_ocean,
+            vmax=vmax_ocean,
+            symmetric=True,
+        )
+        axes_maps[1, 1].set_title("Posterior Expected Dynamic Ocean Topography")
 
     # Plot GMSL PDF
-    class MockMeasure:
-        def __init__(self, m, s):
-            self.mean = np.array([m])
-            self.cov = np.array([[s**2]])
+    if args.plot_pdfs:
 
-    fig_pdf, ax_pdf = plt.subplots(figsize=(8, 5), layout="constrained")
-    inf.plot_1d_distributions(
-        [MockMeasure(post_gmsl_mean, post_gmsl_std)],
-        true_value=true_gmsl,
-        ax=ax_pdf,
-        xlabel="GMSL Change (mm)",
-        title="Joint Inversion Global Mean Sea Level Estimate",
-        posterior_labels=["Joint Bayes Posterior"],
-    )
+        class MockMeasure:
+            def __init__(self, m, s):
+                self.mean = np.array([m])
+                self.cov = np.array([[s**2]])
 
-    plt.show()
+        fig_pdf, ax_pdf = plt.subplots(figsize=(8, 5), layout="constrained")
+        inf.plot_1d_distributions(
+            [MockMeasure(post_gmsl_mean, post_gmsl_std)],
+            true_value=true_gmsl,
+            ax=ax_pdf,
+            xlabel="GMSL Change (mm)",
+            title="Joint Inversion Global Mean Sea Level Estimate",
+            posterior_labels=["Joint Bayes Posterior"],
+        )
+
+    if any([args.plot_maps, args.plot_pdfs]):
+        plt.show()
 
 
 if __name__ == "__main__":

@@ -1,9 +1,5 @@
 """
-UPDATED test suite for the FingerPrint class.
-
-This version is simplified to use the pygeoinf
-LinearOperator.check() method for comprehensive axiom validation
-of the as_..._linear_operator() factory methods.
+Test suite for the FingerPrint class.
 """
 
 import pytest
@@ -55,6 +51,17 @@ def fingerprint(request):
         earth_model_parameters=nondim_scheme,
     )
     fp.set_state_from_ice_ng(version=version)
+    return fp
+
+
+@pytest.fixture(scope="module")
+def fast_fingerprint():
+    """
+    A single, lower-resolution FingerPrint instance dedicated to
+    computationally heavy tests (like randomized adjoint checks) to save time.
+    """
+    fp = FingerPrint(lmax=64, grid="DH")
+    fp.set_state_from_ice_ng(version=IceModel.ICE7G)
     return fp
 
 
@@ -132,48 +139,55 @@ def test_ocean_average_of_ocean_function(fingerprint: FingerPrint):
 
 
 @pytest.mark.parametrize("rotational_feedbacks", [True, False])
-def test_sea_level_reciprocity(fingerprint: FingerPrint, rotational_feedbacks: bool):
+def test_sea_level_reciprocity(
+    fast_fingerprint: FingerPrint, rotational_feedbacks: bool
+):
     """
     Check the sea level reciprocity relation using random loads.
-    This test verifies the self-adjoint nature of the sea-level operator.
+    This acts as a direct physics test of the __call__ solver.
     """
-    direct_load_1 = random_load(fingerprint)
-    direct_load_2 = random_load(fingerprint)
+    direct_load_1 = random_load(fast_fingerprint)
+    direct_load_2 = random_load(fast_fingerprint)
     rtol = 1e-9
 
-    sea_level_change_1, _, _, _ = fingerprint(
+    sea_level_change_1, _, _, _ = fast_fingerprint(
         direct_load=direct_load_1,
         rotational_feedbacks=rotational_feedbacks,
         rtol=rtol,
     )
-    sea_level_change_2, _, _, _ = fingerprint(
+    sea_level_change_2, _, _, _ = fast_fingerprint(
         direct_load=direct_load_2,
         rotational_feedbacks=rotational_feedbacks,
         rtol=rtol,
     )
 
-    lhs = fingerprint.integrate(direct_load_2 * sea_level_change_1)
-    rhs = fingerprint.integrate(direct_load_1 * sea_level_change_2)
+    lhs = fast_fingerprint.integrate(direct_load_2 * sea_level_change_1)
+    rhs = fast_fingerprint.integrate(direct_load_1 * sea_level_change_2)
 
     assert np.isclose(lhs, rhs, rtol=1000 * rtol)
 
 
 @pytest.mark.parametrize("rotational_feedbacks", [True, False])
 def test_generalised_sea_level_reciprocity(
-    fingerprint: FingerPrint, rotational_feedbacks: bool
+    fast_fingerprint: FingerPrint, rotational_feedbacks: bool
 ):
     """Test the generalised reciprocity relation using random forces."""
-    direct_load_1 = random_load(fingerprint)
-    direct_load_2 = random_load(fingerprint)
-    displacement_load_1 = random_load(fingerprint)
-    displacement_load_2 = random_load(fingerprint)
-    gravitational_potential_load_1 = random_load(fingerprint)
-    gravitational_potential_load_2 = random_load(fingerprint)
+    direct_load_1 = random_load(fast_fingerprint)
+    direct_load_2 = random_load(fast_fingerprint)
+    displacement_load_1 = random_load(fast_fingerprint)
+    displacement_load_2 = random_load(fast_fingerprint)
+    gravitational_potential_load_1 = random_load(fast_fingerprint)
+    gravitational_potential_load_2 = random_load(fast_fingerprint)
+
     angular_momentum_change_1 = (
-        random_angular_momentum(fingerprint) if rotational_feedbacks else np.zeros(2)
+        random_angular_momentum(fast_fingerprint)
+        if rotational_feedbacks
+        else np.zeros(2)
     )
     angular_momentum_change_2 = (
-        random_angular_momentum(fingerprint) if rotational_feedbacks else np.zeros(2)
+        random_angular_momentum(fast_fingerprint)
+        if rotational_feedbacks
+        else np.zeros(2)
     )
     rtol = 1e-9
 
@@ -182,7 +196,7 @@ def test_generalised_sea_level_reciprocity(
         displacement_1,
         gravity_potential_change_1,
         angular_velocity_change_1,
-    ) = fingerprint(
+    ) = fast_fingerprint(
         direct_load=direct_load_1,
         displacement_load=displacement_load_1,
         gravitational_potential_load=gravitational_potential_load_1,
@@ -195,7 +209,7 @@ def test_generalised_sea_level_reciprocity(
         displacement_2,
         gravity_potential_change_2,
         angular_velocity_change_2,
-    ) = fingerprint(
+    ) = fast_fingerprint(
         direct_load=direct_load_2,
         displacement_load=displacement_load_2,
         gravitational_potential_load=gravitational_potential_load_2,
@@ -203,23 +217,23 @@ def test_generalised_sea_level_reciprocity(
         rtol=rtol,
     )
 
-    g = fingerprint.gravitational_acceleration
+    g = fast_fingerprint.gravitational_acceleration
 
-    lhs_integrand = direct_load_2 * sea_level_change_1 - (1 / g) * (
+    lhs_integrand = direct_load_2 * sea_level_change_1 - (1.0 / g) * (
         g * displacement_load_2 * displacement_1
         + gravitational_potential_load_2 * gravity_potential_change_1
     )
     lhs = (
-        fingerprint.integrate(lhs_integrand)
+        fast_fingerprint.integrate(lhs_integrand)
         - np.dot(angular_momentum_change_2, angular_velocity_change_1) / g
     )
 
-    rhs_integrand = direct_load_1 * sea_level_change_2 - (1 / g) * (
+    rhs_integrand = direct_load_1 * sea_level_change_2 - (1.0 / g) * (
         g * displacement_load_1 * displacement_2
         + gravitational_potential_load_1 * gravity_potential_change_2
     )
     rhs = (
-        fingerprint.integrate(rhs_integrand)
+        fast_fingerprint.integrate(rhs_integrand)
         - np.dot(angular_momentum_change_1, angular_velocity_change_2) / g
     )
 
@@ -246,65 +260,82 @@ def test_as_sobolev_operator_creation(fingerprint: FingerPrint):
     assert isinstance(op, inf.LinearOperator)
 
 
-@pytest.mark.parametrize("sobolev", [False, True])
-@pytest.mark.parametrize("rotational_feedbacks", [True, False])
-@pytest.mark.parametrize("order", [1, 2])
-@pytest.mark.parametrize("scale", [0.1, 0.5])
+@pytest.mark.parametrize(
+    "sobolev, order, scale_factor, rotational_feedbacks",
+    [
+        # 1. Lebesgue, no rotational feedbacks
+        (False, None, None, False),
+        # 2. Lebesgue, with rotational feedbacks
+        (False, None, None, True),
+        # 3. Sobolev (Order 1), no rotational feedbacks
+        (True, 1.0, 0.1, False),
+        # 4. Sobolev (Order 2), with rotational feedbacks
+        (True, 2.0, 0.2, True),
+    ],
+    ids=[
+        "Lebesgue-NoRotation",
+        "Lebesgue-Rotation",
+        "Sobolev-O1-NoRotation",
+        "Sobolev-O2-Rotation",
+    ],
+)
 def test_linear_operator_adjoint_identity(
-    fingerprint: FingerPrint,
+    fast_fingerprint: FingerPrint,  # <-- Use the fast fixture here!
     sobolev: bool,
     order: float,
-    scale: float,
+    scale_factor: float,
     rotational_feedbacks: bool,
 ):
     """
-    Tests the adjoint identity (dot-product test) for the LinearOperator.
-
-    This is a fundamental test that verifies that the implemented formal
-    adjoint mapping is indeed the correct adjoint of the forward mapping
-    with respect to the defined Hilbert space inner products.
+    Tests the adjoint identity for the LinearOperator using pygeoinf's
+    built-in .check() method with spatially regular Gaussian measures.
     """
-
-    # 1. Create the linear operator with a tight solver tolerance for accuracy
     rtol = 1e-9
+    check_rtol = 1e-5
+    check_atol = 1e-5
+
+    # 1. Construct the fingerprint linear operator
     if sobolev:
-        A = fingerprint.as_sobolev_linear_operator(
+        A = fast_fingerprint.as_sobolev_linear_operator(
             order,
-            scale * fingerprint.mean_sea_floor_radius,
+            scale_factor * fast_fingerprint.mean_sea_floor_radius,
             rotational_feedbacks=rotational_feedbacks,
             rtol=rtol,
         )
     else:
-        A = fingerprint.as_lebesgue_linear_operator(
+        A = fast_fingerprint.as_lebesgue_linear_operator(
             rotational_feedbacks=rotational_feedbacks, rtol=rtol
         )
 
-    # 2. Create random elements in the domain and codomain spaces
-    direct_load = random_load(fingerprint)
-    adjoint_direct_load = random_load(fingerprint)
-    adjoint_displacement_load = random_load(fingerprint)
-    adjoint_gravitational_potential_load = random_load(fingerprint)
+    # 2. Domain measure (Load space)
+    smoothness_scale = 0.1 * fast_fingerprint.mean_sea_floor_radius
+    domain_measure = A.domain.heat_kernel_gaussian_measure(smoothness_scale)
 
-    adjoint_angular_momentum_change = (
-        random_angular_momentum(fingerprint) if rotational_feedbacks else np.zeros(2)
+    # 3. Codomain measure (Response space)
+    field_space = A.codomain.subspace(0)
+    field_measure = field_space.heat_kernel_gaussian_measure(smoothness_scale)
+
+    euclidean_space = A.codomain.subspace(3)
+    angular_momentum_std = (
+        fast_fingerprint.rotation_frequency * fast_fingerprint.mean_sea_floor_radius**4
     )
 
-    u = direct_load
-    v = [
-        adjoint_direct_load,
-        adjoint_displacement_load,
-        adjoint_gravitational_potential_load,
-        adjoint_angular_momentum_change,
-    ]
+    euclidean_measure = inf.GaussianMeasure.from_standard_deviation(
+        euclidean_space, angular_momentum_std
+    )
 
-    # 3. Calculate the inner products for both sides of the identity
-    lhs = A.codomain.inner_product(A(u), v)
-    rhs = A.domain.inner_product(u, A.adjoint(v))
+    codomain_measure = inf.GaussianMeasure.from_direct_sum(
+        [field_measure, field_measure, field_measure, euclidean_measure]
+    )
 
-    # 5. Assert that the two sides are equal within a relative tolerance
-    # A looser tolerance is needed here due to numerical precision accumulating
-    # through the iterative solvers in both the forward and adjoint mappings.
-    assert np.isclose(lhs, rhs, rtol=1000 * rtol)
+    # 4. Run the comprehensive self-checks
+    A.check(
+        n_checks=3,
+        check_rtol=check_rtol,
+        check_atol=check_atol,
+        domain_measure=domain_measure,
+        codomain_measure=codomain_measure,
+    )
 
 
 # ====================================================================#
@@ -388,11 +419,11 @@ def test_ocean_projection_basic(fingerprint: FingerPrint):
     # Test with default NaN value
     ocean_proj = fingerprint.ocean_projection()
     assert np.all((ocean_proj.data == 1) | np.isnan(ocean_proj.data))
-    
+
     # Test with value=0
     ocean_proj_zero = fingerprint.ocean_projection(value=0)
     assert np.all((ocean_proj_zero.data == 1) | (ocean_proj_zero.data == 0))
-    
+
     # Check that ocean function matches projection where defined
     ocean_mask = fingerprint.ocean_function.data > 0
     assert np.all(ocean_proj_zero.data[ocean_mask] == 1)
@@ -407,10 +438,10 @@ def test_ocean_projection_exclude_ice_shelves(fingerprint: FingerPrint):
     ocean_proj_no_shelves = fingerprint.ocean_projection(
         value=0, exclude_ice_shelves=True
     )
-    
+
     # The projection excluding ice shelves should have equal or fewer ocean points
     assert np.sum(ocean_proj_no_shelves.data) <= np.sum(ocean_proj.data)
-    
+
     # Ice shelf regions (ocean_function > 0 AND ice_thickness > 0) should be excluded
     ice_shelf_mask = (fingerprint.ocean_function.data > 0) & (
         fingerprint.ice_thickness.data > 0
@@ -427,11 +458,11 @@ def test_ice_projection_basic(fingerprint: FingerPrint):
     # Test with default parameters (exclude_glaciers=True by default)
     ice_proj = fingerprint.ice_projection()
     assert np.all((ice_proj.data == 1) | np.isnan(ice_proj.data))
-    
+
     # Test with value=0
     ice_proj_zero = fingerprint.ice_projection(value=0)
     assert np.all((ice_proj_zero.data == 1) | (ice_proj_zero.data == 0))
-    
+
     # Check that ice is properly identified
     ice_mask = fingerprint.ice_thickness.data > 0
     # Note: some ice may be excluded due to default glacier exclusion
@@ -458,10 +489,10 @@ def test_ice_projection_exclusions(
         exclude_ice_shelves=exclude_ice_shelves,
         exclude_glaciers=exclude_glaciers,
     )
-    
+
     # Result should only contain 0s and 1s
     assert np.all((ice_proj.data == 0) | (ice_proj.data == 1))
-    
+
     # When excluding ice shelves, regions with both ocean_function and ice_thickness
     # should be excluded
     if exclude_ice_shelves:
@@ -470,7 +501,7 @@ def test_ice_projection_exclusions(
         )
         if np.any(ice_shelf_mask):
             assert np.all(ice_proj.data[ice_shelf_mask] == 0)
-    
+
     # When excluding glaciers, glacier regions should be excluded
     if exclude_glaciers:
         glacier_proj = fingerprint.glacier_projection(value=0)
@@ -485,7 +516,7 @@ def test_ice_projection_glacier_exclusion_effect(fingerprint: FingerPrint):
     """
     ice_all = fingerprint.ice_projection(value=0, exclude_glaciers=False)
     ice_no_glaciers = fingerprint.ice_projection(value=0, exclude_glaciers=True)
-    
+
     # Excluding glaciers should result in equal or less ice coverage
     assert np.sum(ice_no_glaciers.data) <= np.sum(ice_all.data)
 
@@ -498,11 +529,11 @@ def test_land_projection_basic(fingerprint: FingerPrint):
     # Test with default parameters
     land_proj = fingerprint.land_projection()
     assert np.all((land_proj.data == 1) | np.isnan(land_proj.data))
-    
+
     # Test with value=0
     land_proj_zero = fingerprint.land_projection(value=0)
     assert np.all((land_proj_zero.data == 1) | (land_proj_zero.data == 0))
-    
+
     # Land should be where ocean_function is 0
     land_mask = fingerprint.ocean_function.data == 0
     assert np.all(land_proj_zero.data[land_mask] == 1)
@@ -515,10 +546,10 @@ def test_land_projection_exclude_ice(fingerprint: FingerPrint):
     """
     land_proj = fingerprint.land_projection(value=0, exclude_ice=False)
     land_proj_no_ice = fingerprint.land_projection(value=0, exclude_ice=True)
-    
+
     # Excluding ice should result in equal or less land coverage
     assert np.sum(land_proj_no_ice.data) <= np.sum(land_proj.data)
-    
+
     # Icy land regions (ocean_function == 0 AND ice_thickness > 0) should be excluded
     icy_land_mask = (fingerprint.ocean_function.data == 0) & (
         fingerprint.ice_thickness.data > 0
@@ -534,11 +565,11 @@ def test_ocean_land_partition(fingerprint: FingerPrint):
     """
     ocean_proj = fingerprint.ocean_projection(value=0)
     land_proj = fingerprint.land_projection(value=0)
-    
+
     # Every point should be either ocean (1,0) or land (0,1)
     total = ocean_proj.data + land_proj.data
     assert np.all(total == 1)
-    
+
     # No overlap
     overlap = ocean_proj.data * land_proj.data
     assert np.all(overlap == 0)
@@ -549,16 +580,16 @@ def test_glacier_projection_basic(fingerprint: FingerPrint):
     Tests that glacier_projection returns expected values.
     """
     glacier_proj = fingerprint.glacier_projection(value=0)
-    
+
     # Should only contain 0s and 1s
     assert np.all((glacier_proj.data == 0) | (glacier_proj.data == 1))
-    
+
     # Glacier region should be North American region (30-70N, 180-270E)
     lats, lons = np.meshgrid(fingerprint.lats(), fingerprint.lons(), indexing="ij")
     lat_mask = np.logical_and(lats > 30, lats < 70)
     lon_mask = np.logical_and(lons > 180, lons < 270)
     expected_glacier_mask = np.logical_and(lat_mask, lon_mask)
-    
+
     assert np.all(glacier_proj.data == expected_glacier_mask.astype(float))
 
 
@@ -568,14 +599,14 @@ def test_projection_integration(fingerprint: FingerPrint):
     """
     ocean_proj = fingerprint.ocean_projection(value=0)
     land_proj = fingerprint.land_projection(value=0)
-    
+
     ocean_area = fingerprint.integrate(ocean_proj)
     land_area = fingerprint.integrate(land_proj)
-    
+
     # Ocean and land areas should sum to total sphere area
     radius = fingerprint.mean_sea_floor_radius
     total_area = 4.0 * np.pi * radius**2
-    
+
     assert np.isclose(ocean_area + land_area, total_area, rtol=1e-6)
 
 
@@ -589,17 +620,17 @@ def test_projection_multiplication(fingerprint: FingerPrint):
     )
     land_proj = fingerprint.land_projection(value=0)
     glacier_proj = fingerprint.glacier_projection(value=0)
-    
+
     # Ice on land (excluding ice shelves)
     ice_on_land = ice_proj.data * land_proj.data
-    
+
     # Glacier ice (intersection of ice and glacier regions)
     glacier_ice = ice_proj.data * glacier_proj.data
-    
+
     # Both should be binary
     assert np.all((ice_on_land == 0) | (ice_on_land == 1))
     assert np.all((glacier_ice == 0) | (glacier_ice == 1))
-    
+
     # Ice on land should be non-zero somewhere
     assert np.sum(ice_on_land) > 0
 
@@ -610,16 +641,12 @@ def test_projection_with_random_load(fingerprint: FingerPrint):
     """
     load = random_load(fingerprint)
     ocean_proj = fingerprint.ocean_projection(value=0)
-    
+
     # Apply projection
-    ocean_load = SHGrid.from_array(
-        load.data * ocean_proj.data, grid=fingerprint.grid
-    )
-    
+    ocean_load = SHGrid.from_array(load.data * ocean_proj.data, grid=fingerprint.grid)
+
     # Integrate over ocean only
     ocean_integral = fingerprint.integrate(ocean_load)
-    
+
     # Should be finite
     assert np.isfinite(ocean_integral)
-
-

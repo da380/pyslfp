@@ -969,3 +969,30 @@ def remove_degrees_from_shgrid(grid, degrees_to_remove: list[int]):
     modified_grid = modified_shcoeffs.expand(grid=grid.grid, extend=grid.extend)
 
     return modified_grid
+
+
+def altimetry_averaging_operator(points: List[Tuple[float, float]]) -> LinearOperator:
+    """
+    Creates a LinearOperator that maps a vector of altimetry observations
+    to a Global Mean Sea Level (GMSL) estimate using a latitude-weighted average.
+
+    Args:
+        points: A list of (latitude, longitude) tuples representing the
+                observation locations in degrees.
+
+    Returns:
+        A LinearOperator mapping from EuclideanSpace(N) to EuclideanSpace(1).
+    """
+    n_points = len(points)
+
+    if n_points == 0:
+        raise ValueError("The list of altimetry points cannot be empty.")
+
+    domain = EuclideanSpace(n_points)
+    codomain = EuclideanSpace(1)
+    lats = np.array([p[0] for p in points])
+    lats_rad = np.radians(lats)
+    weights = np.cos(lats_rad)
+    weights /= np.sum(weights)
+    matrix = weights.reshape(1, n_points)
+    return LinearOperator.from_matrix(domain, codomain, matrix)

@@ -23,10 +23,11 @@ from .operators import (
     sea_surface_height_operator,
     remove_ocean_average_operator,
     ocean_altimetry_operator,
+    altimetry_averaging_operator,
 )
 
 
-from .plotting import plot, plot_corner_distributions
+from .plotting import plot, create_map_figure
 
 from .utils import (
     read_gloss_tide_gauge_data,
@@ -52,6 +53,7 @@ __all__ = [
     "spatial_mutliplication_operator",
     "plot",
     "plot_corner_distributions",
+    "create_map_figure",
     "read_gloss_tide_gauge_data",
     "partition_points_by_grid",
     "get_spherical_harmonic_degree_blocks",
@@ -59,4 +61,5 @@ __all__ = [
     "sea_surface_height_operator",
     "remove_ocean_average_operator",
     "ocean_altimetry_operator",
+    "altimetry_averaging_operator",
 ]

@@ -85,8 +85,8 @@ def main():
     parser.add_argument(
         "--precond",
         type=str,
-        choices=["block", "banded", "spectral", "none"],
-        default="block",
+        choices=["none", "block", "banded", "spectral", "sparse"],
+        default="none",
         help="Type of preconditioner to apply",
     )
     parser.add_argument(
@@ -213,6 +213,10 @@ def main():
         elif args.precond == "spectral":
             solver_wrapper = inf.SpectralPreconditioningMethod(
                 rank=args.rank, method="fixed"
+            )
+        elif args.precond == "sparse":
+            solver_wrapper = inf.ColumnThresholdedPreconditioningMethod(
+                1e-3, incomplete=args.incomplete
             )
 
         preconditioner = solver_wrapper(surrogate_normal_operator)

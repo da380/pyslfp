@@ -436,33 +436,26 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         angular_momentum_change: Optional[np.ndarray] = None,
         rotational_feedbacks: bool = True,
         rtol: float = 1.0e-6,
+        max_iterations: Optional[int] = None,
         verbose: bool = False,
     ) -> Tuple[SHGrid, SHGrid, SHGrid, np.ndarray]:
         """
         Solves the generalized sea level equation for a given load.
 
-        This method employs an iterative solver to determine the self-consistent
-        redistribution of ocean water following changes in surface mass (e.g., ice melt).
-        It accounts for the solid Earth's elastic deformation, gravitational perturbations,
-        and (optionally) rotational feedbacks.
-
         Args:
-            direct_load: The direct surface mass load (e.g., from ice melt) represented as an SHGrid.
+            direct_load: The direct surface mass load (e.g., from ice melt).
             displacement_load: An externally imposed vertical surface displacement load.
             gravitational_potential_load: An externally imposed gravitational potential load.
             angular_momentum_change: An externally imposed change in angular momentum.
-            rotational_feedbacks: If True, includes the effects of polar wander (rotational
-                feedbacks) on the sea level solution. Defaults to True.
-            rtol: The relative tolerance for the iterative solver to determine convergence.
-                Defaults to 1.0e-6.
-            verbose: If True, prints the relative error at each solver iteration. Defaults to False.
+            rotational_feedbacks: If True, includes the effects of polar wander.
+            rtol: The relative tolerance for the iterative solver.
+            max_iterations: The maximum number of solver iterations. If set to 1,
+                the solver applies the direct Love number scaling and exits immediately
+                (useful for cheap surrogate models).
+            verbose: If True, prints the relative error at each solver iteration.
 
         Returns:
-            A tuple containing four elements:
-                - `sea_level_change` (SHGrid): The spatially variable, self-consistent sea level change.
-                - `displacement` (SHGrid): The vertical surface displacement of the solid Earth.
-                - `gravity_potential_change` (SHGrid): The total change in the gravity potential.
-                - `angular_velocity_change` (np.ndarray): The change in angular velocity `[ω_x, ω_y]`.
+            Tuple of (sea_level_change, displacement, gravity_potential_change, angular_velocity_change)
         """
 
         h_b = self._h[None, :, None]
@@ -548,7 +541,10 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         count = 0
         count_print = 0
 
-        while err > rtol:
+        # Hard limit iterations if requested, otherwise effectively infinite
+        iter_limit = max_iterations if max_iterations is not None else 10000
+
+        while err > rtol and count < iter_limit:
 
             displacement_lm = self.expand_field(load)
             gravity_potential_change_lm = displacement_lm.copy()
@@ -610,6 +606,110 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
             gravity_potential_change,
             angular_velocity_change,
         )
+
+    def as_lebesgue_linear_operator(
+        self,
+        /,
+        *,
+        rotational_feedbacks: bool = True,
+        rtol: float = 1e-6,
+        max_iterations: Optional[int] = None,
+        verbose: bool = False,
+    ) -> LinearOperator:
+        """
+        Wraps the physical model as a LinearOperator between Lebesgue spaces.
+        """
+
+        domain = self.lebesgue_load_space()
+        codomain = self.lebesgue_response_space()
+
+        def mapping(u: SHGrid) -> List[Union[SHGrid, np.ndarray]]:
+            (
+                sea_level_change,
+                vertical_displacement,
+                gravity_potential_change,
+                angular_velocity_change,
+            ) = self(
+                direct_load=u,
+                rotational_feedbacks=rotational_feedbacks,
+                rtol=rtol,
+                max_iterations=max_iterations,
+                verbose=verbose,
+            )
+
+            if rotational_feedbacks:
+                gravitational_potential_change = (
+                    self.gravity_potential_change_to_gravitational_potential_change(
+                        gravity_potential_change, angular_velocity_change
+                    )
+                )
+            else:
+                gravitational_potential_change = gravity_potential_change
+
+            return [
+                sea_level_change,
+                vertical_displacement,
+                gravitational_potential_change,
+                angular_velocity_change,
+            ]
+
+        def adjoint_mapping(response: List[Union[SHGrid, np.ndarray]]) -> SHGrid:
+            g = self.gravitational_acceleration
+            adjoint_direct_load = response[0]
+            adjoint_displacement_load = -1 * response[1]
+            adjoint_gravitational_potential_load = -g * response[2]
+
+            if rotational_feedbacks:
+                adjoint_angular_momentum_change = -g * (
+                    response[3]
+                    + self.angular_momentum_change_from_potential(response[2])
+                )
+            else:
+                adjoint_angular_momentum_change = None
+
+            adjoint_sea_level, _, _, _ = self(
+                direct_load=adjoint_direct_load,
+                displacement_load=adjoint_displacement_load,
+                gravitational_potential_load=adjoint_gravitational_potential_load,
+                angular_momentum_change=adjoint_angular_momentum_change,
+                rotational_feedbacks=rotational_feedbacks,
+                rtol=rtol,
+                max_iterations=max_iterations,
+                verbose=verbose,
+            )
+
+            return adjoint_sea_level
+
+        return LinearOperator(
+            domain, codomain, mapping, adjoint_mapping=adjoint_mapping
+        )
+
+    def as_sobolev_linear_operator(
+        self,
+        order: float,
+        scale: float,
+        /,
+        *,
+        rotational_feedbacks: bool = True,
+        rtol: float = 1e-6,
+        max_iterations: Optional[int] = None,
+        verbose: bool = False,
+    ) -> LinearOperator:
+        """
+        Constructs the sea-level model as a LinearOperator between Sobolev spaces.
+        """
+
+        domain = self.sobolev_load_space(order, scale)
+        codomain = self.sobolev_response_space(order, scale)
+
+        lebesgue_operator = self.as_lebesgue_linear_operator(
+            rotational_feedbacks=rotational_feedbacks,
+            rtol=rtol,
+            max_iterations=max_iterations,
+            verbose=verbose,
+        )
+
+        return LinearOperator.from_formal_adjoint(domain, codomain, lebesgue_operator)
 
     def centrifugal_potential_change(
         self, angular_velocity_change: np.ndarray
@@ -1062,147 +1162,6 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         return HilbertSpaceDirectSum(
             [field_space, field_space, field_space, EuclideanSpace(2)]
         )
-
-    def as_lebesgue_linear_operator(
-        self,
-        /,
-        *,
-        rotational_feedbacks: bool = True,
-        rtol: float = 1e-6,
-        verbose: bool = False,
-    ) -> LinearOperator:
-        """
-        Wraps the physical model as a LinearOperator between Lebesgue spaces.
-
-        This method provides the fundamental mathematical representation of the
-        sea-level fingerprint problem. It encapsulates the forward mapping
-        (from a surface mass load to the response fields) and its corresponding
-        adjoint mapping into a single `pygeoinf.LinearOperator` object. This
-        operator acts on square-integrable functions ($L^2$).
-
-        Args:
-            rotational_feedbacks: If True, include polar wander effects in the
-                forward and adjoint calculations. Defaults to True.
-            rtol: The relative tolerance for the underlying iterative solver.
-                Defaults to 1e-6.
-            verbose: Prints convergence information is True.
-
-        Returns:
-            A `pygeoinf.LinearOperator` that maps from the Lebesgue load
-            space to the Lebesgue response space.
-        """
-
-        domain = self.lebesgue_load_space()
-        codomain = self.lebesgue_response_space()
-
-        def mapping(u: SHGrid) -> List[Union[SHGrid, np.ndarray]]:
-            """The forward mapping from a load to the sea level response fields."""
-            (
-                sea_level_change,
-                vertical_displacement,
-                gravity_potential_change,
-                angular_velocity_change,
-            ) = self(
-                direct_load=u,
-                rotational_feedbacks=rotational_feedbacks,
-                rtol=rtol,
-                verbose=verbose,
-            )
-
-            if rotational_feedbacks:
-                gravitational_potential_change = (
-                    self.gravity_potential_change_to_gravitational_potential_change(
-                        gravity_potential_change, angular_velocity_change
-                    )
-                )
-            else:
-                gravitational_potential_change = gravity_potential_change
-
-            return [
-                sea_level_change,
-                vertical_displacement,
-                gravitational_potential_change,
-                angular_velocity_change,
-            ]
-
-        def adjoint_mapping(response: List[Union[SHGrid, np.ndarray]]) -> SHGrid:
-            """The adjoint mapping from response fields to the adjoint load."""
-            g = self.gravitational_acceleration
-            adjoint_direct_load = response[0]
-            adjoint_displacement_load = -1 * response[1]
-            adjoint_gravitational_potential_load = -g * response[2]
-
-            if rotational_feedbacks:
-                adjoint_angular_momentum_change = -g * (
-                    response[3]
-                    + self.angular_momentum_change_from_potential(response[2])
-                )
-            else:
-                adjoint_angular_momentum_change = None
-
-            adjoint_sea_level, _, _, _ = self(
-                direct_load=adjoint_direct_load,
-                displacement_load=adjoint_displacement_load,
-                gravitational_potential_load=adjoint_gravitational_potential_load,
-                angular_momentum_change=adjoint_angular_momentum_change,
-                rotational_feedbacks=rotational_feedbacks,
-                rtol=rtol,
-                verbose=verbose,
-            )
-
-            return adjoint_sea_level
-
-        return LinearOperator(
-            domain, codomain, mapping, adjoint_mapping=adjoint_mapping
-        )
-
-    def as_sobolev_linear_operator(
-        self,
-        order: float,
-        scale: float,
-        /,
-        *,
-        rotational_feedbacks: bool = True,
-        rtol: float = 1e-6,
-        verbose: bool = False,
-    ) -> LinearOperator:
-        """
-        Constructs the sea-level model as a LinearOperator between Sobolev spaces.
-
-        This is the primary tool for solving regularized inverse problems. By
-        defining the operator on Sobolev spaces, we frame the problem to seek a
-        spatially smooth surface load, which is often a necessary physical
-        constraint to obtain a unique and stable solution from noisy or
-        incomplete data. This approach is equivalent to a form of Tikhonov
-        regularization.
-
-        The operator correctly handles the transformation between the underlying
-        Lebesgue representation (where the physics is calculated) and the
-        Sobolev representation (where the problem is posed) by internally
-        managing the "mass matrices" that define the Sobolev inner products.
-
-        Args:
-            order: The Sobolev order (s > 0), controlling the degree of
-                smoothness of the input load space.
-            scale: The Sobolev scale (λ > 0), a characteristic length scale
-                that defines the spatial scale at which the smoothness is enforced.
-            rotational_feedbacks: If True, include polar wander effects. Defaults to True.
-            rtol: Relative tolerance for the underlying iterative solver. Defaults to 1e-6.
-            verbose: Prints convergence information is True.
-
-            Returns:
-                A `pygeoinf.LinearOperator` that maps from the Sobolev load
-                space to the Sobolev response space.
-        """
-
-        domain = self.sobolev_load_space(order, scale)
-        codomain = self.sobolev_response_space(order, scale)
-
-        lebesgue_operator = self.as_lebesgue_linear_operator(
-            rotational_feedbacks=rotational_feedbacks, rtol=rtol, verbose=verbose
-        )
-
-        return LinearOperator.from_formal_adjoint(domain, codomain, lebesgue_operator)
 
     def ocean_altimetry_points(
         self,

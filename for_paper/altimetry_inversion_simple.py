@@ -302,7 +302,7 @@ def main():
         true_ssh = exact_model_to_ssh(true_model)
         post_ssh = exact_model_to_ssh(post_ice)
 
-        ocean_mask = scale_mm * exact_fp.ocean_projection(value=0)
+        scale_mm * exact_fp.ocean_projection(value=0)
         ice_mask = scale_mm * exact_fp.ice_projection(value=0)
 
         vmax_ice = max(
@@ -310,7 +310,7 @@ def main():
             np.max(np.abs(post_ice.data * scale_mm)),
         )
 
-        vmax_ssh = max(
+        max(
             np.max(np.abs(true_ssh.data * scale_mm)),
             np.max(np.abs(post_ssh.data * scale_mm)),
         )

@@ -352,7 +352,7 @@ def main():
             np.sqrt(post_gmsl_meas.covariance.matrix(dense=True)[0, 0]) * scale_mm
         )
 
-        print(f"\n--- Results ---")
+        print("\n--- Results ---")
         print(f"True GMSL:      {true_gmsl:.3f} mm")
         print(f"Posterior GMSL: {post_gmsl_mean:.3f} ± {post_gmsl_std:.3f} mm")
 

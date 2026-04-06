@@ -164,7 +164,6 @@ def main():
     op3 = inf.RowLinearOperator([load_identity, load_identity])
 
     model_to_ssh_operator = op3 @ op2 @ op1
-    model_space = model_to_ssh_operator.domain
 
     # ------------------ SET UP THE PRIORS ------------------
     ice_thickness_scale = args.ice_scale_km * 1000.0 / fp.length_scale

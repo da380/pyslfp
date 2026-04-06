@@ -16,8 +16,6 @@ sea-level equation).
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
-import cartopy.crs as ccrs
 import regionmask
 import pygeoinf as inf
 import pyslfp as sl

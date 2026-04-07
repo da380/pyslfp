@@ -27,7 +27,7 @@ from .operators import (
 )
 
 
-from .plotting import plot, create_map_figure
+from .plotting import plot, create_map_figure, plot_corner_distributions
 
 from .utils import (
     read_gloss_tide_gauge_data,
@@ -62,4 +62,5 @@ __all__ = [
     "remove_ocean_average_operator",
     "ocean_altimetry_operator",
     "altimetry_averaging_operator",
+    "plot_corner_distributions",
 ]

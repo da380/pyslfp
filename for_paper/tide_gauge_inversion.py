@@ -48,13 +48,13 @@ def parse_arguments():
     parser.add_argument(
         "--noise-factor",
         type=float,
-        default=1.0,
+        default=0.5,
         help="Observation noise std as a factor of the expected GMSL std.",
     )
     parser.add_argument(
         "--prior-scale-km",
         type=float,
-        default=100.0,
+        default=500.0,
         help="Correlation length scale (in km) for the ice thickness prior.",
     )
     parser.add_argument(
@@ -80,7 +80,7 @@ def build_operators(lmax, tide_gauge_points, args, is_surrogate=False):
 
     # Set up the finger print operator
     load_order = 2.0
-    load_scale_km = 250.0
+    load_scale_km = 500.0
     load_scale = 1000.0 * load_scale_km / fp.length_scale
 
     # PHYSICS-LITE: Limit SLE iterations for the surrogate
@@ -416,23 +416,19 @@ def main():
         full_width = get_width_scaling(full_mean, full_std, true_3d_mm)
 
         # --- Figure 4: Parameterized Corner Plot ---
-        inf.plot_corner_distributions(
+        sl.plot_corner_distributions(
             param_posterior_mm,
             true_values=true_3d_mm,
             labels=regions,
             title="Parameterized 3D Joint Posterior",
-            colormap="Blues",
-            width_scaling=param_width,
         )
 
         # --- Figure 5: Full Spatial (Mapped) Corner Plot ---
-        inf.plot_corner_distributions(
+        sl.plot_corner_distributions(
             full_posterior_3d_mm,
             true_values=true_3d_mm,
             labels=regions,
             title="Full Spatial Mapped Joint Posterior",
-            colormap="Greens",
-            width_scaling=full_width,
         )
 
     if args.plot_maps or args.plot_corners:

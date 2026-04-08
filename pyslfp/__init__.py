@@ -24,10 +24,13 @@ from .operators import (
     remove_ocean_average_operator,
     ocean_altimetry_operator,
     altimetry_averaging_operator,
+    ice_sheet_averaging_operator,
+    ice_sheet_basis_operator,
+    get_ice_sheet_masks_and_labels,
 )
 
 
-from .plotting import plot, create_map_figure, plot_corner_distributions
+from .plotting import plot, create_map_figure
 
 from .utils import (
     read_gloss_tide_gauge_data,
@@ -62,5 +65,7 @@ __all__ = [
     "remove_ocean_average_operator",
     "ocean_altimetry_operator",
     "altimetry_averaging_operator",
-    "plot_corner_distributions",
+    "ice_sheet_averaging_operator",
+    "ice_sheet_basis_operator",
+    "get_ice_sheet_masks_and_labels",
 ]

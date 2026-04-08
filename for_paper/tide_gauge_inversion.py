@@ -36,7 +36,7 @@ def parse_arguments():
     parser.add_argument(
         "--lmax",
         type=int,
-        default=128,
+        default=256,
         help="Maximum spherical harmonic degree for the exact Earth model.",
     )
     parser.add_argument(
@@ -54,7 +54,7 @@ def parse_arguments():
     parser.add_argument(
         "--prior-scale-km",
         type=float,
-        default=500.0,
+        default=250.0,
         help="Correlation length scale (in km) for the ice thickness prior.",
     )
     parser.add_argument(
@@ -80,7 +80,7 @@ def build_operators(lmax, tide_gauge_points, args, is_surrogate=False):
 
     # Set up the finger print operator
     load_order = 2.0
-    load_scale_km = 500.0
+    load_scale_km = 100.0
     load_scale = 1000.0 * load_scale_km / fp.length_scale
 
     # PHYSICS-LITE: Limit SLE iterations for the surrogate
@@ -169,42 +169,35 @@ def main():
     # ==========================================
     # 3. Setup Parameterization & Generate Truth
     # ==========================================
-    print(
-        f"\n--- Generating Synthetic Data (Parameterized Truth = {args.parameterized_truth}) ---"
-    )
+    print(f"\n--- Generating Synthetic Data (25-Basin Parameterization) ---")
     model_space = exact_forward_operator.domain
 
-    # Math masks (MUST be 0 outside ice for the operator algebra to work)
-    ice_mask_math = exact_fp.ice_projection(value=0)
-    grl_mask = exact_fp.greenland_projection(value=0) * ice_mask_math
-    wais_mask = exact_fp.west_antarctic_projection(value=0) * ice_mask_math
-    eais_mask = exact_fp.east_antarctic_projection(value=0) * ice_mask_math
-
-    regions = ["Greenland", "W. Antarctica", "E. Antarctica"]
-    masks = [grl_mask, wais_mask, eais_mask]
+    # Use the new robust basin collector from your updated library
+    masks, regions = sl.get_ice_sheet_masks_and_labels(exact_fp)
 
     # Parameterization operators
-    basis_op = sl.averaging_operator(model_space, masks).adjoint
+    basis_op = sl.ice_sheet_basis_operator(model_space, exact_fp)
+
+    # Create the evaluation (averaging) operator for the 25 regions
+    # We use the normalized masks to calculate 'mm/yr' regional averages
     areas = [exact_fp.integrate(m) for m in masks]
-    avg_weights = [m * (1.0 / a) for m, a in zip(masks, areas)]
+    avg_weights = [m * (1.0 / a) if a > 0 else m for m, a in zip(masks, areas)]
     eval_op = sl.averaging_operator(model_space, avg_weights)
 
-    # Project the prior into the 3D space and densify it
+    # Project the prior into the 25D space
     param_prior = exact_model_prior.affine_mapping(
         operator=basis_op.adjoint
     ).with_dense_covariance()
 
     if args.parameterized_truth:
-        # Draw a 3D parameter vector and broadcast it to the spatial map
+        # Generate truth from the 25 regional parameters
         param_truth = param_prior.sample()
         model = basis_op(param_truth)
     else:
-        # Draw a fully continuous spatial field
+        # Generate full-field spatial truth
         model = exact_model_prior.sample()
 
     data = forward_problem.data_measure_from_model(model).sample()
-
-    # Extract the exact 3D regional averages of the true model to plot on the corner plot
     true_3d_mm = eval_op(model) * to_mm
 
     # ==========================================
@@ -259,32 +252,36 @@ def main():
     print("Extracting 3D regional averages from the full spatial posterior...")
     full_posterior_3d = model_posterior.affine_mapping(operator=eval_op)
 
-    # --- Optimize Measures (Scale to mm AND densify exactly once) ---
-    print("Densifying 3D covariances for stats and corner plots...")
-    to_mm_op = param_posterior.domain.identity_operator() * to_mm
-
-    param_posterior_mm = param_posterior.affine_mapping(
-        operator=to_mm_op
-    ).with_dense_covariance()
-    full_posterior_3d_mm = full_posterior_3d.affine_mapping(
-        operator=to_mm_op
-    ).with_dense_covariance()
-
     # Extract stats directly from the cached dense representations
-    param_mean = param_posterior_mm.expectation
-    param_std = np.sqrt(np.diag(param_posterior_mm.covariance.matrix(dense=True)))
+    if args.plot_corners:
 
-    full_mean = full_posterior_3d_mm.expectation
-    full_std = np.sqrt(np.diag(full_posterior_3d_mm.covariance.matrix(dense=True)))
+        # --- Optimize Measures (Scale to mm AND densify exactly once) ---
+        print("Densifying 3D covariances for stats and corner plots...")
+        to_mm_op = param_posterior.domain.identity_operator() * to_mm
 
-    print("\nResults (Average Ice Thickness Change):")
-    for i, region in enumerate(regions):
-        print(f"[{region}]")
-        print(
-            f"  Parameterized 3D: {param_mean[i]:>6.2f} mm  ± {param_std[i]:>5.2f} mm"
-        )
-        print(f"  Full Inversion:   {full_mean[i]:>6.2f} mm  ± {full_std[i]:>5.2f} mm")
-    print("-----------------------------------------------\n")
+        param_posterior_mm = param_posterior.affine_mapping(
+            operator=to_mm_op
+        ).with_dense_covariance()
+        full_posterior_3d_mm = full_posterior_3d.affine_mapping(
+            operator=to_mm_op
+        ).with_dense_covariance()
+
+        param_mean = param_posterior_mm.expectation
+        param_std = np.sqrt(np.diag(param_posterior_mm.covariance.matrix(dense=True)))
+
+        full_mean = full_posterior_3d_mm.expectation
+        full_std = np.sqrt(np.diag(full_posterior_3d_mm.covariance.matrix(dense=True)))
+
+        print("\nResults (Average Ice Thickness Change):")
+        for i, region in enumerate(regions):
+            print(f"[{region}]")
+            print(
+                f"  Parameterized 3D: {param_mean[i]:>6.2f} mm  ± {param_std[i]:>5.2f} mm"
+            )
+            print(
+                f"  Full Inversion:   {full_mean[i]:>6.2f} mm  ± {full_std[i]:>5.2f} mm"
+            )
+        print("-----------------------------------------------\n")
 
     # ==========================================
     # 6. Spatial Plotting
@@ -401,34 +398,84 @@ def main():
         cbar_scatter3.set_label("Parameterized Normalized Residuals (σ)")
         ax3.set_title("3D Parameterized Expectation & Data Residuals")
 
+        # --- Figure 4: Parameterization Regions Plot ---
+        fig4, ax4 = sl.create_map_figure(figsize=(12, 7))
+
+        # Combine masks into a single grid with integer labels (1 to 6)
+        combined_regions = exact_fp.zero_grid()
+        for i, m in enumerate(masks):
+            # i+1 ensures we don't use 0 (which is the background)
+            combined_regions.data += m.data * (i + 1)
+
+        # Set background (zeros) to NaN so they are transparent
+        combined_regions.data[combined_regions.data == 0] = np.nan
+
+        # Use a discrete qualitative colormap
+        num_regions = len(regions)
+        region_cmap = plt.get_cmap("tab10", num_regions)
+
+        ax4, region_mappable = sl.plot(
+            combined_regions,
+            ax=ax4,
+            cmap=region_cmap,
+            colorbar=False,
+            vmin=0.5,
+            vmax=num_regions + 0.5,
+        )
+
+        # Create a custom colorbar with region names as labels
+        cbar_regions = fig4.colorbar(
+            region_mappable,
+            ax=ax4,
+            location="bottom",
+            shrink=0.8,
+            pad=0.05,
+            ticks=np.arange(1, num_regions + 1),
+        )
+        cbar_regions.set_ticklabels(regions)
+        cbar_regions.set_label("Parameterization Regions (Drainage Basins)")
+        ax4.set_title("Geographical Basin Parameterization")
+
     # ==========================================
-    # 7. Corner Plots
+    # 7. Corner Plots (Sub-sampled)
     # ==========================================
     if args.plot_corners:
+        # Define the specific basins we want to highlight (e.g., high-interest areas)
+        # Names must match what comes out of list_imbie_ant_regions/list_mouginot_grl_regions
+        interesting_names = [
+            "ANT_A-Ap",  # Antarctic Peninsula
+            "ANT_G-H",  # Amundsen Sea (Pine Island/Thwaites)
+            "ANT_C-Cp",  # Wilkes Land / Totten
+            "GRL_NW",  # Northwest Greenland
+            "GRL_NE",  # Northeast Greenland (NEGIS)
+            "GRL_SW",  # Southwest Greenland
+        ]
 
-        def get_width_scaling(mean, std, truth, default_width=3.75):
-            """Calculates the required width scaling to ensure truth is on screen."""
-            z_scores = np.abs(mean - truth) / std
-            max_z = np.max(z_scores)
-            return max(default_width, max_z * 1.2)
+        # Find the indices for these names in the master 25-region list
+        indices = [regions.index(name) for name in interesting_names]
 
-        param_width = get_width_scaling(param_mean, param_std, true_3d_mm)
-        full_width = get_width_scaling(full_mean, full_std, true_3d_mm)
+        # Create a sub-sampling operator (maps 25D -> 6D)
+        sub_sampler = inf.SelectionOperator(param_posterior.domain, indices)
+
+        # Map the posteriors to this smaller space for plotting
+        param_sub_posterior = param_posterior_mm.affine_mapping(operator=sub_sampler)
+        full_sub_posterior = full_posterior_3d_mm.affine_mapping(operator=sub_sampler)
+        sub_truth = true_3d_mm[indices]
 
         # --- Figure 4: Parameterized Corner Plot ---
-        sl.plot_corner_distributions(
-            param_posterior_mm,
-            true_values=true_3d_mm,
-            labels=regions,
-            title="Parameterized 3D Joint Posterior",
+        inf.plot_corner_distributions(
+            param_sub_posterior,
+            true_values=sub_truth,
+            labels=interesting_names,
+            title="Parameterized 25D (Sub-sampled) Joint Posterior",
         )
 
         # --- Figure 5: Full Spatial (Mapped) Corner Plot ---
-        sl.plot_corner_distributions(
-            full_posterior_3d_mm,
-            true_values=true_3d_mm,
-            labels=regions,
-            title="Full Spatial Mapped Joint Posterior",
+        inf.plot_corner_distributions(
+            full_sub_posterior,
+            true_values=sub_truth,
+            labels=interesting_names,
+            title="Full Spatial 25D (Sub-sampled) Joint Posterior",
         )
 
     if args.plot_maps or args.plot_corners:

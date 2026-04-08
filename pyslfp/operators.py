@@ -996,3 +996,50 @@ def altimetry_averaging_operator(points: List[Tuple[float, float]]) -> LinearOpe
     weights /= np.sum(weights)
     matrix = weights.reshape(1, n_points)
     return LinearOperator.from_matrix(domain, codomain, matrix)
+
+
+def get_ice_sheet_masks_and_labels(fp):
+    """Gathers all 18 ANT and 7 GRL basin masks into lists."""
+    ant_names = fp.list_imbie_ant_regions()
+    grl_names = fp.list_mouginot_grl_regions()
+
+    masks = []
+    labels = []
+
+    for name in ant_names:
+        masks.append(fp.imbie_ant_projection(name, value=0.0))
+        labels.append(f"ANT_{name}")
+
+    for name in grl_names:
+        masks.append(fp.mouginot_grl_projection(name, value=0.0))
+        labels.append(f"GRL_{name}")
+
+    return masks, labels
+
+
+def ice_sheet_basis_operator(model_space, fp):
+    """
+    The 'Basis' operator G: Maps [25x1] coefficients -> Global Field.
+    If input is 1.0, the resulting field is 1.0 meter within that basin.
+
+    This is the adjoint of the INTEGRAL operator.
+    """
+    masks, _ = get_ice_sheet_masks_and_labels(fp)
+    # In pyslfp, averaging_operator(masks) actually computes the
+    # L2 inner product (the integral).
+    return averaging_operator(model_space, masks).adjoint
+
+
+def ice_sheet_averaging_operator(model_space, fp):
+    """
+    The 'Averaging' operator B: Maps Global Field -> [25x1] Averages.
+    Returns the true spatial average (Total Integral / Area).
+    """
+    masks, _ = get_ice_sheet_masks_and_labels(fp)
+
+    # Apply the weighting factor (1/Area) to each mask
+    areas = [fp.integrate(m) for m in masks]
+    # Handle potential zero-area masks safely
+    weighted_masks = [m * (1.0 / a) if a > 0 else m for m, a in zip(masks, areas)]
+
+    return averaging_operator(model_space, weighted_masks)

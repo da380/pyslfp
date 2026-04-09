@@ -650,3 +650,106 @@ def test_projection_with_random_load(fingerprint: FingerPrint):
 
     # Should be finite
     assert np.isfinite(ocean_integral)
+
+
+# ====================================================================#
+#             Tests for Regional and Hemisphere Projections           #
+# ====================================================================#
+
+
+def test_hemisphere_projections(fingerprint: FingerPrint):
+    """
+    Tests that the northern and southern hemisphere projections are binary
+    and mutually exclusive.
+    """
+    nh_proj = fingerprint.northern_hemisphere_projection(value=0)
+    sh_proj = fingerprint.southern_hemisphere_projection(value=0)
+
+    # Check they are binary
+    assert np.all((nh_proj.data == 0) | (nh_proj.data == 1))
+    assert np.all((sh_proj.data == 0) | (sh_proj.data == 1))
+
+    # Check they do not overlap
+    overlap = nh_proj.data * sh_proj.data
+    assert np.max(overlap) == 0
+
+
+def test_ar6_regionmask_projections(fingerprint: FingerPrint):
+    """
+    Tests the AR6 regionmask convenience methods and error handling.
+    """
+    grl_proj = fingerprint.greenland_projection(value=0)
+    wais_proj = fingerprint.west_antarctic_projection(value=0)
+
+    # Check they are binary
+    assert np.all((grl_proj.data == 0) | (grl_proj.data == 1))
+    assert np.all((wais_proj.data == 0) | (wais_proj.data == 1))
+
+    # Greenland and West Antarctica should not overlap
+    assert np.max(grl_proj.data * wais_proj.data) == 0
+
+    # Test error handling for a non-existent region
+    with pytest.raises(ValueError, match="not found in the AR6 dataset"):
+        fingerprint.regionmask_projection("Atlantis")
+
+
+def test_shapefile_region_lists(fingerprint: FingerPrint):
+    """
+    Tests that the dynamic listing of IMBIE and Mouginot regions works.
+    """
+    ant_regions = fingerprint.list_imbie_ant_regions()
+    grl_regions = fingerprint.list_mouginot_grl_regions()
+
+    assert isinstance(ant_regions, list)
+    assert isinstance(grl_regions, list)
+    assert len(ant_regions) > 0
+    assert len(grl_regions) > 0
+
+
+def test_shapefile_projections(fingerprint: FingerPrint):
+    """
+    Tests the dynamic projection generation for IMBIE and Mouginot regions.
+    """
+    ant_regions = fingerprint.list_imbie_ant_regions()
+    if ant_regions:
+        # Test a valid Antarctica region
+        test_region = ant_regions[0]
+        proj = fingerprint.imbie_ant_projection(test_region, value=0)
+        assert np.all((proj.data == 0) | (proj.data == 1))
+        # It should have some non-zero area
+        assert np.sum(proj.data) > 0
+
+    # Test error handling
+    with pytest.raises(ValueError, match="not found in ANT"):
+        fingerprint.imbie_ant_projection("FakeBasin")
+
+
+# ====================================================================#
+#                    Tests for Observation Generators                 #
+# ====================================================================#
+
+
+def test_altimetry_point_generators(fingerprint: FingerPrint):
+    """
+    Tests that the altimetry point generators return valid lists of
+    (lat, lon) coordinates based on the respective masks.
+    """
+    # Use a coarse spacing to keep the test fast
+    ocean_pts = fingerprint.ocean_altimetry_points(spacing_degrees=10.0)
+    ice_pts = fingerprint.ice_altimetry_points(spacing_degrees=10.0)
+
+    # Check ocean points
+    assert isinstance(ocean_pts, list)
+    if ocean_pts:
+        assert isinstance(ocean_pts[0], tuple)
+        assert len(ocean_pts[0]) == 2
+        # Ensure points respect the default latitude bounds (-66 to 66)
+        lats = [p[0] for p in ocean_pts]
+        assert np.max(lats) <= 66.0
+        assert np.min(lats) >= -66.0
+
+    # Check ice points
+    assert isinstance(ice_pts, list)
+    if ice_pts:
+        assert isinstance(ice_pts[0], tuple)
+        assert len(ice_pts[0]) == 2

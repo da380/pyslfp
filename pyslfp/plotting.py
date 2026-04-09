@@ -15,6 +15,8 @@ from cartopy.mpl.geoaxes import GeoAxes
 from matplotlib.figure import Figure
 
 
+
+
 def create_map_figure(
     figsize: Optional[Tuple[float, float]] = None,
     projection: Optional[Projection] = None,
@@ -62,8 +64,6 @@ def plot(
     if projection is None and ax is None:
         projection = ccrs.Robinson()
 
-    # If a colorbar is requested but no kwargs are provided, inject the
-    # traditional pyslfp aesthetics so the user doesn't have to type them.
     if colorbar and colorbar_kwargs is None:
         colorbar_kwargs = {"orientation": "horizontal", "shrink": 0.7, "pad": 0.05}
 

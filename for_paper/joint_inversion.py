@@ -197,8 +197,6 @@ def build_joint_physics(lmax, obs_degree, points, args, is_surrogate=False):
     grace_noise_scale = args.grace_noise_scale_factor * ice_scale
     grace_noise_std = args.grace_noise_std_factor * ice_std
 
-    # FIX: Ensure the noise load space extends to the full observation degree
-    # so the mapped observation noise covariance doesn't contain zeros!
     noise_load_space = (
         load_space.with_degree(obs_degree)
         if load_space.lmax < obs_degree
@@ -281,9 +279,7 @@ def main():
     )
 
     if args.full_woodbury:
-        print(
-            "Constructing Full Joint Woodbury Preconditioner (This will take a moment to assemble the GRACE blocks)..."
-        )
+        print("Constructing Full Joint Woodbury Preconditioner...")
         surr_joint_fwd = inf.LinearForwardProblem(
             surr["A_joint"], data_error_measure=surr["data_noise"]
         )
@@ -291,12 +287,10 @@ def main():
             surr_joint_fwd, surr["model_prior"]
         )
 
-        # This seamlessly rips through the BlockLinearOperator matrices
         joint_preconditioner = surr_joint_inv.woodbury_data_preconditioner()
 
     else:
         print("Constructing GRACE Preconditioner Block (WMB)...")
-        # Use the 'exact' WMB method and load space to preserve the full obs_degree data dimension
         wmb_proxy_prior = exact[
             "load_space"
         ].point_value_scaled_heat_kernel_gaussian_measure(

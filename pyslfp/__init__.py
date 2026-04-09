@@ -24,6 +24,10 @@ from .operators import (
     remove_ocean_average_operator,
     ocean_altimetry_operator,
     altimetry_averaging_operator,
+    ice_sheet_averaging_operator,
+    ice_sheet_basis_operator,
+    get_ice_sheet_masks_and_labels,
+    standard_ice_groupings,
 )
 
 
@@ -62,4 +66,8 @@ __all__ = [
     "remove_ocean_average_operator",
     "ocean_altimetry_operator",
     "altimetry_averaging_operator",
+    "ice_sheet_averaging_operator",
+    "ice_sheet_basis_operator",
+    "get_ice_sheet_masks_and_labels",
+    "standard_ice_groupings",
 ]

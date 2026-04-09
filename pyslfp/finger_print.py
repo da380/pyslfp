@@ -1045,9 +1045,7 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
 
         lons, lats = self.lons(), self.lats()
 
-        # 3. Create a 3D boolean mask (prevents the 'overlapping regions' error)
-        # We use lons[:-1] because pyslfp's last column is a duplicate of the first
-        # regionmask automatically handles the 0-360 vs -180-180 wrap here.
+        # 3. Create a 3D boolean mask
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 "ignore", category=UserWarning, message=".*overlapping regions.*"
@@ -1055,8 +1053,11 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
             mask_3d = rm_obj.mask_3D(lons[:-1], lats)
 
         # 4. Extract the specific region layer
-        # This ensures 'NW' doesn't bleed into 'NE'
-        specific_layer = mask_3d.sel(region=region_id).values
+        # Handle cases where coarse grids (e.g., lmax=16) completely miss small regions
+        if region_id in mask_3d.region.values:
+            specific_layer = mask_3d.sel(region=region_id).values
+        else:
+            specific_layer = np.zeros((len(lats), len(lons) - 1), dtype=bool)
 
         # Convert boolean True/False to 1.0/value
         mask_data = np.where(specific_layer, 1.0, value)

@@ -36,7 +36,7 @@ def parse_arguments():
     parser.add_argument(
         "--lmax",
         type=int,
-        default=256,
+        default=128,
         help="Maximum spherical harmonic degree for the exact Earth model.",
     )
     parser.add_argument(
@@ -80,11 +80,11 @@ def build_operators(lmax, tide_gauge_points, args, is_surrogate=False):
 
     # Set up the finger print operator
     load_order = 2.0
-    load_scale_km = 100.0
+    load_scale_km = 250.0
     load_scale = 1000.0 * load_scale_km / fp.length_scale
 
     # PHYSICS-LITE: Limit SLE iterations for the surrogate
-    max_iters = 1 if is_surrogate else None
+    max_iters = 3 if is_surrogate else None
     finger_print_operator = fp.as_sobolev_linear_operator(
         load_order, load_scale, rtol=1e-9, max_iterations=max_iters
     )
@@ -169,7 +169,7 @@ def main():
     # ==========================================
     # 3. Setup Parameterization & Generate Truth
     # ==========================================
-    print(f"\n--- Generating Synthetic Data (25-Basin Parameterization) ---")
+    print("\n--- Generating Synthetic Data (25-Basin Parameterization) ---")
     model_space = exact_forward_operator.domain
 
     # Use the new robust basin collector from your updated library
@@ -440,8 +440,7 @@ def main():
     # 7. Corner Plots (Sub-sampled)
     # ==========================================
     if args.plot_corners:
-        # Define the specific basins we want to highlight (e.g., high-interest areas)
-        # Names must match what comes out of list_imbie_ant_regions/list_mouginot_grl_regions
+        # Define the specific basins we want to highlight
         interesting_names = [
             "ANT_A-Ap",  # Antarctic Peninsula
             "ANT_G-H",  # Amundsen Sea (Pine Island/Thwaites)
@@ -454,8 +453,9 @@ def main():
         # Find the indices for these names in the master 25-region list
         indices = [regions.index(name) for name in interesting_names]
 
-        # Create a sub-sampling operator (maps 25D -> 6D)
-        sub_sampler = inf.SelectionOperator(param_posterior.domain, indices)
+        # Create a sub-sampling operator (maps 25D -> 6D) using the native pygeoinf method
+        # REPLACE inf.SelectionOperator with this:
+        sub_sampler = param_posterior.domain.subspace_projection(indices)
 
         # Map the posteriors to this smaller space for plotting
         param_sub_posterior = param_posterior_mm.affine_mapping(operator=sub_sampler)

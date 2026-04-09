@@ -27,6 +27,7 @@ from .operators import (
     ice_sheet_averaging_operator,
     ice_sheet_basis_operator,
     get_ice_sheet_masks_and_labels,
+    standard_ice_groupings,
 )
 
 
@@ -68,4 +69,5 @@ __all__ = [
     "ice_sheet_averaging_operator",
     "ice_sheet_basis_operator",
     "get_ice_sheet_masks_and_labels",
+    "standard_ice_groupings",
 ]

@@ -2,7 +2,7 @@
 Module for plotting functions using matplotlib and cartopy.
 """
 
-from typing import Tuple, Optional, List, Any, Union
+from typing import Tuple, Optional, List, Any
 
 from pyshtools import SHGrid
 
@@ -14,12 +14,7 @@ from cartopy.crs import Projection
 from cartopy.mpl.geoaxes import GeoAxes
 from matplotlib.figure import Figure
 
-import matplotlib.pyplot as plt
-import matplotlib.colors as colors
-import numpy as np
-import scipy.stats as stats
 
-from pygeoinf import GaussianMeasure
 
 
 def create_map_figure(

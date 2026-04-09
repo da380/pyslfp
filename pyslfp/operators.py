@@ -20,7 +20,9 @@ from pygeoinf import (
     MassWeightedHilbertSpace,
     DiagonalSparseMatrixLinearOperator,
     GaussianMeasure,
+    CholeskySolver,
 )
+
 
 from pygeoinf.symmetric_space.symmetric_space import (
     InvariantLinearAutomorphism,
@@ -998,48 +1000,127 @@ def altimetry_averaging_operator(points: List[Tuple[float, float]]) -> LinearOpe
     return LinearOperator.from_matrix(domain, codomain, matrix)
 
 
-def get_ice_sheet_masks_and_labels(fp):
-    """Gathers all 18 ANT and 7 GRL basin masks into lists."""
-    ant_names = fp.list_imbie_ant_regions()
-    grl_names = fp.list_mouginot_grl_regions()
-
-    masks = []
-    labels = []
-
-    for name in ant_names:
-        masks.append(fp.imbie_ant_projection(name, value=0.0))
-        labels.append(f"ANT_{name}")
-
-    for name in grl_names:
-        masks.append(fp.mouginot_grl_projection(name, value=0.0))
-        labels.append(f"GRL_{name}")
-
-    return masks, labels
-
-
-def ice_sheet_basis_operator(model_space, fp):
+def get_ice_sheet_masks_and_labels(fp, groupings=None):
     """
-    The 'Basis' operator G: Maps [25x1] coefficients -> Global Field.
-    If input is 1.0, the resulting field is 1.0 meter within that basin.
+    Returns combined SHGrid masks and labels for regional groupings.
 
-    This is the adjoint of the INTEGRAL operator.
+    Args:
+        fp: The FingerPrint object.
+        groupings: A list of lists of region names (e.g. [["ANT_A-Ap", "ANT_G-H"], ["GRL_NW"]]).
+                   If None, defaults to individual regions for all available basins.
     """
-    masks, _ = get_ice_sheet_masks_and_labels(fp)
-    # In pyslfp, averaging_operator(masks) actually computes the
-    # L2 inner product (the integral).
-    return averaging_operator(model_space, masks).adjoint
+
+    if isinstance(groupings, str):
+        groupings = standard_ice_groupings(fp, scheme=groupings)
+
+    if groupings is None:
+        # Default to the full 25-parameter individual breakdown
+        ant_names = [f"ANT_{name}" for name in fp.list_imbie_ant_regions()]
+        grl_names = [f"GRL_{name}" for name in fp.list_mouginot_grl_regions()]
+        groupings = [[name] for name in ant_names + grl_names]
+
+    combined_masks = []
+    combined_labels = []
+
+    for group in groupings:
+        if not group:
+            continue
+
+        accumulated_data = None
+        reference_grid = None
+
+        for name in group:
+            # Parse the prefix to fetch from the correct Regionmask dataset
+            if name.startswith("ANT_"):
+                m = fp.imbie_ant_projection(name[4:], value=0.0)
+            elif name.startswith("GRL_"):
+                m = fp.mouginot_grl_projection(name[4:], value=0.0)
+            else:
+                raise ValueError(
+                    f"Unknown region '{name}'. Must start with 'ANT_' or 'GRL_'."
+                )
+
+            # Accumulate the mask data arrays
+            if accumulated_data is None:
+                accumulated_data = m.data.copy()
+                reference_grid = m
+            else:
+                accumulated_data += m.data
+
+        # Create a new combined SHGrid by injecting the summed data
+        combined_grid = reference_grid.copy()
+        combined_grid.data = accumulated_data
+
+        combined_masks.append(combined_grid)
+        combined_labels.append(" + ".join(group))
+
+    return combined_masks, combined_labels
 
 
-def ice_sheet_averaging_operator(model_space, fp):
+
+def ice_sheet_averaging_operator(model_space, fp, groupings=None):
     """
-    The 'Averaging' operator B: Maps Global Field -> [25x1] Averages.
-    Returns the true spatial average (Total Integral / Area).
+    The 'Averaging' operator B: Maps Global Field -> [N x 1] Averages.
     """
-    masks, _ = get_ice_sheet_masks_and_labels(fp)
+    masks, _ = get_ice_sheet_masks_and_labels(fp, groupings=groupings)
 
-    # Apply the weighting factor (1/Area) to each mask
+    # Apply the weighting factor (1/Area) to each combined mask
     areas = [fp.integrate(m) for m in masks]
-    # Handle potential zero-area masks safely
     weighted_masks = [m * (1.0 / a) if a > 0 else m for m, a in zip(masks, areas)]
 
     return averaging_operator(model_space, weighted_masks)
+
+
+def ice_sheet_basis_operator(model_space, fp, groupings=None):
+    """
+    The 'Basis' operator G_tilde: Maps [N x 1] coefficients -> Global Field in H^s.
+    Acts as a strict right-inverse to the averaging operator.
+    """
+    B = ice_sheet_averaging_operator(model_space, fp, groupings=groupings)
+    M = B @ B.adjoint
+    M_inv = CholeskySolver()(M)
+    return B.adjoint @ M_inv
+
+
+def standard_ice_groupings(fp, scheme="individual"):
+    """
+    Provides predefined sensible groupings of ice sheet basins.
+
+    Args:
+        fp: The FingerPrint object.
+        scheme (str): The name of the grouping scheme to use. Options include:
+            - 'individual': All 25 basins kept separate (Default).
+            - 'ice_sheets': 2 parameters (All Antarctica, All Greenland).
+            - 'macro_regions': 4 parameters (WAIS, EAIS, AP, All Greenland).
+            - 'grl_focused': Greenland individual, Antarctica lumped.
+            - 'ant_focused': Antarctica individual, Greenland lumped.
+
+    Returns:
+        A list of lists containing the prefixed basin names.
+    """
+    ant_names = [f"ANT_{name}" for name in fp.list_imbie_ant_regions()]
+    grl_names = [f"GRL_{name}" for name in fp.list_mouginot_grl_regions()]
+
+    if scheme == "individual":
+        return [[name] for name in ant_names + grl_names]
+
+    elif scheme == "ice_sheets":
+        return [ant_names, grl_names]
+
+    elif scheme == "macro_regions":
+        # Standard IMBIE definitions for West Antarctica, East Antarctica, and the Peninsula
+        wais = ["ANT_F-G", "ANT_G-H", "ANT_H-Hp"]
+        ap = ["ANT_I-Ipp", "ANT_Ipp-J", "ANT_J-Jpp"]
+        # EAIS is everything else in Antarctica
+        eais = [n for n in ant_names if n not in wais and n not in ap]
+
+        return [wais, eais, ap, grl_names]
+
+    elif scheme == "grl_focused":
+        return [ant_names] + [[name] for name in grl_names]
+
+    elif scheme == "ant_focused":
+        return [[name] for name in ant_names] + [grl_names]
+
+    else:
+        raise ValueError(f"Unknown grouping scheme: '{scheme}'")

@@ -30,6 +30,11 @@ from pyslfp.operators import (
     remove_ocean_average_operator,
     remove_degrees_from_pyshtools_coeffs,
     remove_degrees_from_shgrid,
+    altimetry_averaging_operator,
+    standard_ice_groupings,
+    get_ice_sheet_masks_and_labels,
+    ice_sheet_averaging_operator,
+    ice_sheet_basis_operator,
 )
 
 # Use standard non-dimensionalisation for sensible numbers
@@ -520,3 +525,130 @@ class TestRemoveDegreesFunctions:
 
         # Check that original grid is unchanged
         assert np.allclose(grid.data, grid_data_original)
+
+
+# ================== Tests for Altimetry Operators ==================
+
+
+class TestAltimetryAveragingOperator:
+    """A test suite for the altimetry_averaging_operator."""
+
+    def test_altimetry_averaging_operator_basic(self):
+        """Tests the latitude weighting logic."""
+        # cos(0) = 1.0, cos(60) = 0.5. Total weight = 1.5.
+        # Normalized weights = 2/3 and 1/3.
+        points = [(0, 0), (60, 0)]
+        op = altimetry_averaging_operator(points)
+
+        assert op.domain.dim == 2
+        assert op.codomain.dim == 1
+
+        # Applying to [3.0, 3.0] should yield (2/3)*3 + (1/3)*3 = 3.0
+        res = op(np.array([3.0, 3.0]))
+        assert np.isclose(res[0], 3.0)
+
+    def test_altimetry_averaging_operator_empty(self):
+        """Tests that empty points raise an error."""
+        with pytest.raises(ValueError, match="cannot be empty"):
+            altimetry_averaging_operator([])
+
+
+# ================== Tests for Ice Sheet Groupings and Masks ==================
+
+
+@pytest.mark.parametrize("lmax", [16])
+class TestIceSheetGroupings:
+    """A test suite for the regional ice sheet grouping utilities."""
+
+    def test_standard_ice_groupings(self, lmax, fp_instance):
+        """Tests that the string-based scheme parser returns valid lists."""
+
+        # 1. Individual
+        ind = standard_ice_groupings(fp_instance, "individual")
+        assert len(ind) > 0
+        assert all(len(g) == 1 for g in ind)
+
+        # 2. Ice Sheets (Antarctica, Greenland)
+        sheets = standard_ice_groupings(fp_instance, "ice_sheets")
+        assert len(sheets) == 2
+
+        # 3. Macro Regions (WAIS, EAIS, AP, GRL)
+        macro = standard_ice_groupings(fp_instance, "macro_regions")
+        assert len(macro) == 4
+
+        # 4. Unknown Scheme
+        with pytest.raises(ValueError, match="Unknown grouping scheme"):
+            standard_ice_groupings(fp_instance, "unknown_scheme")
+
+    def test_get_ice_sheet_masks_and_labels(self, lmax, fp_instance):
+        """Tests the mask accumulation logic for grouped regions."""
+
+        groupings = [["GRL_NW", "GRL_NE"]]
+        masks, labels = get_ice_sheet_masks_and_labels(fp_instance, groupings=groupings)
+
+        assert len(masks) == 1
+        assert len(labels) == 1
+        assert labels[0] == "GRL_NW + GRL_NE"
+        assert np.sum(masks[0].data) > 0
+
+
+# ================== Tests for Ice Sheet Parameterized Operators ==================
+
+
+@pytest.mark.parametrize("lmax", [16])  # Keep lmax small for fast matrix inversion
+class TestIceSheetParameterizedOperators:
+    """A test suite for the parameterized regional inversion operators."""
+
+    @pytest.mark.parametrize("space_type", ["sobolev"])
+    def test_averaging_operator_axiom_checks(self, lmax, space_type, fp_instance):
+        """Tests the adjoint identity for the regional averaging operator."""
+
+        load_space = get_load_space(fp_instance, space_type)
+
+        # Use "ice_sheets" (2 params) to keep the test exceptionally fast
+        op = ice_sheet_averaging_operator(
+            load_space, fp_instance, groupings="ice_sheets"
+        )
+        op.check(n_checks=3)
+
+    @pytest.mark.parametrize("space_type", ["sobolev"])
+    def test_basis_operator_axiom_checks(self, lmax, space_type, fp_instance):
+        """Tests the adjoint identity for the regional basis operator."""
+
+        load_space = get_load_space(fp_instance, space_type)
+
+        op = ice_sheet_basis_operator(load_space, fp_instance, groupings="ice_sheets")
+        op.check(n_checks=3)
+
+    @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
+    def test_basis_is_right_inverse(self, lmax, space_type, fp_instance):
+        """
+        Critically tests that the basis operator acts as a strict right-inverse
+        to the averaging operator, meaning B(G(x)) = x.
+        """
+        from pyslfp.operators import (
+            ice_sheet_basis_operator,
+        )
+
+        load_space = get_load_space(fp_instance, space_type)
+
+        # Use "macro_regions" (4 params) to test a slightly more complex combination
+        groupings = "macro_regions"
+
+        B = ice_sheet_averaging_operator(load_space, fp_instance, groupings=groupings)
+        G = ice_sheet_basis_operator(load_space, fp_instance, groupings=groupings)
+
+        # Compose the operators: EuclideanSpace -> HilbertSpace -> EuclideanSpace
+        identity_approx = B @ G
+
+        N = identity_approx.domain.dim
+
+        # Check that it perfectly recovers standard basis vectors in Euclidean space
+        for i in range(N):
+            e_i = np.zeros(N)
+            e_i[i] = 1.0
+
+            res = identity_approx(e_i)
+
+            # The result should be extremely close to the input vector
+            np.testing.assert_allclose(res, e_i, atol=1e-7)

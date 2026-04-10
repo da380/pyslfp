@@ -60,11 +60,11 @@ class IceNG:
             date_string = f"{date:04.1f}"
 
         if self._version == IceModel.ICE7G:
-            return DATADIR + "/ice7g/I7G_NA.VM7_1deg." + date_string + ".nc"
+            return str(DATADIR / "ice7g" / f"I7G_NA.VM7_1deg.{date_string}.nc")
         elif self._version == IceModel.ICE6G:
-            return DATADIR + "/ice6g/I6_C.VM5a_1deg." + date_string + ".nc"
+            return str(DATADIR / "ice6g" / f"I6_C.VM5a_1deg.{date_string}.nc")
         else:
-            return DATADIR + "/ice5g/ice5g_v1.2_" + date_string + "k_1deg.nc"
+            return str(DATADIR / "ice5g" / f"ice5g_v1.2_{date_string}k_1deg.nc")
 
     def _find_files(self, date: float) -> Tuple[str, str, float]:
         """

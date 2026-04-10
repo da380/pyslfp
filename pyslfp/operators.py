@@ -589,7 +589,7 @@ class WMBMethod(EarthModelParameters, LoveNumbers):
         *,
         minimum_degree: int = 2,
         earth_model_parameters: Optional[EarthModelParameters] = None,
-        love_number_file: str = DATADIR + "/love_numbers/PREM_4096.dat",
+        love_number_file: str = str(DATADIR / "love_numbers" / "PREM_4096.dat"),
     ):
         """
         Initializes the WMBMethod instance.
@@ -1055,7 +1055,6 @@ def get_ice_sheet_masks_and_labels(fp, groupings=None):
         combined_labels.append(" + ".join(group))
 
     return combined_masks, combined_labels
-
 
 
 def ice_sheet_averaging_operator(model_space, fp, groupings=None):

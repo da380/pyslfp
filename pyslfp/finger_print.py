@@ -7,7 +7,6 @@ from __future__ import annotations
 from typing import Optional, Tuple, List, Union
 
 
-
 import numpy as np
 
 from scipy.interpolate import RegularGridInterpolator
@@ -51,7 +50,7 @@ class FingerPrint(Regions, EarthModelParameters, LoveNumbers):
         lmax: int = 256,
         earth_model_parameters: Optional[EarthModelParameters] = None,
         grid: str = "DH",
-        love_number_file: str = DATADIR + "/love_numbers/PREM_4096.dat",
+        love_number_file: str = str(DATADIR / "love_numbers" / "PREM_4096.dat"),
         exclude_caspian_sea_from_ocean: bool = True,
     ) -> None:
         """

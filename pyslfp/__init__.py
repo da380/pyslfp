@@ -40,6 +40,11 @@ from .utils import (
 )
 
 
+def where_is_my_data():
+    """Returns the absolute path to the current data directory."""
+    return str(DATADIR.absolute())
+
+
 __all__ = [
     "DATADIR",
     "IceNG",

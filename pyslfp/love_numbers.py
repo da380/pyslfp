@@ -44,7 +44,7 @@ class LoveNumbers:
         """
 
         if file is None:
-            file = DATADIR + "/love_numbers/PREM_4096.dat"
+            file = str(DATADIR / "love_numbers" / "PREM_4096.dat")
 
         data = np.loadtxt(file)
         data_degree = len(data[:, 0]) - 1

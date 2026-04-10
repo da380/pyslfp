@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, develop ] # Added develop so you can test your push
   pull_request:
-    branches: [ main ]
+    branches: [ main, develop ]
 
 jobs:
   build-and-test:
@@ -15,7 +15,10 @@ jobs:
         python-version: ["3.12"]
 
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        lfs: true # This tells the runner to pull the actual shapefiles
 
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v4
@@ -38,4 +41,3 @@ jobs:
 
     - name: Build package
       run: poetry build
-

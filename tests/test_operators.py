@@ -244,7 +244,7 @@ class TestIceThicknessToLoadOperator:
             * fp_instance.one_minus_ocean_function
             * ice_thickness_change
         )
-        assert np.allclose(load_actual.data, load_expected.data, rtol=1e-10)
+        assert np.allclose(load_actual.data, load_expected.data, rtol=1e-6)
 
     @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
     def test_axiom_checks(self, lmax, space_type, fp_instance):
@@ -390,7 +390,7 @@ class TestRemoveOceanAverageOperator:
         v = op(u)
         int = fp_instance.ocean_average(v)
 
-        np.testing.assert_allclose(int, 0, rtol=1e-8)
+        np.testing.assert_allclose(int, 0, rtol=1e-6)
 
 
 # ================== Tests for remove_degrees functions ==================

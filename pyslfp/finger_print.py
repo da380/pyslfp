@@ -6,19 +6,14 @@ and adjoint elastic fingerprint calculations.
 from __future__ import annotations
 from typing import Optional, Tuple, List, Union
 
-import os
-import warnings
 
-import geopandas as gpd
 
 import numpy as np
-import regionmask
 
 from scipy.interpolate import RegularGridInterpolator
 
 from pyshtools import SHGrid, SHCoeffs
 
-from cartopy import crs as ccrs
 
 from pygeoinf import (
     LinearOperator,
@@ -30,12 +25,13 @@ from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 from .ice_ng import IceNG, IceModel
 from .physical_parameters import EarthModelParameters
 from .love_numbers import LoveNumbers
+from .regions import Regions
 
 
 from . import DATADIR
 
 
-class FingerPrint(EarthModelParameters, LoveNumbers):
+class FingerPrint(Regions, EarthModelParameters, LoveNumbers):
     """
     Computes elastic sea level "fingerprints" for a given surface load.
 
@@ -70,14 +66,18 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
             exclude_caspian_sea_from_ocean: If True, the Caspian Sea will be
             treated as land in the ocean function. Defaults to True.
         """
+
+        # Initialize the Regions mixin
+        Regions.__init__(self)
+
         # Set up the earth model parameters
         if earth_model_parameters is None:
-            super().__init__()
+            EarthModelParameters.__init__(self)
         else:
             init_kwargs = EarthModelParameters._get_init_kwargs_from_instance(
                 earth_model_parameters
             )
-            super().__init__(**init_kwargs)
+            EarthModelParameters.__init__(self, **init_kwargs)
 
         # Set options.
         self._lmax: int = lmax
@@ -129,15 +129,6 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         self._ice_thickness: Optional[SHGrid] = None
         self._ocean_function: Optional[SHGrid] = None
         self._ocean_area: Optional[float] = None
-
-        self._ar6_regions = regionmask.defined_regions.ar6.all
-
-        # Placeholders for custom datasets (lazy loaded)
-        # ... your existing init ...
-        self._imbie_ant_gdf = None
-        self._imbie_ant_regions = None
-        self._mouginot_grl_gdf = None
-        self._mouginot_grl_regions = None
 
         # Initialise the counter for number of solver calls.
         self._solver_counter: int = 0
@@ -232,39 +223,6 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
     def solver_counter(self) -> int:
         """Returns the number of times the __call__ solver method has been called."""
         return self._solver_counter
-
-    @property
-    def imbie_ant_regions(self):
-        if self._imbie_ant_regions is None:
-            path = os.path.join(
-                DATADIR, "ANT_Basins_IMBIE2", "ANT_Basins_IMBIE2_v1.6.shp"
-            )
-            # Store the GDF privately for direct polygon access
-            self._imbie_ant_gdf = gpd.read_file(path).to_crs(epsg=4326)
-            self._imbie_ant_gdf = self._imbie_ant_gdf[
-                self._imbie_ant_gdf["Subregion"].notna()
-                & (self._imbie_ant_gdf["Subregion"] != "")
-            ]
-            self._imbie_ant_regions = regionmask.from_geopandas(
-                self._imbie_ant_gdf, names="Subregion", name="IMBIE_ANT"
-            )
-        return self._imbie_ant_regions
-
-    @property
-    def mouginot_grl_regions(self):
-        if self._mouginot_grl_regions is None:
-            path = os.path.join(
-                DATADIR, "Greenland_Basins", "Greenland_Basins_PS_v1.4.2.shp"
-            )
-            # Store the GDF privately
-            self._mouginot_grl_gdf = gpd.read_file(path).to_crs(epsg=4326)
-            self._mouginot_grl_gdf = self._mouginot_grl_gdf.dissolve(
-                by="SUBREGION1"
-            ).reset_index()
-            self._mouginot_grl_regions = regionmask.from_geopandas(
-                self._mouginot_grl_gdf, names="SUBREGION1", name="Mouginot_GRL"
-            )
-        return self._mouginot_grl_regions
 
     # ---------------------------------------------------------#
     #                     Private methods                      #
@@ -941,188 +899,6 @@ class FingerPrint(EarthModelParameters, LoveNumbers):
         combined_mask = ocean_mask & lat_mask & ice_free_mask
 
         return SHGrid.from_array(np.where(combined_mask, 1, value), grid=self.grid)
-
-    def regionmask_projection(
-        self, region_name: str, /, *, value: float = np.nan
-    ) -> SHGrid:
-        """
-        Returns a grid that is 1 for a specific AR6 region and `value` elsewhere.
-
-        This method uses the `regionmask` library to generate masks for the
-        IPCC AR6 reference regions.
-
-        Args:
-            region_name: The name or abbreviation of the AR6 region (e.g.,
-                         "Greenland" or "GRL").
-            value: The value to assign outside the region. Default is NaN.
-
-        Returns:
-            An SHGrid object representing the regional mask.
-        """
-        try:
-            region_id = self._ar6_regions.map_keys(region_name)
-        except KeyError as exc:
-            raise ValueError(
-                f"Region '{region_name}' not found in the AR6 dataset. "
-                "Check regionmask.defined_regions.ar6.all.names for available regions."
-            ) from exc
-        lons = self.lons()
-        lats = self.lats()
-        mask_unextended = self._ar6_regions.mask(lons[:-1], lats)
-        masked_data_unextended = np.where(mask_unextended.data == region_id, 1, value)
-        masked_data = np.hstack(
-            (masked_data_unextended, masked_data_unextended[:, 0:1])
-        )
-
-        return SHGrid.from_array(masked_data, grid=self.grid)
-
-    def greenland_projection(self, /, *, value: float = np.nan) -> SHGrid:
-        """
-        Returns a grid that is 1 over the AR6 Greenland region and `value` elsewhere.
-        """
-        return self.regionmask_projection("Greenland/Iceland", value=value)
-
-    def west_antarctic_projection(self, /, *, value: float = np.nan) -> SHGrid:
-        """
-        Returns a grid that is 1 over the AR6 West Antarctica region and `value` elsewhere.
-        """
-        return self.regionmask_projection("W.Antarctica", value=value)
-
-    def east_antarctic_projection(self, /, *, value: float = np.nan) -> SHGrid:
-        """
-        Returns a grid that is 1 over the AR6 East Antarctica region and `value` elsewhere.
-        """
-        return self.regionmask_projection("E.Antarctica", value=value)
-
-    def caspian_sea_projection(self, /, *, value: float = np.nan) -> SHGrid:
-        """
-        Returns a simple rectangular grid that is 1 over the approximate
-        location of the Caspian Sea and `value` elsewhere.
-        """
-        lats, lons = np.meshgrid(self.lats(), self.lons(), indexing="ij")
-        lat_mask = np.logical_and(lats > 36, lats < 49.5)
-        lon_mask = np.logical_and(lons > 45.5, lons < 55)
-        caspian_mask = np.logical_and(lat_mask, lon_mask)
-        return SHGrid.from_array(
-            np.where(caspian_mask, 1, value),
-            grid=self.grid,
-        )
-
-    def glacier_projection(self, /, *, value: float = np.nan) -> SHGrid:
-        """
-        Returns a grid that is 1 over glacier regions and `value` elsewhere.
-        Uses a simple rectangular mask for North American glaciers.
-
-        Args:
-            value: The value to assign outside glacier regions. Default is NaN.
-        """
-        lats, lons = np.meshgrid(self.lats(), self.lons(), indexing="ij")
-        lat_mask = np.logical_and(lats > 30, lats < 70)
-        lon_mask = np.logical_and(lons > 180, lons < 270)
-
-        glacier_mask = np.logical_and(lat_mask, lon_mask)
-
-        return SHGrid.from_array(
-            np.where(glacier_mask, 1, value),
-            grid=self.grid,
-        )
-
-    def _apply_regionmask(self, dataset_key, region_name, value):
-        """Internal helper to apply a regionmask to the current grid."""
-        # 1. Fetch the actual Regionmask object based on the string key
-        if dataset_key == "ANT":
-            rm_obj = self.imbie_ant_regions
-        elif dataset_key == "GRL":
-            rm_obj = self.mouginot_grl_regions
-        else:
-            raise ValueError("dataset_key must be 'ANT' or 'GRL'")
-
-        # 2. Map name to unique ID
-        try:
-            region_id = rm_obj.map_keys(region_name)
-        except KeyError:
-            raise ValueError(f"Region '{region_name}' not found in {dataset_key}.")
-
-        lons, lats = self.lons(), self.lats()
-
-        # 3. Create a 3D boolean mask
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", category=UserWarning, message=".*overlapping regions.*"
-            )
-            mask_3d = rm_obj.mask_3D(lons[:-1], lats)
-
-        # 4. Extract the specific region layer
-        # Handle cases where coarse grids (e.g., lmax=16) completely miss small regions
-        if region_id in mask_3d.region.values:
-            specific_layer = mask_3d.sel(region=region_id).values
-        else:
-            specific_layer = np.zeros((len(lats), len(lons) - 1), dtype=bool)
-
-        # Convert boolean True/False to 1.0/value
-        mask_data = np.where(specific_layer, 1.0, value)
-
-        # 5. Extend longitude to include 360-degree column for pyslfp SHGrid
-        masked_data = np.hstack((mask_data, mask_data[:, 0:1]))
-
-        return SHGrid.from_array(masked_data, grid=self.grid)
-
-    def imbie_ant_projection(
-        self, region_name: str, /, *, value: float = np.nan
-    ) -> SHGrid:
-        """Returns an SHGrid for a specific IMBIE Antarctica basin."""
-        return self._apply_regionmask("ANT", region_name, value)
-
-    def mouginot_grl_projection(
-        self, region_name: str, /, *, value: float = np.nan
-    ) -> SHGrid:
-        """Returns an SHGrid for a specific Mouginot Greenland sector."""
-        return self._apply_regionmask("GRL", region_name, value)
-
-    def list_imbie_ant_regions(self) -> list[str]:
-        """Returns all available IMBIE Antarctic subregion names."""
-        return sorted(self.imbie_ant_regions.names)
-
-    def list_mouginot_grl_regions(self) -> list[str]:
-        """Returns all available Mouginot Greenland sector names."""
-        return sorted(self.mouginot_grl_regions.names)
-
-    def plot_imbie_ant_boundaries(self, ax, region_names=None, **kwargs):
-        """
-        Plots the vector boundaries for Antarctica basins.
-
-        Args:
-            ax: The matplotlib/cartopy axis to plot on.
-            region_names: List of names (e.g., ['G-H']). If None, plots all.
-            **kwargs: Passed to gdf.boundary.plot (e.g., color, linewidth).
-        """
-        _ = self.imbie_ant_regions  # Ensure GDF is loaded
-        gdf = self._imbie_ant_gdf
-
-        if region_names is not None:
-            gdf = gdf[gdf["Subregion"].isin(np.atleast_1d(region_names))]
-
-        # Default styling if not provided
-        kwargs.setdefault("edgecolor", "black")
-        kwargs.setdefault("linewidth", 1.0)
-
-        # We must tell geopandas to use PlateCarree since the GDF is in degrees
-        return gdf.boundary.plot(ax=ax, transform=ccrs.PlateCarree(), **kwargs)
-
-    def plot_mouginot_grl_boundaries(self, ax, region_names=None, **kwargs):
-        """
-        Plots the vector boundaries for Greenland sectors.
-        """
-        _ = self.mouginot_grl_regions  # Ensure GDF is loaded
-        gdf = self._mouginot_grl_gdf
-
-        if region_names is not None:
-            gdf = gdf[gdf["SUBREGION1"].isin(np.atleast_1d(region_names))]
-
-        kwargs.setdefault("edgecolor", "black")
-        kwargs.setdefault("linewidth", 1.0)
-
-        return gdf.boundary.plot(ax=ax, transform=ccrs.PlateCarree(), **kwargs)
 
     def disk_load(
         self, delta: float, latitude: float, longitude: float, amplitude: float

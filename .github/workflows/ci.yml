@@ -32,6 +32,12 @@ jobs:
     - name: Install dependencies
       run: poetry install --with dev
 
+    - name: Cache PySLFP Data
+        uses: actions/cache@v4
+        with:
+          path: ~/.pyslfp_data          
+          key: ${{ runner.os }}-pyslfp-data-${{ hashFiles('pyslfp/downloader.py') }}
+
     - name: Lint with ruff
       run: poetry run ruff check .
 

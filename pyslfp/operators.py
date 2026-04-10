@@ -30,8 +30,6 @@ from pygeoinf.symmetric_space.symmetric_space import (
 )
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
-
-from . import DATADIR
 from .physical_parameters import EarthModelParameters
 from .love_numbers import LoveNumbers
 from .finger_print import FingerPrint
@@ -589,7 +587,7 @@ class WMBMethod(EarthModelParameters, LoveNumbers):
         *,
         minimum_degree: int = 2,
         earth_model_parameters: Optional[EarthModelParameters] = None,
-        love_number_file: str = str(DATADIR / "love_numbers" / "PREM_4096.dat"),
+        love_number_file: Optional[str] = None,
     ):
         """
         Initializes the WMBMethod instance.
@@ -1000,7 +998,7 @@ def altimetry_averaging_operator(points: List[Tuple[float, float]]) -> LinearOpe
     return LinearOperator.from_matrix(domain, codomain, matrix)
 
 
-def get_ice_sheet_masks_and_labels(fp, groupings=None):
+def get_ice_sheet_masks_and_labels(fp, /, *, groupings=None):
     """
     Returns combined SHGrid masks and labels for regional groupings.
 
@@ -1057,7 +1055,7 @@ def get_ice_sheet_masks_and_labels(fp, groupings=None):
     return combined_masks, combined_labels
 
 
-def ice_sheet_averaging_operator(model_space, fp, groupings=None):
+def ice_sheet_averaging_operator(model_space, fp, /, *, groupings=None):
     """
     The 'Averaging' operator B: Maps Global Field -> [N x 1] Averages.
     """
@@ -1070,7 +1068,7 @@ def ice_sheet_averaging_operator(model_space, fp, groupings=None):
     return averaging_operator(model_space, weighted_masks)
 
 
-def ice_sheet_basis_operator(model_space, fp, groupings=None):
+def ice_sheet_basis_operator(model_space, fp, /, *, groupings=None):
     """
     The 'Basis' operator G_tilde: Maps [N x 1] coefficients -> Global Field in H^s.
     Acts as a strict right-inverse to the averaging operator.
@@ -1081,7 +1079,7 @@ def ice_sheet_basis_operator(model_space, fp, groupings=None):
     return B.adjoint @ M_inv
 
 
-def standard_ice_groupings(fp, scheme="individual"):
+def standard_ice_groupings(fp, /, *, scheme="individual"):
     """
     Provides predefined sensible groupings of ice sheet basins.
 

@@ -27,9 +27,6 @@ from .love_numbers import LoveNumbers
 from .regions import Regions
 
 
-from . import DATADIR
-
-
 class FingerPrint(Regions, EarthModelParameters, LoveNumbers):
     """
     Computes elastic sea level "fingerprints" for a given surface load.
@@ -50,7 +47,7 @@ class FingerPrint(Regions, EarthModelParameters, LoveNumbers):
         lmax: int = 256,
         earth_model_parameters: Optional[EarthModelParameters] = None,
         grid: str = "DH",
-        love_number_file: str = str(DATADIR / "love_numbers" / "PREM_4096.dat"),
+        love_number_file: Optional[str] = None,
         exclude_caspian_sea_from_ocean: bool = True,
     ) -> None:
         """

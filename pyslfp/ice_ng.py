@@ -48,6 +48,11 @@ class IceNG:
             version: The ice model version to use. Defaults to ICE-7G.
         """
         self._version = version
+
+        from .downloader import ensure_data
+
+        ensure_data(self._version.name)
+
         # Set the densities of ice and water in kg/m^3.
         self.ice_density = 917.0
         self.water_density = 1028.0

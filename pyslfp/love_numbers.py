@@ -44,6 +44,10 @@ class LoveNumbers:
         """
 
         if file is None:
+
+            from .downloader import ensure_data
+
+            ensure_data("LOVE_NUMBERS")
             file = str(DATADIR / "love_numbers" / "PREM_4096.dat")
 
         data = np.loadtxt(file)

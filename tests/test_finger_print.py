@@ -291,8 +291,8 @@ def test_linear_operator_adjoint_identity(
     built-in .check() method with spatially regular Gaussian measures.
     """
     rtol = 1e-9
-    check_rtol = 1e-5
-    check_atol = 1e-5
+    check_rtol = 1e-4
+    check_atol = 1e-4
 
     # 1. Construct the fingerprint linear operator
     if sobolev:

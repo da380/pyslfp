@@ -564,21 +564,21 @@ class TestIceSheetGroupings:
         """Tests that the string-based scheme parser returns valid lists."""
 
         # 1. Individual
-        ind = standard_ice_groupings(fp_instance, "individual")
+        ind = standard_ice_groupings(fp_instance, scheme="individual")
         assert len(ind) > 0
         assert all(len(g) == 1 for g in ind)
 
         # 2. Ice Sheets (Antarctica, Greenland)
-        sheets = standard_ice_groupings(fp_instance, "ice_sheets")
+        sheets = standard_ice_groupings(fp_instance, scheme="ice_sheets")
         assert len(sheets) == 2
 
         # 3. Macro Regions (WAIS, EAIS, AP, GRL)
-        macro = standard_ice_groupings(fp_instance, "macro_regions")
+        macro = standard_ice_groupings(fp_instance, scheme="macro_regions")
         assert len(macro) == 4
 
         # 4. Unknown Scheme
         with pytest.raises(ValueError, match="Unknown grouping scheme"):
-            standard_ice_groupings(fp_instance, "unknown_scheme")
+            standard_ice_groupings(fp_instance, scheme="unknown_scheme")
 
     def test_get_ice_sheet_masks_and_labels(self, lmax, fp_instance):
         """Tests the mask accumulation logic for grouped regions."""

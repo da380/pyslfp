@@ -22,6 +22,7 @@ from cartopy.mpl.geoaxes import GeoAxes
 
 from .config import DATADIR
 from .plotting import plot
+from .ice_models import BaseIceModel
 
 
 class IceModel(Enum):
@@ -32,7 +33,7 @@ class IceModel(Enum):
     ICE7G = 7
 
 
-class IceNG:
+class IceNG(BaseIceModel):
     """
     A data loader for the ICE-5G, ICE-6G, and ICE-7G glacial isostatic
     adjustment models.
@@ -174,6 +175,7 @@ class IceNG:
             )
             ice_thickness = fraction * ice_thickness1 + (1 - fraction) * ice_thickness2
             topography = fraction * topography1 + (1 - fraction) * topography2
+
         return ice_thickness, topography
 
     def get_ice_thickness_and_sea_level(

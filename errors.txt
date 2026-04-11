@@ -1,0 +1,49 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-8.4.2, pluggy-1.6.0
+rootdir: /home/david/dev/pyslfp
+configfile: pyproject.toml
+plugins: cov-6.3.0, anyio-4.11.0
+collected 381 items / 374 deselected / 7 selected
+
+tests/test_physics.py ..F....                                            [100%]
+
+=================================== FAILURES ===================================
+______________________ test_get_sea_surface_height_change ______________________
+
+physics_setup = (<pyslfp.core.EarthModel object at 0x7f17fa3e1fa0>, <pyslfp.state.EarthState object at 0x7f17873f0950>, <pyslfp.physics.SeaLevelEquation object at 0x7f178564b860>)
+
+    def test_get_sea_surface_height_change(physics_setup):
+        """Tests the SSH observable calculation logic."""
+        model, state, solver = physics_setup
+    
+        # Create dummy outputs ensuring we pass ALL parameters to get an exactly aligned grid
+        slc = SHGrid.from_zeros(
+            state.lmax, grid=state.grid, sampling=state.sampling, extend=state.extend
+        )
+        slc.data += 1.0
+        disp = SHGrid.from_zeros(
+            state.lmax, grid=state.grid, sampling=state.sampling, extend=state.extend
+        )
+        disp.data += 0.5
+        avc = np.array([1e-8, 1e-8])
+    
+        # Test without rotational feedbacks
+        ssh_no_rot = solver.get_sea_surface_height_change(
+            state, slc, disp, avc, remove_rotational_contribution=False
+        )
+        assert np.allclose(ssh_no_rot.data, 1.5)
+    
+        # Test with rotational feedbacks (should differ from 1.5)
+        ssh_rot = solver.get_sea_surface_height_change(
+            state, slc, disp, avc, remove_rotational_contribution=True
+        )
+>       assert not np.allclose(ssh_rot.data, 1.5)
+E       AssertionError: assert not True
+E        +  where True = <function allclose at 0x7f17fa19f0f0>(array([[1.5, 1.5, 1.5, ..., 1.5, 1.5, 1.5],\n       [1.5, 1.5, 1.5, ..., 1.5, 1.5, 1.5],\n       [1.5, 1.5, 1.5, ..., 1...., 1.5, 1.5],\n       [1.5, 1.5, 1.5, ..., 1.5, 1.5, 1.5],\n       [1.5, 1.5, 1.5, ..., 1.5, 1.5, 1.5]], shape=(131, 131)), 1.5)
+E        +    where <function allclose at 0x7f17fa19f0f0> = np.allclose
+E        +    and   array([[1.5, 1.5, 1.5, ..., 1.5, 1.5, 1.5],\n       [1.5, 1.5, 1.5, ..., 1.5, 1.5, 1.5],\n       [1.5, 1.5, 1.5, ..., 1...., 1.5, 1.5],\n       [1.5, 1.5, 1.5, ..., 1.5, 1.5, 1.5],\n       [1.5, 1.5, 1.5, ..., 1.5, 1.5, 1.5]], shape=(131, 131)) =   name = None\n  kind = 'real'\n  grid = 'DH'\n  n = 130\n  sampling = 1\n  extend = True\n  nlat = 131\n  nlon = 131\n  lmax = 64\n  units = None.data
+
+tests/test_physics.py:139: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_physics.py::test_get_sea_surface_height_change - AssertionE...
+================= 1 failed, 6 passed, 374 deselected in 1.55s ==================

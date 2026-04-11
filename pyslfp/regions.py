@@ -12,7 +12,7 @@ import regionmask
 from cartopy import crs as ccrs
 from pyshtools import SHGrid
 
-from .config import DATADIR
+from pyslfp.data import DATADIR, ensure_data
 
 
 class Regions:
@@ -54,7 +54,6 @@ class Regions:
     def imbie_ant_regions(self) -> regionmask.Regions:
         """IMBIE2 Antarctic drainage basins (Rignot et al., 2011)."""
         if self._imbie_ant_regions is None:
-            from .downloader import ensure_data
 
             ensure_data("IMBIE_ANT")
 
@@ -73,7 +72,6 @@ class Regions:
     def mouginot_grl_regions(self) -> regionmask.Regions:
         """Greenland drainage basins (Mouginot et al., 2019)."""
         if self._mouginot_grl_regions is None:
-            from .downloader import ensure_data
 
             ensure_data("MOUGINOT_GRL")
 
@@ -91,7 +89,6 @@ class Regions:
     def hydrobasins_regions(self) -> regionmask.Regions:
         """Level 3 Hydrological Basins (HydroBASINS/HydroSHEDS)."""
         if self._hydrobasins_regions is None:
-            from .downloader import ensure_data
 
             ensure_data("HYDRO")
 
@@ -109,7 +106,6 @@ class Regions:
     def iho_seas_regions(self) -> regionmask.Regions:
         """IHO World Seas (Marine Regions, v3)."""
         if self._iho_seas_regions is None:
-            from .downloader import ensure_data
 
             ensure_data("IHO_SEAS")
 

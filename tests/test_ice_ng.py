@@ -2,7 +2,8 @@ import pytest
 import numpy as np
 import os
 from pyshtools import SHGrid
-from pyslfp.ice_ng import IceNG, IceModel, DATADIR
+from pyslfp.ice_ng import IceNG, IceModel
+from pyslfp.config import DATADIR
 
 # Check if the ICE-7G data directory exists to decide if data-dependent
 # tests should be run. We only check for one to keep it simple.
@@ -17,7 +18,7 @@ REASON_TO_SKIP = "ICE-NG data directory not found."
 @pytest.mark.parametrize("version", [IceModel.ICE5G, IceModel.ICE6G, IceModel.ICE7G])
 def test_initialization(version):
     """Tests that the IceNG class can be initialized with all model versions."""
-    loader = IceNG(version=version)
+    loader = IceNG(version=version)  # Keyword argument valid
     assert loader._version == version
 
 
@@ -79,7 +80,7 @@ def test_data_loading_types_and_shape(version, grid, sampling):
     lmax = 32
     loader = IceNG(version=version)
 
-    # Call the method with the specified grid and sampling options
+    # Call the method with positional date/lmax, keyword grid/sampling options
     ice, topo = loader.get_ice_thickness_and_topography(
         5.2, lmax, grid=grid, sampling=sampling
     )
@@ -108,6 +109,8 @@ def test_sea_level_calculation_sanity_check():
     """
     lmax = 64
     loader = IceNG(version=IceModel.ICE7G)
+
+    # Strictly positional 0.0 and lmax
     ice, sea_level = loader.get_ice_thickness_and_sea_level(0.0, lmax)
 
     lats = ice.lats()
@@ -117,11 +120,7 @@ def test_sea_level_calculation_sanity_check():
     target_lat_g = 72
     target_lon_g = -40
 
-    # Latitude index logic is correct
     lat_idx_g = np.argmin(np.abs(lats - target_lat_g))
-
-    # Corrected longitude index logic
-    # Convert target to [0, 360) and find the shortest angular distance
     target_lon_g_positive = target_lon_g % 360
     angular_dist = np.minimum(
         np.abs(lons - target_lon_g_positive), 360 - np.abs(lons - target_lon_g_positive)
@@ -129,8 +128,6 @@ def test_sea_level_calculation_sanity_check():
     lon_idx_g = np.argmin(angular_dist)
 
     greenland_ice = ice.data[lat_idx_g, lon_idx_g]
-    # greenland_sl = sea_level.data[lat_idx_g, lon_idx_g]
-
     assert greenland_ice > 1000
 
     # --- Check the Pacific (approx. 0°N, 150°W) ---
@@ -138,8 +135,6 @@ def test_sea_level_calculation_sanity_check():
     target_lon_p = -150
 
     lat_idx_p = np.argmin(np.abs(lats - target_lat_p))
-
-    # Corrected longitude index logic
     target_lon_p_positive = target_lon_p % 360
     angular_dist = np.minimum(
         np.abs(lons - target_lon_p_positive), 360 - np.abs(lons - target_lon_p_positive)

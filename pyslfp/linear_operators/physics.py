@@ -22,8 +22,16 @@ from pyslfp.state import EarthState
 # ==================================================================== #
 
 
-def lebesgue_load_space(state: EarthState) -> Lebesgue:
-    """Defines the L2 mathematical space for square-integrable surface loads."""
+def lebesgue_load_space(state: EarthState, /) -> Lebesgue:
+    """
+    Defines the L2 mathematical space for square-integrable surface loads.
+
+    Args:
+        state (EarthState): The background state defining the spatial grid.
+
+    Returns:
+        Lebesgue: The mathematical space for surface loads.
+    """
     return Lebesgue(
         state.lmax,
         radius=state.model.parameters.mean_sea_floor_radius,
@@ -31,16 +39,35 @@ def lebesgue_load_space(state: EarthState) -> Lebesgue:
     )
 
 
-def lebesgue_response_space(state: EarthState) -> HilbertSpaceDirectSum:
-    """Defines the composite L2 response space for the physical fields."""
+def lebesgue_response_space(state: EarthState, /) -> HilbertSpaceDirectSum:
+    """
+    Defines the composite L2 response space for the physical fields.
+
+    Args:
+        state (EarthState): The background state defining the spatial grid.
+
+    Returns:
+        HilbertSpaceDirectSum: A composite space comprising SLC, Displacement,
+            Gravitational Potential, and a 2D Euclidean space for Angular Velocity.
+    """
     field_space = lebesgue_load_space(state)
     return HilbertSpaceDirectSum(
         [field_space, field_space, field_space, EuclideanSpace(2)]
     )
 
 
-def sobolev_load_space(state: EarthState, order: float, scale: float) -> Sobolev:
-    """Defines a Sobolev space for surface mass loads with smoothness constraints."""
+def sobolev_load_space(state: EarthState, order: float, scale: float, /) -> Sobolev:
+    """
+    Defines a Sobolev space for surface mass loads with smoothness constraints.
+
+    Args:
+        state (EarthState): The background state defining the spatial grid.
+        order (float): The Sobolev order (smoothness constraint).
+        scale (float): The characteristic length scale.
+
+    Returns:
+        Sobolev: The regularized mathematical space for surface loads.
+    """
     return Sobolev(
         state.lmax,
         order,
@@ -51,9 +78,22 @@ def sobolev_load_space(state: EarthState, order: float, scale: float) -> Sobolev
 
 
 def sobolev_response_space(
-    state: EarthState, order: float, scale: float
+    state: EarthState, order: float, scale: float, /
 ) -> HilbertSpaceDirectSum:
-    """Defines the response space corresponding to a Sobolev load space (order s+1)."""
+    """
+    Defines the response space corresponding to a Sobolev load space.
+
+    Due to elliptic regularity, the response fields are one order smoother
+    than the applied load (order + 1).
+
+    Args:
+        state (EarthState): The background state defining the spatial grid.
+        order (float): The Sobolev order of the load space.
+        scale (float): The characteristic length scale.
+
+    Returns:
+        HilbertSpaceDirectSum: The composite Sobolev response space.
+    """
     field_space = Sobolev(
         state.lmax,
         order + 1,
@@ -76,22 +116,49 @@ def isolate_gravitational_potential(
     angular_velocity_change: np.ndarray,
     solver: SeaLevelEquation,
     state: EarthState,
+    /,
 ) -> SHGrid:
-    """Subtracts the centrifugal potential to isolate the gravitational potential."""
+    """
+    Subtracts the centrifugal potential to isolate the gravitational potential.
+
+    Args:
+        gravity_potential (SHGrid): The total gravity potential change.
+        angular_velocity_change (np.ndarray): The 2-element angular velocity vector.
+        solver (SeaLevelEquation): The configured SLE solver.
+        state (EarthState): The background state defining the spatial grid.
+
+    Returns:
+        SHGrid: The isolated gravitational potential change.
+    """
     gp_lm = gravity_potential.expand(normalization="ortho", csphase=1)
-    gp_lm.coeffs[:, 2, 1] -= solver._rotation_factor * angular_velocity_change
+
+    # Cleanly accessing the public property
+    gp_lm.coeffs[:, 2, 1] -= solver.rotation_factor * angular_velocity_change
+
     return gp_lm.expand(grid=state.grid_type, extend=state.extend)
 
 
 def adjoint_angular_momentum_from_potential(
-    gravitational_potential_load: SHGrid, solver: SeaLevelEquation
+    gravitational_potential_load: SHGrid, solver: SeaLevelEquation, /
 ) -> np.ndarray:
-    """Computes the adjoint angular momentum change for a given potential load."""
+    """
+    Computes the adjoint angular momentum change for a given potential load.
+
+    Args:
+        gravitational_potential_load (SHGrid): The external potential load.
+        solver (SeaLevelEquation): The configured SLE solver.
+
+    Returns:
+        np.ndarray: The resulting 2-element adjoint angular momentum change vector.
+    """
     gpot_lm = gravitational_potential_load.expand(
         normalization="ortho", csphase=1, lmax_calc=2
     )
-    r = solver._rotation_factor
+
+    # Cleanly accessing the public property
+    r = solver.rotation_factor
     b = solver.model.parameters.mean_sea_floor_radius
+
     return -r * b * b * gpot_lm.coeffs[:, 2, 1]
 
 
@@ -103,6 +170,7 @@ def adjoint_angular_momentum_from_potential(
 def get_lebesgue_linear_operator(
     solver: SeaLevelEquation,
     state: EarthState,
+    /,
     *,
     rotational_feedbacks: bool = True,
     rtol: float = 1e-6,
@@ -111,6 +179,18 @@ def get_lebesgue_linear_operator(
 ) -> LinearOperator:
     """
     Constructs the sea-level model as a pygeoinf LinearOperator between Lebesgue spaces.
+
+    Args:
+        solver (SeaLevelEquation): The configured SLE solver engine.
+        state (EarthState): The background Earth state.
+        rotational_feedbacks (bool): Whether to calculate polar wander effects.
+        rtol (float): Relative tolerance for solver convergence.
+        max_iterations (Optional[int]): Hard limit on solver iteration count.
+        verbose (bool): If True, prints internal solver metrics.
+
+    Returns:
+        LinearOperator: A functional operator mathematically mapping a surface mass
+            load to the 4-component physical response fields.
     """
     domain = lebesgue_load_space(state)
     codomain = lebesgue_response_space(state)
@@ -167,6 +247,7 @@ def get_sobolev_linear_operator(
     state: EarthState,
     order: float,
     scale: float,
+    /,
     *,
     rotational_feedbacks: bool = True,
     rtol: float = 1e-6,
@@ -175,6 +256,24 @@ def get_sobolev_linear_operator(
 ) -> LinearOperator:
     """
     Constructs the sea-level model as a pygeoinf LinearOperator between Sobolev spaces.
+
+    This wraps the standard Lebesgue operator but enforces smoothness constraints
+    on the input domain, which acts as a powerful regularization technique during
+    Bayesian or gradient-based inversions.
+
+    Args:
+        solver (SeaLevelEquation): The configured SLE solver engine.
+        state (EarthState): The background Earth state.
+        order (float): The Sobolev smoothness order (s > 0).
+        scale (float): The characteristic Sobolev length scale (λ > 0).
+        rotational_feedbacks (bool): Whether to calculate polar wander effects.
+        rtol (float): Relative tolerance for solver convergence.
+        max_iterations (Optional[int]): Hard limit on solver iteration count.
+        verbose (bool): If True, prints internal solver metrics.
+
+    Returns:
+        LinearOperator: A functional operator mapping a Sobolev surface mass
+            load to the 4-component Sobolev physical response fields.
     """
     domain = sobolev_load_space(state, order, scale)
     codomain = sobolev_response_space(state, order, scale)

@@ -25,17 +25,18 @@ def physics_setup():
     Provides a pre-configured (Model, State, Solver) triad for testing.
     Uses lmax=64 to keep the iterative reciprocity tests fast.
     """
-    model = EarthModel(lmax=64)
+    # lmax is strictly positional
+    model = EarthModel(64)
 
-    # Generate realistic background state using IceNG
-    ice_ng = IceNG(version=IceModel.ICE7G)
+    # Generate realistic background state using IceNG, passing length_scale
+    # as a keyword so it natively handles the non-dimensionalization
+    ice_ng = IceNG(version=IceModel.ICE7G, length_scale=model.parameters.length_scale)
     ice_thickness, sea_level = ice_ng.get_ice_thickness_and_sea_level(0.0, 64)
 
-    # Non-dimensionalize the state grids
-    ice_thickness = ice_thickness / model.parameters.length_scale
-    sea_level = sea_level / model.parameters.length_scale
-
+    # EarthState takes ice, sea_level, and model positionally
     state = EarthState(ice_thickness, sea_level, model)
+
+    # Solver takes model positionally
     solver = SeaLevelEquation(model)
 
     return model, state, solver
@@ -82,7 +83,7 @@ def test_zero_load_input(physics_setup):
         state.lmax, grid=state.grid, sampling=state.sampling, extend=state.extend
     )
 
-    # Testing the standard wrapper
+    # Testing the standard wrapper (state and load are positional)
     slc, disp, gpc, avc = solver.solve_sea_level_equation(state, zero_load)
 
     assert np.all(slc.data == 0)
@@ -128,7 +129,7 @@ def test_get_sea_surface_height_change(physics_setup):
     # Macroscopically large angular velocity change to clear numpy's allclose tolerance
     avc = np.array([1.0, 1.0])
 
-    # Test without rotational feedbacks
+    # Test without rotational feedbacks (state, slc, disp, avc are positional)
     ssh_no_rot = solver.get_sea_surface_height_change(
         state, slc, disp, avc, remove_rotational_contribution=False
     )

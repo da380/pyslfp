@@ -5,20 +5,19 @@ global ice history models.
 
 from __future__ import annotations
 from typing import Tuple
-import xarray as xr
-from pyshtools import SHGrid
-import numpy as np
-import bisect
-from scipy.interpolate import RegularGridInterpolator
 from enum import Enum
 from pathlib import Path
+import bisect
+
+import numpy as np
+import xarray as xr
+from scipy.interpolate import RegularGridInterpolator
+from pyshtools import SHGrid
 
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-
 import cartopy.crs as ccrs
 from cartopy.mpl.geoaxes import GeoAxes
-
 
 from .config import DATADIR
 from .plotting import plot
@@ -38,25 +37,36 @@ class IceNG(BaseIceModel):
     A data loader for the ICE-5G, ICE-6G, and ICE-7G glacial isostatic
     adjustment models.
 
-    This class provides methods to retrieve ice thickness, topography, and
-    sea level for a given date, interpolating between the model's time
-    slices as needed.
+    This class retrieves ice thickness, topography, and sea level for a given
+    date, linearly interpolating between the model's standard time slices.
     """
 
-    def __init__(self, /, *, version: IceModel = IceModel.ICE7G):
+    def __init__(
+        self, /, *, version: IceModel = IceModel.ICE7G, length_scale: float = 1.0
+    ) -> None:
         """
+        Initializes the ICE-NG data loader.
+
         Args:
-            version: The ice model version to use. Defaults to ICE-7G.
+            version (IceModel): The ice model version to use. Defaults to ICE-7G.
+            length_scale (float): The scaling factor to non-dimensionalize
+                the spatial outputs. Defaults to 1.0 (returns raw meters).
         """
+        super().__init__(length_scale=length_scale)
         self._version = version
 
         from .downloader import ensure_data
 
         ensure_data(self._version.name)
 
-        # Set the densities of ice and water in kg/m^3.
-        self.ice_density = 917.0
-        self.water_density = 1028.0
+        # Internal densities used exclusively for ice shelf flotation logic
+        self._ice_density = 917.0
+        self._water_density = 1028.0
+
+    @property
+    def version(self) -> IceModel:
+        """The specific ICE-NG model version being used."""
+        return self._version
 
     def _date_to_file(self, date: float) -> str:
         """Converts a date into the appropriate data file name."""
@@ -73,10 +83,7 @@ class IceNG(BaseIceModel):
             return str(DATADIR / "ice5g" / f"ice5g_v1.2_{date_string}k_1deg.nc")
 
     def _find_files(self, date: float) -> Tuple[str, str, float]:
-        """
-        Given a date, finds the data files that bound it and the fraction
-        for linear interpolation.
-        """
+        """Finds the bounding data files and interpolation fraction for a given date."""
         if self._version in [IceModel.ICE6G, IceModel.ICE7G]:
             dates = np.append(np.linspace(0, 21, 43), np.linspace(22, 26, 5))
         else:
@@ -98,7 +105,7 @@ class IceNG(BaseIceModel):
     def _get_time_slice(
         self, file: str, lmax: int, /, *, grid: str, sampling: int, extend: bool
     ) -> Tuple[SHGrid, SHGrid]:
-        """Reads a data file and interpolates fields onto a pyshtools grid."""
+        """Reads a netCDF file, interpolates fields, and applies non-dimensionalization."""
         data = xr.open_dataset(file)
         ice_thickness = SHGrid.from_zeros(
             lmax, grid=grid, sampling=sampling, extend=extend
@@ -130,8 +137,10 @@ class IceNG(BaseIceModel):
         lats, lons = np.meshgrid(
             ice_thickness.lats(), ice_thickness.lons(), indexing="ij"
         )
-        ice_thickness.data = ice_thickness_function((lats, lons))
-        topography.data = topography_function((lats, lons))
+
+        # Interpolate and immediately scale by the length_scale
+        ice_thickness.data = ice_thickness_function((lats, lons)) / self.length_scale
+        topography.data = topography_function((lats, lons)) / self.length_scale
 
         return ice_thickness, topography
 
@@ -146,20 +155,17 @@ class IceNG(BaseIceModel):
         extend: bool = True,
     ) -> Tuple[SHGrid, SHGrid]:
         """
-        Returns the ice thickness and topography (in meters) for a given date.
-
-        If the date does not exist within the data set, linear interpolation is
-        used. If the date is out of range, constant extrapolation is applied.
+        Returns the scaled ice thickness and topography for a given date.
 
         Args:
-            date: The date in thousands of years before present (ka).
-            lmax: The maximum spherical harmonic degree for the output grids.
-            grid: The `pyshtools` grid type. Defaults to 'DH'.
-            sampling: The `pyshtools` grid sampling. Defaults to 1.
-            extend: `pyshtools` grid extension option. Defaults to True.
+            date (float): The date in thousands of years before present (ka).
+            lmax (int): The maximum spherical harmonic degree.
+            grid (str): The pyshtools grid type.
+            sampling (int): The pyshtools grid sampling.
+            extend (bool): Whether to extend the grid to include the poles.
 
         Returns:
-            A tuple containing the ice thickness and topography as `SHGrid` objects.
+            Tuple[SHGrid, SHGrid]: Ice thickness and topography grids.
         """
         file1, file2, fraction = self._find_files(date)
         if file1 == file2:
@@ -189,25 +195,28 @@ class IceNG(BaseIceModel):
         extend: bool = True,
     ) -> Tuple[SHGrid, SHGrid]:
         """
-        Returns the ice thickness and sea level (in meters) for a given date.
+        Returns the scaled ice thickness and sea level for a given date.
 
-        Sea level is computed from topography assuming isostatic balance for
-        floating ice shelves.
+        Sea level is computed from topography, assuming isostatic balance
+        for floating ice shelves.
 
         Args:
-            date: The date in thousands of years before present (ka).
-            lmax: The maximum spherical harmonic degree for the output grids.
-            grid: The `pyshtools` grid type. Defaults to 'DH'.
-            sampling: The `pyshtools` grid sampling. Defaults to 1.
-            extend: `pyshtools` grid extension option. Defaults to True.
+            date (float): The date in thousands of years before present (ka).
+            lmax (int): The maximum spherical harmonic degree.
+            grid (str): The pyshtools grid type.
+            sampling (int): The pyshtools grid sampling.
+            extend (bool): Whether to extend the grid to include the poles.
 
         Returns:
-            A tuple containing the ice thickness and sea level as `SHGrid` objects.
+            Tuple[SHGrid, SHGrid]: Ice thickness and sea level grids.
         """
         ice_thickness, topography = self.get_ice_thickness_and_topography(
             date, lmax, grid=grid, sampling=sampling, extend=extend
         )
+
         # Compute the sea level using isostatic balance within ice shelves.
+        # Since the density ratio is dimensionless, this math holds regardless
+        # of the length_scale applied to topography and ice_thickness.
         ice_shelf_thickness = SHGrid.from_array(
             np.where(
                 np.logical_and(topography.data < 0, ice_thickness.data > 0),
@@ -224,7 +233,8 @@ class IceNG(BaseIceModel):
             ),
             grid=grid,
         )
-        sea_level += self.ice_density * ice_shelf_thickness / self.water_density
+        sea_level += self._ice_density * ice_shelf_thickness / self._water_density
+
         return ice_thickness, sea_level
 
     def get_ice_thickness(
@@ -237,7 +247,7 @@ class IceNG(BaseIceModel):
         sampling: int = 1,
         extend: bool = True,
     ) -> SHGrid:
-        """Returns the ice thickness (in meters) for a given date."""
+        """Returns the scaled ice thickness for a given date."""
         ice_thickness, _ = self.get_ice_thickness_and_topography(
             date, lmax, grid=grid, sampling=sampling, extend=extend
         )
@@ -253,7 +263,7 @@ class IceNG(BaseIceModel):
         sampling: int = 1,
         extend: bool = True,
     ) -> SHGrid:
-        """Returns the sea level (in meters) for a given date."""
+        """Returns the scaled sea level for a given date."""
         _, sea_level = self.get_ice_thickness_and_sea_level(
             date, lmax, grid=grid, sampling=sampling, extend=extend
         )
@@ -269,7 +279,7 @@ class IceNG(BaseIceModel):
         sampling: int = 1,
         extend: bool = True,
     ) -> SHGrid:
-        """Returns the topography (in meters) for a given date."""
+        """Returns the scaled topography for a given date."""
         _, topography = self.get_ice_thickness_and_topography(
             date, lmax, grid=grid, sampling=sampling, extend=extend
         )
@@ -287,21 +297,19 @@ class IceNG(BaseIceModel):
         fps: int = 15,
         lmax: int = 180,
         **plot_kwargs,
-    ):
+    ) -> None:
         """
         Generates and saves an animation of this ice model over time.
 
         Args:
             output_file (str): Path for the output video (e.g., 'anim.mp4').
-            field (str): Data field to animate. Must be one of
-                'ice_thickness', 'sea_level', or 'topography'.
-            start_date_ka (float): Start date in thousands of years before present.
-            end_date_ka (float): End date in thousands of years before present.
+            field (str): Data field to animate ('ice_thickness', 'sea_level', or 'topography').
+            start_date_ka (float): Start date in ka.
+            end_date_ka (float): End date in ka.
             num_frames (int): Total number of frames in the animation.
             fps (int): Frames per second for the output video.
             lmax (int): Max spherical harmonic degree for the data grids.
-            **plot_kwargs: Additional keyword arguments passed to the plot
-                function (e.g., cmap, projection).
+            **plot_kwargs: Additional keyword arguments passed to the plot function.
         """
         print(f"Initializing animation for {self._version.name}...")
         valid_fields = ("ice_thickness", "sea_level", "topography")
@@ -310,12 +318,10 @@ class IceNG(BaseIceModel):
 
         dates = np.linspace(start_date_ka, end_date_ka, num_frames)
 
-        # Helper to get data by calling the appropriate method of this instance
         def get_data_for_date(date: float):
             method_name = f"get_{field}"
             return getattr(self, method_name)(date, lmax)
 
-        # Create the initial plot (the first frame)
         print("Generating initial frame...")
         initial_data = get_data_for_date(dates[0])
 
@@ -327,22 +333,21 @@ class IceNG(BaseIceModel):
         cbar = fig.colorbar(
             artist, ax=ax, orientation="horizontal", pad=0.05, shrink=0.7
         )
-        cbar.set_label("Meters")
+        unit_label = "Non-dimensional Units" if self.length_scale != 1.0 else "Meters"
+        cbar.set_label(unit_label)
+
         title = ax.set_title(f"Date: {dates[0]:.2f} ka")
 
-        # Define the update function for the animation
         def update(frame_num: int):
             current_date = dates[frame_num]
             print(
                 f"  -> Processing frame {frame_num + 1}/{num_frames} (Date: {current_date:.2f} ka)"
             )
-
             new_data = get_data_for_date(current_date)
             artist.set_array(new_data.data.ravel())
             title.set_text(f"Date: {current_date:.2f} ka")
             return [artist, title]
 
-        # Create and save the animation
         print("Creating animation object...")
         ani = FuncAnimation(fig, func=update, frames=num_frames, blit=False)
 
@@ -365,34 +370,27 @@ class IceNG(BaseIceModel):
         projection: ccrs.Projection = ccrs.Robinson(),
         ice_plot_kwargs: dict = None,
         sl_plot_kwargs: dict = None,
-    ):
+    ) -> None:
         """
         Generates a side-by-side animation of ice thickness and sea level.
 
-        This function creates a video with two synchronized maps, allowing for
-        a direct comparison of how ice sheet changes drive sea level response.
-
         Args:
             output_file (str): Path for the output video (e.g., 'joint_anim.mp4').
-            start_date_ka (float): Start date in thousands of years before present.
-            end_date_ka (float): End date in thousands of years before present.
+            start_date_ka (float): Start date in ka.
+            end_date_ka (float): End date in ka.
             num_frames (int): Total number of frames in the animation.
             fps (int): Frames per second for the output video.
-            lmax (int): Max spherical harmonic degree for the data grids.
-            projection (ccrs.Projection): The cartopy projection to use for both maps.
-            ice_plot_kwargs (dict, optional): Kwargs for the ice thickness plot,
-                passed to `ax.pcolormesh`. E.g., {'cmap': 'Blues', 'vmax': 4000}.
+            lmax (int): Max spherical harmonic degree for the grids.
+            projection (ccrs.Projection): Cartopy projection for both maps.
+            ice_plot_kwargs (dict, optional): Kwargs for the ice thickness plot.
             sl_plot_kwargs (dict, optional): Kwargs for the sea level plot.
-                E.g., {'cmap': 'RdBu_r', 'vmin': -150, 'vmax': 150}.
         """
         print(f"Initializing joint animation for {self._version.name}...")
 
-        # 1. Setup dates and initial data
         dates = np.linspace(start_date_ka, end_date_ka, num_frames)
         initial_ice, initial_sl = self.get_ice_thickness_and_sea_level(dates[0], lmax)
         lons, lats = initial_ice.lons(), initial_ice.lats()
 
-        # 2. Setup plotting kwargs with sensible defaults
         ice_kwargs = {"cmap": "Blues", "vmin": 0}
         if ice_plot_kwargs:
             ice_kwargs.update(ice_plot_kwargs)
@@ -400,13 +398,12 @@ class IceNG(BaseIceModel):
         sl_kwargs = {"cmap": "RdBu_r"}
         if sl_plot_kwargs:
             sl_kwargs.update(sl_plot_kwargs)
-        # Ensure sea level colormap is symmetric if not specified
+
         if "vmin" in sl_kwargs and "vmax" not in sl_kwargs:
             sl_kwargs["vmax"] = -sl_kwargs["vmin"]
         elif "vmax" in sl_kwargs and "vmin" not in sl_kwargs:
             sl_kwargs["vmin"] = -sl_kwargs["vmax"]
 
-        # 3. Create the figure with two subplots
         print("Generating initial frame...")
         fig, (ax1, ax2) = plt.subplots(
             1,
@@ -417,13 +414,13 @@ class IceNG(BaseIceModel):
         )
 
         def setup_ax(ax: GeoAxes, title: str):
-            """Helper to format each map axis."""
             ax.set_title(title, fontsize=14)
             ax.coastlines()
             ax.gridlines(linestyle="--", alpha=0.5)
             ax.set_global()
 
-        # 4. Plot initial data on each subplot
+        unit_label = "ND" if self.length_scale != 1.0 else "m"
+
         setup_ax(ax1, "Ice Thickness")
         artist_ice = ax1.pcolormesh(
             lons, lats, initial_ice.data, transform=ccrs.PlateCarree(), **ice_kwargs
@@ -431,7 +428,7 @@ class IceNG(BaseIceModel):
         cbar_ice = fig.colorbar(
             artist_ice, ax=ax1, orientation="horizontal", pad=0.05, shrink=0.8
         )
-        cbar_ice.set_label("Ice Thickness (m)")
+        cbar_ice.set_label(f"Ice Thickness ({unit_label})")
 
         setup_ax(ax2, "Sea Level")
         artist_sl = ax2.pcolormesh(
@@ -440,24 +437,21 @@ class IceNG(BaseIceModel):
         cbar_sl = fig.colorbar(
             artist_sl, ax=ax2, orientation="horizontal", pad=0.05, shrink=0.8
         )
-        cbar_sl.set_label("Sea Level relative to present (m)")
+        cbar_sl.set_label(f"Sea Level relative to present ({unit_label})")
 
         main_title = fig.suptitle(f"Date: {dates[0]:.2f} ka", fontsize=16)
 
-        # 5. Define the animation update function
         def update(frame_num: int):
             current_date = dates[frame_num]
             print(
                 f"  -> Processing frame {frame_num + 1}/{num_frames} (Date: {current_date:.2f} ka)"
             )
-
             new_ice, new_sl = self.get_ice_thickness_and_sea_level(current_date, lmax)
             artist_ice.set_array(new_ice.data.ravel())
             artist_sl.set_array(new_sl.data.ravel())
             main_title.set_text(f"Date: {current_date:.2f} ka")
             return [artist_ice, artist_sl, main_title]
 
-        # 6. Create and save the animation
         print("Creating animation object...")
         ani = FuncAnimation(fig, func=update, frames=num_frames, blit=False)
 

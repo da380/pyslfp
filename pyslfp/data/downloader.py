@@ -1,16 +1,26 @@
+"""
+Automated dataset downloading and management for the pyslfp library.
+
+This module fetches required datasets (e.g., ice models, shapefiles, Love numbers)
+from Zenodo automatically if they are not found in the local configuration directory.
+"""
+
 import zipfile
+from pathlib import Path
+from typing import Dict
+
 import requests
 import tqdm
-from pathlib import Path
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
 from .config import DATADIR
 
 # The unique identifier for your Zenodo record
-RECORD_ID = "19494464"
+RECORD_ID: str = "19494464"
 
 # Centralized mapping of dataset keys to their local folder names
-FOLDER_MAP = {
+FOLDER_MAP: Dict[str, str] = {
     "LOVE_NUMBERS": "love_numbers",
     "ICE7G": "ice7g",
     "ICE6G": "ice6g",
@@ -23,7 +33,7 @@ FOLDER_MAP = {
 }
 
 # 1. Base automated generator
-DATASET_URLS = {
+DATASET_URLS: Dict[str, str] = {
     key: f"https://zenodo.org/records/{RECORD_ID}/files/pyslfp_{val.lower()}.zip?download=1"
     for key, val in FOLDER_MAP.items()
 }
@@ -44,7 +54,12 @@ DATASET_URLS["MOUGINOT_GRL"] = (
 
 
 def _get_robust_session() -> requests.Session:
-    """Configures a requests Session with automatic retries for flaky connections."""
+    """
+    Configures a requests Session with automatic retries for flaky connections.
+
+    Returns:
+        requests.Session: A configured session object with retry logic attached.
+    """
     session = requests.Session()
 
     # Configure the retry strategy
@@ -55,7 +70,7 @@ def _get_robust_session() -> requests.Session:
         allowed_methods=["GET"],
     )
 
-    # Apply the strategy to all https:// requests made by this session
+    # Apply the strategy to all http/https requests made by this session
     adapter = HTTPAdapter(max_retries=retries)
     session.mount("https://", adapter)
     session.mount("http://", adapter)
@@ -63,12 +78,19 @@ def _get_robust_session() -> requests.Session:
     return session
 
 
-def ensure_data(dataset_key: str) -> Path:
+def ensure_data(dataset_key: str, /) -> Path:
     """
     Checks for the data folder. If missing, automatically downloads it from Zenodo.
 
+    Args:
+        dataset_key (str): The unique identifier for the dataset (e.g., "ICE7G").
+            Must be passed positionally.
+
     Returns:
-        Path: The absolute path to the verified data directory.
+        Path: The absolute path to the verified local data directory.
+
+    Raises:
+        ValueError: If the dataset_key is not recognized in the FOLDER_MAP.
     """
     if dataset_key not in FOLDER_MAP:
         raise ValueError(f"Unknown dataset key: {dataset_key}")
@@ -82,8 +104,18 @@ def ensure_data(dataset_key: str) -> Path:
     return target
 
 
-def fetch_dataset(dataset_key: str) -> None:
-    """Downloads and extracts a specific dataset from Zenodo."""
+def fetch_dataset(dataset_key: str, /) -> None:
+    """
+    Downloads and extracts a specific dataset from Zenodo.
+
+    Args:
+        dataset_key (str): The unique identifier for the dataset to download.
+            Must be passed positionally.
+
+    Raises:
+        ValueError: If there is no download URL configured for the dataset.
+        requests.HTTPError: If the Zenodo server returns a bad response.
+    """
     url = DATASET_URLS.get(dataset_key)
     if not url:
         raise ValueError(f"No download URL configured for dataset: {dataset_key}")

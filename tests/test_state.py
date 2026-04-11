@@ -27,21 +27,21 @@ def earth_state(request):
     pyshtools compatibility.
     """
     lmax, version, grid = request.param
-    model = EarthModel(lmax=lmax)
+
+    # FIX: lmax is strictly positional now
+    model = EarthModel(lmax)
 
     # Use IceNG to get physically realistic ice and topography to test masks
-    ice_ng = IceNG(version=version)
+    # version and length_scale are strictly keyword
+    ice_ng = IceNG(version=version, length_scale=model.parameters.length_scale)
 
     sampling = 2 if grid == "DH2" else 1
     grid_type = "DH" if grid == "DH2" else grid
 
+    # date and lmax are strictly positional, others are keyword
     ice_thickness, sea_level = ice_ng.get_ice_thickness_and_sea_level(
         0.0, lmax, grid=grid_type, sampling=sampling, extend=True
     )
-
-    # Scale to non-dimensional to match core logic
-    ice_thickness = ice_thickness / model.parameters.length_scale
-    sea_level = sea_level / model.parameters.length_scale
 
     return EarthState(ice_thickness, sea_level, model)
 
@@ -63,12 +63,12 @@ def test_earth_state_immutability(earth_state: EarthState):
         earth_state.ice_thickness = random_grid(earth_state)
 
     with pytest.raises(AttributeError):
-        earth_state.model = EarthModel(lmax=32)
+        earth_state.model = EarthModel(32)  # FIX: positional lmax
 
 
 def test_incompatible_grid_raises_error():
     """Tests that the state constructor rejects mismatched grids."""
-    model = EarthModel(lmax=32)
+    model = EarthModel(32)  # FIX: positional lmax
     ice = SHGrid.from_zeros(32, grid="DH")
     bad_sea_lmax = SHGrid.from_zeros(64, grid="DH")
     bad_sea_grid = SHGrid.from_zeros(32, grid="GLQ")
@@ -335,9 +335,8 @@ def test_load_converters(earth_state: EarthState):
 
 def test_disk_load_grid_alignment(earth_state: EarthState):
     """Ensures disk_load respects the specific grid sampling of the state."""
-    d_load = earth_state.disk_load(
-        delta=10.0, latitude=0.0, longitude=0.0, amplitude=100.0
-    )
+    # FIX: disk_load arguments are purely positional
+    d_load = earth_state.disk_load(10.0, 0.0, 0.0, 100.0)
 
     # Crucial: Must match the exact grid shape to prevent broadcasting errors in the solver
     assert d_load.lmax == earth_state.lmax
@@ -349,18 +348,19 @@ def test_regional_convenience_loads(earth_state: EarthState):
     """Tests that regional loads are strictly bounded by their geographic masks."""
     fraction = 0.5
 
+    # FIX: fractional loads strictly require fraction as a keyword
     # 1. Northern Hemisphere Load
-    nh_load = earth_state.northern_hemisphere_load(fraction)
+    nh_load = earth_state.northern_hemisphere_load(fraction=fraction)
     nh_proj = earth_state.northern_hemisphere_projection(value=0)
     # Load must be exactly 0 where the projection mask is 0
     assert np.all(nh_load.data[nh_proj.data == 0] == 0)
 
     # 2. Greenland Load
-    grl_load = earth_state.greenland_load(fraction)
+    grl_load = earth_state.greenland_load(fraction=fraction)
     grl_proj = earth_state.greenland_projection(value=0)
     assert np.all(grl_load.data[grl_proj.data == 0] == 0)
 
     # 3. West Antarctic Load
-    wais_load = earth_state.west_antarctic_load(fraction)
+    wais_load = earth_state.west_antarctic_load(fraction=fraction)
     wais_proj = earth_state.west_antarctic_projection(value=0)
     assert np.all(wais_load.data[wais_proj.data == 0] == 0)

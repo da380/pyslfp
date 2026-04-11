@@ -2,8 +2,8 @@
 Core physics solvers for the pyslfp library.
 
 This module contains the SeaLevelEquation class, which acts as the primary
-engine for calculating gravitationally consistent sea-level fingerprints and
-handling rotational feedbacks.
+engine for calculating gravitationally consistent sea-level fingerprints,
+handling rotational feedbacks, and computing non-linear shoreline migration.
 """
 
 from __future__ import annotations
@@ -19,35 +19,74 @@ from .state import EarthState
 class SeaLevelEquation:
     """
     The core solver for the gravitationally consistent Sea Level Equation (SLE).
+
+    This class encapsulates the algorithms required to solve both the linear
+    and non-linear forms of the SLE, mapping surface mass redistributions to
+    global sea level, surface displacement, and gravity anomalies.
     """
 
-    def __init__(self, model: EarthModel):
-        self.model = model
+    def __init__(self, model: EarthModel, /) -> None:
+        """
+        Initializes the Sea Level Equation solver.
 
-        self._g = self.model.parameters.gravitational_acceleration
-        self._water_density = self.model.parameters.water_density
-        self._radius = self.model.parameters.mean_sea_floor_radius
+        Args:
+            model (EarthModel): The physical configuration of the Earth,
+                including non-dimensional scales and Love numbers. Must be
+                passed positionally.
+        """
+        self._model = model
+
+        # Cache frequently used constants locally for performance
+        self._g = self._model.parameters.gravitational_acceleration
+        self._water_density = self._model.parameters.water_density
+        self._radius = self._model.parameters.mean_sea_floor_radius
 
         self._rotation_factor = (
             np.sqrt((4 * np.pi) / 15.0)
-            * self.model.parameters.rotation_frequency
+            * self._model.parameters.rotation_frequency
             * self._radius**2
         )
+
         self._inertia_factor = (
             np.sqrt(5 / (12 * np.pi))
-            * self.model.parameters.rotation_frequency
+            * self._model.parameters.rotation_frequency
             * self._radius**3
             / (
-                self.model.parameters.gravitational_constant
+                self._model.parameters.gravitational_constant
                 * (
-                    self.model.parameters.polar_moment_of_inertia
-                    - self.model.parameters.equatorial_moment_of_inertia
+                    self._model.parameters.polar_moment_of_inertia
+                    - self._model.parameters.equatorial_moment_of_inertia
                 )
             )
         )
-        self.solver_counter: int = 0
+        self._solver_counter: int = 0
+
+    @property
+    def model(self) -> EarthModel:
+        """The EarthModel configuration driving the solver."""
+        return self._model
+
+    @property
+    def solver_counter(self) -> int:
+        """The number of times the solver has been executed."""
+        return self._solver_counter
+
+    @property
+    def rotation_factor(self) -> float:
+        """The precomputed centrifugal potential rotation factor."""
+        return self._rotation_factor
+
+    @property
+    def inertia_factor(self) -> float:
+        """The precomputed polar wander inertia factor."""
+        return self._inertia_factor
+
+    # ---------------------------------------------------------#
+    #                 Internal Helpers                         #
+    # ---------------------------------------------------------#
 
     def _expand(self, grid: SHGrid) -> SHCoeffs:
+        """Expands an SHGrid to SHCoeffs using normalized conventions."""
         return grid.expand(normalization="ortho", csphase=1)
 
     def _synthesize(self, coeffs: SHCoeffs, target_grid: str, extend: bool) -> SHGrid:
@@ -55,16 +94,32 @@ class SeaLevelEquation:
         return coeffs.expand(grid=target_grid, extend=extend)
 
     def _mean_sea_level_change(self, state: EarthState, direct_load: SHGrid) -> float:
+        """Computes the mean eustatic sea level change for a given load."""
         return -state.integrate(direct_load) / (self._water_density * state.ocean_area)
 
     def _ocean_average(self, state: EarthState, f: SHGrid) -> float:
+        """Computes the spatial average of a field over the oceans."""
         return state.integrate(state.ocean_function * f) / state.ocean_area
 
+    # ---------------------------------------------------------#
+    #                 Observable Generators                    #
+    # ---------------------------------------------------------#
+
     def centrifugal_potential_change(
-        self, state: EarthState, angular_velocity_change: np.ndarray
+        self, state: EarthState, angular_velocity_change: np.ndarray, /
     ) -> SHGrid:
+        """
+        Computes the change in centrifugal potential due to polar wander.
+
+        Args:
+            state (EarthState): The background state defining the grid.
+            angular_velocity_change (np.ndarray): The 2-element [omega_x, omega_y] vector.
+
+        Returns:
+            SHGrid: The centrifugal potential change field.
+        """
         coeffs = SHCoeffs.from_zeros(
-            lmax=self.model.lmax, normalization="ortho", csphase=1
+            lmax=self._model.lmax, normalization="ortho", csphase=1
         )
         coeffs.coeffs[:, 2, 1] = self._rotation_factor * angular_velocity_change
         return self._synthesize(coeffs, state.grid_type, state.extend)
@@ -79,6 +134,20 @@ class SeaLevelEquation:
         *,
         remove_rotational_contribution: bool = True,
     ) -> SHGrid:
+        """
+        Computes the Sea Surface Height (SSH) change from raw physical fields.
+
+        Args:
+            state (EarthState): The background state defining the grid.
+            sea_level_change (SHGrid): The relative sea level change field.
+            displacement (SHGrid): The solid Earth displacement field.
+            angular_velocity_change (np.ndarray): The [omega_x, omega_y] vector.
+            remove_rotational_contribution (bool): Whether to remove the
+                centrifugal signal from the SSH (standard for altimetry).
+
+        Returns:
+            SHGrid: The total Sea Surface Height change.
+        """
         ssh_change = sea_level_change + displacement
 
         if remove_rotational_contribution:
@@ -88,6 +157,10 @@ class SeaLevelEquation:
             ssh_change += centrifugal / self._g
 
         return ssh_change
+
+    # ---------------------------------------------------------#
+    #                 Primary Solvers                          #
+    # ---------------------------------------------------------#
 
     def solve_sea_level_equation(
         self,
@@ -101,7 +174,22 @@ class SeaLevelEquation:
         verbose: bool = False,
     ) -> Tuple[SHGrid, SHGrid, SHGrid, np.ndarray]:
         """
-        Solves the standard Sea Level Equation for a given surface mass load.
+        Solves the standard linear Sea Level Equation for a surface mass load.
+
+        Args:
+            state (EarthState): The unperturbed background Earth state.
+            direct_load (SHGrid): The mass redistribution forcing the system.
+            rotational_feedbacks (bool): Whether to calculate polar wander effects.
+            rtol (float): The relative tolerance for convergence.
+            max_iterations (Optional[int]): Hard limit on iteration count.
+            verbose (bool): If True, prints iteration metrics.
+
+        Returns:
+            Tuple[SHGrid, SHGrid, SHGrid, np.ndarray]: A 4-tuple containing:
+                - Relative Sea Level Change
+                - Vertical Displacement
+                - Gravity Potential Change
+                - Angular Velocity Change [omega_x, omega_y]
         """
         return self.solve_generalised_equation(
             state,
@@ -127,19 +215,36 @@ class SeaLevelEquation:
         verbose: bool = False,
     ) -> Tuple[SHGrid, SHGrid, SHGrid, np.ndarray]:
         """
-        Solves the generalized linear SLE for any combination of forcings.
+        Solves the generalized linear SLE for an arbitrary combination of forcings.
+
+        Useful for adjoint calculations or complex, multi-physical inversions.
+
+        Args:
+            state (EarthState): The unperturbed background Earth state.
+            direct_load (Optional[SHGrid]): Standard surface mass forcing.
+            displacement_load (Optional[SHGrid]): External vertical surface displacement forcing.
+            gravitational_potential_load (Optional[SHGrid]): External gravitational potential forcing.
+            angular_momentum_change (Optional[np.ndarray]): External angular momentum perturbation.
+            rotational_feedbacks (bool): Whether to calculate polar wander effects.
+            rtol (float): The relative tolerance for convergence.
+            max_iterations (Optional[int]): Hard limit on iteration count.
+            verbose (bool): If True, prints iteration metrics.
+
+        Returns:
+            Tuple[SHGrid, SHGrid, SHGrid, np.ndarray]: The physical response fields:
+                (Sea Level Change, Displacement, Gravity Potential, Angular Velocity)
         """
         if direct_load is not None and (
             direct_load.lmax != state.lmax or direct_load.grid != state.grid
         ):
             raise ValueError("Direct load grid must match the EarthState grid.")
 
-        h_b = self.model.love_numbers.h[None, :, None]
-        k_b = self.model.love_numbers.k[None, :, None]
-        h_u_b = self.model.love_numbers.h_u[None, :, None]
-        k_u_b = self.model.love_numbers.k_u[None, :, None]
-        h_phi_b = self.model.love_numbers.h_phi[None, :, None]
-        k_phi_b = self.model.love_numbers.k_phi[None, :, None]
+        h_b = self._model.love_numbers.h[None, :, None]
+        k_b = self._model.love_numbers.k[None, :, None]
+        h_u_b = self._model.love_numbers.h_u[None, :, None]
+        k_u_b = self._model.love_numbers.k_u[None, :, None]
+        h_phi_b = self._model.love_numbers.h_phi[None, :, None]
+        k_phi_b = self._model.love_numbers.k_phi[None, :, None]
 
         loads_present = False
         non_zero_rhs = False
@@ -149,7 +254,6 @@ class SeaLevelEquation:
             mean_slc = self._mean_sea_level_change(state, direct_load)
             non_zero_rhs = non_zero_rhs or np.max(np.abs(direct_load.data)) > 0
         else:
-            # Force exactly aligned empty grids
             direct_load = SHGrid.from_zeros(
                 state.lmax,
                 grid=state.grid,
@@ -193,7 +297,7 @@ class SeaLevelEquation:
             )
             return zero, zero, zero, np.zeros(2)
 
-        self.solver_counter += 1
+        self._solver_counter += 1
 
         load = direct_load + self._water_density * state.ocean_function * mean_slc
         angular_velocity_change = np.zeros(2)
@@ -201,13 +305,12 @@ class SeaLevelEquation:
         r = self._rotation_factor
         i = self._inertia_factor
         m = 1 / (
-            self.model.parameters.polar_moment_of_inertia
-            - self.model.parameters.equatorial_moment_of_inertia
+            self._model.parameters.polar_moment_of_inertia
+            - self._model.parameters.equatorial_moment_of_inertia
         )
-        ht = self.model.love_numbers.ht[2]
-        kt = self.model.love_numbers.kt[2]
+        ht = self._model.love_numbers.ht[2]
+        kt = self._model.love_numbers.kt[2]
 
-        # Force exact alignment for the iteration state
         sea_level_change = SHGrid.from_zeros(
             state.lmax, grid=state.grid, sampling=state.sampling, extend=state.extend
         )
@@ -307,9 +410,27 @@ class SeaLevelEquation:
         Solves the full non-linear Sea Level Equation with shifting shorelines.
 
         Incorporates dynamic ocean function updates, explicit mass conservation,
-        and allows for ice, sediment, and dynamic sea level forcings.
+        and allows for combined ice, sediment, and dynamic sea level forcings.
+
+        Args:
+            initial_state (EarthState): The unperturbed background Earth state.
+            ice_thickness_change (SHGrid): Change in ice thickness.
+            sediment_thickness_change (Optional[SHGrid]): Change in sediment.
+            dynamic_sea_level_change (Optional[SHGrid]): Ocean dynamic sea level forcing.
+            sediment_density (float): Density of sediment layer in kg/m^3.
+            rotational_feedbacks (bool): Whether to calculate polar wander effects.
+            rtol (float): The relative tolerance for convergence.
+            max_iterations (int): Hard limit on non-linear iteration count.
+            verbose (bool): If True, prints iteration metrics.
+
+        Returns:
+            Tuple[EarthState, SHGrid, SHGrid, SHGrid, np.ndarray]:
+                - The new equilibrium EarthState
+                - Relative Sea Level Change
+                - Vertical Displacement
+                - Gravity Potential Change
+                - Angular Velocity Change [omega_x, omega_y]
         """
-        # Validate grid alignments
         if (
             ice_thickness_change.lmax != initial_state.lmax
             or ice_thickness_change.grid != initial_state.grid
@@ -318,43 +439,38 @@ class SeaLevelEquation:
                 "Ice thickness change grid must match the initial state grid."
             )
 
-        # 1. Setup Love Numbers and Constants
-        h_b = self.model.love_numbers.h[None, :, None]
-        k_b = self.model.love_numbers.k[None, :, None]
+        h_b = self._model.love_numbers.h[None, :, None]
+        k_b = self._model.love_numbers.k[None, :, None]
         r = self._rotation_factor
         i = self._inertia_factor
-        ht = self.model.love_numbers.ht[2]
-        kt = self.model.love_numbers.kt[2]
+        ht = self._model.love_numbers.ht[2]
+        kt = self._model.love_numbers.kt[2]
 
-        # 2. Extract Initial State Arrays
         initial_bathy = initial_state.sea_level.data
         initial_ice = initial_state.ice_thickness.data
         initial_ocean_func = initial_state.ocean_function.data
 
         new_ice = initial_ice + ice_thickness_change.data
 
-        # 3. Precompute Static Mass Loads
-        static_load_data = self.model.parameters.ice_density * ice_thickness_change.data
+        static_load_data = (
+            self._model.parameters.ice_density * ice_thickness_change.data
+        )
         if sediment_thickness_change is not None:
             static_load_data += sediment_density * sediment_thickness_change.data
 
-        # 4. Global Water Mass Conservation Target
-        # The total water mass in the final ocean must equal initial water mass + meltwater
         meltwater_mass = -initial_state.integrate(
-            self.model.parameters.ice_density * ice_thickness_change
+            self._model.parameters.ice_density * ice_thickness_change
         )
         initial_water_mass = initial_state.integrate(
             self._water_density * initial_state.ocean_function * initial_state.sea_level
         )
         target_water_mass = initial_water_mass + meltwater_mass
 
-        # 5. Iteration State Variables
         current_ocean_func = initial_ocean_func.copy()
         current_bathy = initial_bathy.copy()
         slc_data = np.zeros_like(initial_bathy)
         angular_velocity_change = np.zeros(2)
 
-        # We need an empty grid template to use the integrator safely
         grid_template = SHGrid.from_zeros(
             initial_state.lmax,
             grid=initial_state.grid,
@@ -368,23 +484,18 @@ class SeaLevelEquation:
         err = 1.0
         count = 0
 
-        self.solver_counter += 1
+        self._solver_counter += 1
 
-        # 6. The Non-Linear Loop
         while err > rtol and count < max_iterations:
 
-            # --- A. Determine the new Load ---
-            # Total Load = Static (Ice + Sed) + Change in Ocean Water Mass
             ocean_mass_change = self._water_density * (
                 current_ocean_func * current_bathy - initial_ocean_func * initial_bathy
             )
             total_load_data = static_load_data + ocean_mass_change
 
-            # Expand load to Spherical Harmonics
             grid_template.data[:] = total_load_data
             load_lm = self._expand(grid_template)
 
-            # --- B. Solve Elasticity & Gravity ---
             displacement_lm = load_lm.copy()
             gpc_lm = load_lm.copy()
 
@@ -406,50 +517,40 @@ class SeaLevelEquation:
                 gpc_lm, initial_state.grid_type, initial_state.extend
             )
 
-            # Local Sea Level Change (spatially varying, no eustatic shift yet)
             slc_local = (-1.0 / self._g) * (self._g * displacement.data + gpc.data)
 
-            # --- C. Enforce Mass Conservation (Solve for Eustatic Shift) ---
-            # Raw bathymetry = Initial + SLC_local - Sediment + DSL
             raw_bathy = initial_bathy + slc_local
             if sediment_thickness_change is not None:
                 raw_bathy -= sediment_thickness_change.data
             if dynamic_sea_level_change is not None:
                 raw_bathy += dynamic_sea_level_change.data
 
-            # Calculate the water mass currently captured by the raw bathymetry
             grid_template.data[:] = self._water_density * current_ocean_func * raw_bathy
             current_raw_water_mass = initial_state.integrate(grid_template)
 
-            # Calculate current ocean area (weighted by density for the shift equation)
             grid_template.data[:] = self._water_density * current_ocean_func
             current_ocean_density_area = initial_state.integrate(grid_template)
 
-            # The eustatic shift needed to balance the global water budget
             eustatic_shift = (
                 target_water_mass - current_raw_water_mass
             ) / current_ocean_density_area
 
-            # --- D. Update Topography and Flotation ---
             new_slc_data = slc_local + eustatic_shift
             new_bathy = raw_bathy + eustatic_shift
 
-            # 2. Update Ocean Function using the state's policy
             potential_ocean = np.where(
                 self._water_density * new_bathy
-                - self.model.parameters.ice_density * new_ice
+                - self._model.parameters.ice_density * new_ice
                 > 0,
                 1,
                 0,
             )
 
             if exclude_caspian:
-                # Ensure the Caspian basin remains land-locked land
                 new_ocean_func = np.where(caspian_mask == 1, 0, potential_ocean)
             else:
                 new_ocean_func = potential_ocean
 
-            # --- E. Check Convergence ---
             max_slc = np.max(np.abs(slc_data))
             err = (
                 np.max(np.abs(new_slc_data - slc_data)) / max_slc
@@ -467,14 +568,14 @@ class SeaLevelEquation:
             current_ocean_func[:] = new_ocean_func
             count += 1
 
-        # 7. Construct Final State and Return Outputs
         final_sea_level = SHGrid.from_array(current_bathy, grid=initial_state.grid)
         final_ice = SHGrid.from_array(new_ice, grid=initial_state.grid)
 
-        # Create the new equilibrium background state
-        final_state = EarthState(final_ice, final_sea_level, self.model)
+        # Inherit the Caspian masking policy properly from the initial state
+        final_state = EarthState(
+            final_ice, final_sea_level, self._model, exclude_caspian=exclude_caspian
+        )
 
-        # Package the outputs identically to the linear solver
         final_slc = SHGrid.from_array(slc_data, grid=initial_state.grid)
 
         return final_state, final_slc, displacement, gpc, angular_velocity_change

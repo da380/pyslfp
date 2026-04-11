@@ -1,12 +1,16 @@
 """
 Test suite for the pygeoinf physical operator wrappers.
+
+Validates the instantiation of mathematical spaces, operator definitions,
+and rigorously tests the adjoint identity using Gaussian measures.
 """
 
 import pytest
 import numpy as np
 from pyshtools import SHGrid
 
-from pygeoinf import LinearOperator, HilbertSpaceDirectSum, EuclideanSpace
+import pygeoinf as inf
+from pygeoinf import HilbertSpaceDirectSum, EuclideanSpace
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
 from pyslfp.core import EarthModel
@@ -32,12 +36,12 @@ from pyslfp.linear_operators.physics import (
 @pytest.fixture(scope="module")
 def operator_setup():
     """Provides a basic EarthState and Solver for operator testing."""
-    model = EarthModel(lmax=32)  # Lower lmax for extremely fast operator tests
-    ice_ng = IceNG(version=IceModel.ICE7G)
-    ice_thickness, sea_level = ice_ng.get_ice_thickness_and_sea_level(0.0, 32)
+    # We use lmax=64 to balance sufficient harmonic complexity with the speed
+    # required for iterative randomized testing in the .check() method.
+    model = EarthModel(64)
 
-    ice_thickness = ice_thickness / model.parameters.length_scale
-    sea_level = sea_level / model.parameters.length_scale
+    ice_ng = IceNG(version=IceModel.ICE7G, length_scale=model.parameters.length_scale)
+    ice_thickness, sea_level = ice_ng.get_ice_thickness_and_sea_level(0.0, 64)
 
     state = EarthState(ice_thickness, sea_level, model)
     solver = SeaLevelEquation(model)
@@ -107,59 +111,89 @@ def test_adjoint_angular_momentum_helper(operator_setup):
 
 
 # ==================================================================== #
-#                         Operator Execution Tests                     #
+#                     Rigorous Adjoint Identity Tests                  #
 # ==================================================================== #
 
 
-def test_lebesgue_linear_operator_forward(operator_setup):
-    """Smoke test for the forward execution of the Lebesgue operator."""
+@pytest.mark.parametrize(
+    "sobolev, order, scale_factor, rotational_feedbacks",
+    [
+        # 1. Lebesgue, no rotational feedbacks
+        (False, None, None, False),
+        # 2. Lebesgue, with rotational feedbacks
+        (False, None, None, True),
+        # 3. Sobolev (Order 1), no rotational feedbacks
+        (True, 1.0, 0.1, False),
+        # 4. Sobolev (Order 2), with rotational feedbacks
+        (True, 2.0, 0.2, True),
+    ],
+    ids=[
+        "Lebesgue-NoRotation",
+        "Lebesgue-Rotation",
+        "Sobolev-O1-NoRotation",
+        "Sobolev-O2-Rotation",
+    ],
+)
+def test_linear_operator_adjoint_identity(
+    operator_setup,
+    sobolev: bool,
+    order: float,
+    scale_factor: float,
+    rotational_feedbacks: bool,
+):
+    """
+    Tests the mathematical adjoint identity <Au, v> == <u, A*v> for the LinearOperator
+    using pygeoinf's built-in .check() method with spatially regular Gaussian measures.
+    """
     state, solver = operator_setup
-    operator = get_lebesgue_linear_operator(solver, state, max_iterations=2)
 
-    assert isinstance(operator, LinearOperator)
+    rtol = 1e-9
+    check_rtol = 1e-4
+    check_atol = 1e-4
+    radius = solver.model.parameters.mean_sea_floor_radius
 
-    # 1. Provide a single domain element (load)
-    test_load = random_grid(state)
+    # 1. Construct the target Linear Operator
+    if sobolev:
+        A = get_sobolev_linear_operator(
+            solver,
+            state,
+            order,
+            scale_factor * radius,
+            rotational_feedbacks=rotational_feedbacks,
+            rtol=rtol,
+        )
+    else:
+        A = get_lebesgue_linear_operator(
+            solver,
+            state,
+            rotational_feedbacks=rotational_feedbacks,
+            rtol=rtol,
+        )
 
-    # 2. Map it forward
-    response = operator(test_load)
+    # 2. Domain measure (Load space)
+    smoothness_scale = 0.1 * radius
+    domain_measure = A.domain.heat_kernel_gaussian_measure(smoothness_scale)
 
-    # 3. Validate Codomain outputs
-    assert isinstance(response, list)
-    assert len(response) == 4
-    assert isinstance(response[0], SHGrid)  # SLC
-    assert isinstance(response[1], SHGrid)  # Disp
-    assert isinstance(response[2], SHGrid)  # Grav Potential
-    assert isinstance(response[3], np.ndarray)  # AVC
-    assert response[3].shape == (2,)
+    # 3. Codomain measure (Response space)
+    field_space = A.codomain.subspace(0)
+    field_measure = field_space.heat_kernel_gaussian_measure(smoothness_scale)
 
+    euclidean_space = A.codomain.subspace(3)
+    angular_momentum_std = solver.model.parameters.rotation_frequency * radius**4
 
-def test_lebesgue_linear_operator_adjoint(operator_setup):
-    """Smoke test for the adjoint execution of the Lebesgue operator."""
-    state, solver = operator_setup
-    operator = get_lebesgue_linear_operator(solver, state, max_iterations=2)
+    euclidean_measure = inf.GaussianMeasure.from_standard_deviation(
+        euclidean_space, angular_momentum_std
+    )
 
-    # 1. Create a dummy codomain element (response list)
-    dummy_response = [
-        random_grid(state),  # Adjoint SLC
-        random_grid(state),  # Adjoint Disp
-        random_grid(state),  # Adjoint GPC
-        np.array([1e-8, 1e-8]),  # Adjoint AVC
-    ]
+    codomain_measure = inf.GaussianMeasure.from_direct_sum(
+        [field_measure, field_measure, field_measure, euclidean_measure]
+    )
 
-    # 2. Map it backward
-    adjoint_load = operator.adjoint(dummy_response)
-
-    # 3. Validate Domain output
-    assert isinstance(adjoint_load, SHGrid)
-    assert adjoint_load.data.shape == state.sea_level.data.shape
-
-
-def test_sobolev_linear_operator_instantiation(operator_setup):
-    """Ensures the Sobolev wrapper correctly inherits the formal adjoint."""
-    state, solver = operator_setup
-    sobolev_op = get_sobolev_linear_operator(solver, state, order=1.0, scale=1000.0)
-
-    assert isinstance(sobolev_op, LinearOperator)
-    assert isinstance(sobolev_op.domain, Sobolev)
-    assert isinstance(sobolev_op.codomain, HilbertSpaceDirectSum)
+    # 4. Run the comprehensive self-checks
+    A.check(
+        n_checks=3,
+        check_rtol=check_rtol,
+        check_atol=check_atol,
+        domain_measure=domain_measure,
+        codomain_measure=codomain_measure,
+    )

@@ -2,16 +2,18 @@
 Core physics definitions for the pyslfp library.
 
 This module contains the fundamental Earth parameters, non-dimensionalization
-schemes, and elastic Love numbers required for sea-level fingerprinting.
+schemes, and elastic Love numbers required for gravitationally consistent
+sea-level fingerprinting.
 """
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Tuple
 
 import numpy as np
 import pyshtools as sh
 import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 
 # Clean import from our new data layer
 from pyslfp.data import DATADIR, ensure_data
@@ -39,7 +41,25 @@ ICE_DENSITY: float = 917.0
 class EarthModelParameters:
     """
     Stores Earth model parameters and handles non-dimensionalization.
-    Strictly immutable to ensure physical consistency.
+
+    This is a frozen dataclass; all properties are strictly immutable
+    to ensure physical consistency across the solver lifecycle.
+
+    Attributes:
+        length_scale (float): The length scale used for non-dimensionalization. Default is 1.0.
+        density_scale (float): The density scale used for non-dimensionalization. Default is 1.0.
+        time_scale (float): The time scale used for non-dimensionalization. Default is 1.0.
+        raw_equatorial_radius (float): Earth's equatorial radius in meters.
+        raw_polar_radius (float): Earth's polar radius in meters.
+        raw_mean_radius (float): Earth's mean radius in meters.
+        raw_mean_sea_floor_radius (float): Mean radius of the solid Earth surface in meters.
+        raw_mass (float): Total mass of the Earth in kilograms.
+        raw_gravitational_acceleration (float): Surface gravity in m/s^2.
+        raw_equatorial_moment_of_inertia (float): Equatorial moment of inertia in kg*m^2.
+        raw_polar_moment_of_inertia (float): Polar moment of inertia in kg*m^2.
+        raw_rotation_frequency (float): Earth's rotation frequency in rad/s.
+        raw_water_density (float): Density of ocean water in kg/m^3.
+        raw_ice_density (float): Density of ice in kg/m^3.
     """
 
     # Base scales
@@ -154,9 +174,13 @@ class EarthModelParameters:
     @staticmethod
     def from_standard_non_dimensionalisation() -> "EarthModelParameters":
         """
-        Returns parameters using a standard non-dimensionalisation scheme based
-        on the mean radius of the Earth, the density of water, and the length
-        of an hour.
+        Returns parameters using a standard non-dimensionalisation scheme.
+
+        This scheme is based on the mean radius of the Earth, the density of water,
+        and the length of an hour.
+
+        Returns:
+            EarthModelParameters: An instance populated with standard scales.
         """
         return EarthModelParameters(
             length_scale=6371000.0, density_scale=1000.0, time_scale=3600
@@ -165,7 +189,11 @@ class EarthModelParameters:
 
 class LoveNumbers:
     """
-    Loads and non-dimensionalizes elastic Love numbers.
+    Loads, stores, and non-dimensionalizes elastic Love numbers.
+
+    This class handles the ingestion of Love number data files and computes
+    the appropriate non-dimensional forms required for the spherical harmonic
+    solutions of the Sea Level Equation.
     """
 
     def __init__(
@@ -175,7 +203,19 @@ class LoveNumbers:
         /,
         *,
         file: Optional[str] = None,
-    ):
+    ) -> None:
+        """
+        Initialize the Love numbers for a specific Earth model.
+
+        Args:
+            lmax (int): The maximum spherical harmonic degree.
+            params (EarthModelParameters): The non-dimensionalized parameters of the Earth.
+            file (Optional[str]): Path to a custom Love number `.dat` file. If None,
+                it uses the default PREM_4096 dataset, downloading it if necessary.
+
+        Raises:
+            ValueError: If the requested lmax exceeds the maximum degree in the data file.
+        """
         if file is None:
             ensure_data("LOVE_NUMBERS")
             file = str(DATADIR / "love_numbers" / "PREM_4096.dat")
@@ -188,49 +228,132 @@ class LoveNumbers:
                 f"lmax ({lmax}) exceeds Love number file max degree ({data_degree})."
             )
 
-        self.lmax = lmax
+        self._lmax = lmax
         self._params = params
 
         # Non-dimensionalize Love numbers using the immutable parameters
-        self.h_u = data[: lmax + 1, 1] * params.load_scale / params.length_scale
-        self.k_u = (
+        self._h_u = data[: lmax + 1, 1] * params.load_scale / params.length_scale
+        self._k_u = (
             data[: lmax + 1, 2]
             * params.load_scale
             / params.gravitational_potential_scale
         )
-        self.h_phi = data[: lmax + 1, 3] * params.load_scale / params.length_scale
-        self.k_phi = (
+        self._h_phi = data[: lmax + 1, 3] * params.load_scale / params.length_scale
+        self._k_phi = (
             data[: lmax + 1, 4]
             * params.load_scale
             / params.gravitational_potential_scale
         )
 
-        self.h = self.h_u + self.h_phi
-        self.k = self.k_u + self.k_phi
-        self.ht = (
+        self._h = self._h_u + self._h_phi
+        self._k = self._k_u + self._k_phi
+
+        self._ht = (
             data[: lmax + 1, 5]
             * params.gravitational_potential_scale
             / params.length_scale
         )
-        self.kt = data[: lmax + 1, 6]
+        self._kt = data[: lmax + 1, 6]
 
-    def displacement_greens_function(self, angle: float, lmax: int = None) -> float:
+    # ---------------------------------------------------------#
+    #                     Properties                           #
+    # ---------------------------------------------------------#
+
+    @property
+    def lmax(self) -> int:
+        """The maximum spherical harmonic degree."""
+        return self._lmax
+
+    @property
+    def h_u(self) -> np.ndarray:
+        """Non-dimensional vertical displacement Love number for direct mass loading."""
+        return self._h_u
+
+    @property
+    def k_u(self) -> np.ndarray:
+        """Non-dimensional gravitational potential Love number for direct mass loading."""
+        return self._k_u
+
+    @property
+    def h_phi(self) -> np.ndarray:
+        """Non-dimensional vertical displacement Love number for potential loading."""
+        return self._h_phi
+
+    @property
+    def k_phi(self) -> np.ndarray:
+        """Non-dimensional gravitational potential Love number for potential loading."""
+        return self._k_phi
+
+    @property
+    def h(self) -> np.ndarray:
+        """Total displacement Love number (degree-dependent)."""
+        return self._h
+
+    @property
+    def k(self) -> np.ndarray:
+        """Total gravitational potential Love number (degree-dependent)."""
+        return self._k
+
+    @property
+    def ht(self) -> np.ndarray:
+        """Tidal (rotational) displacement Love number."""
+        return self._ht
+
+    @property
+    def kt(self) -> np.ndarray:
+        """Tidal (rotational) gravitational potential Love number."""
+        return self._kt
+
+    # ---------------------------------------------------------#
+    #                 Green's Functions                        #
+    # ---------------------------------------------------------#
+
+    def displacement_greens_function(
+        self, angle: float, /, *, lmax: Optional[int] = None
+    ) -> float:
+        """
+        Evaluates the displacement Green's function at a given angular separation.
+
+        Args:
+            angle (float): The angular separation in radians.
+            lmax (Optional[int]): The maximum degree to include in the summation.
+                If None, uses the instance's lmax.
+
+        Returns:
+            float: The non-dimensional displacement value.
+        """
         return self._greens_function(angle, lmax=lmax, displacement=True)
 
-    def potential_greens_function(self, angle: float, lmax: int = None) -> float:
+    def potential_greens_function(
+        self, angle: float, /, *, lmax: Optional[int] = None
+    ) -> float:
+        """
+        Evaluates the gravitational potential Green's function at a given angular separation.
+
+        Args:
+            angle (float): The angular separation in radians.
+            lmax (Optional[int]): The maximum degree to include in the summation.
+                If None, uses the instance's lmax.
+
+        Returns:
+            float: The non-dimensional gravitational potential value.
+        """
         return self._greens_function(angle, lmax=lmax, displacement=False)
 
     def _greens_function(
-        self, angle: float, lmax: int = None, displacement: bool = True
+        self, angle: float, /, *, lmax: Optional[int] = None, displacement: bool = True
     ) -> float:
-        if lmax is None:
-            lmax = self.lmax
+        """Internal helper for computing evaluating summed Legendre polynomials."""
+        calc_lmax = lmax if lmax is not None else self.lmax
 
         x = np.cos(angle)
-        ps = sh.legendre.PLegendre(lmax, x)
-        degrees = np.arange(lmax + 1)
-        love_numbers = self.h[: lmax + 1] if displacement else self.k[: lmax + 1]
-        smoothing = np.exp(-10 * (degrees**2) / lmax**2)
+        ps = sh.legendre.PLegendre(calc_lmax, x)
+        degrees = np.arange(calc_lmax + 1)
+
+        love_numbers = (
+            self.h[: calc_lmax + 1] if displacement else self.k[: calc_lmax + 1]
+        )
+        smoothing = np.exp(-10 * (degrees**2) / calc_lmax**2)
 
         terms = (
             (2 * degrees + 1)
@@ -242,24 +365,35 @@ class LoveNumbers:
         return float(np.sum(terms))
 
     def plot_greens_functions(
-        self, lmax: Optional[int] = None, n_points: int = 181
-    ) -> tuple:
-        """Generates a quick visualization of the Green's functions."""
-        if lmax is None:
-            lmax = self.lmax
+        self, /, *, lmax: Optional[int] = None, n_points: int = 181
+    ) -> Tuple[Figure, np.ndarray]:
+        """
+        Generates a quick visualization of the Green's functions.
+
+        Args:
+            lmax (Optional[int]): The maximum degree to evaluate.
+            n_points (int): The number of points to sample between 0 and 180 degrees.
+
+        Returns:
+            Tuple[Figure, np.ndarray]: The matplotlib Figure and Axes objects.
+        """
+        calc_lmax = lmax if lmax is not None else self.lmax
 
         angles_deg = np.linspace(1e-4, 180, n_points)
         angles_rad = np.deg2rad(angles_deg)
+
         g_disp = [
-            self.displacement_greens_function(angle, lmax=lmax) for angle in angles_rad
+            self.displacement_greens_function(angle, lmax=calc_lmax)
+            for angle in angles_rad
         ]
         g_pot = [
-            self.potential_greens_function(angle, lmax=lmax)
+            self.potential_greens_function(angle, lmax=calc_lmax)
             / self._params.gravitational_acceleration
             for angle in angles_rad
         ]
 
         fig, axes = plt.subplots(2, 1, figsize=(8, 10), sharex=True, layout="tight")
+
         axes[0].plot(angles_deg, g_disp, "b-")
         axes[0].set_title("Displacement Green's function", fontsize=20)
         axes[0].set_ylabel("Non-dimensional length per unit mass", fontsize=20)
@@ -275,20 +409,35 @@ class LoveNumbers:
         return fig, axes
 
     def plot_greens_functions_split(
-        self, split_angle: float = 20.0, lmax: Optional[int] = None, n_points: int = 300
-    ) -> tuple:
-        """Generates a broken axis plot to show detail for near and far fields."""
-        if lmax is None:
-            lmax = self.lmax
+        self,
+        /,
+        *,
+        split_angle: float = 20.0,
+        lmax: Optional[int] = None,
+        n_points: int = 300,
+    ) -> Tuple[Figure, np.ndarray]:
+        """
+        Generates a broken axis plot to show detail for near and far fields.
+
+        Args:
+            split_angle (float): The angle in degrees at which to break the x-axis.
+            lmax (Optional[int]): The maximum degree to evaluate.
+            n_points (int): The number of points to sample.
+
+        Returns:
+            Tuple[Figure, np.ndarray]: The matplotlib Figure and Axes objects.
+        """
+        calc_lmax = lmax if lmax is not None else self.lmax
 
         angles_deg = np.linspace(1e-4, 180, n_points)
         angles_rad = np.deg2rad(angles_deg)
+
         g_disp = np.array(
-            [self.displacement_greens_function(a, lmax=lmax) for a in angles_rad]
+            [self.displacement_greens_function(a, lmax=calc_lmax) for a in angles_rad]
         )
         g_geoid = np.array(
             [
-                -self.potential_greens_function(a, lmax=lmax)
+                -self.potential_greens_function(a, lmax=calc_lmax)
                 / self._params.gravitational_acceleration
                 for a in angles_rad
             ]
@@ -331,21 +480,61 @@ class LoveNumbers:
 
 class EarthModel:
     """
-    The unified physics configuration object for the pyslfp library.
+    The unified physics configuration object for the library.
 
-    This replaces multiple inheritance by safely composing the non-dimensionalized
-    Earth parameters and the corresponding Love numbers into a single object
-    that can be passed to solvers and operators.
+    This object encapsulates the non-dimensionalized Earth parameters and
+    the corresponding Love numbers, ensuring physical consistency across
+    all calculations and solvers.
     """
 
     def __init__(
         self,
         lmax: int,
+        /,
+        *,
         parameters: Optional[EarthModelParameters] = None,
         love_number_file: Optional[str] = None,
-    ):
-        self.lmax = lmax
-        self.parameters = (
+    ) -> None:
+        """
+        Initializes an EarthModel configuration.
+
+        Args:
+            lmax (int): The maximum spherical harmonic degree.
+            parameters (Optional[EarthModelParameters]): The Earth's physical scales.
+                If None, standard non-dimensionalized parameters are generated.
+            love_number_file (Optional[str]): Path to a custom Love number file.
+        """
+        self._lmax = lmax
+        self._parameters = (
             parameters or EarthModelParameters.from_standard_non_dimensionalisation()
         )
-        self.love_numbers = LoveNumbers(lmax, self.parameters, file=love_number_file)
+        self._love_numbers = LoveNumbers(lmax, self._parameters, file=love_number_file)
+
+    @property
+    def lmax(self) -> int:
+        """The maximum spherical harmonic degree."""
+        return self._lmax
+
+    @property
+    def parameters(self) -> EarthModelParameters:
+        """The fundamental, non-dimensionalized Earth parameters."""
+        return self._parameters
+
+    @property
+    def love_numbers(self) -> LoveNumbers:
+        """The elastic Love numbers for this Earth model."""
+        return self._love_numbers
+
+    @classmethod
+    def default(cls, lmax: int, /) -> "EarthModel":
+        """
+        Generates an EarthModel instance using standard PREM parameters
+        and the default PREM Love numbers file.
+
+        Args:
+            lmax (int): The maximum spherical harmonic degree.
+
+        Returns:
+            EarthModel: A fully configured EarthModel ready for solvers.
+        """
+        return cls(lmax)

@@ -67,6 +67,7 @@ class TestLoveNumbers:
     def test_initialization_and_loading(self):
         lmax = 64
         params = EarthModelParameters.from_standard_non_dimensionalisation()
+        # lmax and params are strictly positional-only arguments
         ln = LoveNumbers(lmax, params)
 
         assert isinstance(ln.h, np.ndarray)
@@ -88,7 +89,9 @@ class TestEarthModel:
     def test_earth_model_composition(self):
         """Tests that the EarthModel correctly wires up parameters and love numbers."""
         lmax = 32
-        model = EarthModel(lmax=lmax)
+
+        # lmax is strictly positional; optional arguments must be keywords
+        model = EarthModel(lmax)
 
         # Did it instantiate default parameters?
         assert isinstance(model.parameters, EarthModelParameters)
@@ -98,3 +101,12 @@ class TestEarthModel:
         assert isinstance(model.love_numbers, LoveNumbers)
         assert model.love_numbers.lmax == lmax
         assert len(model.love_numbers.h) == lmax + 1
+
+    def test_earth_model_default_factory(self):
+        """Tests the generation of an EarthModel using the classmethod factory."""
+        lmax = 64
+        model = EarthModel.default(lmax)
+
+        assert isinstance(model, EarthModel)
+        assert model.lmax == lmax
+        assert model.parameters.length_scale == 6371000.0

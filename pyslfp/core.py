@@ -12,10 +12,11 @@ from typing import Optional, Tuple
 
 import numpy as np
 import pyshtools as sh
+from pyshtools import SHCoeffs, SHGrid
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 
-# Clean import from our new data layer
+
 from pyslfp.data import DATADIR, ensure_data
 
 # =====================================================================
@@ -102,6 +103,10 @@ class EarthModelParameters:
     water_density: float = field(init=False)
     ice_density: float = field(init=False)
 
+    # Quantities useful in calculations
+    rotation_factor: float = field(init=False)
+    inertia_factor: float = field(init=False)
+
     def __post_init__(self) -> None:
         """Calculates and locks in all derived scales and parameters."""
 
@@ -169,6 +174,26 @@ class EarthModelParameters:
         )
         object.__setattr__(
             self, "ice_density", self.raw_ice_density / self.density_scale
+        )
+
+        object.__setattr__(
+            self,
+            "rotation_factor",
+            np.sqrt((4 * np.pi) / 15.0)
+            * self.rotation_frequency
+            * self.mean_sea_floor_radius**2,
+        )
+
+        object.__setattr__(
+            self,
+            "inertia_factor",
+            np.sqrt(5 / (12 * np.pi))
+            * self.rotation_frequency
+            * self.mean_sea_floor_radius**3
+            / (
+                self.gravitational_constant
+                * (self.polar_moment_of_inertia - self.equatorial_moment_of_inertia)
+            ),
         )
 
     @staticmethod
@@ -484,7 +509,8 @@ class EarthModel:
 
     This object encapsulates the non-dimensionalized Earth parameters and
     the corresponding Love numbers, ensuring physical consistency across
-    all calculations and solvers.
+    all calculations and solvers. Also sets values for SH transforms
+    and provides a range of utility methods.
     """
 
     def __init__(
@@ -494,6 +520,7 @@ class EarthModel:
         *,
         parameters: Optional[EarthModelParameters] = None,
         love_number_file: Optional[str] = None,
+        grid: str = "DH",
     ) -> None:
         """
         Initializes an EarthModel configuration.
@@ -510,10 +537,57 @@ class EarthModel:
         )
         self._love_numbers = LoveNumbers(lmax, self._parameters, file=love_number_file)
 
+        if grid == "DH2":
+            self._grid = "DH"
+            self._sampling = 2
+        else:
+            self._grid = grid
+            self._sampling = 1
+
+        # Internal parameters (do not change)
+        self._extend: bool = True
+        self._normalization: str = "ortho"
+        self._csphase: int = 1
+
+        self._normalization: str = "ortho"
+        self._csphase: int = 1
+
+        # Precompute the spherical integration factor
+        self._integration_factor = (
+            np.sqrt(4 * np.pi) * self.parameters.mean_sea_floor_radius**2
+        )
+
     @property
     def lmax(self) -> int:
         """The maximum spherical harmonic degree."""
         return self._lmax
+
+    @property
+    def normalization(self) -> str:
+        """Return spherical harmonic normalisation convention."""
+        return self._normalization
+
+    @property
+    def csphase(self) -> int:
+        """Return Condon-Shortley phase option."""
+        return self._csphase
+
+    @property
+    def grid(self) -> str:
+        """Return spatial grid option."""
+        return self._grid
+
+    @property
+    def grid_name(self):
+        """
+        Returns the name of the grid corrected for sampling differences.
+        """
+        return self.grid if self._sampling == 1 else "DH2"
+
+    @property
+    def extend(self) -> bool:
+        """True if grid extended to include 360 degree longitude."""
+        return self._extend
 
     @property
     def parameters(self) -> EarthModelParameters:
@@ -538,3 +612,86 @@ class EarthModel:
             EarthModel: A fully configured EarthModel ready for solvers.
         """
         return cls(lmax)
+
+    # --------------------------------------------------------#
+    #                       Public methods                    #
+    # --------------------------------------------------------#
+
+    def lats(self) -> np.ndarray:
+        """Return the latitudes for the spatial grid."""
+        return self.zero_grid().lats()
+
+    def lons(self) -> np.ndarray:
+        """Return the longitudes for the spatial grid."""
+        return self.zero_grid().lons()
+
+    def check_field(self, f: SHGrid) -> bool:
+        """Checks if an SHGrid object is compatible with instance settings."""
+        is_compatible = (
+            f.lmax == self.lmax and f.grid == self.grid and f.extend == self.extend
+        )
+        if not is_compatible:
+            raise ValueError(
+                "Provided SHGrid object is not compatible with FingerPrint settings."
+            )
+        return True
+
+    def check_coefficient(self, f: SHCoeffs) -> bool:
+        """Checks if an SHCoeffs object is compatible with instance settings."""
+        is_compatible = (
+            f.lmax == self.lmax
+            and f.normalization == self.normalization
+            and f.csphase == self.csphase
+        )
+        if not is_compatible:
+            raise ValueError(
+                "Provided SHCoeffs object is not compatible with FingerPrint settings."
+            )
+        return True
+
+    def zero_grid(self) -> SHGrid:
+        """Return a grid of zeros with compatible dimensions."""
+        return SHGrid.from_zeros(
+            lmax=self.lmax, grid=self.grid, sampling=self._sampling, extend=self.extend
+        )
+
+    def constant_grid(self, value: float) -> SHGrid:
+        """Return a grid of a constant value."""
+        f = self.zero_grid()
+        f.data[:, :] = value
+        return f
+
+    def zero_coefficients(self) -> SHCoeffs:
+        """Return a set of zero spherical harmonic coefficients."""
+        return SHCoeffs.from_zeros(
+            lmax=self.lmax, normalization=self.normalization, csphase=self.csphase
+        )
+
+    def expand_field(
+        self, f: SHGrid, /, *, lmax_calc: Optional[int] = None
+    ) -> SHCoeffs:
+        """Expands an SHGrid object into spherical harmonic coefficients."""
+        self.check_field(f)
+        return f.expand(
+            lmax_calc=lmax_calc, normalization=self.normalization, csphase=self.csphase
+        )
+
+    def expand_coefficient(self, f: SHCoeffs) -> SHGrid:
+        """Expands spherical harmonic coefficients into an SHGrid object."""
+        self.check_coefficient(f)
+        grid = "DH2" if self._sampling == 2 else self.grid
+        return f.expand(grid=grid, extend=self.extend)
+
+    def integrate(self, f: SHGrid) -> float:
+        """
+        Integrate a function over the surface of the sphere.
+
+        Args:
+            f: The function to integrate, represented as an SHGrid object.
+
+        Returns:
+            The integral of the function over the surface.
+        """
+        return (
+            self._integration_factor * self.expand_field(f, lmax_calc=0).coeffs[0, 0, 0]
+        )

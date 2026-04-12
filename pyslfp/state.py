@@ -12,7 +12,7 @@ from typing import Tuple, List
 
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
-from pyshtools import SHGrid
+from pyshtools import SHGrid, SHCoeffs
 
 from .core import EarthModel
 from .regions import Regions
@@ -51,29 +51,14 @@ class EarthState(Regions):
         """
         super().__init__()
 
-        # Validate Grid Compatibility
-        if ice_thickness.lmax != sea_level.lmax:
-            raise ValueError(
-                "Ice thickness and sea level grids must have the same lmax."
-            )
-        if ice_thickness.grid != sea_level.grid:
-            raise ValueError(
-                "Ice thickness and sea level grids must use the same grid type."
-            )
-        if ice_thickness.extend != sea_level.extend:
-            raise ValueError(
-                "Ice thickness and sea level grids must have matching extend properties."
-            )
+        # Check data compatibility
+        model.check_field(sea_level)
+        model.check_field(ice_thickness)
 
         self._ice_thickness = ice_thickness
         self._sea_level = sea_level
         self._model = model
         self._exclude_caspian = exclude_caspian
-
-        # Precompute the spherical integration factor
-        self._integration_factor = (
-            np.sqrt(4 * np.pi) * self._model.parameters.mean_sea_floor_radius**2
-        )
 
     # ---------------------------------------------------------#
     #                 Read-Only Properties                     #
@@ -95,34 +80,19 @@ class EarthState(Regions):
         return self._model
 
     @property
-    def grid(self) -> str:
-        """The pyshtools grid format (e.g., 'DH')."""
-        return self._ice_thickness.grid
-
-    @property
-    def lmax(self) -> int:
-        """The maximum spherical harmonic degree of the state grids."""
-        return self._ice_thickness.lmax
-
-    @property
-    def extend(self) -> bool:
-        """True if the grid extends to the poles."""
-        return self._ice_thickness.extend
-
-    @property
-    def sampling(self) -> int:
-        """Returns the grid sampling factor, defaulting to 1 for non-sampled grids."""
-        return getattr(self._ice_thickness, "sampling", 1)
-
-    @property
-    def grid_type(self) -> str:
-        """Returns the specific string expected by pyshtools expand()."""
-        return self.grid if self.sampling == 1 else "DH2"
-
-    @property
     def exclude_caspian(self) -> bool:
         """Returns true if the Caspian Sea is excluded from the global ocean."""
         return self._exclude_caspian
+
+    @property
+    def grid(self) -> str:
+        """Return spatial grid option."""
+        return self.model.grid
+
+    @property
+    def lmax(self) -> int:
+        """The maximum spherical harmonic degree."""
+        return self.model.lmax
 
     # ---------------------------------------------------------#
     #                 Lazy Evaluated Masks                     #
@@ -158,24 +128,11 @@ class EarthState(Regions):
     @cached_property
     def ocean_area(self) -> float:
         """Returns the total non-dimensional ocean area. Computed lazily."""
-        return self.integrate(self.ocean_function)
+        return self.model.integrate(self.ocean_function)
 
     # ---------------------------------------------------------#
     #                     Spatial Utilities                    #
     # ---------------------------------------------------------#
-
-    def integrate(self, f: SHGrid, /) -> float:
-        """
-        Integrates an SHGrid function over the surface of the sphere.
-
-        Args:
-            f (SHGrid): The scalar field to integrate.
-
-        Returns:
-            float: The spherical integral.
-        """
-        coeffs = f.expand(lmax_calc=0, normalization="ortho", csphase=1).coeffs
-        return float(self._integration_factor * coeffs[0, 0, 0])
 
     def lats(self) -> np.ndarray:
         """Returns the 1D array of grid latitudes."""

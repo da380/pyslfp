@@ -1,32 +1,42 @@
 import matplotlib.pyplot as plt
+import pygeoinf as inf
 import pyslfp as sl
 
-from pyslfp.state import EarthState
+from pyslfp.core import EarthModelParameters, EarthModel
+from pyslfp.ice_ng import IceNG
 from pyslfp.physics import SeaLevelEquation
+from pyslfp.state import EarthState
+
+import pyslfp.linear_operators as op
+
+lmax = 64
+
+parameters = EarthModelParameters.from_standard_non_dimensionalisation()
+
+earth_model = EarthModel(lmax, parameters=parameters)
+
+ice_model = IceNG(length_scale=parameters.length_scale)
+
+ice_thickness, sea_level = ice_model.get_ice_thickness_and_sea_level(0, lmax)
+
+state = EarthState(ice_thickness, sea_level, earth_model)
+
+sle = SeaLevelEquation(earth_model)
+
+A = op.get_lebesgue_linear_operator(sle, state, rtol=1e-9, verbose=True)
+
+load_space = A.domain
+response_space = A.codomain
+field_space = response_space.subspace(0)
 
 
-lmax = 256
-
-
-state = EarthState.default(lmax)
-
-sle = SeaLevelEquation(state.model)
-
-
-ice_thickness_change = (
-    -1 * state.east_antarctic_projection(value=0) * state.ice_thickness
+load_measure = load_space.heat_kernel_gaussian_measure(0.1 * parameters.mean_radius)
+field_measure = field_space.heat_kernel_gaussian_measure(0.1 * parameters.mean_radius)
+avc_measure = inf.GaussianMeasure.from_standard_deviation(
+    response_space.subspace(3), 0.01
 )
-load = state.direct_load_from_ice_thickness_change(ice_thickness_change)
-
-
-# sea_level_change, _, _, _ = sle.solve_sea_level_equation(state, load, verbose=True)
-
-
-new_state, sea_level_change, _, _, _ = sle.solve_nonlinear_equation(
-    state, ice_thickness_change=ice_thickness_change, verbose=True
+response_measure = inf.GaussianMeasure.from_direct_sum(
+    [field_measure, field_measure, field_measure, avc_measure]
 )
 
-sl.plot(sea_level_change)
-
-
-plt.show()
+A.check(domain_measure=load_measure, codomain_measure=response_measure, check_rtol=1e-4)

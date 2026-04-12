@@ -226,6 +226,12 @@ class Regions:
         """East Antarctic projection using AR6 boundaries."""
         return self.regionmask_projection("E.Antarctica", value=value)
 
+    def antarctic_projection(self, /, *, value: float = np.nan) -> SHGrid:
+        """Antarctic projection using AR6 boundaries."""
+        return self.west_antarctic_projection(
+            value=value
+        ) + self.east_antarctic_projection(value=value)
+
     def caspian_sea_projection(self, /, *, value: float = np.nan) -> SHGrid:
         """Simple rectangular projection for the Caspian Sea."""
         lats, lons = np.meshgrid(self.lats(), self.lons(), indexing="ij")

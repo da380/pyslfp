@@ -13,6 +13,7 @@ from pyshtools import SHGrid
 from pygeoinf import LinearOperator, HilbertSpaceDirectSum, EuclideanSpace
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
+from pyslfp.core import EarthModelParameters, EarthModel
 from pyslfp.physics import SeaLevelEquation
 from pyslfp.state import EarthState
 
@@ -22,46 +23,48 @@ from pyslfp.state import EarthState
 # ==================================================================== #
 
 
-def lebesgue_load_space(state: EarthState, /) -> Lebesgue:
+def lebesgue_load_space(earth_model: EarthModel, /) -> Lebesgue:
     """
     Defines the L2 mathematical space for square-integrable surface loads.
 
     Args:
-        state (EarthState): The background state defining the spatial grid.
+        earth_model: The EarthModel relative to which the space is defined
 
     Returns:
         Lebesgue: The mathematical space for surface loads.
     """
     return Lebesgue(
-        state.lmax,
-        radius=state.model.parameters.mean_sea_floor_radius,
-        grid=state.grid_type,
+        earth_model.lmax,
+        radius=earth_model.parameters.mean_sea_floor_radius,
+        grid=earth_model.grid,
     )
 
 
-def lebesgue_response_space(state: EarthState, /) -> HilbertSpaceDirectSum:
+def lebesgue_response_space(earth_model: EarthModel, /) -> HilbertSpaceDirectSum:
     """
     Defines the composite L2 response space for the physical fields.
 
     Args:
-        state (EarthState): The background state defining the spatial grid.
+        earth_model: The EarthModel relative to which the space is defined.
 
     Returns:
         HilbertSpaceDirectSum: A composite space comprising SLC, Displacement,
             Gravitational Potential, and a 2D Euclidean space for Angular Velocity.
     """
-    field_space = lebesgue_load_space(state)
+    field_space = lebesgue_load_space(earth_model)
     return HilbertSpaceDirectSum(
         [field_space, field_space, field_space, EuclideanSpace(2)]
     )
 
 
-def sobolev_load_space(state: EarthState, order: float, scale: float, /) -> Sobolev:
+def sobolev_load_space(
+    earth_model: EarthModel, order: float, scale: float, /
+) -> Sobolev:
     """
     Defines a Sobolev space for surface mass loads with smoothness constraints.
 
     Args:
-        state (EarthState): The background state defining the spatial grid.
+        earth_model: The EarthModel relative to which the space is defined.
         order (float): The Sobolev order (smoothness constraint).
         scale (float): The characteristic length scale.
 
@@ -69,16 +72,16 @@ def sobolev_load_space(state: EarthState, order: float, scale: float, /) -> Sobo
         Sobolev: The regularized mathematical space for surface loads.
     """
     return Sobolev(
-        state.lmax,
+        earth_model.lmax,
         order,
         scale,
-        radius=state.model.parameters.mean_sea_floor_radius,
-        grid=state.grid_type,
+        radius=earth_model.parameters.mean_sea_floor_radius,
+        grid=earth_model.grid,
     )
 
 
 def sobolev_response_space(
-    state: EarthState, order: float, scale: float, /
+    earth_model: EarthModel, order: float, scale: float, /
 ) -> HilbertSpaceDirectSum:
     """
     Defines the response space corresponding to a Sobolev load space.
@@ -87,7 +90,7 @@ def sobolev_response_space(
     than the applied load (order + 1).
 
     Args:
-        state (EarthState): The background state defining the spatial grid.
+        earth_model: The EarthModel relative to which the space is defined.
         order (float): The Sobolev order of the load space.
         scale (float): The characteristic length scale.
 
@@ -95,71 +98,15 @@ def sobolev_response_space(
         HilbertSpaceDirectSum: The composite Sobolev response space.
     """
     field_space = Sobolev(
-        state.lmax,
+        earth_model.lmax,
         order + 1,
         scale,
-        radius=state.model.parameters.mean_sea_floor_radius,
-        grid=state.grid_type,
+        radius=earth_model.parameters.mean_sea_floor_radius,
+        grid=earth_model.grid,
     )
     return HilbertSpaceDirectSum(
         [field_space, field_space, field_space, EuclideanSpace(2)]
     )
-
-
-# ==================================================================== #
-#                       Adjoint Math Helpers                           #
-# ==================================================================== #
-
-
-def isolate_gravitational_potential(
-    gravity_potential: SHGrid,
-    angular_velocity_change: np.ndarray,
-    solver: SeaLevelEquation,
-    state: EarthState,
-    /,
-) -> SHGrid:
-    """
-    Subtracts the centrifugal potential to isolate the gravitational potential.
-
-    Args:
-        gravity_potential (SHGrid): The total gravity potential change.
-        angular_velocity_change (np.ndarray): The 2-element angular velocity vector.
-        solver (SeaLevelEquation): The configured SLE solver.
-        state (EarthState): The background state defining the spatial grid.
-
-    Returns:
-        SHGrid: The isolated gravitational potential change.
-    """
-    gp_lm = gravity_potential.expand(normalization="ortho", csphase=1)
-
-    # Cleanly accessing the public property
-    gp_lm.coeffs[:, 2, 1] -= solver.rotation_factor * angular_velocity_change
-
-    return gp_lm.expand(grid=state.grid_type, extend=state.extend)
-
-
-def adjoint_angular_momentum_from_potential(
-    gravitational_potential_load: SHGrid, solver: SeaLevelEquation, /
-) -> np.ndarray:
-    """
-    Computes the adjoint angular momentum change for a given potential load.
-
-    Args:
-        gravitational_potential_load (SHGrid): The external potential load.
-        solver (SeaLevelEquation): The configured SLE solver.
-
-    Returns:
-        np.ndarray: The resulting 2-element adjoint angular momentum change vector.
-    """
-    gpot_lm = gravitational_potential_load.expand(
-        normalization="ortho", csphase=1, lmax_calc=2
-    )
-
-    # Cleanly accessing the public property
-    r = solver.rotation_factor
-    b = solver.model.parameters.mean_sea_floor_radius
-
-    return -r * b * b * gpot_lm.coeffs[:, 2, 1]
 
 
 # ==================================================================== #
@@ -192,9 +139,11 @@ def get_lebesgue_linear_operator(
         LinearOperator: A functional operator mathematically mapping a surface mass
             load to the 4-component physical response fields.
     """
-    domain = lebesgue_load_space(state)
-    codomain = lebesgue_response_space(state)
-    g = solver.model.parameters.gravitational_acceleration
+    model = state.model
+    parameters = model.parameters
+    domain = lebesgue_load_space(model)
+    codomain = lebesgue_response_space(model)
+    g = parameters.gravitational_acceleration
 
     def mapping(u: SHGrid) -> List[Union[SHGrid, np.ndarray]]:
         slc, disp, gpc, avc = solver.solve_generalised_equation(
@@ -206,12 +155,7 @@ def get_lebesgue_linear_operator(
             verbose=verbose,
         )
 
-        if rotational_feedbacks:
-            grav_pot_change = isolate_gravitational_potential(gpc, avc, solver, state)
-        else:
-            grav_pot_change = gpc
-
-        return [slc, disp, grav_pot_change, avc]
+        return [slc, disp, gpc, avc]
 
     def adjoint_mapping(response: List[Union[SHGrid, np.ndarray]]) -> SHGrid:
         adjoint_direct_load = response[0]
@@ -219,10 +163,11 @@ def get_lebesgue_linear_operator(
         adjoint_grav_pot_load = -g * response[2]
 
         if rotational_feedbacks:
-            adjoint_avc = -g * (
-                response[3]
-                + adjoint_angular_momentum_from_potential(response[2], solver)
-            )
+            gpot_lm = model.expand_field(response[2], lmax_calc=2)
+            r = parameters.rotation_factor
+            b = parameters.mean_sea_floor_radius
+            amc = -r * b * b * gpot_lm.coeffs[:, 2, 1]
+            adjoint_avc = -g * (response[3] + amc)
         else:
             adjoint_avc = None
 

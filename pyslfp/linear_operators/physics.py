@@ -12,7 +12,12 @@ from typing import List, Union, Optional, Tuple
 import numpy as np
 from pyshtools import SHGrid
 
-from pygeoinf import LinearOperator, HilbertSpaceDirectSum, EuclideanSpace
+from pygeoinf import (
+    LinearOperator,
+    HilbertSpaceDirectSum,
+    EuclideanSpace,
+    GaussianMeasure,
+)
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
 from pyslfp.core import EarthModelParameters, EarthModel
@@ -24,7 +29,7 @@ from pyslfp.linear_operators.utils import underlying_space
 
 class FingerPrintOperator(LinearOperator):
     """
-    A LinearOperator associated with the solution of the linearised elastic
+    A pygeoinf LinearOperator associated with the solution of the linearised elastic
     sea level equation.
     """
 
@@ -304,6 +309,39 @@ class FingerPrintOperator(LinearOperator):
         Returns the EarthModelParameters associated with the operator
         """
         return self.model.parameters
+
+    @property
+    def load_measure_for_testing(self) -> GaussianMeasure:
+        """
+        Returns a measure on the load space that is suitable for testing purposes.
+        """
+        return self.domain.point_value_scaled_heat_kernel_gaussian_measure(
+            0.5 * self.parameters.mean_sea_floor_radius
+        )
+
+    @property
+    def response_measure_for_testing(self) -> GaussianMeasure:
+        """
+        Returns a measure on the response space that is suitable for testing purposes.
+        """
+        field_measure = self.codomain.subspace(
+            0
+        ).point_value_scaled_heat_kernel_gaussian_measure(
+            0.5 * self.parameters.mean_sea_floor_radius
+        )
+
+        amc_std = (
+            self.parameters.rotation_frequency
+            * self.parameters.mean_sea_floor_radius**4
+        )
+
+        amc_measure = GaussianMeasure.from_standard_deviation(
+            self.codomain.subspace(3), amc_std
+        )
+
+        return GaussianMeasure.from_direct_sum(
+            [field_measure, field_measure, field_measure, amc_measure]
+        )
 
     def _l2_mapping_impl(self, zeta: SHGrid) -> List[Union[SHGrid, np.ndarray]]:
         slc, disp, gpc, avc = self._sle.solve_sea_level_equation(

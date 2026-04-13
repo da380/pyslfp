@@ -1,11 +1,13 @@
-
-
 import pyslfp.linear_operators as op
 
 
 A = op.FingerPrintOperator.for_sobolev_testing(64, 2, 0.1)
 
-A.check(check_rtol=1e-6)
+A.check(
+    check_rtol=1e-6,
+    domain_measure=A.load_measure_for_testing,
+    codomain_measure=A.response_measure_for_testing,
+)
 
 """
 direct_load = A.state.northern_hemisphere_load()

@@ -197,15 +197,25 @@ class EarthModelParameters:
         )
 
     @staticmethod
-    def from_standard_non_dimensionalisation() -> "EarthModelParameters":
+    def from_standard_scales(
+        length_scale: float, density_scale: float, time_scale: float
+    ) -> EarthModelParameters:
+        """
+        Returns a parameter instance non-dimensionalised using the input length, density, and time scales.
+        """
+        return EarthModelParameters(
+            length_scale=length_scale,
+            density_scale=density_scale,
+            time_scale=time_scale,
+        )
+
+    @staticmethod
+    def from_defaults() -> EarthModelParameters:
         """
         Returns parameters using a standard non-dimensionalisation scheme.
 
         This scheme is based on the mean radius of the Earth, the density of water,
         and the length of an hour.
-
-        Returns:
-            EarthModelParameters: An instance populated with standard scales.
         """
         return EarthModelParameters(
             length_scale=6371000.0, density_scale=1000.0, time_scale=3600
@@ -532,9 +542,7 @@ class EarthModel:
             love_number_file (Optional[str]): Path to a custom Love number file.
         """
         self._lmax = lmax
-        self._parameters = (
-            parameters or EarthModelParameters.from_standard_non_dimensionalisation()
-        )
+        self._parameters = parameters or EarthModelParameters.from_defaults()
         self._love_numbers = LoveNumbers(lmax, self._parameters, file=love_number_file)
 
         if grid == "DH2":
@@ -556,6 +564,16 @@ class EarthModel:
         self._integration_factor = (
             np.sqrt(4 * np.pi) * self.parameters.mean_sea_floor_radius**2
         )
+
+    @staticmethod
+    def from_defaults(*, lmax: int = 256) -> EarthModel:
+        """
+        Returns the default Earth model, based on PREM with standard non-dimensionalisations.
+
+        Args:
+            lmax (int): Truncation degree for discretisation. Defaults to 256.
+        """
+        return EarthModel(lmax)
 
     @property
     def lmax(self) -> int:
@@ -585,6 +603,13 @@ class EarthModel:
         return self.grid if self._sampling == 1 else "DH2"
 
     @property
+    def sampling(self) -> int:
+        """
+        Returns the sampling value of the SH grid.
+        """
+        return self._sampling
+
+    @property
     def extend(self) -> bool:
         """True if grid extended to include 360 degree longitude."""
         return self._extend
@@ -598,20 +623,6 @@ class EarthModel:
     def love_numbers(self) -> LoveNumbers:
         """The elastic Love numbers for this Earth model."""
         return self._love_numbers
-
-    @classmethod
-    def default(cls, lmax: int, /) -> "EarthModel":
-        """
-        Generates an EarthModel instance using standard PREM parameters
-        and the default PREM Love numbers file.
-
-        Args:
-            lmax (int): The maximum spherical harmonic degree.
-
-        Returns:
-            EarthModel: A fully configured EarthModel ready for solvers.
-        """
-        return cls(lmax)
 
     # --------------------------------------------------------#
     #                       Public methods                    #

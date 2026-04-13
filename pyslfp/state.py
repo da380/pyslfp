@@ -12,10 +12,12 @@ from typing import Tuple, List
 
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
-from pyshtools import SHGrid, SHCoeffs
+from pyshtools import SHGrid
 
 from .core import EarthModel
 from .regions import Regions
+from .ice_ng import IceNG
+from .analytical_ice import AnalyticalIceModel
 
 
 class EarthState(Regions):
@@ -59,6 +61,48 @@ class EarthState(Regions):
         self._sea_level = sea_level
         self._model = model
         self._exclude_caspian = exclude_caspian
+
+    @staticmethod
+    def from_defaults(*, lmax: int = 256) -> EarthState:
+        """
+        Returns the default EarthState, which is based on PREM with the
+        standard non-dimensionalisation and Ice-7g at present day.
+
+        Args:
+            lmax (int): Truncation degree for the model discretisation. Defaults to 256.
+        """
+
+        earth_model = EarthModel(lmax)
+        ice_model = IceNG(length_scale=earth_model.parameters.length_scale)
+        ice_thickness, sea_level = ice_model.get_ice_thickness_and_sea_level(
+            0.0,
+            lmax,
+            grid=earth_model.grid_name,
+            sampling=earth_model.sampling,
+            extend=earth_model.extend,
+        )
+        return EarthState(ice_thickness, sea_level, earth_model)
+
+    @staticmethod
+    def for_testing(lmax: int) -> EarthState:
+        """
+        Returns a simple analytical state suitable for testing.
+        The EarthModel is PREM and the standard non-dimensionalisation
+        is applied.
+
+        Args:
+            lmax (int): Truncation degree for the model discretisation.
+        """
+        earth_model = EarthModel(lmax)
+        ice_model = AnalyticalIceModel(length_scale=earth_model.parameters.length_scale)
+        ice_thickness, sea_level = ice_model.get_ice_thickness_and_sea_level(
+            0.0,
+            lmax,
+            grid=earth_model.grid_name,
+            sampling=earth_model.sampling,
+            extend=earth_model.extend,
+        )
+        return EarthState(ice_thickness, sea_level, earth_model, exclude_caspian=False)
 
     # ---------------------------------------------------------#
     #                 Read-Only Properties                     #
@@ -398,40 +442,3 @@ class EarthState(Regions):
             -fraction * self.ice_thickness * self.east_antarctic_projection(value=0)
         )
         return self.direct_load_from_ice_thickness_change(ice_change)
-
-    # ---------------------------------------------------------#
-    #                 Default Factory                          #
-    # ---------------------------------------------------------#
-
-    @classmethod
-    def default(cls, lmax: int, /, *, exclude_caspian: bool = True) -> "EarthState":
-        """
-        Generates a standard Present-Day EarthState.
-
-        Constructs an Earth model using the default PREM parameterization
-        and loads present-day (0.0 ka) ice thickness and topography from ICE-7G.
-
-        Args:
-            lmax (int): Maximum spherical harmonic degree to build grids.
-            exclude_caspian (bool): Whether to enforce the Caspian Sea mask.
-
-        Returns:
-            EarthState: A configured, Present-Day Earth snapshot.
-        """
-        from .core import EarthModel
-        from .ice_ng import IceNG, IceModel
-
-        # Initialize the standard physics model
-        model = EarthModel.default(lmax)
-
-        # Initialize the ICE-7G data provider, passing the required length scale
-        ice_engine = IceNG(
-            version=IceModel.ICE7G, length_scale=model.parameters.length_scale
-        )
-
-        # Fetch present day (0.0 ka) data natively fitted to the model scales
-        ice_thickness, sea_level = ice_engine.get_ice_thickness_and_sea_level(
-            0.0, lmax, grid="DH", sampling=1, extend=True
-        )
-
-        return cls(ice_thickness, sea_level, model, exclude_caspian=exclude_caspian)

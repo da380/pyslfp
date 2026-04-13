@@ -5,6 +5,7 @@ from .physics import (
     sobolev_response_space,
     get_lebesgue_linear_operator,
     get_sobolev_linear_operator,
+    FingerPrintOperator,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "sobolev_response_space",
     "get_lebesgue_linear_operator",
     "get_sobolev_linear_operator",
+    "FingerPrintOperator",
 ]

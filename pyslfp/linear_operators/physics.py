@@ -6,7 +6,9 @@ functional analysis library, providing mathematically rigorous LinearOperators
 for Bayesian inversions and adjoint calculations.
 """
 
-from typing import List, Union, Optional
+from __future__ import annotations
+
+from typing import List, Union, Optional, Tuple
 import numpy as np
 from pyshtools import SHGrid
 
@@ -14,8 +16,331 @@ from pygeoinf import LinearOperator, HilbertSpaceDirectSum, EuclideanSpace
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
 from pyslfp.core import EarthModelParameters, EarthModel
-from pyslfp.physics import SeaLevelEquation
+from pyslfp.physics import LinearSeaLevelEquation
 from pyslfp.state import EarthState
+
+from pyslfp.linear_operators.utils import underlying_space
+
+
+class FingerPrintOperator(LinearOperator):
+    """
+    A LinearOperator associated with the solution of the linearised elastic
+    sea level equation.
+    """
+
+    def __init__(
+        self,
+        state: EarthState,
+        /,
+        *,
+        load_parameters: Tuple[float, float] = None,
+        response_parameters: Tuple[float, float] = None,
+        rotational_feedbacks: bool = True,
+        rtol: float = 1e-9,
+        max_iterations: Optional[int] = None,
+        verbose: bool = False,
+    ):
+        """
+        Args:
+            state: The backgroud state for the finger print calculations. This state
+                also provides access to the associated earth model.
+            load_parameters: A tuple of the Sobolev order and scale for the
+                load space. If not provided, defaults to a Lebesgue space.
+            response_parameters: A tuple of the Sobolev order and scale for the
+                response fields. If not provided, defaults to a Lebesgue space.
+            rotational_feedbacks (bool): Whether to calculate polar wander effects.
+            rtol (float): The relative tolerance for convergence.
+            max_iterations (Optional[int]): Hard limit on iteration count.
+            verbose (bool): If True, prints iteration metrics.
+
+        Raises:
+            ValueError: If load and response parameters are provided, and internal
+                checks for mathematical consistency is carried out and an exception
+                is raised these fails.
+
+        Notes:
+            Due to elliptic regularity, the response fields gain one Sobolev order
+                over the loads. This means that the response order can only be less
+                than equal to one plus the load order.
+        """
+
+        self._state = state
+
+        sobolev_load = load_parameters is not None
+        sobolev_response = response_parameters is not None
+
+        def _check_sobolev(parameters):
+            _, scale = parameters
+            if scale <= 0.0:
+                raise ValueError("Scale must be positive")
+
+            return parameters
+
+        if sobolev_load:
+            load_order, load_scale = _check_sobolev(load_parameters)
+        else:
+            load_order = 0
+            load_scale = None
+
+        if sobolev_response:
+            response_order, response_scale = _check_sobolev(response_parameters)
+        else:
+            response_order = 0
+            response_scale = None
+
+        if response_order > load_order + 1:
+            raise ValueError(
+                "Response order cannot be greater than one plus the load order"
+            )
+
+        domain = (
+            sobolev_load_space(state.model, load_order, load_scale)
+            if sobolev_load
+            else lebesgue_load_space(state.model)
+        )
+
+        codomain = (
+            sobolev_response_space(state.model, response_order, response_scale)
+            if sobolev_response
+            else lebesgue_response_space(state.model)
+        )
+
+        self._sle = LinearSeaLevelEquation(state)
+        self._rotational_feedbacks = rotational_feedbacks
+        self._rtol = rtol
+        self._max_iterations = max_iterations
+        self._verbose = verbose
+
+        self._g = self.parameters.gravitational_acceleration
+        self._r = self.parameters.rotation_factor
+        self._b = self.parameters.mean_sea_floor_radius
+
+        l2_domain = underlying_space(domain)
+        l2_codomain = underlying_space(codomain)
+
+        l2_operator = LinearOperator(
+            l2_domain,
+            l2_codomain,
+            self._l2_mapping_impl,
+            adjoint_mapping=self._l2_adjoint_mapping_impl,
+        )
+
+        operator = LinearOperator.from_formal_adjoint(domain, codomain, l2_operator)
+
+        super().__init__(domain, codomain, operator, adjoint_mapping=operator.adjoint)
+
+    @staticmethod
+    def from_lebesgue_defaults(
+        *,
+        lmax: int = 256,
+        rotational_feedbacks: bool = True,
+        rtol: float = 1e-9,
+        max_iterations: Optional[int] = None,
+        verbose: bool = False,
+    ) -> FingerPrintOperator:
+        """
+        Returns the LinearOperator between Lebesgue spaces using
+        default initialisations for the earth model and state.
+
+        Args:
+            lmax: Truncation degree for the calculations.
+            rotational_feedbacks (bool): Whether to calculate polar wander effects.
+            rtol (float): The relative tolerance for convergence.
+            max_iterations (Optional[int]): Hard limit on iteration count.
+            verbose (bool): If True, prints iteration metrics.
+        """
+
+        state = EarthState.from_defaults(lmax=lmax)
+
+        return FingerPrintOperator(
+            state,
+            rotational_feedbacks=rotational_feedbacks,
+            rtol=rtol,
+            max_iterations=max_iterations,
+            verbose=verbose,
+        )
+
+    @staticmethod
+    def from_sobolev_defaults(
+        order: float,
+        relative_scale: float,
+        /,
+        *,
+        lmax: int = 256,
+        rotational_feedbacks: bool = True,
+        rtol: float = 1e-9,
+        max_iterations: Optional[int] = None,
+        verbose: bool = False,
+        regularity: bool = False,
+    ) -> FingerPrintOperator:
+        """
+        Returns the LinearOperator between Sobolev spaces using
+        default initialisations for the earth model and state.
+
+        Args:
+            lmax: Truncation degree for the calculations.
+            order: Sobolev order.
+            relative_scale: Sobolev scale relative to the Earth model's mean radius.
+            rotational_feedbacks (bool): Whether to calculate polar wander effects.
+            rtol (float): The relative tolerance for convergence.
+            max_iterations (Optional[int]): Hard limit on iteration count.
+            verbose (bool): If True, prints iteration metrics.
+            regularity (bool): If True, the response order is raised by
+                one from the load order in accordance with elliptic
+                regularity. Otherwise, the response order is the same
+                as for the load.
+        """
+
+        state = EarthState.from_defaults(lmax=lmax)
+        scale = state.model.parameters.mean_sea_floor_radius * relative_scale
+        load_parameters = (order, scale)
+        response_parameters = (order + 1, scale) if regularity else load_parameters
+
+        return FingerPrintOperator(
+            state,
+            load_parameters=load_parameters,
+            response_parameters=response_parameters,
+            rotational_feedbacks=rotational_feedbacks,
+            rtol=rtol,
+            max_iterations=max_iterations,
+            verbose=verbose,
+        )
+
+    @staticmethod
+    def for_lebesgue_testing(
+        lmax: int,
+        /,
+        *,
+        rotational_feedbacks: bool = True,
+        rtol: float = 1e-9,
+        max_iterations: Optional[int] = None,
+        verbose: bool = False,
+    ) -> FingerPrintOperator:
+        """
+        Returns the LinearOperator between Lebesgue spaces using
+        testing initialisations for the Earth model and initial state.
+
+        Args:
+            lmax: Truncation degree for the calculations.
+            rotational_feedbacks (bool): Whether to calculate polar wander effects.
+            rtol (float): The relative tolerance for convergence.
+            max_iterations (Optional[int]): Hard limit on iteration count.
+            verbose (bool): If True, prints iteration metrics.
+        """
+
+        state = EarthState.for_testing(lmax)
+
+        return FingerPrintOperator(
+            state,
+            rotational_feedbacks=rotational_feedbacks,
+            rtol=rtol,
+            max_iterations=max_iterations,
+            verbose=verbose,
+        )
+
+    @staticmethod
+    def for_sobolev_testing(
+        lmax: int,
+        order: float,
+        relative_scale: float,
+        /,
+        *,
+        rotational_feedbacks: bool = True,
+        rtol: float = 1e-9,
+        max_iterations: Optional[int] = None,
+        verbose: bool = False,
+        regularity: bool = False,
+    ) -> FingerPrintOperator:
+        """
+        Returns the LinearOperator between Sobolev spaces using
+        default initialisations for the earth model and state.
+
+        Args:
+            lmax: Truncation degree for the calculations.
+            order: Sobolev order.
+            relative_scale: Sobolev scale relative to the Earth model's mean radius.
+            rotational_feedbacks (bool): Whether to calculate polar wander effects.
+            rtol (float): The relative tolerance for convergence.
+            max_iterations (Optional[int]): Hard limit on iteration count.
+            verbose (bool): If True, prints iteration metrics.
+            regularity (bool): If True, the response order is raised by
+                one from the load order in accordance with ellipstic
+                regularity. Otherwise, the response order is the same
+                as for the load.
+        """
+
+        state = EarthState.for_testing(lmax)
+        scale = state.model.parameters.mean_sea_floor_radius * relative_scale
+        load_parameters = (order, scale)
+        response_parameters = (order + 1, scale) if regularity else load_parameters
+
+        return FingerPrintOperator(
+            state,
+            load_parameters=load_parameters,
+            response_parameters=response_parameters,
+            rotational_feedbacks=rotational_feedbacks,
+            rtol=rtol,
+            max_iterations=max_iterations,
+            verbose=verbose,
+        )
+
+    @property
+    def state(self) -> EarthState:
+        """
+        Returns the EarthState associated with the operator
+        """
+        return self._state
+
+    @property
+    def model(self) -> EarthModel:
+        """
+        Returns the EarthModel associated with the operator
+        """
+        return self.state.model
+
+    @property
+    def parameters(self) -> EarthModelParameters:
+        """
+        Returns the EarthModelParameters associated with the operator
+        """
+        return self.model.parameters
+
+    def _l2_mapping_impl(self, zeta: SHGrid) -> List[Union[SHGrid, np.ndarray]]:
+        slc, disp, gpc, avc = self._sle.solve_sea_level_equation(
+            zeta,
+            rotational_feedbacks=self._rotational_feedbacks,
+            rtol=self._rtol,
+            max_iterations=self._max_iterations,
+            verbose=self._verbose,
+        )
+
+        return [slc, disp, gpc, avc]
+
+    def _l2_adjoint_mapping_impl(
+        self, response: List[Union[SHGrid, np.ndarray]]
+    ) -> SHGrid:
+        adjoint_direct_load = response[0]
+        adjoint_displacement_load = -1 * response[1]
+        adjoint_grav_pot_load = -self._g * response[2]
+
+        if self._rotational_feedbacks:
+            gpot_lm = self._state.model.expand_field(response[2], lmax_calc=2)
+            amc = -self._r * self._b * self._b * gpot_lm.coeffs[:, 2, 1]
+            adjoint_avc = -self._g * (response[3] + amc)
+        else:
+            adjoint_avc = None
+
+        adjoint_sea_level, _, _, _ = self._sle.solve_generalised_equation(
+            direct_load=adjoint_direct_load,
+            displacement_load=adjoint_displacement_load,
+            gravitational_potential_load=adjoint_grav_pot_load,
+            angular_momentum_change=adjoint_avc,
+            rotational_feedbacks=self._rotational_feedbacks,
+            rtol=self._rtol,
+            max_iterations=self._max_iterations,
+            verbose=self._verbose,
+        )
+        return adjoint_sea_level
 
 
 # ==================================================================== #
@@ -107,129 +432,3 @@ def sobolev_response_space(
     return HilbertSpaceDirectSum(
         [field_space, field_space, field_space, EuclideanSpace(2)]
     )
-
-
-# ==================================================================== #
-#                       Linear Operator Factories                      #
-# ==================================================================== #
-
-
-def get_lebesgue_linear_operator(
-    solver: SeaLevelEquation,
-    state: EarthState,
-    /,
-    *,
-    rotational_feedbacks: bool = True,
-    rtol: float = 1e-6,
-    max_iterations: Optional[int] = None,
-    verbose: bool = False,
-) -> LinearOperator:
-    """
-    Constructs the sea-level model as a pygeoinf LinearOperator between Lebesgue spaces.
-
-    Args:
-        solver (SeaLevelEquation): The configured SLE solver engine.
-        state (EarthState): The background Earth state.
-        rotational_feedbacks (bool): Whether to calculate polar wander effects.
-        rtol (float): Relative tolerance for solver convergence.
-        max_iterations (Optional[int]): Hard limit on solver iteration count.
-        verbose (bool): If True, prints internal solver metrics.
-
-    Returns:
-        LinearOperator: A functional operator mathematically mapping a surface mass
-            load to the 4-component physical response fields.
-    """
-    model = state.model
-    parameters = model.parameters
-    domain = lebesgue_load_space(model)
-    codomain = lebesgue_response_space(model)
-    g = parameters.gravitational_acceleration
-
-    def mapping(u: SHGrid) -> List[Union[SHGrid, np.ndarray]]:
-        slc, disp, gpc, avc = solver.solve_generalised_equation(
-            state,
-            direct_load=u,
-            rotational_feedbacks=rotational_feedbacks,
-            rtol=rtol,
-            max_iterations=max_iterations,
-            verbose=verbose,
-        )
-
-        return [slc, disp, gpc, avc]
-
-    def adjoint_mapping(response: List[Union[SHGrid, np.ndarray]]) -> SHGrid:
-        adjoint_direct_load = response[0]
-        adjoint_displacement_load = -1 * response[1]
-        adjoint_grav_pot_load = -g * response[2]
-
-        if rotational_feedbacks:
-            gpot_lm = model.expand_field(response[2], lmax_calc=2)
-            r = parameters.rotation_factor
-            b = parameters.mean_sea_floor_radius
-            amc = -r * b * b * gpot_lm.coeffs[:, 2, 1]
-            adjoint_avc = -g * (response[3] + amc)
-        else:
-            adjoint_avc = None
-
-        adjoint_sea_level, _, _, _ = solver.solve_generalised_equation(
-            state,
-            direct_load=adjoint_direct_load,
-            displacement_load=adjoint_displacement_load,
-            gravitational_potential_load=adjoint_grav_pot_load,
-            angular_momentum_change=adjoint_avc,
-            rotational_feedbacks=rotational_feedbacks,
-            rtol=rtol,
-            max_iterations=max_iterations,
-            verbose=verbose,
-        )
-        return adjoint_sea_level
-
-    return LinearOperator(domain, codomain, mapping, adjoint_mapping=adjoint_mapping)
-
-
-def get_sobolev_linear_operator(
-    solver: SeaLevelEquation,
-    state: EarthState,
-    order: float,
-    scale: float,
-    /,
-    *,
-    rotational_feedbacks: bool = True,
-    rtol: float = 1e-6,
-    max_iterations: Optional[int] = None,
-    verbose: bool = False,
-) -> LinearOperator:
-    """
-    Constructs the sea-level model as a pygeoinf LinearOperator between Sobolev spaces.
-
-    This wraps the standard Lebesgue operator but enforces smoothness constraints
-    on the input domain, which acts as a powerful regularization technique during
-    Bayesian or gradient-based inversions.
-
-    Args:
-        solver (SeaLevelEquation): The configured SLE solver engine.
-        state (EarthState): The background Earth state.
-        order (float): The Sobolev smoothness order (s > 0).
-        scale (float): The characteristic Sobolev length scale (λ > 0).
-        rotational_feedbacks (bool): Whether to calculate polar wander effects.
-        rtol (float): Relative tolerance for solver convergence.
-        max_iterations (Optional[int]): Hard limit on solver iteration count.
-        verbose (bool): If True, prints internal solver metrics.
-
-    Returns:
-        LinearOperator: A functional operator mapping a Sobolev surface mass
-            load to the 4-component Sobolev physical response fields.
-    """
-    domain = sobolev_load_space(state, order, scale)
-    codomain = sobolev_response_space(state, order, scale)
-
-    lebesgue_operator = get_lebesgue_linear_operator(
-        solver,
-        state,
-        rotational_feedbacks=rotational_feedbacks,
-        rtol=rtol,
-        max_iterations=max_iterations,
-        verbose=verbose,
-    )
-
-    return LinearOperator.from_formal_adjoint(domain, codomain, lebesgue_operator)

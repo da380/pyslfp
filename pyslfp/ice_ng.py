@@ -214,9 +214,6 @@ class IceNG(BaseIceModel):
             date, lmax, grid=grid, sampling=sampling, extend=extend
         )
 
-        # Compute the sea level using isostatic balance within ice shelves.
-        # Since the density ratio is dimensionless, this math holds regardless
-        # of the length_scale applied to topography and ice_thickness.
         ice_shelf_thickness = SHGrid.from_array(
             np.where(
                 np.logical_and(topography.data < 0, ice_thickness.data > 0),

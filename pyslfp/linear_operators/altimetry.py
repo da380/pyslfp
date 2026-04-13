@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from pyshtools import SHGrid
 from pygeoinf import LinearOperator, HilbertSpaceDirectSum
 from .utils import check_response_space, ocean_projection_operator, underlying_space
 from .physics import adjoint_angular_momentum_from_potential

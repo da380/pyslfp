@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Optional, Tuple
 
 import numpy as np
-from pyshtools import SHGrid, SHCoeffs
+from pyshtools import SHGrid
 
 from .core import EarthModel
 from .state import EarthState
@@ -75,7 +75,7 @@ class SeaLevelEquation:
         /,
         *,
         rotational_feedbacks: bool = True,
-        rtol: float = 1.0e-6,
+        rtol: float = 1e-9,
         max_iterations: Optional[int] = None,
         verbose: bool = False,
     ) -> Tuple[SHGrid, SHGrid, SHGrid, np.ndarray]:
@@ -116,7 +116,7 @@ class SeaLevelEquation:
         gravitational_potential_load: Optional[SHGrid] = None,
         angular_momentum_change: Optional[np.ndarray] = None,
         rotational_feedbacks: bool = True,
-        rtol: float = 1.0e-6,
+        rtol: float = 1e-9,
         max_iterations: Optional[int] = None,
         verbose: bool = False,
     ) -> Tuple[SHGrid, SHGrid, SHGrid, np.ndarray]:
@@ -272,7 +272,6 @@ class SeaLevelEquation:
             count += 1
 
         if rotational_feedbacks:
-            potential_change_lm = self._model.expand_field(potential_change)
             potential_change_lm.coeffs[:, 2, 1] -= r * angular_velocity_change
             potential_change = self._model.expand_coefficient(potential_change_lm)
 
@@ -293,7 +292,7 @@ class SeaLevelEquation:
         dynamic_sea_level_change: Optional[SHGrid] = None,
         sediment_density: float = 2300.0,
         rotational_feedbacks: bool = True,
-        rtol: float = 1.0e-6,
+        rtol: float = 1e-9,
         max_iterations: int = 50,
         verbose: bool = False,
     ) -> Tuple[EarthState, SHGrid, SHGrid, SHGrid, np.ndarray]:
@@ -462,8 +461,137 @@ class SeaLevelEquation:
         final_slc = SHGrid.from_array(slc_data, grid=self._model.grid)
 
         if rotational_feedbacks:
-            gpc_lm = self._model.expand_field(gpc)
             gpc_lm.coeffs[:, 2, 1] -= r * angular_velocity_change
             gpc = self._model.expand_coefficient(gpc_lm)
 
         return final_state, final_slc, displacement, gpc, angular_velocity_change
+
+
+class LinearSeaLevelEquation:
+    """
+    Specialisation of the SeaLevelEquation class that is limited to
+    the solution of linear problems, and for which the initial state
+    is taken in during construction.
+    """
+
+    def __init__(self, state: EarthState, /) -> None:
+        """
+        Initializes the linear Sea Level Equation solver.
+
+        Args:
+            state (Earthstate): The initial state for the earth model.
+        """
+
+        self._state = state
+        self._sle = SeaLevelEquation(state.model)
+
+    @staticmethod
+    def from_defaults(*, lmax: int = 256) -> LinearSeaLevelEquation:
+        """
+        Sets up the linear solver using the default parameters.
+        The Earth model is PREM with standard non-dimensionalisations,
+        while the initial state is present-day Ice-7g.
+
+        Args:
+            lmax (int): Truncation degree for the discretisation. Defaults to 256.
+        """
+        state = EarthState.from_defaults(lmax=lmax)
+        return LinearSeaLevelEquation(state)
+
+    @staticmethod
+    def for_testing(lmax: int) -> LinearSeaLevelEquation:
+        """
+        Sets up the linear solver using the testing state.
+        The Earth model is PREM weith standard non-dimensionalisartion,
+        while the initial state takes a simple analytical form.
+        """
+        state = EarthState.for_testing(lmax)
+        return LinearSeaLevelEquation(state)
+
+    @property
+    def state(self) -> EarthState:
+        """
+        Returns the background state.
+        """
+        return self._state
+
+    def solve_sea_level_equation(
+        self,
+        direct_load: SHGrid,
+        /,
+        *,
+        rotational_feedbacks: bool = True,
+        rtol: float = 1e-9,
+        max_iterations: Optional[int] = None,
+        verbose: bool = False,
+    ) -> Tuple[SHGrid, SHGrid, SHGrid, np.ndarray]:
+        """
+        Solves the standard linear Sea Level Equation for a surface mass load.
+
+        Args:
+            direct_load (SHGrid): The mass redistribution forcing the system.
+            rotational_feedbacks (bool): Whether to calculate polar wander effects.
+            rtol (float): The relative tolerance for convergence.
+            max_iterations (Optional[int]): Hard limit on iteration count.
+            verbose (bool): If True, prints iteration metrics.
+
+        Returns:
+            Tuple[SHGrid, SHGrid, SHGrid, np.ndarray]: A 4-tuple containing:
+                - Relative Sea Level Change
+                - Vertical Displacement
+                - Gravity Potential Change
+                - Angular Velocity Change [omega_x, omega_y]
+        """
+        return self._sle.solve_sea_level_equation(
+            self.state,
+            direct_load,
+            rotational_feedbacks=rotational_feedbacks,
+            rtol=rtol,
+            max_iterations=max_iterations,
+            verbose=verbose,
+        )
+
+    def solve_generalised_equation(
+        self,
+        /,
+        *,
+        direct_load: Optional[SHGrid] = None,
+        displacement_load: Optional[SHGrid] = None,
+        gravitational_potential_load: Optional[SHGrid] = None,
+        angular_momentum_change: Optional[np.ndarray] = None,
+        rotational_feedbacks: bool = True,
+        rtol: float = 1e-9,
+        max_iterations: Optional[int] = None,
+        verbose: bool = False,
+    ) -> Tuple[SHGrid, SHGrid, SHGrid, np.ndarray]:
+        """
+        Solves the generalized linear SLE for an arbitrary combination of forcings.
+
+        Useful for adjoint calculations or complex, multi-physical inversions.
+
+        Args:
+            state (EarthState): The unperturbed background Earth state.
+            direct_load (Optional[SHGrid]): Standard surface mass forcing.
+            displacement_load (Optional[SHGrid]): External vertical surface displacement forcing.
+            gravitational_potential_load (Optional[SHGrid]): External gravitational potential forcing.
+            angular_momentum_change (Optional[np.ndarray]): External angular momentum perturbation.
+            rotational_feedbacks (bool): Whether to calculate polar wander effects.
+            rtol (float): The relative tolerance for convergence.
+            max_iterations (Optional[int]): Hard limit on iteration count.
+            verbose (bool): If True, prints iteration metrics.
+
+        Returns:
+            Tuple[SHGrid, SHGrid, SHGrid, np.ndarray]: The physical response fields:
+                (Sea Level Change, Displacement, Gravitational Potential, Angular Velocity)
+        """
+        return self._sle.solve_generalised_equation(
+            self._state,
+            direct_load=direct_load,
+            displacement_load=displacement_load,
+            gravitational_potential_load=gravitational_potential_load,
+            angular_momentum_change=angular_momentum_change,
+            rotational_feedbacks=rotational_feedbacks,
+            rtol=rtol,
+            max_iterations=max_iterations,
+            verbose=verbose,
+        )

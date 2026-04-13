@@ -442,3 +442,87 @@ class EarthState(Regions):
             -fraction * self.ice_thickness * self.east_antarctic_projection(value=0)
         )
         return self.direct_load_from_ice_thickness_change(ice_change)
+
+    def imbie_ant_load(self, region_name: str, /, *, fraction: float = 1.0) -> SHGrid:
+        """
+        Returns a load from melting a fraction of a specific IMBIE Antarctic basin.
+
+        Args:
+            region_name (str): The name of the IMBIE drainage basin (e.g., 'A-Ap', 'F-G').
+            fraction (float): The fraction of the current ice thickness to melt.
+        """
+        ice_change = (
+            -fraction
+            * self.ice_thickness
+            * self.imbie_ant_projection(region_name, value=0)
+        )
+        return self.direct_load_from_ice_thickness_change(ice_change)
+
+    def mouginot_grl_load(
+        self, region_name: str, /, *, fraction: float = 1.0
+    ) -> SHGrid:
+        """
+        Returns a load from melting a fraction of a specific Mouginot Greenland basin.
+
+        Args:
+            region_name (str): The name of the Mouginot drainage basin (e.g., 'CE', 'NW').
+            fraction (float): The fraction of the current ice thickness to melt.
+        """
+        ice_change = (
+            -fraction
+            * self.ice_thickness
+            * self.mouginot_grl_projection(region_name, value=0)
+        )
+        return self.direct_load_from_ice_thickness_change(ice_change)
+
+    def hydrobasin_water_load(
+        self, region_id: str, /, *, thickness_change: float = 1.0
+    ) -> SHGrid:
+        """
+        Returns a terrestrial water load applied to a specific HydroBASIN.
+
+        Args:
+            region_id (str): The HydroBASINS Level 3 ID.
+            thickness_change (float): Uniform non-dimensional water thickness change
+                added to the basin.
+        """
+        mask = self.hydrobasin_projection(region_id, value=0)
+
+        # Note: We use water_density directly here since it is a liquid water load
+        # on land, rather than using direct_load_from_ice_thickness_change.
+        return (
+            self.model.parameters.water_density
+            * self.one_minus_ocean_function
+            * mask
+            * thickness_change
+        )
+
+    def iho_sea_load(
+        self, region_name: str, /, *, thickness_change: float = 1.0
+    ) -> SHGrid:
+        """
+        Returns an ocean mass load applied to a specific IHO Sea region.
+
+        Args:
+            region_name (str): The name of the IHO sea (e.g., 'Mediterranean Sea').
+            thickness_change (float): Uniform non-dimensional sea level change added.
+        """
+        sea_level_change = (
+            self.iho_sea_projection(region_name, value=0) * thickness_change
+        )
+        return self.direct_load_from_sea_level_change(sea_level_change)
+
+    def ne_ocean_load(
+        self, region_name: str, /, *, thickness_change: float = 1.0
+    ) -> SHGrid:
+        """
+        Returns an ocean mass load applied to a specific Natural Earth ocean basin.
+
+        Args:
+            region_name (str): The name of the Natural Earth basin (e.g., 'North Atlantic Ocean').
+            thickness_change (float): Uniform non-dimensional sea level change added.
+        """
+        sea_level_change = (
+            self.ne_ocean_projection(region_name, value=0) * thickness_change
+        )
+        return self.direct_load_from_sea_level_change(sea_level_change)

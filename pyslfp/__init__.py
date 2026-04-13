@@ -31,7 +31,7 @@ from .operators import (
 )
 
 
-from .plotting import plot, create_map_figure
+from .plotting import plot, create_map_figure, plot_points
 
 from .utils import (
     read_gloss_tide_gauge_data,
@@ -61,7 +61,7 @@ __all__ = [
     "land_projection_operator",
     "spatial_mutliplication_operator",
     "plot",
-    "plot_corner_distributions",
+    "plot_points",
     "create_map_figure",
     "read_gloss_tide_gauge_data",
     "partition_points_by_grid",

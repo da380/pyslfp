@@ -9,7 +9,6 @@ spectral manipulations.
 from __future__ import annotations
 from typing import List, Union
 
-import numpy as np
 from pyshtools import SHGrid
 
 from pygeoinf import (
@@ -46,6 +45,14 @@ def underlying_space(space: HilbertSpace, /) -> HilbertSpace:
         )
     else:
         return space
+
+
+def _check_sobolev(parameters):
+    _, scale = parameters
+    if scale <= 0.0:
+        raise ValueError("Scale must be positive")
+
+    return parameters
 
 
 def check_load_space(
@@ -117,14 +124,15 @@ def check_response_space(
             )
 
 
-def averaging_operator(
+def l2_products_operator(
     load_space: Union[Lebesgue, Sobolev], weighting_functions: List[SHGrid], /
 ) -> LinearOperator:
     """
     Creates an operator that computes a vector of L2 inner products.
 
     The action on function `u` returns a vector `d` where `d_i = <u, w_i>_L2`.
-    The inner product is always the L2 integral, even if the load_space is Sobolev.
+    The inner product is always the standard L2 integral, explicitly bypassing
+    the Sobolev inner product if a Sobolev space is provided.
 
     Args:
         load_space: The input domain space.
@@ -136,35 +144,52 @@ def averaging_operator(
     if not isinstance(load_space, (Lebesgue, Sobolev)):
         raise TypeError("load_space must be a Lebesgue or Sobolev space.")
 
-    is_sobolev = isinstance(load_space, Sobolev)
+    # 1. Resolve the underlying L2 space to avoid Sobolev gradient penalties
     l2_space = underlying_space(load_space)
+    codomain = EuclideanSpace(len(weighting_functions))
 
-    n_weights = len(weighting_functions)
-    codomain = EuclideanSpace(n_weights)
+    # 2. Build the operator natively using pygeoinf's vector factory
+    l2_operator = LinearOperator.from_vectors(l2_space, weighting_functions)
 
-    def mapping(u: SHGrid) -> np.ndarray:
-        results = np.zeros(n_weights)
-        for i, w_i in enumerate(weighting_functions):
-            results[i] = l2_space.inner_product(u, w_i)
-        return results
+    # 3. Formally lift the operator back to the target domain (handles Sobolev)
+    return LinearOperator.from_formal_adjoint(load_space, codomain, l2_operator)
 
-    def adjoint_mapping(d: np.ndarray) -> SHGrid:
-        result_grid = l2_space.zero
-        for i, w_i in enumerate(weighting_functions):
-            l2_space.axpy(d[i], w_i, result_grid)
-        return result_grid
 
-    l2_operator = LinearOperator(
-        l2_space, codomain, mapping, adjoint_mapping=adjoint_mapping
-    )
+def averaging_operator(
+    state: EarthState,
+    load_space: Union[Lebesgue, Sobolev],
+    weighting_functions: List[SHGrid],
+    /,
+) -> LinearOperator:
+    """
+    Creates an operator that computes the true spatial average over given regions.
 
-    if is_sobolev:
-        return LinearOperator.from_formal_adjoint(load_space, codomain, l2_operator)
-    return l2_operator
+    The action on function `u` returns a vector `d` where `d_i` is the
+    integral of `u * w_i` divided by the integral (area) of `w_i`.
+
+    Args:
+        state: The EarthState object used for integration (area calculation).
+        load_space: The input domain space.
+        weighting_functions: SHGrid masks representing the regions to average over.
+
+    Returns:
+        LinearOperator: Mapping from load_space to EuclideanSpace(N_weights).
+    """
+    if not isinstance(load_space, (Lebesgue, Sobolev)):
+        raise TypeError("load_space must be a Lebesgue or Sobolev space.")
+
+    # Pre-calculate the physical areas for normalization using the EarthState
+    areas = [state.integrate(w_i) for w_i in weighting_functions]
+
+    # Normalize the weighting functions so the inner product acts as an average
+    normalized_weights = [w_i / area for w_i, area in zip(weighting_functions, areas)]
+
+    # Delegate the heavy lifting to the L2 products operator
+    return l2_products_operator(load_space, normalized_weights)
 
 
 def spatial_multiplication_operator(
-    projection_field: SHGrid, load_space: Union[Lebesgue, Sobolev], /
+    load_space: Union[Lebesgue, Sobolev], projection_field: SHGrid, /
 ) -> LinearOperator:
     """
     Returns a linear operator that multiplies a load by a spatial field.
@@ -212,85 +237,3 @@ def ice_projection_operator(
         value=0, exclude_ice_shelves=exclude_ice_shelves
     )
     return spatial_multiplication_operator(projection_field, load_space)
-
-
-def ocean_projection_operator(
-    state: EarthState,
-    load_space: Union[Lebesgue, Sobolev],
-    /,
-    *,
-    exclude_ice_shelves: bool = False,
-):
-    """
-    Returns a LinearOpeator multiplies a load by a function that is one
-    over the background oceans and zero elsewhere.
-
-    Args:
-        state: The EarthState object.
-        load_space: The Hilbert space for the load.
-        exclude_ice_shelves: If True, the function is set to zero in ice-shelved regions.
-
-    Returns:
-        A LinearOperator object.
-
-    """
-    check_load_space(load_space)
-    projection_field = state.ocean_projection(
-        value=0, exclude_ice_shelves=exclude_ice_shelves
-    )
-    return spatial_multiplication_operator(projection_field, load_space)
-
-
-def land_projection_operator(
-    state: EarthState,
-    load_space: Union[Lebesgue, Sobolev],
-    /,
-    *,
-    exclude_ice: bool = True,
-):
-    """
-    Returns a LinearOpeator multiplies a load by a function that is one
-    over the background land and zero elsewhere.
-
-    Args:
-        state: The EarthState object.
-        load_space: The Hilbert space for the load.
-        exclude_ice: If True, the function is set to zero in ice-covered regions.
-
-    Returns:
-        A LinearOperator object.
-
-    """
-    check_load_space(load_space)
-    projection_field = state.land_projection(value=0, exclude_ice=exclude_ice)
-    return spatial_multiplication_operator(projection_field, load_space)
-
-
-def remove_ocean_average_operator(
-    state: EarthState, load_space: Union[Lebesgue, Sobolev], /
-) -> LinearOperator:
-    """
-    Adjusts a scalar function so that its integral over the oceans is zero.
-
-    Args:
-        state: An instance of EarthState that defined the ocean.
-        load_space: The input domain space.
-    """
-    l2_load_space = underlying_space(load_space)
-    ocean_func = state.ocean_function
-    ocean_area = state.ocean_area
-
-    def mapping(load: SHGrid) -> SHGrid:
-        ocean_avg = state.integrate(ocean_func * load) / ocean_area
-        new_load = load.copy()
-        new_load.data -= ocean_avg
-        return new_load
-
-    def adjoint_mapping(load: SHGrid) -> SHGrid:
-        total_avg = state.integrate(load)
-        return load - total_avg * ocean_func / ocean_area
-
-    l2_operator = LinearOperator(
-        l2_load_space, l2_load_space, mapping, adjoint_mapping=adjoint_mapping
-    )
-    return LinearOperator.from_formal_adjoint(load_space, load_space, l2_operator)

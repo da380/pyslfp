@@ -13,6 +13,7 @@ import numpy as np
 from pyshtools import SHGrid
 
 from pygeoinf import (
+    HilbertSpace,
     LinearOperator,
     HilbertSpaceDirectSum,
     EuclideanSpace,
@@ -24,7 +25,12 @@ from pyslfp.core import EarthModelParameters, EarthModel
 from pyslfp.physics import LinearSeaLevelEquation
 from pyslfp.state import EarthState
 
-from pyslfp.linear_operators.utils import underlying_space
+from pyslfp.linear_operators.utils import (
+    underlying_space,
+    _check_sobolev,
+    spatial_multiplication_operator,
+    averaging_operator,
+)
 
 
 class FingerPrintOperator(LinearOperator):
@@ -74,13 +80,6 @@ class FingerPrintOperator(LinearOperator):
         sobolev_load = load_parameters is not None
         sobolev_response = response_parameters is not None
 
-        def _check_sobolev(parameters):
-            _, scale = parameters
-            if scale <= 0.0:
-                raise ValueError("Scale must be positive")
-
-            return parameters
-
         if sobolev_load:
             load_order, load_scale = _check_sobolev(load_parameters)
         else:
@@ -122,6 +121,8 @@ class FingerPrintOperator(LinearOperator):
 
         l2_domain = underlying_space(domain)
         l2_codomain = underlying_space(codomain)
+
+        self._cpc_op = centrifugal_potential_operator(state.model)
 
         l2_operator = LinearOperator(
             l2_domain,
@@ -311,22 +312,36 @@ class FingerPrintOperator(LinearOperator):
         return self.model.parameters
 
     @property
+    def field_space(self) -> HilbertSpace:
+        """
+        Returns the space for the response fields.
+        """
+        return self.codomain.subspace(0)
+
+    @property
+    def avc_space(self) -> HilbertSpace:
+        """
+        Retutns the space for the angular velocity changes
+        """
+        return self.codomain.subspace(3)
+
+    # ================================================================ #
+    #                Measures for convenience in testing               #
+    # ================================================================ #
+
     def load_measure_for_testing(self) -> GaussianMeasure:
         """
         Returns a measure on the load space that is suitable for testing purposes.
         """
-        return self.domain.point_value_scaled_heat_kernel_gaussian_measure(
+        return self.domain.heat_kernel_gaussian_measure(
             0.5 * self.parameters.mean_sea_floor_radius
         )
 
-    @property
     def response_measure_for_testing(self) -> GaussianMeasure:
         """
         Returns a measure on the response space that is suitable for testing purposes.
         """
-        field_measure = self.codomain.subspace(
-            0
-        ).point_value_scaled_heat_kernel_gaussian_measure(
+        field_measure = self.codomain.subspace(0).heat_kernel_gaussian_measure(
             0.5 * self.parameters.mean_sea_floor_radius
         )
 
@@ -342,6 +357,152 @@ class FingerPrintOperator(LinearOperator):
         return GaussianMeasure.from_direct_sum(
             [field_measure, field_measure, field_measure, amc_measure]
         )
+
+    # ================================================================ #
+    #                    Spatial projection operators                  #
+    # ================================================================ #
+
+    def ocean_projection_operator(
+        self, /, *, exclude_ice_shelves: bool = False, load_action: bool = True
+    ) -> LinearOperator:
+        """
+        Returns a LinearOperator that multiplies a field by a function that is one
+        over the oceans and zero elsewhere.
+
+        Args:
+            exclude_ice_shelves: If True, the function is set to zero in ice-shelved regions.
+            load_action: If True, the operator acts on the load space. Otherwise, it acts on the
+                field space associated with the response space. Default is True.
+
+        Returns:
+            A LinearOperator object.
+        """
+        projection_field = self.state.ocean_projection(
+            value=0, exclude_ice_shelves=exclude_ice_shelves
+        )
+        return spatial_multiplication_operator(
+            self.domain if load_action else self.field_space,
+            projection_field,
+        )
+
+    def ice_projection_operator(
+        self, /, *, exclude_ice_shelves: bool = False, load_action: bool = True
+    ) -> LinearOperator:
+        """
+        Returns a LinearOperator that multiplies a field by a function that is one
+        over the ice sheets and zero elsewhere.
+
+        Args:
+            exclude_ice_shelves: If True, the function is set to zero in ice-shelved regions.
+            load_action: If True, the operator acts on the load space. Otherwise, it acts on the
+                field space associated with the response space. Default is True.
+
+        Returns:
+            A LinearOperator object.
+        """
+        projection_field = self.state.ice_projection(
+            value=0, exclude_ice_shelves=exclude_ice_shelves
+        )
+        return spatial_multiplication_operator(
+            self.domain if load_action else self.field_space,
+            projection_field,
+        )
+
+    def land_projection_operator(
+        self, /, *, exclude_ice: bool = True, load_action: bool = True
+    ) -> LinearOperator:
+        """
+        Returns a LinearOperator that multiplies a field by a function that is one
+        over the background land and zero elsewhere.
+
+        Args:
+            exclude_ice: If True, the function is set to zero in ice-covered regions.
+            load_action: If True, the operator acts on the load space. Otherwise, it acts on the
+                field space associated with the response space. Default is True.
+
+        Returns:
+            A LinearOperator object.
+        """
+        projection_field = self.state.land_projection(value=0, exclude_ice=exclude_ice)
+        return spatial_multiplication_operator(
+            self.domain if load_action else self.field_space,
+            projection_field,
+        )
+
+    # ================================================================ #
+    #                     Spatial averaging operators                  #
+    # ================================================================ #
+
+    def ocean_average_operator(
+        self, /, *, exclude_ice_shelves: bool = False, load_action: bool = True
+    ) -> LinearOperator:
+        """
+        Returns a LinearOperator that averages a function over the oceans.
+
+        Args:
+            exclude_ice_shelves: If True, the function is set to zero in ice-shelved regions.
+            load_action: If True, the operator acts on the load space. Otherwise, it acts on the
+                field space associated with the response space. Default is True.
+
+        Returns:
+            A LinearOperator object.
+        """
+        projection_field = self.state.ocean_projection(
+            value=0, exclude_ice_shelves=exclude_ice_shelves
+        )
+        return averaging_operator(
+            self.state,
+            self.domain if load_action else self.field_space,
+            [projection_field],
+        )
+
+    def ice_average_operator(
+        self, /, *, exclude_ice_shelves: bool = False, load_action: bool = True
+    ) -> LinearOperator:
+        """
+        Returns a LinearOperator that averages a function over the ice sheets.
+
+        Args:
+            exclude_ice_shelves: If True, the function is set to zero in ice-shelved regions.
+            load_action: If True, the operator acts on the load space. Otherwise, it acts on the
+                field space associated with the response space. Default is True.
+
+        Returns:
+            A LinearOperator object.
+        """
+        projection_field = self.state.ice_projection(
+            value=0, exclude_ice_shelves=exclude_ice_shelves
+        )
+        return averaging_operator(
+            self.state,
+            self.domain if load_action else self.field_space,
+            [projection_field],
+        )
+
+    def land_average_operator(
+        self, /, *, exclude_ice: bool = True, load_action: bool = True
+    ) -> LinearOperator:
+        """
+        Returns a LinearOperator that averages a function over the background land.
+
+        Args:
+            exclude_ice: If True, the function is set to zero in ice-covered regions.
+            load_action: If True, the operator acts on the load space. Otherwise, it acts on the
+                field space associated with the response space. Default is True.
+
+        Returns:
+            A LinearOperator object.
+        """
+        projection_field = self.state.land_projection(value=0, exclude_ice=exclude_ice)
+        return averaging_operator(
+            self.state,
+            self.domain if load_action else self.field_space,
+            [projection_field],
+        )
+
+    # ================================================================= #
+    #                          Private methods                          #
+    # ================================================================= #
 
     def _l2_mapping_impl(self, zeta: SHGrid) -> List[Union[SHGrid, np.ndarray]]:
         slc, disp, gpc, avc = self._sle.solve_sea_level_equation(
@@ -362,9 +523,7 @@ class FingerPrintOperator(LinearOperator):
         adjoint_grav_pot_load = -self._g * response[2]
 
         if self._rotational_feedbacks:
-            gpot_lm = self._state.model.expand_field(response[2], lmax_calc=2)
-            amc = -self._r * self._b * self._b * gpot_lm.coeffs[:, 2, 1]
-            adjoint_avc = -self._g * (response[3] + amc)
+            adjoint_avc = -self._g * (response[3] - self._cpc_op.adjoint(response[2]))
         else:
             adjoint_avc = None
 
@@ -379,6 +538,45 @@ class FingerPrintOperator(LinearOperator):
             verbose=self._verbose,
         )
         return adjoint_sea_level
+
+
+def centrifugal_potential_operator(
+    model: EarthModel, /, *, sobolev_parameters=None
+) -> LinearOperator:
+    """
+    Returns the LinearOperator the maps an angular velocity perturbation
+    to the corresponding centrifugal potential perturbation.
+    """
+
+    domain = EuclideanSpace(2)
+
+    sobolev_field = sobolev_parameters is not None
+
+    if sobolev_field:
+        order, scale = _check_sobolev(sobolev_parameters)
+        codomain = sobolev_load_space(model, order, scale)
+    else:
+        codomain = lebesgue_load_space(model)
+
+    r = model.parameters.rotation_factor
+    b = model.parameters.mean_sea_floor_radius
+
+    def mapping(w: np.ndarray) -> SHGrid:
+        cpc_lm = model.zero_coefficients()
+        cpc_lm.coeffs[:, 2, 1] = model.parameters.rotation_factor * w
+        return model.expand_coefficient(cpc_lm)
+
+    def adjoint_mapping(cpc: SHGrid) -> np.ndarray:
+        cpc_lm = model.expand_field(cpc, lmax_calc=2)
+        return r * b * b * cpc_lm.coeffs[:, 2, 1]
+
+    l2_codomain = underlying_space(codomain)
+
+    l2_operator = LinearOperator(
+        domain, l2_codomain, mapping, adjoint_mapping=adjoint_mapping
+    )
+
+    return LinearOperator.from_formal_adjoint(domain, codomain, l2_operator)
 
 
 # ==================================================================== #

@@ -3,11 +3,8 @@ from __future__ import annotations
 import numpy as np
 
 from pyshtools import SHGrid
-from pygeoinf import LinearOperator, HilbertSpaceDirectSum
-from .utils import check_response_space, ocean_projection_operator, underlying_space
-from .physics import adjoint_angular_momentum_from_potential
-
-from pyslfp.state import EarthState
+from pygeoinf import HilbertSpaceDirectSum
+from .physics import FingerPrintOperator
 
 
 def get_sea_surface_height_change(
@@ -42,7 +39,7 @@ def get_sea_surface_height_change(
 
 
 def sea_surface_height_operator(
-    state: EarthState,
+    fp_op: FingerPrintOperator,
     response_space: HilbertSpaceDirectSum,
     /,
     *,
@@ -53,9 +50,7 @@ def sea_surface_height_operator(
     to the sea surface height.
 
     Args:
-        state: An EarthState instance.
-        response_space: The response space, for the fingerprint operator, this being
-            a HilbertSpaceDirectSum whose elements take the form [SL, u, phi, omega]
+        fp_op: An instance of FingerPrintOperators.
         remove_rotational_contribution: If True, rotational contribution
                 is removed from the sea surface height. Default is True
 
@@ -69,51 +64,5 @@ def sea_surface_height_operator(
         the dynamic topography must added to obtain the full sea surface height change.
     """
 
-    check_response_space(response_space)
-
-    domain = response_space
-    codomain = response_space.subspace(0)
-
-    l2_domain = underlying_space(domain)
-    l2_codomain = underlying_space(codomain)
-
-    ocean_projection = ocean_projection_operator(state, codomain)
-
-    def mapping(response):
-        sea_level_change, displacement, _, angular_velocity_change = response
-        sea_surface_height_change = state.get_sea_surface_height_change(
-            sea_level_change,
-            displacement,
-            angular_velocity_change,
-            remove_rotational_contribution=remove_rotational_contribution,
-        )
-        return ocean_projection(sea_surface_height_change)
-
-    def adjoint_mapping(sea_surface_height_change):
-        projected_sea_surface_height_change = ocean_projection(
-            sea_surface_height_change
-        )
-
-        if remove_rotational_contribution:
-            angular_momentum_change = (
-                -adjoint_angular_momentum_from_potential(
-                    projected_sea_surface_height_change, state.model.parameters
-                )
-                / state.model.parameters.gravitational_acceleration
-            )
-
-        else:
-            angular_momentum_change = np.zeros(2)
-
-        return [
-            projected_sea_surface_height_change,
-            projected_sea_surface_height_change,
-            codomain.zero,
-            angular_momentum_change,
-        ]
-
-    l2_operator = LinearOperator(
-        l2_domain, l2_codomain, mapping, adjoint_mapping=adjoint_mapping
-    )
-
-    return LinearOperator.from_formal_adjoint(domain, codomain, l2_operator)
+    # cpc_op = centrifugal_potential_operator(fp_op.model, field_parameters=(codomain))
+    # ocean_projection = ocean_projection_operator(fp_op.state, codomain)

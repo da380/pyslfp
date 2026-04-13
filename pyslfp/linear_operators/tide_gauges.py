@@ -7,10 +7,56 @@ specific geographic coordinates.
 """
 
 from __future__ import annotations
-from typing import List, Tuple
+import csv
+from typing import Callable, List, Optional, Tuple
 
+from pyslfp.data.downloader import ensure_data
 from pygeoinf import LinearOperator, HilbertSpaceDirectSum, RowLinearOperator
+
 from .utils import check_response_space
+
+
+def read_gloss_tide_gauge_data(
+    filter_func: Optional[Callable[[str, float, float], bool]] = None,
+) -> Tuple[List[str], List[Tuple[float, float]]]:
+    """
+    Reads and parses the GLOSS tide gauge network coordinates and names.
+
+    Automatically fetches the GLOSS dataset from Zenodo if not present locally.
+
+    Args:
+        filter_func: An optional callable that takes (name, lat, lon) and
+            returns True if the station should be included, False otherwise.
+
+    Returns:
+        Tuple[List[str], List[Tuple[float, float]]]: Two lists containing the
+            station names and their corresponding (latitude, longitude) tuples.
+    """
+    data_dir = ensure_data("TIDE_GAUGE")
+    file_path = data_dir / "gloss_full.txt"
+
+    names: List[str] = []
+    points: List[Tuple[float, float]] = []
+
+    # Using encoding="utf-8" to handle special characters in international names.
+    with open(file_path, "r", encoding="utf-8") as f:
+        reader = csv.reader(f)
+
+        # Skip the header row
+        next(reader, None)
+
+        for row in reader:
+            if len(row) >= 5:
+                name = row[0].strip()
+                lat = float(row[3])
+                lon = float(row[4])
+
+                # Apply the filter if one was provided
+                if filter_func is None or filter_func(name, lat, lon):
+                    names.append(name)
+                    points.append((lat, lon))
+
+    return names, points
 
 
 def tide_gauge_operator(

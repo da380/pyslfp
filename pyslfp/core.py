@@ -197,28 +197,21 @@ class EarthModelParameters:
         )
 
     @staticmethod
-    def from_standard_scales(
-        length_scale: float, density_scale: float, time_scale: float
-    ) -> EarthModelParameters:
+    def from_defaults() -> EarthModelParameters:
         """
-        Returns a parameter instance non-dimensionalised using the input length, density, and time scales.
+        Returns parameters using a standard non-dimensionalisation scheme.
+        This is defined such that the Earth's radius, density, and
+        surface gravitational acceleration are equal to one.
         """
+
+        length_scale = MEAN_RADIUS
+        density_scale = 3 * MASS / (4 * np.pi * length_scale**3)
+        time_scale = np.sqrt(length_scale / GRAVITATIONAL_ACCELERATION)
+
         return EarthModelParameters(
             length_scale=length_scale,
             density_scale=density_scale,
             time_scale=time_scale,
-        )
-
-    @staticmethod
-    def from_defaults() -> EarthModelParameters:
-        """
-        Returns parameters using a standard non-dimensionalisation scheme.
-
-        This scheme is based on the mean radius of the Earth, the density of water,
-        and the length of an hour.
-        """
-        return EarthModelParameters(
-            length_scale=6371000.0, density_scale=1000.0, time_scale=3600
         )
 
 

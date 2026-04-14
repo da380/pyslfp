@@ -173,7 +173,7 @@ class WMBMethod:
             idx_start = l**2 - self.minimum_degree**2
             idx_end = (l + 1) ** 2 - self.minimum_degree**2
             # Assumes the EarthModel has access to the Love numbers via a `.k` attribute or similar
-            scaling_factors[idx_start:idx_end] = self.model.k[l]
+            scaling_factors[idx_start:idx_end] = self.model.love_numbers.k[l]
 
         return DiagonalSparseMatrixLinearOperator.from_diagonal_values(
             domain, domain, scaling_factors
@@ -232,7 +232,9 @@ class WMBMethod:
             out_end = (l + 1) ** 2 - self.minimum_degree**2
 
             prior_stds = np.sqrt(prior_variances[in_start:in_end])
-            observed_stds[out_start:out_end] = prior_stds * abs(self.model.k[l])
+            observed_stds[out_start:out_end] = prior_stds * abs(
+                self.model.love_numbers.k[l]
+            )
 
         observation_space = EuclideanSpace(self.observation_dim)
         return GaussianMeasure.from_standard_deviations(

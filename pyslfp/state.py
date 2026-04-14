@@ -320,23 +320,15 @@ class EarthState(Regions):
     def disk_load(
         self, delta: float, latitude: float, longitude: float, amplitude: float, /
     ) -> SHGrid:
-        """
-        Returns a circular disk load.
-
-        Args:
-            delta (float): Radius of the disk in degrees.
-            latitude (float): Latitude of the disk center in degrees.
-            longitude (float): Longitude of the disk center in degrees.
-            amplitude (float): Amplitude of the load.
-        """
+        """Returns a circular disk load."""
         return amplitude * SHGrid.from_cap(
             delta,
             latitude,
             longitude,
             lmax=self.lmax,
             grid=self.grid,
-            extend=self.extend,
-            sampling=self.sampling,
+            extend=self.model.extend,
+            sampling=self.model.sampling,
         )
 
     def northern_hemisphere_load(self, /, *, fraction: float = 1.0) -> SHGrid:

@@ -290,7 +290,7 @@ class SeaLevelEquation:
         ice_thickness_change: Optional[SHGrid] = None,
         sediment_thickness_change: Optional[SHGrid] = None,
         dynamic_sea_level_change: Optional[SHGrid] = None,
-        sediment_density: float = 2300.0,
+        sediment_density: float = None,
         rotational_feedbacks: bool = True,
         rtol: float = 1e-9,
         max_iterations: int = 50,
@@ -321,6 +321,12 @@ class SeaLevelEquation:
                 - Gravity Potential Change
                 - Angular Velocity Change [omega_x, omega_y]
         """
+        if sediment_density is None:
+            sediment_density = 2300.0 / self._model.parameters.density_scale
+
+        if ice_thickness_change is not None:
+            self._model.check_field(ice_thickness_change)
+
         if ice_thickness_change is not None:
             self._model.check_field(ice_thickness_change)
 
@@ -343,19 +349,9 @@ class SeaLevelEquation:
 
         new_ice = initial_ice + ice_thickness_change.data
 
-        static_load_data = (
-            self._model.parameters.ice_density * ice_thickness_change.data
-        )
-        if sediment_thickness_change is not None:
-            static_load_data += sediment_density * sediment_thickness_change.data
-
-        meltwater_mass = -self._model.integrate(
-            self._model.parameters.ice_density * ice_thickness_change
-        )
         initial_water_mass = self._model.integrate(
             self._water_density * initial_state.ocean_function * initial_state.sea_level
         )
-        target_water_mass = initial_water_mass + meltwater_mass
 
         current_ocean_func = initial_ocean_func.copy()
         current_bathy = initial_bathy.copy()
@@ -374,10 +370,18 @@ class SeaLevelEquation:
 
         while err > rtol and count < max_iterations:
 
+            grounded_ice_change = self._model.parameters.ice_density * (
+                (1.0 - current_ocean_func) * new_ice
+                - (1.0 - initial_ocean_func) * initial_ice
+            )
+
             ocean_mass_change = self._water_density * (
                 current_ocean_func * current_bathy - initial_ocean_func * initial_bathy
             )
-            total_load_data = static_load_data + ocean_mass_change
+
+            total_load_data = grounded_ice_change + ocean_mass_change
+            if sediment_thickness_change is not None:
+                total_load_data += sediment_density * sediment_thickness_change.data
 
             grid_template.data[:] = total_load_data
             load_lm = self._model.expand_field(grid_template)
@@ -406,6 +410,20 @@ class SeaLevelEquation:
                 raw_bathy -= sediment_thickness_change.data
             if dynamic_sea_level_change is not None:
                 raw_bathy += dynamic_sea_level_change.data
+
+            grid_template.data[:] = grounded_ice_change
+            total_ice_mass_change = self._model.integrate(grid_template)
+
+            sediment_mass_change = 0.0
+            if sediment_thickness_change is not None:
+                grid_template.data[:] = (
+                    sediment_density * sediment_thickness_change.data
+                )
+                sediment_mass_change = self._model.integrate(grid_template)
+
+            target_water_mass = (
+                initial_water_mass - total_ice_mass_change - sediment_mass_change
+            )
 
             grid_template.data[:] = self._water_density * current_ocean_func * raw_bathy
             current_raw_water_mass = self._model.integrate(grid_template)

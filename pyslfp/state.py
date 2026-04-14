@@ -14,8 +14,8 @@ from pyshtools import SHGrid
 
 from .core import EarthModel
 from .regions import Regions
-from .ice_ng import IceNG
-from .analytical_ice import AnalyticalIceModel
+from .ice import IceNG, AnalyticalIceModel
+from .plotting import plot_coastline
 
 
 class EarthState(Regions):
@@ -455,3 +455,43 @@ class EarthState(Regions):
             self.ne_ocean_projection(region_name, value=0) * thickness_change
         )
         return self.direct_load_from_sea_level_change(sea_level_change)
+
+    # ---------------------------------------------------------#
+    #                 Utility functions                        #
+    # ---------------------------------------------------------#
+
+    def plot_coastline(
+        self,
+        ax: GeoAxes,
+        /,
+        *,
+        color: str = "black",
+        linewidth: float = 1.0,
+        zorder: int = 10,
+        **kwargs,
+    ) -> Any:
+        """
+        Plots the coastline for the state on an existing axis.
+
+        Args:
+            ax: The Cartopy GeoAxes to plot onto.
+            color: Line color.
+            linewidth: Thickness of the line.
+            zorder: Drawing order (default 10 to ensure it's above the data field).
+            **kwargs: Additional arguments passed to ax.contour.
+
+        Returns:
+            The QuadContourSet artist created by the contour call.
+        """
+        coast_function = (
+            self.model.parameters.water_density * self.sea_level
+            - self.model.parameters.ice_density * self.ice_thickness
+        )
+        return plot_coastline(
+            coast_function,
+            ax,
+            color=color,
+            linewidth=linewidth,
+            zorder=zorder,
+            **kwargs,
+        )

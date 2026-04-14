@@ -15,7 +15,8 @@ from .ice_models import BaseIceModel
 
 class AnalyticalIceModel(BaseIceModel):
     """
-    A synthetic ice model generating smooth, Gaussian-based continents and ice caps.
+    A synthetic ice model generating smooth, Super-Gaussian-based
+    continents and ice caps.
 
     Perfect for unit testing the SeaLevelEquation solver at low spherical
     harmonic degrees without triggering noise or convergence issues.
@@ -43,10 +44,18 @@ class AnalyticalIceModel(BaseIceModel):
         colat_rad = np.deg2rad(90.0 - lats)
         lon_rad = np.deg2rad(lons)
 
-        def gaussian_feature(
-            peak_height: float, center_colat: float, center_lon: float, width: float
+        def topographic_feature(
+            peak_height: float,
+            center_colat: float,
+            center_lon: float,
+            width: float,
+            power: int = 2,
         ) -> np.ndarray:
-            """Helper to generate a smooth, localized spherical bump using great-circle distance."""
+            """
+            Helper to generate a smooth, localized spherical bump.
+            Using power=2 yields a standard Gaussian (dome).
+            Using power > 2 yields a Super-Gaussian (flat plateau / mesa).
+            """
             # Spherical law of cosines to find the true angular distance between points
             cos_dist = np.cos(colat_rad) * np.cos(center_colat) + np.sin(
                 colat_rad
@@ -55,7 +64,7 @@ class AnalyticalIceModel(BaseIceModel):
             # Clip to [-1, 1] to avoid floating point errors feeding into arccos
             dist = np.arccos(np.clip(cos_dist, -1.0, 1.0))
 
-            return peak_height * np.exp(-(dist**2) / (2 * width**2))
+            return peak_height * np.exp(-0.5 * (dist / width) ** power)
 
         # ---------------------------------------------------------
         # 1. Topography / Sea Level
@@ -64,31 +73,44 @@ class AnalyticalIceModel(BaseIceModel):
         raw_sea_level = np.full_like(lats, 4000.0)
 
         # Continent 1: North Polar landmass (Negative sea level = land)
-        # Peak elevation 2000m -> Requires subtracting 6000m from base ocean
-        raw_sea_level -= gaussian_feature(
-            6000.0, center_colat=0.0, center_lon=0.0, width=0.4
+        # Power=6 makes it a very flat plateau with steep edges.
+        raw_sea_level -= topographic_feature(
+            6000.0, center_colat=0.0, center_lon=0.0, width=0.35, power=6
         )
 
-        # Continent 2: low-latitude landmass (e.g., roughly 0N, 90E)
-        raw_sea_level -= gaussian_feature(
-            5000.0, center_colat=np.pi / 2, center_lon=np.pi / 2, width=0.5
+        # Continent 2: low-latitude landmass
+        raw_sea_level -= topographic_feature(
+            5000.0, center_colat=np.pi / 2, center_lon=np.pi / 2, width=0.45, power=4
+        )
+
+        # Continent 3: Low-lying Southern Hemisphere continent
+        # Very gentle peak (4500) but a wide, flat top (width=0.6, power=4)
+        # The steepish drop-off combined with low elevation creates excellent migration zones.
+        raw_sea_level -= topographic_feature(
+            4050.0,
+            center_colat=3 * np.pi / 4,
+            center_lon=3 * np.pi / 2,
+            width=1.5,
+            power=4,
         )
 
         # ---------------------------------------------------------
         # 2. Ice Thickness
         # ---------------------------------------------------------
-        # Base ice cap on the North Polar continent (always present)
-        raw_ice = gaussian_feature(3000.0, center_colat=0.0, center_lon=0.0, width=0.2)
+        # Base ice caps (kept at power=2 so they remain parabolic/dome-shaped)
+        raw_ice = topographic_feature(
+            3000.0, center_colat=0.0, center_lon=0.0, width=0.2, power=2
+        )
 
         # Time-evolving mid-latitude ice sheet (melts as date approaches 0)
-        # Assuming date=21 is LGM and date=0 is present
         if date > 0:
             ice_factor = min(date / 21.0, 1.0)
-            raw_ice += gaussian_feature(
+            raw_ice += topographic_feature(
                 2500.0 * ice_factor,
                 center_colat=np.pi / 4,
                 center_lon=np.pi / 2,
                 width=0.15,
+                power=2,
             )
 
         # Mask the ice with a smooth sigmoid to ensure it only exists on land

@@ -87,8 +87,6 @@ def plot(
     )
 
 
-
-
 def plot_points(
     points: List[Tuple[float, float]],
     /,
@@ -166,3 +164,44 @@ def plot_points(
         fig.colorbar(sc, ax=ax, **cb_opts)
 
     return ax, sc
+
+
+def plot_coastline(
+    f: SHGrid,
+    ax: GeoAxes,
+    /,
+    *,
+    color: str = "black",
+    linewidth: float = 1.0,
+    zorder: int = 10,
+    **kwargs,
+) -> Any:
+    """
+    Plots a specific isoline (coastline) from an SHGrid onto an existing map.
+
+    Args:
+        f: The SHGrid object whose zeros define the coast line.
+        ax: The Cartopy GeoAxes to plot onto.
+        color: Line color.
+        linewidth: Thickness of the line.
+        zorder: Drawing order (default 10 to ensure it's above the data field).
+        **kwargs: Additional arguments passed to ax.contour.
+
+    Returns:
+        The QuadContourSet artist created by the contour call.
+    """
+    # 1. Extract coordinates from the grid itself to ensure alignment
+    lons = f.lons()
+    lats = f.lats()
+
+    # 2. Add standard contour styling defaults
+    kwargs.setdefault("colors", color)
+    kwargs.setdefault("linewidths", linewidth)
+    kwargs.setdefault("zorder", zorder)
+
+    # 3. Plot with the mandatory PlateCarree transform for degree-based data
+    contour_set = ax.contour(
+        lons, lats, f.data, levels=[0], transform=ccrs.PlateCarree(), **kwargs
+    )
+
+    return contour_set

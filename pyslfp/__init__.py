@@ -1,78 +1,50 @@
 """
-Unified public imports for the library
+pyslfp: A physical engine for sea-level fingerprinting and glacial isostatic adjustment.
 """
 
-# Import shared constants first
-from .config import DATADIR
+# ---------------------------------------------------------------------------
+# 1. Core Configuration & State Containers
+# ---------------------------------------------------------------------------
+from .core import EarthModelParameters, LoveNumbers, EarthModel
+from .state import EarthState
 
-from .ice_ng import IceNG, IceModel
-from .physical_parameters import EarthModelParameters
-from .finger_print import FingerPrint
-
-from .operators import (
-    tide_gauge_operator,
-    grace_operator,
-    averaging_operator,
-    WMBMethod,
-    ice_thickness_change_to_load_operator,
-    ice_projection_operator,
-    ocean_projection_operator,
-    land_projection_operator,
-    spatial_mutliplication_operator,
-    sea_level_change_to_load_operator,
-    sea_surface_height_operator,
-    remove_ocean_average_operator,
-    ocean_altimetry_operator,
-    altimetry_averaging_operator,
-    ice_sheet_averaging_operator,
-    ice_sheet_basis_operator,
-    get_ice_sheet_masks_and_labels,
-    standard_ice_groupings,
-)
+# ---------------------------------------------------------------------------
+# 2. Physics Engine & Solvers
+# ---------------------------------------------------------------------------
+from .physics import SeaLevelEquation, LinearSeaLevelEquation
 
 
-from .plotting import plot, create_map_figure, plot_points
+# ---------------------------------------------------------------------------
+# 4. Visualization Utilities
+# ---------------------------------------------------------------------------
+from .plotting import plot, plot_points, create_map_figure, plot_coastline
 
-from .utils import (
-    read_gloss_tide_gauge_data,
-    partition_points_by_grid,
-    get_spherical_harmonic_degree_blocks,
-)
+# ---------------------------------------------------------------------------
+# 5. Expose Sub-packages for Namespaced Access
+# ---------------------------------------------------------------------------
+# Allows users to do: `pyslfp.linear_operators.ocean_average_operator(...)`
+from . import linear_operators
+from . import ice
 
 
-def where_is_my_data():
-    """Returns the absolute path to the current data directory."""
-    return str(DATADIR.absolute())
-
-
+# ---------------------------------------------------------------------------
+# 6. Define the Top-Level API (__all__)
+# ---------------------------------------------------------------------------
 __all__ = [
-    "DATADIR",
-    "IceNG",
-    "IceModel",
+    # Core & State
     "EarthModelParameters",
-    "FingerPrint",
-    "tide_gauge_operator",
-    "grace_operator",
-    "averaging_operator",
-    "WMBMethod",
-    "ice_thickness_change_to_load_operator",
-    "ice_projection_operator",
-    "ocean_projection_operator",
-    "land_projection_operator",
-    "spatial_mutliplication_operator",
+    "LoveNumbers",
+    "EarthModel",
+    "EarthState",
+    # Physics Solvers
+    "SeaLevelEquation",
+    "LinearSeaLevelEquation",
+    # Visualization
     "plot",
     "plot_points",
     "create_map_figure",
-    "read_gloss_tide_gauge_data",
-    "partition_points_by_grid",
-    "get_spherical_harmonic_degree_blocks",
-    "sea_level_change_to_load_operator",
-    "sea_surface_height_operator",
-    "remove_ocean_average_operator",
-    "ocean_altimetry_operator",
-    "altimetry_averaging_operator",
-    "ice_sheet_averaging_operator",
-    "ice_sheet_basis_operator",
-    "get_ice_sheet_masks_and_labels",
-    "standard_ice_groupings",
+    "plot_coastline",
+    # Sub-packages
+    "linear_operators",
+    "ice",
 ]

@@ -49,7 +49,6 @@ from .loads import (
 
 from .grace import grace_observation_operator, GraceObservationModel, WMBMethod
 
-# from .altimetry import sea_surface_height_operator
 
 __all__ = [
     # .utils

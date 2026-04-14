@@ -25,8 +25,8 @@ from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 from pygeoinf.symmetric_space.symmetric_space import InvariantGaussianMeasure
 
 from pyslfp.core import EarthModel
-from pyslfp.operators.utils import check_response_space, check_load_space
-from pyslfp.physics import FingerPrintOperator
+from pyslfp.linear_operators.utils import check_response_space, check_load_space
+from pyslfp.linear_operators.physics import FingerPrintOperator
 
 
 # ================================================================ #

@@ -8,10 +8,8 @@ projections, masking, and point-generation logic.
 
 from __future__ import annotations
 from functools import cached_property
-from typing import Tuple, List
 
 import numpy as np
-from scipy.interpolate import RegularGridInterpolator
 from pyshtools import SHGrid
 
 from .core import EarthModel
@@ -284,77 +282,6 @@ class EarthState(Regions):
         ice_free_mask = self.ice_thickness.data <= ice_threshold
         combined_mask = ocean_mask & lat_mask & ice_free_mask
         return SHGrid.from_array(np.where(combined_mask, 1, value), grid=self.grid)
-
-    # ---------------------------------------------------------#
-    #                 Point Generation Logic                   #
-    # ---------------------------------------------------------#
-
-    def _filter_independent_points(
-        self, points: np.ndarray, mask: SHGrid
-    ) -> List[Tuple[float, float]]:
-        grid_lats = mask.lats()
-        grid_lons = mask.lons()
-        lats_asc = grid_lats[::-1]
-        data_asc = mask.data[::-1, :]
-
-        interpolator = RegularGridInterpolator(
-            (lats_asc, grid_lons), data_asc, bounds_error=False, fill_value=0.0
-        )
-        mask_values = interpolator(points)
-        valid_points = points[mask_values > 0.5]
-        return [(float(lat), float(lon)) for lat, lon in valid_points]
-
-    def ocean_altimetry_points(
-        self,
-        /,
-        *,
-        spacing_degrees: float = 2.0,
-        latitude_min: float = -66.0,
-        latitude_max: float = 66.0,
-    ) -> List[Tuple[float, float]]:
-        """
-        Generates a regular grid of points returning only those in the valid oceans.
-
-        Args:
-            spacing_degrees (float): Spatial resolution of the points.
-            latitude_min (float): Southern boundary.
-            latitude_max (float): Northern boundary.
-        """
-        lats = np.arange(latitude_min, latitude_max + 1e-9, spacing_degrees)
-        lons = np.arange(0.0, 360.0, spacing_degrees)
-        lat_mesh, lon_mesh = np.meshgrid(lats, lons, indexing="ij")
-        candidate_points = np.column_stack((lat_mesh.ravel(), lon_mesh.ravel()))
-        mask = self.altimetry_projection(
-            latitude_min=latitude_min, latitude_max=latitude_max, value=0
-        )
-        return self._filter_independent_points(candidate_points, mask)
-
-    def ice_altimetry_points(
-        self,
-        /,
-        *,
-        spacing_degrees: float = 2.0,
-        exclude_ice_shelves: bool = False,
-        exclude_glaciers: bool = True,
-    ) -> List[Tuple[float, float]]:
-        """
-        Generates a regular grid of points returning only those over ice sheets.
-
-        Args:
-            spacing_degrees (float): Spatial resolution of the points.
-            exclude_ice_shelves (bool): Exclude floating ice shelves.
-            exclude_glaciers (bool): Exclude smaller mountain glaciers.
-        """
-        lats = np.arange(-90.0, 90.0 + 1e-9, spacing_degrees)
-        lons = np.arange(0.0, 360.0, spacing_degrees)
-        lat_mesh, lon_mesh = np.meshgrid(lats, lons, indexing="ij")
-        candidate_points = np.column_stack((lat_mesh.ravel(), lon_mesh.ravel()))
-        mask = self.ice_projection(
-            value=0,
-            exclude_ice_shelves=exclude_ice_shelves,
-            exclude_glaciers=exclude_glaciers,
-        )
-        return self._filter_independent_points(candidate_points, mask)
 
     # ---------------------------------------------------------#
     #                 Load Converters                          #

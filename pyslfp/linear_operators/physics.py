@@ -25,9 +25,7 @@ from pyslfp.core import EarthModelParameters, EarthModel
 from pyslfp.physics import LinearSeaLevelEquation
 from pyslfp.state import EarthState
 
-from pyslfp.linear_operators.utils import (
-    underlying_space,
-)
+from pyslfp.linear_operators.utils import underlying_space, check_load_space
 
 
 class FingerPrintOperator(LinearOperator):
@@ -347,45 +345,6 @@ class FingerPrintOperator(LinearOperator):
         return adjoint_sea_level
 
 
-def centrifugal_potential_operator(
-    model: EarthModel, /, *, sobolev_parameters=None
-) -> LinearOperator:
-    """
-    Returns the LinearOperator the maps an angular velocity perturbation
-    to the corresponding centrifugal potential perturbation.
-    """
-
-    domain = EuclideanSpace(2)
-
-    sobolev_field = sobolev_parameters is not None
-
-    if sobolev_field:
-        order, scale = sobolev_parameters
-        codomain = sobolev_load_space(model, order, scale)
-    else:
-        codomain = lebesgue_load_space(model)
-
-    r = model.parameters.rotation_factor
-    b = model.parameters.mean_sea_floor_radius
-
-    def mapping(w: np.ndarray) -> SHGrid:
-        cpc_lm = model.zero_coefficients()
-        cpc_lm.coeffs[:, 2, 1] = model.parameters.rotation_factor * w
-        return model.expand_coefficient(cpc_lm)
-
-    def adjoint_mapping(cpc: SHGrid) -> np.ndarray:
-        cpc_lm = model.expand_field(cpc, lmax_calc=2)
-        return r * b * b * cpc_lm.coeffs[:, 2, 1]
-
-    l2_codomain = underlying_space(codomain)
-
-    l2_operator = LinearOperator(
-        domain, l2_codomain, mapping, adjoint_mapping=adjoint_mapping
-    )
-
-    return LinearOperator.from_formal_adjoint(domain, codomain, l2_operator)
-
-
 # ==================================================================== #
 #                       Space Generators                               #
 # ==================================================================== #
@@ -475,3 +434,250 @@ def sobolev_response_space(
     return HilbertSpaceDirectSum(
         [field_space, field_space, field_space, EuclideanSpace(2)]
     )
+
+
+"""
+Core physical operators for the Sea Level Equation.
+
+These operators represent the fundamental mathematical mappings of the Earth's 
+elastic, gravitational, and rotational responses. By composing these operators, 
+users can construct the full Sea Level Equation as a generalized linear system 
+(e.g., for Krylov solvers or adjoint state methods).
+"""
+
+
+# ================================================================ #
+#                 Solid Earth Response Operators                   #
+# ================================================================ #
+
+
+def centrifugal_potential_operator(
+    model: EarthModel, /, *, sobolev_parameters=None
+) -> LinearOperator:
+    """
+    Returns the LinearOperator the maps an angular velocity perturbation
+    to the corresponding centrifugal potential perturbation.
+    """
+
+    domain = EuclideanSpace(2)
+
+    sobolev_field = sobolev_parameters is not None
+
+    if sobolev_field:
+        order, scale = sobolev_parameters
+        codomain = sobolev_load_space(model, order, scale)
+    else:
+        codomain = lebesgue_load_space(model)
+
+    r = model.parameters.rotation_factor
+    b = model.parameters.mean_sea_floor_radius
+
+    def mapping(w: np.ndarray) -> SHGrid:
+        cpc_lm = model.zero_coefficients()
+        cpc_lm.coeffs[:, 2, 1] = model.parameters.rotation_factor * w
+        return model.expand_coefficient(cpc_lm)
+
+    def adjoint_mapping(cpc: SHGrid) -> np.ndarray:
+        cpc_lm = model.expand_field(cpc, lmax_calc=2)
+        return r * b * b * cpc_lm.coeffs[:, 2, 1]
+
+    l2_codomain = underlying_space(codomain)
+
+    l2_operator = LinearOperator(
+        domain, l2_codomain, mapping, adjoint_mapping=adjoint_mapping
+    )
+
+    return LinearOperator.from_formal_adjoint(domain, codomain, l2_operator)
+
+
+def solid_earth_response_operator(
+    state: EarthState,
+    load_space: Union[Lebesgue, Sobolev],
+    /,
+    *,
+    rotational_feedbacks: bool = True,
+) -> LinearOperator:
+    """
+    Maps a total surface mass load to the solid Earth's elastic and
+    gravitational response.
+
+    Args:
+        state: The background EarthState.
+        load_space: The Hilbert space for the surface mass load.
+        rotational_feedbacks: If True, computes the coupled polar wander effect.
+
+    Returns:
+        A LinearOperator mapping from `load_space` to a HilbertSpaceDirectSum
+        containing [Vertical Displacement, Gravity Potential Change, Angular Velocity].
+    """
+    check_load_space(load_space)
+    l2_load_space = underlying_space(load_space)
+
+    # 4-component space: [Disp, GPC, AVC] (We drop SLC for this pure physical step)
+    codomain = HilbertSpaceDirectSum([l2_load_space, l2_load_space, EuclideanSpace(2)])
+
+    # Cache constants
+    model = state.model
+    h_b = model.love_numbers.h[None, :, None]
+    k_b = model.love_numbers.k[None, :, None]
+    r = model.parameters.rotation_factor
+    i = model.parameters.inertia_factor
+    ht = model.love_numbers.ht[2]
+    kt = model.love_numbers.kt[2]
+
+    # Closed-form multiplier for the rotational feedback loop
+    rot_C = i / (1.0 - i * kt * r) if rotational_feedbacks else 0.0
+
+    def mapping(load: SHGrid) -> list:
+        load_lm = model.expand_field(load)
+
+        disp_lm = load_lm.copy()
+        gpc_lm = load_lm.copy()
+
+        disp_lm.coeffs *= h_b
+        gpc_lm.coeffs *= k_b
+
+        avc = np.zeros(2)
+
+        if rotational_feedbacks:
+            # SHCoeffs for l=2, m=1 are at index [:, 2, 1]
+            phi_21_load = gpc_lm.coeffs[:, 2, 1]
+
+            # Exact closed-form solution for the angular velocity change
+            avc = rot_C * phi_21_load
+
+            centrifugal_coeffs = r * avc
+            disp_lm.coeffs[:, 2, 1] += ht * centrifugal_coeffs
+
+            # Total GPC includes the centrifugal potential itself (kt + 1)
+            gpc_lm.coeffs[:, 2, 1] += (kt + 1.0) * centrifugal_coeffs
+
+        disp = model.expand_coefficient(disp_lm)
+        gpc = model.expand_coefficient(gpc_lm)
+        return [disp, gpc, avc]
+
+    def adjoint_mapping(response: list) -> SHGrid:
+        disp_star, gpc_star, avc_star = response
+
+        disp_star_lm = model.expand_field(disp_star)
+        gpc_star_lm = model.expand_field(gpc_star)
+
+        load_star_lm = disp_star_lm.copy()
+        load_star_lm.coeffs = disp_star_lm.coeffs * h_b + gpc_star_lm.coeffs * k_b
+
+        if rotational_feedbacks:
+            disp_21_star = disp_star_lm.coeffs[:, 2, 1]
+            gpc_21_star = gpc_star_lm.coeffs[:, 2, 1]
+
+            # Adjoint of the rotational coupling
+            coupling_star = (
+                (ht * r) * disp_21_star + ((kt + 1.0) * r) * gpc_21_star + avc_star
+            )
+
+            # k_b[0, 2, 0] is simply the scalar load Love number k_2
+            load_star_lm.coeffs[:, 2, 1] += (rot_C * k_b[0, 2, 0]) * coupling_star
+
+        return model.expand_coefficient(load_star_lm)
+
+    l2_operator = LinearOperator(
+        l2_load_space, codomain, mapping, adjoint_mapping=adjoint_mapping
+    )
+
+    target_codomain = HilbertSpaceDirectSum([load_space, load_space, EuclideanSpace(2)])
+    return LinearOperator.from_formal_adjoint(load_space, target_codomain, l2_operator)
+
+
+# ================================================================ #
+#                 Sea Level Assembly Operators                     #
+# ================================================================ #
+
+
+def solid_earth_to_sea_level_operator(
+    state: EarthState,
+    load_space: Union[Lebesgue, Sobolev],
+) -> LinearOperator:
+    """
+    Maps the solid Earth response [Disp, GPC, AVC] to relative sea level change.
+
+    This computes S_local = (Phi/g) - U, and then subtracts the ocean average
+    of S_local to ensure the integral over the oceans is zero.
+    """
+    check_load_space(load_space)
+    l2_load_space = underlying_space(load_space)
+
+    domain = HilbertSpaceDirectSum([l2_load_space, l2_load_space, EuclideanSpace(2)])
+
+    g = state.model.parameters.gravitational_acceleration
+
+    def mapping(response: list) -> SHGrid:
+        disp, gpc, avc = response
+
+        # Local relative sea level
+        slc_local_data = (gpc.data / g) - disp.data
+        slc_local = SHGrid.from_array(slc_local_data, grid=state.grid)
+
+        # Remove the spatial ocean average
+        ocean_avg = (
+            state.model.integrate(state.ocean_function * slc_local) / state.ocean_area
+        )
+        slc_local.data -= ocean_avg
+
+        return slc_local
+
+    def adjoint_mapping(slc_star: SHGrid) -> list:
+        # Adjoint of removing the ocean average
+        avg_star = state.model.integrate(slc_star) / state.ocean_area
+        local_star_data = slc_star.data - (avg_star * state.ocean_function.data)
+        local_star = SHGrid.from_array(local_star_data, grid=state.grid)
+
+        disp_star = local_star.copy()
+        disp_star.data = -local_star.data
+
+        gpc_star = local_star.copy()
+        gpc_star.data = local_star.data / g
+
+        avc_star = np.zeros(2)
+        return [disp_star, gpc_star, avc_star]
+
+    l2_operator = LinearOperator(
+        domain, l2_load_space, mapping, adjoint_mapping=adjoint_mapping
+    )
+
+    target_domain = HilbertSpaceDirectSum([load_space, load_space, EuclideanSpace(2)])
+    return LinearOperator.from_formal_adjoint(target_domain, load_space, l2_operator)
+
+
+def eustatic_sea_level_operator(
+    state: EarthState,
+    load_space: Union[Lebesgue, Sobolev],
+) -> LinearOperator:
+    """
+    Maps a direct mass load to its uniform eustatic sea level shift.
+
+    This enforces strict mass conservation (the volume of water added to the
+    oceans must equal the volume of the melted ice).
+    """
+    check_load_space(load_space)
+    l2_load_space = underlying_space(load_space)
+
+    def mapping(direct_load: SHGrid) -> SHGrid:
+        eustatic_shift = -state.model.integrate(direct_load) / (
+            state.model.parameters.water_density * state.ocean_area
+        )
+        slc = state.model.zero_grid()
+        slc.data += eustatic_shift
+        return slc
+
+    def adjoint_mapping(slc_star: SHGrid) -> SHGrid:
+        shift_star = state.model.integrate(slc_star)
+        load_star_data = -shift_star / (
+            state.model.parameters.water_density * state.ocean_area
+        )
+        load_star = state.model.zero_grid()
+        load_star.data += load_star_data
+        return load_star
+
+    l2_operator = LinearOperator(
+        l2_load_space, l2_load_space, mapping, adjoint_mapping=adjoint_mapping
+    )
+    return LinearOperator.from_formal_adjoint(load_space, load_space, l2_operator)

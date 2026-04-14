@@ -4,7 +4,7 @@ Module defining the Regions mixin class for spatial masking and dataset handling
 
 from __future__ import annotations
 import warnings
-from typing import Optional, List, Union, Any
+from typing import Optional, List, Union, Any, Tuple
 
 import numpy as np
 import geopandas as gpd

@@ -16,7 +16,6 @@ from pygeoinf import (
     LinearOperator,
     HilbertSpaceDirectSum,
     GaussianMeasure,
-    EuclideanSpace,
     LinearForwardProblem,
 )
 
@@ -200,23 +199,22 @@ class TideGaugeObservationModel:
     ) -> LinearForwardProblem:
         """
         Wraps the composite forward operator in a Pygeoinf LinearForwardProblem,
-        automatically generating the appropriate Euclidean noise measure.
+        automatically generating the diagonal Euclidean noise measure.
 
         Args:
             noise_std: The non-dimensional standard deviation of the measurement noise.
                 Can be a single float (uniform noise) or an array matching the number of points.
         """
-        n_points = len(self.points)
-        data_space = EuclideanSpace(n_points)
+        data_space = self.forward_operator.codomain
 
         if isinstance(noise_std, (float, int)):
-            stds = np.full(n_points, float(noise_std))
+            stds = np.full(data_space.dim, float(noise_std))
         else:
             stds = np.asarray(noise_std)
-            if len(stds) != n_points:
+            if len(stds) != data_space.dim:
                 raise ValueError(
                     f"Provided noise array length ({len(stds)}) does not match "
-                    f"number of tide gauges ({n_points})."
+                    f"number of tide gauges ({data_space.dim})."
                 )
 
         noise_meas = GaussianMeasure.from_standard_deviations(data_space, stds)

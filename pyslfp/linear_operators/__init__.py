@@ -22,9 +22,6 @@ from .spatial import (
     land_projection_operator,
     ice_average_operator,
     land_average_operator,
-    ice_thickness_change_to_load_operator,
-    sea_level_change_to_load_operator,
-    ocean_density_change_to_load_operator,
     remove_ocean_average_operator,
     ice_sheet_averaging_operator,
     ice_sheet_basis_operator,
@@ -35,6 +32,22 @@ from .tide_gauges import (
     tide_gauge_operator,
     TideGaugeObservationModel,
 )
+
+from .altimetry import (
+    ocean_altimetry_points,
+    ice_altimetry_points,
+    sea_surface_height_operator,
+    altimetry_point_operator,
+)
+
+from .loads import (
+    ice_thickness_change_to_load_operator,
+    sea_level_change_to_load_operator,
+    ocean_density_change_to_load_operator,
+    joint_ice_ocean_to_load_operator,
+)
+
+from .grace import grace_observation_operator, GraceObservationModel, WMBMethod
 
 # from .altimetry import sea_surface_height_operator
 
@@ -59,9 +72,6 @@ __all__ = [
     "land_projection_operator",
     "ice_average_operator",
     "land_average_operator",
-    "ice_thickness_change_to_load_operator",
-    "sea_level_change_to_load_operator",
-    "ocean_density_change_to_load_operator",
     "remove_ocean_average_operator",
     "ice_sheet_averaging_operator",
     "ice_sheet_basis_operator",
@@ -69,4 +79,18 @@ __all__ = [
     "read_gloss_tide_gauge_data",
     "tide_gauge_operator",
     "TideGaugeObservationModel",
+    # .altimetry
+    "ocean_altimetry_points",
+    "ice_altimetry_points",
+    "sea_surface_height_operator",
+    "altimetry_point_operator",
+    # .loads
+    "ice_thickness_change_to_load_operator",
+    "sea_level_change_to_load_operator",
+    "ocean_density_change_to_load_operator",
+    "joint_ice_ocean_to_load_operator",
+    # .grace
+    "grace_observation_operator",
+    "GraceObservationModel",
+    "WMBMethod",
 ]

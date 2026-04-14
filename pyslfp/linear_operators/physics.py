@@ -27,9 +27,6 @@ from pyslfp.state import EarthState
 
 from pyslfp.linear_operators.utils import (
     underlying_space,
-    _check_sobolev,
-    spatial_multiplication_operator,
-    averaging_operator,
 )
 
 
@@ -81,13 +78,13 @@ class FingerPrintOperator(LinearOperator):
         sobolev_response = response_parameters is not None
 
         if sobolev_load:
-            load_order, load_scale = _check_sobolev(load_parameters)
+            load_order, load_scale = load_parameters
         else:
             load_order = 0
             load_scale = None
 
         if sobolev_response:
-            response_order, response_scale = _check_sobolev(response_parameters)
+            response_order, response_scale = response_parameters
         else:
             response_order = 0
             response_scale = None
@@ -136,30 +133,52 @@ class FingerPrintOperator(LinearOperator):
         super().__init__(domain, codomain, operator, adjoint_mapping=operator.adjoint)
 
     @staticmethod
-    def from_lebesgue_defaults(
+    def from_defaults(
         *,
         lmax: int = 256,
+        load_parameters: Optional[Tuple[float, float]] = None,
+        response_parameters: Optional[Tuple[float, float]] = None,
         rotational_feedbacks: bool = True,
         rtol: float = 1e-9,
         max_iterations: Optional[int] = None,
         verbose: bool = False,
     ) -> FingerPrintOperator:
         """
-        Returns the LinearOperator between Lebesgue spaces using
-        default initialisations for the earth model and state.
+        Returns the FingerPrintOperator using default initialisations for the
+        Earth model and state.
+
+        If no parameters are provided, it defaults to a standard L2 (Lebesgue) space.
+        To regularize the inversion, provide (order, relative_scale) tuples for the
+        Sobolev spaces. The relative scale is automatically multiplied by the Earth's
+        mean radius.
 
         Args:
             lmax: Truncation degree for the calculations.
-            rotational_feedbacks (bool): Whether to calculate polar wander effects.
-            rtol (float): The relative tolerance for convergence.
-            max_iterations (Optional[int]): Hard limit on iteration count.
-            verbose (bool): If True, prints iteration metrics.
+            load_parameters: Tuple of (Sobolev order, relative length scale).
+            response_parameters: Tuple of (Sobolev order, relative length scale).
+            rotational_feedbacks: Whether to calculate polar wander effects.
+            rtol: The relative tolerance for convergence.
+            max_iterations: Hard limit on iteration count.
+            verbose: If True, prints iteration metrics.
         """
-
         state = EarthState.from_defaults(lmax=lmax)
+        radius = state.model.parameters.mean_sea_floor_radius
+
+        abs_load = (
+            (load_parameters[0], load_parameters[1] * radius)
+            if load_parameters
+            else None
+        )
+        abs_resp = (
+            (response_parameters[0], response_parameters[1] * radius)
+            if response_parameters
+            else None
+        )
 
         return FingerPrintOperator(
             state,
+            load_parameters=abs_load,
+            response_parameters=abs_resp,
             rotational_feedbacks=rotational_feedbacks,
             rtol=rtol,
             max_iterations=max_iterations,
@@ -167,123 +186,53 @@ class FingerPrintOperator(LinearOperator):
         )
 
     @staticmethod
-    def from_sobolev_defaults(
-        order: float,
-        relative_scale: float,
-        /,
-        *,
-        lmax: int = 256,
-        rotational_feedbacks: bool = True,
-        rtol: float = 1e-9,
-        max_iterations: Optional[int] = None,
-        verbose: bool = False,
-        regularity: bool = False,
-    ) -> FingerPrintOperator:
-        """
-        Returns the LinearOperator between Sobolev spaces using
-        default initialisations for the earth model and state.
-
-        Args:
-            lmax: Truncation degree for the calculations.
-            order: Sobolev order.
-            relative_scale: Sobolev scale relative to the Earth model's mean radius.
-            rotational_feedbacks (bool): Whether to calculate polar wander effects.
-            rtol (float): The relative tolerance for convergence.
-            max_iterations (Optional[int]): Hard limit on iteration count.
-            verbose (bool): If True, prints iteration metrics.
-            regularity (bool): If True, the response order is raised by
-                one from the load order in accordance with elliptic
-                regularity. Otherwise, the response order is the same
-                as for the load.
-        """
-
-        state = EarthState.from_defaults(lmax=lmax)
-        scale = state.model.parameters.mean_sea_floor_radius * relative_scale
-        load_parameters = (order, scale)
-        response_parameters = (order + 1, scale) if regularity else load_parameters
-
-        return FingerPrintOperator(
-            state,
-            load_parameters=load_parameters,
-            response_parameters=response_parameters,
-            rotational_feedbacks=rotational_feedbacks,
-            rtol=rtol,
-            max_iterations=max_iterations,
-            verbose=verbose,
-        )
-
-    @staticmethod
-    def for_lebesgue_testing(
+    def for_testing(
         lmax: int,
         /,
         *,
+        load_parameters: Optional[Tuple[float, float]] = None,
+        response_parameters: Optional[Tuple[float, float]] = None,
         rotational_feedbacks: bool = True,
         rtol: float = 1e-9,
         max_iterations: Optional[int] = None,
         verbose: bool = False,
     ) -> FingerPrintOperator:
         """
-        Returns the LinearOperator between Lebesgue spaces using
-        testing initialisations for the Earth model and initial state.
+        Returns the FingerPrintOperator using analytical testing initialisations
+        for the Earth model and initial state.
+
+        If no parameters are provided, it defaults to a standard L2 (Lebesgue) space.
+        To regularize the inversion, provide (order, relative_scale) tuples for the
+        Sobolev spaces. The relative scale is automatically multiplied by the Earth's
+        mean radius.
 
         Args:
             lmax: Truncation degree for the calculations.
-            rotational_feedbacks (bool): Whether to calculate polar wander effects.
-            rtol (float): The relative tolerance for convergence.
-            max_iterations (Optional[int]): Hard limit on iteration count.
-            verbose (bool): If True, prints iteration metrics.
+            load_parameters: Tuple of (Sobolev order, relative length scale).
+            response_parameters: Tuple of (Sobolev order, relative length scale).
+            rotational_feedbacks: Whether to calculate polar wander effects.
+            rtol: The relative tolerance for convergence.
+            max_iterations: Hard limit on iteration count.
+            verbose: If True, prints iteration metrics.
         """
-
         state = EarthState.for_testing(lmax)
+        radius = state.model.parameters.mean_sea_floor_radius
 
-        return FingerPrintOperator(
-            state,
-            rotational_feedbacks=rotational_feedbacks,
-            rtol=rtol,
-            max_iterations=max_iterations,
-            verbose=verbose,
+        abs_load = (
+            (load_parameters[0], load_parameters[1] * radius)
+            if load_parameters
+            else None
+        )
+        abs_resp = (
+            (response_parameters[0], response_parameters[1] * radius)
+            if response_parameters
+            else None
         )
 
-    @staticmethod
-    def for_sobolev_testing(
-        lmax: int,
-        order: float,
-        relative_scale: float,
-        /,
-        *,
-        rotational_feedbacks: bool = True,
-        rtol: float = 1e-9,
-        max_iterations: Optional[int] = None,
-        verbose: bool = False,
-        regularity: bool = False,
-    ) -> FingerPrintOperator:
-        """
-        Returns the LinearOperator between Sobolev spaces using
-        default initialisations for the earth model and state.
-
-        Args:
-            lmax: Truncation degree for the calculations.
-            order: Sobolev order.
-            relative_scale: Sobolev scale relative to the Earth model's mean radius.
-            rotational_feedbacks (bool): Whether to calculate polar wander effects.
-            rtol (float): The relative tolerance for convergence.
-            max_iterations (Optional[int]): Hard limit on iteration count.
-            verbose (bool): If True, prints iteration metrics.
-            regularity (bool): If True, the response order is raised by
-                one from the load order in accordance with ellipstic
-                regularity. Otherwise, the response order is the same
-                as for the load.
-        """
-
-        state = EarthState.for_testing(lmax)
-        scale = state.model.parameters.mean_sea_floor_radius * relative_scale
-        load_parameters = (order, scale)
-        response_parameters = (order + 1, scale) if regularity else load_parameters
-
         return FingerPrintOperator(
             state,
-            load_parameters=load_parameters,
-            response_parameters=response_parameters,
+            load_parameters=abs_load,
+            response_parameters=abs_resp,
             rotational_feedbacks=rotational_feedbacks,
             rtol=rtol,
             max_iterations=max_iterations,
@@ -358,148 +307,6 @@ class FingerPrintOperator(LinearOperator):
             [field_measure, field_measure, field_measure, amc_measure]
         )
 
-    # ================================================================ #
-    #                    Spatial projection operators                  #
-    # ================================================================ #
-
-    def ocean_projection_operator(
-        self, /, *, exclude_ice_shelves: bool = False, load_action: bool = True
-    ) -> LinearOperator:
-        """
-        Returns a LinearOperator that multiplies a field by a function that is one
-        over the oceans and zero elsewhere.
-
-        Args:
-            exclude_ice_shelves: If True, the function is set to zero in ice-shelved regions.
-            load_action: If True, the operator acts on the load space. Otherwise, it acts on the
-                field space associated with the response space. Default is True.
-
-        Returns:
-            A LinearOperator object.
-        """
-        projection_field = self.state.ocean_projection(
-            value=0, exclude_ice_shelves=exclude_ice_shelves
-        )
-        return spatial_multiplication_operator(
-            self.domain if load_action else self.field_space,
-            projection_field,
-        )
-
-    def ice_projection_operator(
-        self, /, *, exclude_ice_shelves: bool = False, load_action: bool = True
-    ) -> LinearOperator:
-        """
-        Returns a LinearOperator that multiplies a field by a function that is one
-        over the ice sheets and zero elsewhere.
-
-        Args:
-            exclude_ice_shelves: If True, the function is set to zero in ice-shelved regions.
-            load_action: If True, the operator acts on the load space. Otherwise, it acts on the
-                field space associated with the response space. Default is True.
-
-        Returns:
-            A LinearOperator object.
-        """
-        projection_field = self.state.ice_projection(
-            value=0, exclude_ice_shelves=exclude_ice_shelves
-        )
-        return spatial_multiplication_operator(
-            self.domain if load_action else self.field_space,
-            projection_field,
-        )
-
-    def land_projection_operator(
-        self, /, *, exclude_ice: bool = True, load_action: bool = True
-    ) -> LinearOperator:
-        """
-        Returns a LinearOperator that multiplies a field by a function that is one
-        over the background land and zero elsewhere.
-
-        Args:
-            exclude_ice: If True, the function is set to zero in ice-covered regions.
-            load_action: If True, the operator acts on the load space. Otherwise, it acts on the
-                field space associated with the response space. Default is True.
-
-        Returns:
-            A LinearOperator object.
-        """
-        projection_field = self.state.land_projection(value=0, exclude_ice=exclude_ice)
-        return spatial_multiplication_operator(
-            self.domain if load_action else self.field_space,
-            projection_field,
-        )
-
-    # ================================================================ #
-    #                     Spatial averaging operators                  #
-    # ================================================================ #
-
-    def ocean_average_operator(
-        self, /, *, exclude_ice_shelves: bool = False, load_action: bool = True
-    ) -> LinearOperator:
-        """
-        Returns a LinearOperator that averages a function over the oceans.
-
-        Args:
-            exclude_ice_shelves: If True, the function is set to zero in ice-shelved regions.
-            load_action: If True, the operator acts on the load space. Otherwise, it acts on the
-                field space associated with the response space. Default is True.
-
-        Returns:
-            A LinearOperator object.
-        """
-        projection_field = self.state.ocean_projection(
-            value=0, exclude_ice_shelves=exclude_ice_shelves
-        )
-        return averaging_operator(
-            self.state,
-            self.domain if load_action else self.field_space,
-            [projection_field],
-        )
-
-    def ice_average_operator(
-        self, /, *, exclude_ice_shelves: bool = False, load_action: bool = True
-    ) -> LinearOperator:
-        """
-        Returns a LinearOperator that averages a function over the ice sheets.
-
-        Args:
-            exclude_ice_shelves: If True, the function is set to zero in ice-shelved regions.
-            load_action: If True, the operator acts on the load space. Otherwise, it acts on the
-                field space associated with the response space. Default is True.
-
-        Returns:
-            A LinearOperator object.
-        """
-        projection_field = self.state.ice_projection(
-            value=0, exclude_ice_shelves=exclude_ice_shelves
-        )
-        return averaging_operator(
-            self.state,
-            self.domain if load_action else self.field_space,
-            [projection_field],
-        )
-
-    def land_average_operator(
-        self, /, *, exclude_ice: bool = True, load_action: bool = True
-    ) -> LinearOperator:
-        """
-        Returns a LinearOperator that averages a function over the background land.
-
-        Args:
-            exclude_ice: If True, the function is set to zero in ice-covered regions.
-            load_action: If True, the operator acts on the load space. Otherwise, it acts on the
-                field space associated with the response space. Default is True.
-
-        Returns:
-            A LinearOperator object.
-        """
-        projection_field = self.state.land_projection(value=0, exclude_ice=exclude_ice)
-        return averaging_operator(
-            self.state,
-            self.domain if load_action else self.field_space,
-            [projection_field],
-        )
-
     # ================================================================= #
     #                          Private methods                          #
     # ================================================================= #
@@ -553,7 +360,7 @@ def centrifugal_potential_operator(
     sobolev_field = sobolev_parameters is not None
 
     if sobolev_field:
-        order, scale = _check_sobolev(sobolev_parameters)
+        order, scale = sobolev_parameters
         codomain = sobolev_load_space(model, order, scale)
     else:
         codomain = lebesgue_load_space(model)

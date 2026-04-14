@@ -376,9 +376,11 @@ class EarthState(Regions):
             self.model.parameters.water_density * self.ocean_function * sea_level_change
         )
 
-    def direct_load_from_density_change(self, density_change: SHGrid, /) -> SHGrid:
+    def direct_load_from_ocean_ocean_density_change(
+        self, ocean_density_change: SHGrid, /
+    ) -> SHGrid:
         """Converts an ocean density change into the associated surface mass load."""
-        return self.sea_level * self.ocean_function * density_change
+        return self.sea_level * self.ocean_function * ocean_density_change
 
     # ---------------------------------------------------------#
     #                 Convenience Loads                        #

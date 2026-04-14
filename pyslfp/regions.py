@@ -375,3 +375,84 @@ class Regions:
         """Plot Natural Earth ocean boundaries onto a Cartopy axis."""
         kwargs.setdefault("line_kws", dict(color="dodgerblue", linewidth=1.0))
         return self.ne_ocean_regions.plot(ax=ax, add_label=False, **kwargs)
+
+    # ---------------------------------------------------------#
+    #             Composite Projections & Groupings            #
+    # ---------------------------------------------------------#
+
+    def ice_basin_groupings(self, /, *, scheme: str = "individual") -> List[List[str]]:
+        """
+        Provides predefined sensible groupings of ice sheet basins.
+
+        Args:
+            scheme (str): The grouping scheme to use ('individual', 'ice_sheets',
+                          'macro_regions', 'grl_focused', 'ant_focused').
+        """
+        ant_names = [f"ANT_{name}" for name in self.list_imbie_ant_regions()]
+        grl_names = [f"GRL_{name}" for name in self.list_mouginot_grl_regions()]
+
+        if scheme == "individual":
+            return [[name] for name in ant_names + grl_names]
+        elif scheme == "ice_sheets":
+            return [ant_names, grl_names]
+        elif scheme == "macro_regions":
+            wais = ["ANT_F-G", "ANT_G-H", "ANT_H-Hp"]
+            ap = ["ANT_I-Ipp", "ANT_Ipp-J", "ANT_J-Jpp"]
+            eais = [n for n in ant_names if n not in wais and n not in ap]
+            return [wais, eais, ap, grl_names]
+        elif scheme == "grl_focused":
+            return [ant_names] + [[name] for name in grl_names]
+        elif scheme == "ant_focused":
+            return [[name] for name in ant_names] + [grl_names]
+        else:
+            raise ValueError(f"Unknown grouping scheme: '{scheme}'")
+
+    def grouped_ice_projections(
+        self, /, *, groupings: Optional[Union[str, List[List[str]]]] = None
+    ) -> Tuple[List[SHGrid], List[str]]:
+        """
+        Returns combined SHGrid masks and labels for regional basin groupings.
+
+        Args:
+            groupings: A scheme name or a custom list of lists of prefixed region names.
+        """
+        if isinstance(groupings, str):
+            groupings = self.ice_basin_groupings(scheme=groupings)
+
+        if groupings is None:
+            groupings = self.ice_basin_groupings(scheme="individual")
+
+        combined_masks = []
+        combined_labels = []
+
+        for group in groupings:
+            if not group:
+                continue
+
+            accumulated_data = None
+            reference_grid = None
+
+            for name in group:
+                if name.startswith("ANT_"):
+                    m = self.imbie_ant_projection(name[4:], value=0.0)
+                elif name.startswith("GRL_"):
+                    m = self.mouginot_grl_projection(name[4:], value=0.0)
+                else:
+                    raise ValueError(
+                        f"Unknown region '{name}'. Must start with 'ANT_' or 'GRL_'."
+                    )
+
+                if accumulated_data is None:
+                    accumulated_data = m.data.copy()
+                    reference_grid = m
+                else:
+                    accumulated_data += m.data
+
+            # Create a new combined SHGrid by injecting the summed data
+            combined_grid = reference_grid.copy()
+            combined_grid.data = accumulated_data
+
+            combined_masks.append(combined_grid)
+            combined_labels.append(" + ".join(group))
+
+        return combined_masks, combined_labels

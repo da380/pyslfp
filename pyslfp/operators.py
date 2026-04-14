@@ -513,7 +513,7 @@ def sea_level_change_to_load_operator(
     return LinearOperator.from_formal_adjoint(sea_level_space, load_space, l2_operator)
 
 
-def density_change_to_load_operator(
+def ocean_density_change_to_load_operator(
     finger_print: FingerPrint,
     load_space: Union[Lebesgue, Sobolev],
 ):
@@ -528,8 +528,8 @@ def density_change_to_load_operator(
         A LinearOperator object.
     """
 
-    def mapping(density_change: SHGrid) -> SHGrid:
-        return finger_print.direct_load_from_density_change(density_change)
+    def mapping(ocean_density_change: SHGrid) -> SHGrid:
+        return finger_print.direct_load_from_ocean_density_change(ocean_density_change)
 
     l2_load_space = underlying_space(load_space)
 

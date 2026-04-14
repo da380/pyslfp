@@ -47,14 +47,6 @@ def underlying_space(space: HilbertSpace, /) -> HilbertSpace:
         return space
 
 
-def _check_sobolev(parameters):
-    _, scale = parameters
-    if scale <= 0.0:
-        raise ValueError("Scale must be positive")
-
-    return parameters
-
-
 def check_load_space(
     load_space: HilbertSpace, /, *, point_values: bool = False
 ) -> bool:
@@ -179,7 +171,7 @@ def averaging_operator(
         raise TypeError("load_space must be a Lebesgue or Sobolev space.")
 
     # Pre-calculate the physical areas for normalization using the EarthState
-    areas = [state.integrate(w_i) for w_i in weighting_functions]
+    areas = [state.model.integrate(w_i) for w_i in weighting_functions]
 
     # Normalize the weighting functions so the inner product acts as an average
     normalized_weights = [w_i / area for w_i, area in zip(weighting_functions, areas)]
@@ -189,51 +181,22 @@ def averaging_operator(
 
 
 def spatial_multiplication_operator(
-    load_space: Union[Lebesgue, Sobolev], projection_field: SHGrid, /
+    space: Union[Lebesgue, Sobolev], v: SHGrid, /
 ) -> LinearOperator:
     """
-    Returns a linear operator that multiplies a load by a spatial field.
+    Returns a linear operator that multiplies a field by another field.
 
     Args:
-        projection_field (SHGrid): The scalar field to multiply by.
-        load_space: The Hilbert space for the load.
+        v (SHGrid): The scalar field to multiply by.
+        space: The Hilbert space for the field
 
     Returns:
         LinearOperator: Mapping from load_space to itself.
     """
 
-    def mapping(load: SHGrid) -> SHGrid:
-        return projection_field * load
+    def mapping(u: SHGrid) -> SHGrid:
+        return v * u
 
-    l2_load_space = underlying_space(load_space)
-    l2_operator = LinearOperator.self_adjoint(l2_load_space, mapping)
-    return LinearOperator.from_formally_self_adjoint(load_space, l2_operator)
-
-
-def ice_projection_operator(
-    state: EarthState,
-    load_space: Union[Lebesgue, Sobolev],
-    /,
-    *,
-    exclude_ice_shelves: bool = False,
-):
-    """
-    Returns a LinearOpeator multiplies a load by a function that is one
-    over the background ice sheets and zero elsewhere.
-
-    Args:
-        state: The EarthState object.
-        load_space: The Hilbert space for the load.
-        exclude_ice_shelves: If True, the function is set to zero in ice-shelved regions.
-
-    Returns:
-        A LinearOperator object.
-
-    """
-
-    check_load_space(load_space)
-
-    projection_field = state.ice_projection(
-        value=0, exclude_ice_shelves=exclude_ice_shelves
-    )
-    return spatial_multiplication_operator(projection_field, load_space)
+    l2_space = underlying_space(space)
+    l2_operator = LinearOperator.self_adjoint(l2_space, mapping)
+    return LinearOperator.from_formally_self_adjoint(space, l2_operator)

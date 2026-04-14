@@ -26,7 +26,7 @@ from pyslfp.operators import (
     ocean_projection_operator,
     land_projection_operator,
     sea_level_change_to_load_operator,
-    density_change_to_load_operator,
+    ocean_density_change_to_load_operator,
     remove_ocean_average_operator,
     remove_degrees_from_pyshtools_coeffs,
     remove_degrees_from_shgrid,
@@ -277,12 +277,12 @@ class TestSeaLevelChangeToLoadOperator:
         op.check(n_checks=3)
 
 
-# ================== Tests for density_change_to_load_operator ==================
+# ================== Tests for ocean_density_change_to_load_operator ==================
 
 
 @pytest.mark.parametrize("lmax", [16, 32])
 class TestDensityChangeToLoadOperator:
-    """A test suite for the density_change_to_load_operator."""
+    """A test suite for the ocean_density_change_to_load_operator."""
 
     @pytest.mark.parametrize("space_type", ["lebesgue", "sobolev"])
     def test_axiom_checks(self, lmax, space_type, fp_instance):
@@ -290,7 +290,7 @@ class TestDensityChangeToLoadOperator:
         Tests the operator axioms using the pygeoinf check() method.
         """
         space = get_load_space(fp_instance, space_type)
-        op = density_change_to_load_operator(fp_instance, space)
+        op = ocean_density_change_to_load_operator(fp_instance, space)
 
         op.check(n_checks=3)
 

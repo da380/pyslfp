@@ -9,8 +9,12 @@ projections, masking, and point-generation logic.
 from __future__ import annotations
 from functools import cached_property
 
+from typing import Any
+
 import numpy as np
 from pyshtools import SHGrid
+from cartopy.mpl.geoaxes import GeoAxes
+
 
 from .core import EarthModel
 from .regions import Regions

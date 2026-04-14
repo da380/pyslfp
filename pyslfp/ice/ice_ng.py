@@ -193,6 +193,8 @@ class IceNG(BaseIceModel):
             ),
             grid=grid,
         )
-        sea_level += self._ice_density * ice_shelf_thickness / self._water_density
+
+        flotation_ratio = self._ice_density / self._water_density
+        sea_level = sea_level + (ice_shelf_thickness * flotation_ratio)
 
         return ice_thickness, sea_level

@@ -54,3 +54,7 @@ build-backend = "poetry.core.masonry.api"
 filterwarnings = [
     "ignore:Overriding `Axes.cla` in GeoAxes is pending deprecation:PendingDeprecationWarning:cartopy.mpl.geoaxes",
 ]
+markers = [
+    "slow: marks tests as slow (run with '-m slow' or exclude with '-m \"not slow\"')"
+]
+addopts = "-m 'not slow'"

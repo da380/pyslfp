@@ -31,6 +31,10 @@ class Regions:
         and `grid` properties.
     """
 
+    # ==================================================================== #
+    #                  1. Initialization & Lazy Loaders                    #
+    # ==================================================================== #
+
     def __init__(self) -> None:
         """Initializes the Regions mixin with built-in AR6 region definitions."""
         self._ar6_regions = regionmask.defined_regions.ar6.all
@@ -46,17 +50,11 @@ class Regions:
         self._iho_seas_regions: Optional[regionmask.Regions] = None
         self._ne_ocean_regions: Optional[regionmask.Regions] = None
 
-    # ---------------------------------------------------------#
-    #             Lazy Loading Properties (Type Hinted)        #
-    # ---------------------------------------------------------#
-
     @property
     def imbie_ant_regions(self) -> regionmask.Regions:
         """IMBIE2 Antarctic drainage basins (Rignot et al., 2011)."""
         if self._imbie_ant_regions is None:
-
             ensure_data("IMBIE_ANT")
-
             path = DATADIR / "ANT_Basins_IMBIE2" / "ANT_Basins_IMBIE2_v1.6.shp"
             self._imbie_ant_gdf = gpd.read_file(path).to_crs(epsg=4326)
             self._imbie_ant_gdf = self._imbie_ant_gdf[
@@ -72,9 +70,7 @@ class Regions:
     def mouginot_grl_regions(self) -> regionmask.Regions:
         """Greenland drainage basins (Mouginot et al., 2019)."""
         if self._mouginot_grl_regions is None:
-
             ensure_data("MOUGINOT_GRL")
-
             path = DATADIR / "Greenland_Basins" / "Greenland_Basins_PS_v1.4.2.shp"
             self._mouginot_grl_gdf = gpd.read_file(path).to_crs(epsg=4326)
             self._mouginot_grl_gdf = self._mouginot_grl_gdf.dissolve(
@@ -89,9 +85,7 @@ class Regions:
     def hydrobasins_regions(self) -> regionmask.Regions:
         """Level 3 Hydrological Basins (HydroBASINS/HydroSHEDS)."""
         if self._hydrobasins_regions is None:
-
             ensure_data("HYDRO")
-
             path = DATADIR / "HydroBasins" / "HydroBASINS_L3_combined.shp"
             self._hydrobasins_gdf = gpd.read_file(path)
             self._hydrobasins_gdf["HYBAS_ID"] = self._hydrobasins_gdf[
@@ -106,9 +100,7 @@ class Regions:
     def iho_seas_regions(self) -> regionmask.Regions:
         """IHO World Seas (Marine Regions, v3)."""
         if self._iho_seas_regions is None:
-
             ensure_data("IHO_SEAS")
-
             path = DATADIR / "World_Seas_IHO_v3" / "World_Seas_IHO_v3.shp"
             self._iho_seas_gdf = gpd.read_file(path).to_crs(epsg=4326)
             self._iho_seas_regions = regionmask.from_geopandas(
@@ -125,19 +117,187 @@ class Regions:
             )
         return self._ne_ocean_regions
 
-    # ---------------------------------------------------------#
-    #             Internal Mask Applier                        #
-    # ---------------------------------------------------------#
+    # ==================================================================== #
+    #                    2. Universal API Routers                          #
+    # ==================================================================== #
 
-    def _apply_regionmask(
-        self, dataset_key: str, region_name: str, value: float
+    def list_all_regions(self) -> dict[str, List[str]]:
+        """
+        Returns a dictionary mapping every dataset key to a list of its
+        available region names.
+
+        Warning: Calling this will trigger the lazy-loading of ALL
+        underlying shapefiles if they haven't been downloaded/parsed yet.
+        """
+        return {
+            "AR6 (IPCC Climate Regions)": sorted(self._ar6_regions.names),
+            "IMBIE (Antarctica)": self.list_imbie_ant_regions(),
+            "Mouginot (Greenland)": self.list_mouginot_grl_regions(),
+            "IHO (World Seas)": self.list_iho_seas(),
+            "HydroBASINS (Level 3)": self.list_hydrobasins(),
+            "Natural Earth (Oceans)": self.list_ne_oceans(),
+            "Hardcoded Custom": ["Caspian Sea", "Glaciers"],
+        }
+
+    def get_projection(
+        self, regions: Union[str, List[str]], /, *, value: float = np.nan
     ) -> SHGrid:
         """
-        Internal helper to apply a regionmask to the current grid.
+        A universal projection router. Takes a single region name or a list of
+        region names, automatically locates them across all available datasets
+        (AR6, IHO, HydroBASINS, IMBIE, Mouginot), and returns a unified mask.
 
-        Handles the meshgrid creation and coordinate wrapping required to
-        robustly mask regions across the antimeridian.
+        Args:
+            regions: A single region name or list of region names.
+            value: The value to assign outside the unified mask. Defaults to NaN.
         """
+        if isinstance(regions, str):
+            regions = [regions]
+
+        lats, lons = self.lats(), self.lons()
+        accumulated_mask = np.zeros((len(lats), len(lons)), dtype=bool)
+
+        lookup_methods = [
+            self.regionmask_projection,
+            self.iho_sea_projection,
+            self.hydrobasin_projection,
+            self.imbie_ant_projection,
+            self.mouginot_grl_projection,
+            self.ne_ocean_projection,
+        ]
+
+        for region in regions:
+            matched = False
+
+            if region == "Caspian Sea":
+                mask_grid = self.caspian_sea_projection(value=0.0)
+                accumulated_mask = accumulated_mask | (mask_grid.data == 1.0)
+                continue
+            if region == "Glaciers":
+                mask_grid = self.glacier_projection(value=0.0)
+                accumulated_mask = accumulated_mask | (mask_grid.data == 1.0)
+                continue
+
+            for lookup_method in lookup_methods:
+                try:
+                    mask_grid = lookup_method(region, value=0.0)
+                    accumulated_mask = accumulated_mask | (mask_grid.data == 1.0)
+                    matched = True
+                    break
+                except ValueError:
+                    continue
+
+            if not matched:
+                raise ValueError(
+                    f"Universal lookup failed: Region '{region}' could not be found "
+                    f"in AR6, IHO, HydroBASINS, IMBIE, Mouginot, or Natural Earth."
+                )
+
+        final_data = np.where(accumulated_mask, 1.0, value)
+        return SHGrid.from_array(final_data, grid=self.grid)
+
+    def plot_boundaries(
+        self,
+        ax: Any,
+        regions: Union[str, List[str]],
+        /,
+        **kwargs,
+    ) -> None:
+        """
+        A universal boundary plotting router.
+        """
+        if isinstance(regions, str):
+            regions = [regions]
+
+        grouped = {
+            "AR6": [],
+            "IHO": [],
+            "HYDRO": [],
+            "ANT": [],
+            "GRL": [],
+            "NE_OCEAN": [],
+        }
+
+        for r in regions:
+            # --- MOVED THIS TO THE TOP ---
+            if r == "Caspian Sea" or r == "Glaciers":
+                warnings.warn(
+                    f"'{r}' is a hardcoded array mask and has no vector boundaries to plot."
+                )
+                continue
+
+            def check_and_add(dataset_obj, key, name):
+                try:
+                    dataset_obj.map_keys(name)
+                    grouped[key].append(name)
+                    return True
+                except KeyError:
+                    return False
+
+            if check_and_add(self._ar6_regions, "AR6", r):
+                continue
+            if check_and_add(self.iho_seas_regions, "IHO", r):
+                continue
+            if check_and_add(self.hydrobasins_regions, "HYDRO", r):
+                continue
+            if check_and_add(self.imbie_ant_regions, "ANT", r):
+                continue
+            if check_and_add(self.mouginot_grl_regions, "GRL", r):
+                continue
+            if check_and_add(self.ne_ocean_regions, "NE_OCEAN", r):
+                continue
+
+            raise ValueError(
+                f"Universal plot failed: Region '{r}' not found in any dataset."
+            )
+
+        if grouped["AR6"]:
+            self.plot_ar6_boundaries(ax, region_names=grouped["AR6"], **kwargs)
+        if grouped["IHO"]:
+            self.plot_iho_sea_boundaries(ax, region_names=grouped["IHO"], **kwargs)
+        if grouped["HYDRO"]:
+            self.plot_hydrobasin_boundaries(ax, region_ids=grouped["HYDRO"], **kwargs)
+        if grouped["ANT"]:
+            self.plot_imbie_ant_boundaries(ax, region_names=grouped["ANT"], **kwargs)
+        if grouped["GRL"]:
+            self.plot_mouginot_grl_boundaries(ax, region_names=grouped["GRL"], **kwargs)
+        if grouped["NE_OCEAN"]:
+            self.plot_ne_ocean_boundaries(
+                ax, region_names=grouped["NE_OCEAN"], **kwargs
+            )
+
+    # ==================================================================== #
+    #                         3. Listing Methods                           #
+    # ==================================================================== #
+
+    def list_imbie_ant_regions(self) -> List[str]:
+        """List available IMBIE Antarctic subregions."""
+        return sorted(self.imbie_ant_regions.names)
+
+    def list_mouginot_grl_regions(self) -> List[str]:
+        """List available Greenland subregions."""
+        return sorted(self.mouginot_grl_regions.names)
+
+    def list_hydrobasins(self) -> List[str]:
+        """List available HydroBASINS IDs (Level 3)."""
+        return sorted(self.hydrobasins_regions.names)
+
+    def list_iho_seas(self) -> List[str]:
+        """List available IHO Sea names."""
+        return sorted(self.iho_seas_regions.names)
+
+    def list_ne_oceans(self) -> List[str]:
+        """List available Natural Earth ocean basins."""
+        return sorted(self.ne_ocean_regions.names)
+
+    # ==================================================================== #
+    #                        4. Projection Methods                         #
+    # ==================================================================== #
+
+    def _apply_regionmask(
+        self, dataset_key: str, region_names: Union[str, List[str]], value: float
+    ) -> SHGrid:
+        """Internal helper to apply a regionmask to the current grid."""
         if dataset_key == "ANT":
             rm_obj = self.imbie_ant_regions
         elif dataset_key == "GRL":
@@ -153,14 +313,19 @@ class Regions:
                 "dataset_key must be 'ANT', 'GRL', 'HYDRO', 'OCEAN', or 'NE_OCEAN'"
             )
 
-        try:
-            region_id = rm_obj.map_keys(region_name)
-        except KeyError:
-            raise ValueError(f"Region '{region_name}' not found in {dataset_key}.")
+        if isinstance(region_names, str):
+            region_names = [region_names]
+
+        region_ids = []
+        for name in region_names:
+            try:
+                region_ids.append(rm_obj.map_keys(name))
+            except KeyError as exc:
+                raise ValueError(
+                    f"Region '{name}' not found in {dataset_key}."
+                ) from exc
 
         lons, lats = self.lons(), self.lats()
-
-        # Robustness: Create a 2D meshgrid and manually wrap longitudes to [-180, 180].
         lon_mesh, lat_mesh = np.meshgrid(lons[:-1], lats)
         lon_mesh_180 = np.where(lon_mesh > 180, lon_mesh - 360, lon_mesh)
 
@@ -170,49 +335,83 @@ class Regions:
             )
             mask_3d = rm_obj.mask_3D(lon_mesh_180, lat_mesh, wrap_lon=False)
 
-        if region_id in mask_3d.region.values:
-            specific_layer = mask_3d.sel(region=region_id).values
-            if not np.any(specific_layer):
+        valid_ids = [rid for rid in region_ids if rid in mask_3d.region.values]
+
+        if valid_ids:
+            specific_layers = mask_3d.sel(region=valid_ids).values
+            combined_layer = np.any(specific_layers, axis=0)
+
+            if not np.any(combined_layer):
                 warnings.warn(
-                    f"Region '{region_name}' in {dataset_key} contains no grid points "
+                    f"Regions '{region_names}' in {dataset_key} contain no grid points "
                     f"at lmax={self.lmax}. Consider increasing resolution.",
                     UserWarning,
                 )
         else:
-            specific_layer = np.zeros((len(lats), len(lons) - 1), dtype=bool)
+            combined_layer = np.zeros((len(lats), len(lons) - 1), dtype=bool)
 
-        mask_data = np.where(specific_layer, 1.0, value)
+        mask_data = np.where(combined_layer, 1.0, value)
         masked_data = np.hstack((mask_data, mask_data[:, 0:1]))
 
         return SHGrid.from_array(masked_data, grid=self.grid)
 
-    # ---------------------------------------------------------#
-    #             Public Projection Methods                    #
-    # ---------------------------------------------------------#
-
     def regionmask_projection(
-        self, region_name: str, /, *, value: float = np.nan
+        self, region_names: Union[str, List[str]], /, *, value: float = np.nan
     ) -> SHGrid:
-        """
-        Returns a binary mask for an IPCC AR6 region.
+        """Returns a binary mask for one or more IPCC AR6 regions."""
+        if isinstance(region_names, str):
+            region_names = [region_names]
 
-        Args:
-            region_name: The name of the AR6 region (e.g., 'Greenland/Iceland').
-            value: The value for areas outside the region. Defaults to NaN.
-        """
-        try:
-            region_id = self._ar6_regions.map_keys(region_name)
-        except KeyError as exc:
-            raise ValueError(
-                f"Region '{region_name}' not found in the AR6 dataset."
-            ) from exc
+        region_ids = []
+        for name in region_names:
+            try:
+                region_ids.append(self._ar6_regions.map_keys(name))
+            except KeyError as exc:
+                raise ValueError(
+                    f"Region '{name}' not found in the AR6 dataset."
+                ) from exc
+
         lons, lats = self.lons(), self.lats()
         mask_unextended = self._ar6_regions.mask(lons[:-1], lats)
-        masked_data_unextended = np.where(mask_unextended.data == region_id, 1, value)
+        combined_layer = np.isin(mask_unextended.data, region_ids)
+
+        masked_data_unextended = np.where(combined_layer, 1.0, value)
         masked_data = np.hstack(
             (masked_data_unextended, masked_data_unextended[:, 0:1])
         )
         return SHGrid.from_array(masked_data, grid=self.grid)
+
+    def imbie_ant_projection(
+        self, region_name: str, /, *, value: float = np.nan
+    ) -> SHGrid:
+        """Project a specific IMBIE Antarctic basin."""
+        return self._apply_regionmask("ANT", region_name, value)
+
+    def mouginot_grl_projection(
+        self, region_name: str, /, *, value: float = np.nan
+    ) -> SHGrid:
+        """Project a specific Mouginot Greenland basin."""
+        return self._apply_regionmask("GRL", region_name, value)
+
+    def hydrobasin_projection(
+        self, region_id: str, /, *, value: float = np.nan
+    ) -> SHGrid:
+        """Project a specific Level 3 Hydrological Basin ID."""
+        return self._apply_regionmask("HYDRO", region_id, value)
+
+    def iho_sea_projection(
+        self, region_name: str, /, *, value: float = np.nan
+    ) -> SHGrid:
+        """Project a specific IHO Sea area."""
+        return self._apply_regionmask("OCEAN", region_name, value)
+
+    def ne_ocean_projection(
+        self, region_name: str, /, *, value: float = np.nan
+    ) -> SHGrid:
+        """Project a Natural Earth ocean basin."""
+        return self._apply_regionmask("NE_OCEAN", region_name, value)
+
+    # --- Static & Convenience Projections ---
 
     def greenland_projection(self, /, *, value: float = np.nan) -> SHGrid:
         """Greenland projection using AR6 boundaries."""
@@ -249,43 +448,64 @@ class Regions:
         )
         return SHGrid.from_array(np.where(glacier_mask, 1, value), grid=self.grid)
 
-    def imbie_ant_projection(
-        self, region_name: str, /, *, value: float = np.nan
-    ) -> SHGrid:
-        """Project a specific IMBIE Antarctic basin."""
-        return self._apply_regionmask("ANT", region_name, value)
+    # ==================================================================== #
+    #                         5. Plotting Methods                          #
+    # ==================================================================== #
 
-    def mouginot_grl_projection(
-        self, region_name: str, /, *, value: float = np.nan
-    ) -> SHGrid:
-        """Project a specific Mouginot Greenland basin."""
-        return self._apply_regionmask("GRL", region_name, value)
+    def _plot_gdf_boundaries(
+        self,
+        ax: Any,
+        gdf: gpd.GeoDataFrame,
+        name_column: str,
+        region_names: Optional[Union[str, List[str]]],
+        **kwargs,
+    ) -> Any:
+        """Internal helper to filter and plot GeoDataFrame boundaries."""
+        if region_names is not None:
+            gdf = gdf[gdf[name_column].isin(np.atleast_1d(region_names))]
 
-    def hydrobasin_projection(
-        self, region_id: str, /, *, value: float = np.nan
-    ) -> SHGrid:
-        """Project a specific Level 3 Hydrological Basin ID."""
-        return self._apply_regionmask("HYDRO", region_id, value)
+        merged_geom = gdf.geometry.unary_union
+        merged_series = gpd.GeoSeries([merged_geom], crs=gdf.crs)
 
-    def iho_sea_projection(
-        self, region_name: str, /, *, value: float = np.nan
-    ) -> SHGrid:
-        """Project a specific IHO Sea area."""
-        return self._apply_regionmask("OCEAN", region_name, value)
+        kwargs.pop("line_kws", None)
+        kwargs.setdefault("edgecolor", "black")
+        kwargs.setdefault("linewidth", 1.0)
 
-    def ne_ocean_projection(
-        self, region_name: str, /, *, value: float = np.nan
-    ) -> SHGrid:
-        """Project a Natural Earth ocean basin."""
-        return self._apply_regionmask("NE_OCEAN", region_name, value)
+        return merged_series.boundary.plot(
+            ax=ax, transform=ccrs.PlateCarree(), aspect=None, **kwargs
+        )
 
-    # ---------------------------------------------------------#
-    #             Listing and Plotting Methods                 #
-    # ---------------------------------------------------------#
+    def plot_ar6_boundaries(
+        self,
+        ax: Any,
+        /,
+        *,
+        region_names: Optional[Union[str, List[str]]] = None,
+        **kwargs,
+    ) -> Any:
+        """Plot AR6 region boundaries onto a Cartopy axis."""
+        if region_names is not None:
+            if isinstance(region_names, str):
+                region_names = [region_names]
+            idxs = [self._ar6_regions.map_keys(r) for r in region_names]
+            return self._ar6_regions[idxs].plot(ax=ax, add_label=False, **kwargs)
+        return self._ar6_regions.plot(ax=ax, add_label=False, **kwargs)
 
-    def list_imbie_ant_regions(self) -> List[str]:
-        """List available IMBIE Antarctic subregions."""
-        return sorted(self.imbie_ant_regions.names)
+    def plot_ne_ocean_boundaries(
+        self,
+        ax: Any,
+        /,
+        *,
+        region_names: Optional[Union[str, List[str]]] = None,
+        **kwargs,
+    ) -> Any:
+        """Plot Natural Earth ocean boundaries onto a Cartopy axis."""
+        if region_names is not None:
+            if isinstance(region_names, str):
+                region_names = [region_names]
+            idxs = [self._ne_ocean_regions.map_keys(r) for r in region_names]
+            return self._ne_ocean_regions[idxs].plot(ax=ax, add_label=False, **kwargs)
+        return self._ne_ocean_regions.plot(ax=ax, add_label=False, **kwargs)
 
     def plot_imbie_ant_boundaries(
         self,
@@ -296,17 +516,10 @@ class Regions:
         **kwargs,
     ) -> Any:
         """Plot IMBIE Antarctic basin boundaries onto a Cartopy axis."""
-        _ = self.imbie_ant_regions
-        gdf = self._imbie_ant_gdf
-        if region_names is not None:
-            gdf = gdf[gdf["Subregion"].isin(np.atleast_1d(region_names))]
-        kwargs.setdefault("edgecolor", "black")
-        kwargs.setdefault("linewidth", 1.0)
-        return gdf.boundary.plot(ax=ax, transform=ccrs.PlateCarree(), **kwargs)
-
-    def list_mouginot_grl_regions(self) -> List[str]:
-        """List available Greenland subregions."""
-        return sorted(self.mouginot_grl_regions.names)
+        _ = self.imbie_ant_regions  # Trigger lazy loading
+        return self._plot_gdf_boundaries(
+            ax, self._imbie_ant_gdf, "Subregion", region_names, **kwargs
+        )
 
     def plot_mouginot_grl_boundaries(
         self,
@@ -317,17 +530,10 @@ class Regions:
         **kwargs,
     ) -> Any:
         """Plot Greenland basin boundaries onto a Cartopy axis."""
-        _ = self.mouginot_grl_regions
-        gdf = self._mouginot_grl_gdf
-        if region_names is not None:
-            gdf = gdf[gdf["SUBREGION1"].isin(np.atleast_1d(region_names))]
-        kwargs.setdefault("edgecolor", "black")
-        kwargs.setdefault("linewidth", 1.0)
-        return gdf.boundary.plot(ax=ax, transform=ccrs.PlateCarree(), **kwargs)
-
-    def list_hydrobasins(self) -> List[str]:
-        """List available HydroBASINS IDs (Level 3)."""
-        return sorted(self.hydrobasins_regions.names)
+        _ = self.mouginot_grl_regions  # Trigger lazy loading
+        return self._plot_gdf_boundaries(
+            ax, self._mouginot_grl_gdf, "SUBREGION1", region_names, **kwargs
+        )
 
     def plot_hydrobasin_boundaries(
         self,
@@ -338,17 +544,10 @@ class Regions:
         **kwargs,
     ) -> Any:
         """Plot hydrological basin boundaries onto a Cartopy axis."""
-        _ = self.hydrobasins_regions
-        gdf = self._hydrobasins_gdf
-        if region_ids is not None:
-            gdf = gdf[gdf["HYBAS_ID"].isin(np.atleast_1d(region_ids))]
-        kwargs.setdefault("edgecolor", "blue")
-        kwargs.setdefault("linewidth", 0.5)
-        return gdf.boundary.plot(ax=ax, transform=ccrs.PlateCarree(), **kwargs)
-
-    def list_iho_seas(self) -> List[str]:
-        """List available IHO Sea names."""
-        return sorted(self.iho_seas_regions.names)
+        _ = self.hydrobasins_regions  # Trigger lazy loading
+        return self._plot_gdf_boundaries(
+            ax, self._hydrobasins_gdf, "HYBAS_ID", region_ids, **kwargs
+        )
 
     def plot_iho_sea_boundaries(
         self,
@@ -359,26 +558,14 @@ class Regions:
         **kwargs,
     ) -> Any:
         """Plot IHO sea boundaries onto a Cartopy axis."""
-        _ = self.iho_seas_regions
-        gdf = self._iho_seas_gdf
-        if region_names is not None:
-            gdf = gdf[gdf["NAME"].isin(np.atleast_1d(region_names))]
-        kwargs.setdefault("edgecolor", "teal")
-        kwargs.setdefault("linewidth", 0.8)
-        return gdf.boundary.plot(ax=ax, transform=ccrs.PlateCarree(), **kwargs)
+        _ = self.iho_seas_regions  # Trigger lazy loading
+        return self._plot_gdf_boundaries(
+            ax, self._iho_seas_gdf, "NAME", region_names, **kwargs
+        )
 
-    def list_ne_oceans(self) -> List[str]:
-        """List available Natural Earth ocean basins."""
-        return sorted(self.ne_ocean_regions.names)
-
-    def plot_ne_ocean_boundaries(self, ax: Any, /, **kwargs) -> Any:
-        """Plot Natural Earth ocean boundaries onto a Cartopy axis."""
-        kwargs.setdefault("line_kws", dict(color="dodgerblue", linewidth=1.0))
-        return self.ne_ocean_regions.plot(ax=ax, add_label=False, **kwargs)
-
-    # ---------------------------------------------------------#
-    #             Composite Projections & Groupings            #
-    # ---------------------------------------------------------#
+    # ==================================================================== #
+    #                    6. Composite Ice Groupings                        #
+    # ==================================================================== #
 
     def ice_basin_groupings(self, /, *, scheme: str = "individual") -> List[List[str]]:
         """
@@ -448,7 +635,6 @@ class Regions:
                 else:
                     accumulated_data += m.data
 
-            # Create a new combined SHGrid by injecting the summed data
             combined_grid = reference_grid.copy()
             combined_grid.data = accumulated_data
 

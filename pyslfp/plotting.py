@@ -63,9 +63,6 @@ def plot(
     if projection is None and ax is None:
         projection = ccrs.Robinson()
 
-    if colorbar and colorbar_kwargs is None:
-        colorbar_kwargs = {"orientation": "horizontal", "shrink": 0.7, "pad": 0.05}
-
     return sphere.plot(
         f,
         ax=ax,

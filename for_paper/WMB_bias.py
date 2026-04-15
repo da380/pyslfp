@@ -16,9 +16,16 @@ sea-level equation).
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
-import regionmask
 import pygeoinf as inf
-import pyslfp as sl
+
+
+from pyslfp import create_map_figure, plot
+from pyslfp.linear_operators import (
+    WMBMethod,
+    grace_observation_operator,
+    sea_level_change_to_load_operator,
+)
+
 import grace_utils as utils
 
 
@@ -97,7 +104,7 @@ def parse_arguments():
     parser.add_argument(
         "--noise-std-factor",
         type=float,
-        default=0.1,
+        default=0.05,
         help="Factor scaling the noise standard deviation.",
     )
     parser.add_argument(
@@ -114,12 +121,16 @@ def main():
     if args.smoothing_scale_km is None:
         args.smoothing_scale_km = args.load_scale_km
 
-    fp, load_space, response_space, fp_op, scale_mm = utils.build_physics_components(
+    state, load_space, response_space, fp_op, scale_mm = utils.build_physics_components(
         args.lmax, args.load_order, args.load_scale_km
     )
 
+    # Extract the decoupled state and model from the operator
+    state = fp_op.state
+    model = fp_op.model
+
     _, cond_prior, noise = utils.build_measures(
-        fp,
+        state,
         load_space,
         args.direct_scale_km,
         args.direct_std_m,
@@ -129,18 +140,25 @@ def main():
         prior_shift=args.prior_shift,
     )
 
-    wmb = sl.WMBMethod.from_finger_print(fp, args.obs_degree)
-    region_names, avg_op, weighting_functions = utils.get_regional_averaging(
-        fp, load_space, args.smoothing_scale_km
+    # Use the refactored WMBMethod which now takes an EarthModel
+    wmb = WMBMethod(model, args.obs_degree)
+
+    region_names, avg_op, weighting_functions, regions_dict = (
+        utils.get_regional_averaging(
+            state, load_space, smoothing_scale_km=args.smoothing_scale_km
+        )
     )
+
     wmb_avg_op = avg_op @ wmb.potential_coefficient_to_load_operator(load_space)
 
     data_err = wmb.load_measure_to_observation_measure(noise)
     data_space = data_err.domain
 
     sea_level_proj = response_space.subspace_projection(0)
-    sle_to_load = sl.sea_level_change_to_load_operator(
-        fp, sea_level_proj.codomain, load_space
+
+    # Use the new sea_level_change_to_load_operator taking EarthState
+    sle_to_load = sea_level_change_to_load_operator(
+        state, sea_level_proj.codomain, load_space
     )
 
     # ------------------ OPTION: PLOT EXAMPLE LOADS ------------------
@@ -150,52 +168,25 @@ def main():
         sample_direct = cond_prior.sample()
         sample_induced = (sle_to_load @ sea_level_proj @ fp_op)(sample_direct)
 
-        ar6 = regionmask.defined_regions.ar6.all
-        idxs = [ar6.map_keys(r) for r in region_names]
-
-        fig1, ax1 = sl.create_map_figure(figsize=(14, 8))
-        _, im1 = sl.plot(
+        fig1, ax1 = create_map_figure(figsize=(14, 8))
+        _, im1 = plot(
             sample_direct * scale_mm,
             ax=ax1,
             colorbar_kwargs={"label": "EWT (mm)"},
             symmetric=True,
         )
         ax1.set_title("Example Direct Load Sample")
+        utils.draw_region_boundaries(state, ax1, regions_dict)
 
-        ar6[idxs].plot(
-            ax=ax1,
-            add_label=True,
-            label="abbrev",
-            line_kws=dict(color="black", linewidth=2.5, linestyle="-"),
-            text_kws={
-                "color": "black",
-                "fontweight": "bold",
-                "fontsize": 10,
-                "bbox": dict(facecolor="white", alpha=0.7, edgecolor="none", pad=1),
-            },
-        )
-
-        fig2, ax2 = sl.create_map_figure(figsize=(14, 8))
-        _, im2 = sl.plot(
+        fig2, ax2 = create_map_figure(figsize=(14, 8))
+        _, im2 = plot(
             sample_induced * scale_mm,
             ax=ax2,
             colorbar_kwargs={"label": "EWT (mm)"},
             symmetric=True,
         )
         ax2.set_title("Resulting Induced Water Load")
-
-        ar6[idxs].plot(
-            ax=ax2,
-            add_label=True,
-            label="abbrev",
-            line_kws=dict(color="black", linewidth=2.5, linestyle="-"),
-            text_kws={
-                "color": "black",
-                "fontweight": "bold",
-                "fontsize": 10,
-                "bbox": dict(facecolor="white", alpha=0.7, edgecolor="none", pad=1),
-            },
-        )
+        utils.draw_region_boundaries(state, ax2, regions_dict)
 
     # ------------------ CORE BIAS EVALUATION ------------------
     op1 = inf.BlockLinearOperator(
@@ -214,7 +205,7 @@ def main():
             ],
             [
                 load_space.zero_operator(data_space),
-                sl.grace_operator(response_space, args.obs_degree),
+                grace_observation_operator(response_space, args.obs_degree),
                 data_space.identity_operator(),
             ],
         ]
@@ -264,7 +255,6 @@ def main():
         nrows=nrows, ncols=2, figsize=(14, 5 * nrows), layout="constrained"
     )
     for i, region in enumerate(region_names):
-
         ax = axes.flatten()[i]
         mu, std = err_means[i], err_stds[i]
 
@@ -290,7 +280,7 @@ def main():
             gaussian_pdf(x_vals, mu, std),
             "r-",
             linewidth=2,
-            label=rf"Actual Bias ($\mu$={mu:.3f}, $\sigma$={std:.3f})",
+            label=rf"Actual error ($\mu$={mu:.3f}, $\sigma$={std:.3f})",
         )
 
         ax.plot(
@@ -298,7 +288,7 @@ def main():
             gaussian_pdf(x_vals, 0, wmb_stds[i]),
             "b-",
             linewidth=2,
-            label=rf"Theoretical Bias ($\mu$={0:.3f}, $\sigma$={wmb_stds[i]:.3f})",
+            label=rf"Theoretical error ($\mu$={0:.3f}, $\sigma$={wmb_stds[i]:.3f})",
         )
 
         ax.set_title(region, fontsize=14)

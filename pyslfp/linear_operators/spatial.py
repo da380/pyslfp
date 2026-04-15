@@ -119,54 +119,6 @@ def land_average_operator(
 
 
 # ================================================================ #
-#                Mass-to-Load Conversion Operators                 #
-# ================================================================ #
-
-
-def ice_thickness_change_to_load_operator(
-    state: EarthState,
-    space: Union[Lebesgue, Sobolev],
-) -> LinearOperator:
-    """Maps an ice thickness change to the corresponding surface mass load."""
-    check_load_space(space)
-    multiplier = state.model.parameters.ice_density * state.one_minus_ocean_function
-    return spatial_multiplication_operator(space, multiplier)
-
-
-def sea_level_change_to_load_operator(
-    state: EarthState,
-    sea_level_space: Union[Lebesgue, Sobolev],
-    load_space: Union[Lebesgue, Sobolev],
-) -> LinearOperator:
-    """Maps a sea level change to the corresponding surface mass load."""
-    check_load_space(sea_level_space)
-    check_load_space(load_space)
-
-    multiplier = state.model.parameters.water_density * state.ocean_function
-
-    def mapping(sea_level_change: SHGrid) -> SHGrid:
-        return multiplier * sea_level_change
-
-    l2_sea_level_space = underlying_space(sea_level_space)
-    l2_load_space = underlying_space(load_space)
-
-    l2_operator = LinearOperator(
-        l2_sea_level_space, l2_load_space, mapping, adjoint_mapping=mapping
-    )
-    return LinearOperator.from_formal_adjoint(sea_level_space, load_space, l2_operator)
-
-
-def ocean_density_change_to_load_operator(
-    state: EarthState,
-    space: Union[Lebesgue, Sobolev],
-) -> LinearOperator:
-    """Maps an ocean density change to the corresponding surface mass load."""
-    check_load_space(space)
-    multiplier = state.sea_level * state.ocean_function
-    return spatial_multiplication_operator(space, multiplier)
-
-
-# ================================================================ #
 #                     Mass Conservation Operators                  #
 # ================================================================ #
 
@@ -236,3 +188,71 @@ def ice_sheet_basis_operator(
     M = B @ B.adjoint
     M_inv = CholeskySolver()(M)
     return B.adjoint @ M_inv
+
+
+# ================================================================ #
+#              Universal Region Routing Operators                  #
+# ================================================================ #
+
+
+def _parse_averaging_regions(
+    state: EarthState, regions: Union[str, List[str], List[List[str]]]
+) -> List[SHGrid]:
+    """
+    Internal helper to resolve varied region inputs into a list of SHGrid masks
+    specifically for the region_average_operator.
+    """
+    if isinstance(regions, str):
+        groupings = [[regions]]
+    elif isinstance(regions, list):
+        if len(regions) > 0 and isinstance(regions[0], str):
+            # It's a flat list of strings (a single composite group)
+            groupings = [regions]
+        else:
+            # It's already a list of lists
+            groupings = regions
+    else:
+        raise TypeError("Regions must be a string, list of strings, or list of lists.")
+
+    return [state.get_projection(group, value=0.0) for group in groupings]
+
+
+def region_average_operator(
+    state: EarthState,
+    space: Union[Lebesgue, Sobolev],
+    regions: Union[str, List[str], List[List[str]]],
+) -> LinearOperator:
+    """
+    Maps a global field to a Euclidean vector of regional spatial averages.
+
+    Args:
+        state: The EarthState used for routing and area calculations.
+        space: The Hilbert space defining the input field.
+        regions: A single name, a flat list (forming one composite average),
+            or a list of lists (forming multiple independent averages).
+    """
+    check_load_space(space)
+    masks = _parse_averaging_regions(state, regions)
+    return averaging_operator(state, space, masks)
+
+
+def region_projection_operator(
+    state: EarthState,
+    space: Union[Lebesgue, Sobolev],
+    regions: Union[str, List[str]],
+) -> LinearOperator:
+    """
+    Projects a global field onto a single (potentially composite) region.
+    Maps Space -> Space.
+
+    Args:
+        state: The EarthState used for region routing.
+        space: The Hilbert space defining the input field.
+        regions: A single region name or a flat list of region names.
+    """
+    check_load_space(space)
+
+    # get_projection automatically flattens a List[str] into a single composite mask
+    mask = state.get_projection(regions, value=0.0)
+
+    return spatial_multiplication_operator(space, mask)

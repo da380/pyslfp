@@ -15,12 +15,11 @@ from pyslfp.linear_operators.spatial import (
     ocean_average_operator,
     ice_average_operator,
     land_average_operator,
-    ice_thickness_change_to_load_operator,
-    sea_level_change_to_load_operator,
-    ocean_density_change_to_load_operator,
     remove_ocean_average_operator,
     ice_sheet_averaging_operator,
     ice_sheet_basis_operator,
+    region_average_operator,
+    region_projection_operator,
 )
 
 
@@ -105,40 +104,6 @@ def test_spatial_averaging_operators(testing_state, sobolev):
             check_atol=1e-4,
             domain_measure=domain_measure,
             codomain_measure=codomain_measure,
-        )
-
-
-# ==================================================================== #
-#                  3. Mass-to-Load Conversion Operators                #
-# ==================================================================== #
-
-
-@pytest.mark.parametrize("sobolev", [False, True])
-def test_mass_conversion_operators(testing_state, sobolev):
-    """Tests the adjoint identities for the physical density multipliers."""
-    model = testing_state.model
-    b = model.parameters.mean_sea_floor_radius
-
-    if sobolev:
-        space = sobolev_load_space(model, 1.0, 0.1 * b)
-    else:
-        space = lebesgue_load_space(model)
-
-    ops = [
-        ice_thickness_change_to_load_operator(testing_state, space),
-        sea_level_change_to_load_operator(testing_state, space, space),
-        ocean_density_change_to_load_operator(testing_state, space),
-    ]
-
-    domain_measure = space.heat_kernel_gaussian_measure(0.5 * b)
-
-    for A in ops:
-        A.check(
-            n_checks=2,
-            check_rtol=1e-4,
-            check_atol=1e-4,
-            domain_measure=domain_measure,
-            codomain_measure=domain_measure,
         )
 
 
@@ -234,3 +199,90 @@ def test_ice_sheet_basin_operators(testing_state, sobolev):
     reconstructed_coeffs = A(B(random_coeffs))
 
     assert np.allclose(random_coeffs, reconstructed_coeffs)
+
+
+# ==================================================================== #
+#                  5. Universal Region Routing Operators               #
+# ==================================================================== #
+
+
+def test_region_average_operator_routing(testing_state):
+    """Test that the average operator correctly interprets list nesting."""
+    space = lebesgue_load_space(testing_state.model)
+
+    # 1. Single string -> EuclideanSpace(1)
+    op1 = region_average_operator(testing_state, space, "Greenland/Iceland")
+    assert isinstance(op1.codomain, inf.EuclideanSpace)
+    assert op1.codomain.dim == 1
+
+    # 2. Flat list (Composite Region) -> EuclideanSpace(1)
+    op2 = region_average_operator(
+        testing_state, space, ["Greenland/Iceland", "W.Antarctica"]
+    )
+    assert op2.codomain.dim == 1
+
+    # 3. List of Lists -> EuclideanSpace(2)
+    op3 = region_average_operator(
+        testing_state, space, [["Greenland/Iceland", "W.Antarctica"], ["E.Antarctica"]]
+    )
+    assert op3.codomain.dim == 2
+
+
+def test_region_projection_operator_routing(testing_state):
+    """Test that the projection operator returns a simple Space -> Space mapping."""
+    space = lebesgue_load_space(testing_state.model)
+
+    # 1. Single string -> Space to Space
+    op1 = region_projection_operator(testing_state, space, "Greenland/Iceland")
+    assert isinstance(op1.codomain, type(space))
+
+    # 2. Flat list (Composite Region) -> Space to Space
+    op2 = region_projection_operator(
+        testing_state, space, ["Greenland/Iceland", "W.Antarctica"]
+    )
+    assert isinstance(op2.codomain, type(space))
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("sobolev", [False, True])
+def test_region_routing_adjoints(testing_state, sobolev):
+    """Tests the adjoint identities for the universal routing operators."""
+    model = testing_state.model
+    b = model.parameters.mean_sea_floor_radius
+
+    if sobolev:
+        space = sobolev_load_space(model, 1.0, 0.1 * b)
+    else:
+        space = lebesgue_load_space(model)
+
+    # Averager takes a nested list for multiple distinct outputs
+    avg_regions = [["Greenland/Iceland"], ["W.Antarctica"]]
+    avg_op = region_average_operator(testing_state, space, avg_regions)
+
+    # Projector takes a flat list for a single composite mask
+    proj_regions = ["Greenland/Iceland", "W.Antarctica"]
+    proj_op = region_projection_operator(testing_state, space, proj_regions)
+
+    domain_measure = space.heat_kernel_gaussian_measure(0.5 * b)
+
+    # 1. Adjoint check for average operator (Space -> Euclidean)
+    avg_codomain_measure = inf.GaussianMeasure.from_standard_deviation(
+        avg_op.codomain, 1.0
+    )
+    avg_op.check(
+        n_checks=2,
+        check_rtol=1e-4,
+        check_atol=1e-4,
+        domain_measure=domain_measure,
+        codomain_measure=avg_codomain_measure,
+    )
+
+    # 2. Adjoint check for projection operator (Space -> Space)
+    # Codomain measure is just the domain measure again!
+    proj_op.check(
+        n_checks=2,
+        check_rtol=1e-4,
+        check_atol=1e-4,
+        domain_measure=domain_measure,
+        codomain_measure=domain_measure,
+    )

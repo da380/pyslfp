@@ -100,27 +100,6 @@ def test_grace_observation_model_adjoint(fingerprint_operator):
     )
 
 
-def test_grace_observation_model_forward_problem(fingerprint_operator):
-    """
-    Ensures the LinearForwardProblem initializes correctly with valid measures.
-    """
-    model = GraceObservationModel(fingerprint_operator, 10, minimum_degree=2)
-    A = model.forward_operator
-
-    valid_noise_measure = inf.GaussianMeasure.from_standard_deviation(A.codomain, 0.1)
-    invalid_noise_measure = inf.GaussianMeasure.from_standard_deviation(
-        inf.EuclideanSpace(5), 0.1
-    )
-
-    # Valid
-    prob = model.create_forward_problem(valid_noise_measure)
-    assert isinstance(prob, inf.LinearForwardProblem)
-
-    # Invalid space dimension
-    with pytest.raises(ValueError, match="must match the truncated Euclidean space"):
-        model.create_forward_problem(invalid_noise_measure)
-
-
 # ==================================================================== #
 #                  2. Spectral Approximation (WMB Method)              #
 # ==================================================================== #

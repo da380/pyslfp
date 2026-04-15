@@ -54,16 +54,10 @@ def grace_observation_operator(
         EuclideanSpace.
     """
     check_response_space(response_space, point_values=False)
-
-    # Subspace 2 is the Gravitational Potential Change
     gpc_space = response_space.subspace(2)
-
-    # Map the spatial field to truncated SH coefficients
     spatial_to_coeffs = gpc_space.to_coefficient_operator(
         obs_degree, lmin=minimum_degree
     )
-
-    # Combine with the subspace projection
     return spatial_to_coeffs @ response_space.subspace_projection(2)
 
 

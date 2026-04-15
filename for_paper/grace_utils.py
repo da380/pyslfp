@@ -107,7 +107,6 @@ def get_regional_averaging(
 ):
     """Sets up the averaging operator using specialized geophysical basins."""
 
-    # Provide a default set of geophysically interesting regions if none are passed
     if regions_dict is None:
         regions_dict = {
             "GRL (NW Basin)": "NW",
@@ -118,7 +117,6 @@ def get_regional_averaging(
 
     region_names = list(regions_dict.keys())
 
-    # Generate the binary masks using the universal get_projection router!
     weighting_functions = [
         state.get_projection(raw_names, value=0.0)
         for raw_names in regions_dict.values()
@@ -132,10 +130,8 @@ def get_regional_averaging(
         smoothing_operator = smoothing_measure.covariance
         weighting_functions = [smoothing_operator(wf) for wf in weighting_functions]
 
-    # Use the formal Pygeoinf averaging operator builder
     avg_operator = averaging_operator(state, load_space, weighting_functions)
 
-    # Return the dictionary too, so calling scripts know exactly what to plot
     return region_names, avg_operator, weighting_functions, regions_dict
 
 
@@ -147,7 +143,6 @@ def draw_region_boundaries(state, ax, regions_dict, **kwargs):
     kwargs.setdefault("edgecolor", "black")
     kwargs.setdefault("linewidth", 2.0)
 
-    # Flatten the list of regions in case some are composite lists
     raw_regions = []
     for val in regions_dict.values():
         if isinstance(val, str):

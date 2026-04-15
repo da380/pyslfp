@@ -103,7 +103,7 @@ def build_total_load_operator(state, response_space, load_space, finger_print_op
 
 
 def get_regional_averaging(
-    state, load_space, regions_dict=None, smoothing_scale_km=None
+    state, load_space, /, *, regions_dict=None, smoothing_scale_km=None
 ):
     """Sets up the averaging operator using specialized geophysical basins."""
 

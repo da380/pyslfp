@@ -52,13 +52,13 @@ def parse_arguments():
     parser.add_argument(
         "--lmax",
         type=int,
-        default=128,
+        default=64,
         help="Maximum spherical harmonic degree for the Earth model.",
     )
     parser.add_argument(
         "--obs-degree",
         type=int,
-        default=100,
+        default=32,
         help="Maximum spherical harmonic degree of the GRACE observations.",
     )
     parser.add_argument(
@@ -130,12 +130,12 @@ def main():
             args.mc_trials = 500
 
     print("Initializing models and operators...")
-    fp, load_space, response_space, fp_op, scale_mm = utils.build_physics_components(
+    state, load_space, response_space, fp_op, scale_mm = utils.build_physics_components(
         args.lmax, args.load_order, args.load_scale_km
     )
 
     init_prior, cond_prior, noise = utils.build_measures(
-        fp,
+        state,
         load_space,
         args.direct_scale_km,
         args.direct_std_m,
@@ -145,22 +145,26 @@ def main():
         prior_shift=args.prior_shift,
     )
 
-    wmb = sl.WMBMethod.from_finger_print(fp, args.obs_degree)
+    # 1. Initialize WMBMethod using the model API
+    wmb = sl.linear_operators.WMBMethod(state.model, args.obs_degree)
     data_error_measure = wmb.load_measure_to_observation_measure(noise)
-    forward_op = sl.grace_operator(response_space, args.obs_degree) @ fp_op
 
+    # 2. Use the new GraceObservationModel wrapper to handle the forward operators
+    obs_model = sl.linear_operators.GraceObservationModel(fp_op, args.obs_degree)
     forward_problem = inf.LinearForwardProblem(
-        forward_op, data_error_measure=data_error_measure
+        obs_model.forward_operator, data_error_measure=data_error_measure
     )
-    true_direct_load, synthetic_grace_data = forward_problem.synthetic_model_and_data(
+
+    true_direct_load, synthetic_grace_data = forward_problem.joint_measure(
         cond_prior
-    )
+    ).sample()
 
     inverse_problem = inf.LinearBayesianInversion(forward_problem, cond_prior)
     preconditioner = wmb.bayesian_normal_operator_preconditioner(
         init_prior, data_error_measure
     )
-    solver = inf.CGMatrixSolver()
+    callback = None  # inverse_problem.normal_residual_callback(synthetic_grace_data)
+    solver = inf.CGMatrixSolver(callback=callback)
 
     print("Solving for posterior...")
     load_posterior = inverse_problem.model_posterior_measure(
@@ -168,9 +172,11 @@ def main():
     )
     print(f"Solution in {solver.iterations} iterations")
 
-    tot_op = utils.build_total_load_operator(fp, response_space, load_space, fp_op)
-    region_names, avg_op, weighting_functions = utils.get_regional_averaging(
-        fp, load_space, args.smoothing_scale_km
+    tot_op = utils.build_total_load_operator(state, response_space, load_space, fp_op)
+    region_names, avg_op, weighting_functions, regions_dict = (
+        utils.get_regional_averaging(
+            state, load_space, smoothing_scale_km=args.smoothing_scale_km
+        )
     )
 
     tot_avg_op = avg_op @ tot_op
@@ -220,6 +226,7 @@ def main():
             symmetric=True,
         )
         axes_maps[0].set_title("True Direct Load")
+        utils.draw_region_boundaries(state, axes_maps[0], regions_dict)
 
         sl.plot(
             post_dir_mm,
@@ -231,6 +238,7 @@ def main():
             symmetric=True,
         )
         axes_maps[1].set_title("Posterior Expectation (Direct Load)")
+        utils.draw_region_boundaries(state, axes_maps[1], regions_dict)
 
     # ------------------ OPTION 2: PDFs ------------------
     if args.plot_pdfs:
@@ -271,8 +279,9 @@ def main():
     # ------------------ OPTION 4: Monte Carlo ------------------
     if args.mc_trials > 0:
         print(f"Running {args.mc_trials} MC trials via dense joint measure mapping...")
-        w_errs, b_errs = np.zeros((args.mc_trials, len(region_names))), np.zeros(
-            (args.mc_trials, len(region_names))
+        w_errs, b_errs = (
+            np.zeros((args.mc_trials, len(region_names))),
+            np.zeros((args.mc_trials, len(region_names))),
         )
 
         post_exp_op = inverse_problem.posterior_expectation_operator(
@@ -330,7 +339,6 @@ def main():
         ncols = int(np.ceil(np.sqrt(n_reg)))
         nrows = int(np.ceil(n_reg / ncols))
 
-        # Dynamically size the figure (e.g., 5x5 inches per subplot)
         fig_mc, axes_mc = plt.subplots(
             nrows=nrows,
             ncols=ncols,
@@ -340,7 +348,6 @@ def main():
             layout="constrained",
         )
 
-        # Flatten the axes array so we can iterate over it easily in 1D
         axes_flat = np.atleast_1d(axes_mc).flatten()
 
         for j, region in enumerate(region_names):
@@ -361,7 +368,6 @@ def main():
                 [raw_mean_w[j] / wmb_stds_mm[j], raw_mean_b[j] / post_stds_mm[j]]
             )
 
-            # Calculate offsets dynamically based on number of regions (n_reg)
             var_w = raw_cov[j, j] / (wmb_stds_mm[j] ** 2)
             var_b = raw_cov[j + n_reg, j + n_reg] / (post_stds_mm[j] ** 2)
             cov_wb = raw_cov[j, j + n_reg] / (wmb_stds_mm[j] * post_stds_mm[j])
@@ -415,11 +421,8 @@ def main():
             ax.set_title(region, fontsize=14)
             ax.grid(True, linestyle=":", alpha=0.4)
 
-            # Smart Axis Labeling: Only label the bottom row and left-most column
-            # If the plot is on the bottom row OR there's no plot underneath it:
             if j >= (nrows - 1) * ncols or (j + ncols >= n_reg):
                 ax.set_xlabel(r"WMB Normalized Error", fontsize=11)
-            # If the plot is on the far-left column:
             if j % ncols == 0:
                 ax.set_ylabel(r"Bayes Normalized Error", fontsize=11)
 
@@ -429,7 +432,6 @@ def main():
                 )
                 ax.legend(loc="upper left", fontsize=9)
 
-        # Hide any unused subplots in the grid (e.g., if we have 5 regions in a 2x3 grid)
         for j in range(n_reg, len(axes_flat)):
             axes_flat[j].set_visible(False)
 

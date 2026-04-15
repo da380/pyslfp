@@ -18,7 +18,6 @@ from pygeoinf import (
     HilbertSpaceDirectSum,
     EuclideanSpace,
     GaussianMeasure,
-    LinearForwardProblem,
     DiagonalSparseMatrixLinearOperator,
 )
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
@@ -114,21 +113,6 @@ class GraceObservationModel:
     def forward_operator(self) -> LinearOperator:
         return self._forward_operator
 
-    def create_forward_problem(
-        self, data_error_measure: GaussianMeasure
-    ) -> LinearForwardProblem:
-        """
-        Wraps the exact forward operator in a Pygeoinf LinearForwardProblem.
-        """
-        if data_error_measure.domain != self.forward_operator.codomain:
-            raise ValueError(
-                "The noise measure domain must match the truncated Euclidean space."
-            )
-
-        return LinearForwardProblem(
-            self.forward_operator, data_error_measure=data_error_measure
-        )
-
 
 # ================================================================ #
 #                 Spectral Approximation (WMB)                     #
@@ -172,7 +156,6 @@ class WMBMethod:
         for l in range(self.minimum_degree, self.obs_degree + 1):
             idx_start = l**2 - self.minimum_degree**2
             idx_end = (l + 1) ** 2 - self.minimum_degree**2
-            # Assumes the EarthModel has access to the Love numbers via a `.k` attribute or similar
             scaling_factors[idx_start:idx_end] = self.model.love_numbers.k[l]
 
         return DiagonalSparseMatrixLinearOperator.from_diagonal_values(

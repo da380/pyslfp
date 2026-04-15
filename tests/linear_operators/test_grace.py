@@ -146,16 +146,13 @@ def test_wmb_preconditioner_generation(testing_state):
     wmb = WMBMethod(model, 10, minimum_degree=2)
     load_space = lebesgue_load_space(model)
 
-    # Pygeoinf's heat kernel generates an InvariantGaussianMeasure
     prior_measure = load_space.heat_kernel_gaussian_measure(0.5 * b)
     assert isinstance(prior_measure, InvariantGaussianMeasure)
 
-    # 1. Test Measure Push-Forward
     obs_measure = wmb.load_measure_to_observation_measure(prior_measure)
     assert isinstance(obs_measure, inf.GaussianMeasure)
     assert obs_measure.domain.dim == wmb.observation_dim
 
-    # 2. Test Preconditioner Assembly
     noise_measure = inf.GaussianMeasure.from_standard_deviation(
         obs_measure.domain, 1e-10
     )

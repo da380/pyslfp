@@ -1,0 +1,29 @@
+repos:
+  # --- 1. Prevent accidental commits to main (Runs on commit) ---
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: no-commit-to-branch
+        args: [--branch, main]
+
+  # --- 2. Ruff: Linting & Formatting (Runs on commit) ---
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.3.0
+    hooks:
+      - id: ruff
+        args: [ --fix ]
+      - id: ruff-format
+
+  # --- 3. Pytest (Runs on PUSH only) ---
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest (full suite)
+        # Forces pytest to run all tests, including those marked as slow
+        #entry: poetry run pytest -m "slow or not slow"
+        entry: poetry run pytest
+        language: system
+        pass_filenames: false
+        always_run: true
+        # This ensures the hook only triggers when you try to push
+        stages: [pre-push]

@@ -1,0 +1,313 @@
+"""
+WMB Method Bias Evaluation
+==========================
+
+This script quantifies the systematic bias introduced by the Wahr, Molenaar, & Bryan (1998)
+(WMB) method when estimating regional surface mass changes from satellite gravimetry
+(e.g., GRACE / GRACE-FO).
+
+The WMB method isolates surface mass anomalies by applying a purely spectral scaling
+(via load Love numbers) to observed gravitational potential coefficients. However, this
+approach inherently neglects gravitational self-attraction and loading (SAL) effects—most
+notably the induced redistribution of water mass across the global ocean (governed by the
+sea-level equation).
+"""
+
+import argparse
+import numpy as np
+import matplotlib.pyplot as plt
+import pygeoinf as inf
+
+
+from pyslfp import create_map_figure, plot
+from pyslfp.linear_operators import (
+    WMBMethod,
+    grace_observation_operator,
+    sea_level_change_to_load_operator,
+)
+
+import grace_utils as utils
+
+
+def parse_arguments():
+    """Parses command-line arguments to configure the WMB bias evaluation."""
+    parser = argparse.ArgumentParser(
+        description="Calculate WMB method bias using analytical Gaussian measures."
+    )
+    parser.add_argument(
+        "--samples",
+        type=int,
+        default=0,
+        help="Number of Monte Carlo samples to draw for validating analytical error distributions.",
+    )
+    parser.add_argument(
+        "--plot-loads",
+        action="store_true",
+        help="Plot an example of the direct load and the induced water load with region boxes.",
+    )
+
+    parser.add_argument(
+        "--lmax",
+        type=int,
+        default=128,
+        help="Maximum spherical harmonic degree for the Earth model.",
+    )
+    parser.add_argument(
+        "--obs-degree",
+        type=int,
+        default=100,
+        help="Maximum spherical harmonic degree of the GRACE observations.",
+    )
+    parser.add_argument(
+        "--load-order",
+        type=float,
+        default=2.0,
+        help="Sobolev space order for the load.",
+    )
+    parser.add_argument(
+        "--load-scale-km",
+        type=float,
+        default=500.0,
+        help="Length scale (in km) defining the load space.",
+    )
+    parser.add_argument(
+        "--smoothing-scale-km",
+        type=float,
+        default=None,
+        help="Scale (in km) for spatial smoothing. Defaults to --load-scale-km.",
+    )
+
+    parser.add_argument(
+        "--direct-scale-km",
+        type=float,
+        default=250.0,
+        help="Correlation length scale (in km) for the prior.",
+    )
+    parser.add_argument(
+        "--direct-std-m",
+        type=float,
+        default=0.01,
+        help="Pointwise standard deviation (in m EWT) for the prior.",
+    )
+    parser.add_argument(
+        "--prior-shift",
+        type=float,
+        default=1.0,
+        help="Shift the prior expectation by drawing a sample and multiplying by this factor.",
+    )
+    parser.add_argument(
+        "--noise-scale-factor",
+        type=float,
+        default=0.25,
+        help="Factor scaling the noise correlation length.",
+    )
+    parser.add_argument(
+        "--noise-std-factor",
+        type=float,
+        default=0.05,
+        help="Factor scaling the noise standard deviation.",
+    )
+    parser.add_argument(
+        "--remove-degree-1",
+        action="store_true",
+        help="Remove degree 1 components from the prior measure.",
+    )
+
+    return parser.parse_args()
+
+
+def main():
+    args = parse_arguments()
+    if args.smoothing_scale_km is None:
+        args.smoothing_scale_km = args.load_scale_km
+
+    state, load_space, response_space, fp_op, scale_mm = utils.build_physics_components(
+        args.lmax, args.load_order, args.load_scale_km
+    )
+
+    # Extract the decoupled state and model from the operator
+    state = fp_op.state
+    model = fp_op.model
+
+    _, cond_prior, noise = utils.build_measures(
+        state,
+        load_space,
+        args.direct_scale_km,
+        args.direct_std_m,
+        args.noise_scale_factor,
+        args.noise_std_factor,
+        remove_degree_1=args.remove_degree_1,
+        prior_shift=args.prior_shift,
+    )
+
+    # Use the refactored WMBMethod which now takes an EarthModel
+    wmb = WMBMethod(model, args.obs_degree)
+
+    region_names, avg_op, weighting_functions, regions_dict = (
+        utils.get_regional_averaging(
+            state, load_space, smoothing_scale_km=args.smoothing_scale_km
+        )
+    )
+
+    wmb_avg_op = avg_op @ wmb.potential_coefficient_to_load_operator(load_space)
+
+    data_err = wmb.load_measure_to_observation_measure(noise)
+    data_space = data_err.domain
+
+    sea_level_proj = response_space.subspace_projection(0)
+
+    # Use the new sea_level_change_to_load_operator taking EarthState
+    sle_to_load = sea_level_change_to_load_operator(
+        state, sea_level_proj.codomain, load_space
+    )
+
+    # ------------------ OPTION: PLOT EXAMPLE LOADS ------------------
+    if args.plot_loads:
+        print("Plotting example direct and induced loads...")
+
+        sample_direct = cond_prior.sample()
+        sample_induced = (sle_to_load @ sea_level_proj @ fp_op)(sample_direct)
+
+        fig1, ax1 = create_map_figure(figsize=(14, 8))
+        _, im1 = plot(
+            sample_direct * scale_mm,
+            ax=ax1,
+            colorbar_kwargs={"label": "EWT (mm)"},
+            symmetric=True,
+        )
+        ax1.set_title("Example Direct Load Sample")
+        utils.draw_region_boundaries(state, ax1, regions_dict)
+
+        fig2, ax2 = create_map_figure(figsize=(14, 8))
+        _, im2 = plot(
+            sample_induced * scale_mm,
+            ax=ax2,
+            colorbar_kwargs={"label": "EWT (mm)"},
+            symmetric=True,
+        )
+        ax2.set_title("Resulting Induced Water Load")
+        utils.draw_region_boundaries(state, ax2, regions_dict)
+
+    # ------------------ CORE BIAS EVALUATION ------------------
+    op1 = inf.BlockLinearOperator(
+        [
+            [load_space.identity_operator(), data_space.zero_operator(load_space)],
+            [fp_op, data_space.zero_operator(response_space)],
+            [load_space.zero_operator(data_space), data_space.identity_operator()],
+        ]
+    )
+    op2 = inf.BlockLinearOperator(
+        [
+            [
+                load_space.identity_operator(),
+                sle_to_load @ sea_level_proj,
+                data_space.zero_operator(load_space),
+            ],
+            [
+                load_space.zero_operator(data_space),
+                grace_observation_operator(response_space, args.obs_degree),
+                data_space.identity_operator(),
+            ],
+        ]
+    )
+
+    avgs_space = avg_op.codomain
+    true_op = (
+        inf.RowLinearOperator([avg_op, data_space.zero_operator(avgs_space)])
+        @ op2
+        @ op1
+    )
+    err_op = inf.RowLinearOperator([avg_op, -1 * wmb_avg_op]) @ op2 @ op1
+
+    joint_meas = inf.GaussianMeasure.from_direct_sum([cond_prior, data_err])
+    true_meas = joint_meas.affine_mapping(operator=true_op)
+    err_meas = joint_meas.affine_mapping(operator=err_op)
+
+    true_stds = np.sqrt(np.diag(true_meas.covariance.matrix(dense=True))) * scale_mm
+    err_stds = np.sqrt(np.diag(err_meas.covariance.matrix(dense=True))) * scale_mm
+    err_means = err_meas.expectation * scale_mm
+
+    wmb_noise_meas = data_err.affine_mapping(operator=wmb_avg_op)
+    wmb_stds = np.sqrt(np.diag(wmb_noise_meas.covariance.matrix(dense=True))) * scale_mm
+
+    if args.samples > 0:
+        print(f"Drawing {args.samples} MC samples...")
+        joint_samples_list = joint_meas.samples(args.samples)
+        err_samples = np.zeros((args.samples, len(region_names)))
+        for idx, sample in enumerate(joint_samples_list):
+            err_samples[idx, :] = err_op(sample) * scale_mm
+
+    print("Plotting Bias PDFs...")
+
+    def gaussian_pdf(x, mean, std):
+        return (1.0 / (std * np.sqrt(2 * np.pi))) * np.exp(
+            -0.5 * ((x - mean) / std) ** 2
+        )
+
+    def make_forward(std_val):
+        return lambda x: x / std_val
+
+    def make_inverse(std_val):
+        return lambda x: x * std_val
+
+    nrows = int(np.ceil(len(region_names) / 2))
+    fig, axes = plt.subplots(
+        nrows=nrows, ncols=2, figsize=(14, 5 * nrows), layout="constrained"
+    )
+    for i, region in enumerate(region_names):
+        ax = axes.flatten()[i]
+        mu, std = err_means[i], err_stds[i]
+
+        norm_std = true_stds[i]
+        norm_label = r"Error Standardized by True Signal $\sigma$"
+
+        if args.samples > 0:
+            ax.hist(
+                err_samples[:, i],
+                bins=50,
+                alpha=0.3,
+                color="red",
+                density=True,
+                label="MC Samples",
+            )
+
+        plot_min = mu - 4 * std
+        plot_max = mu + 4 * std
+        x_vals = np.linspace(plot_min, plot_max, 300)
+
+        ax.plot(
+            x_vals,
+            gaussian_pdf(x_vals, mu, std),
+            "r-",
+            linewidth=2,
+            label=rf"Actual error ($\mu$={mu:.3f}, $\sigma$={std:.3f})",
+        )
+
+        ax.plot(
+            x_vals,
+            gaussian_pdf(x_vals, 0, wmb_stds[i]),
+            "b-",
+            linewidth=2,
+            label=rf"Theoretical error ($\mu$={0:.3f}, $\sigma$={wmb_stds[i]:.3f})",
+        )
+
+        ax.set_title(region, fontsize=14)
+        ax.set_xlabel("Error (mm)", fontsize=12)
+        ax.axvline(0, color="black", linestyle="--", linewidth=1.5)
+        ax.grid(True, linestyle=":", alpha=0.6)
+        ax.legend(loc="best", fontsize=9)
+
+        sec_ax = ax.secondary_xaxis(
+            "top", functions=(make_forward(norm_std), make_inverse(norm_std))
+        )
+        sec_ax.set_xlabel(norm_label, fontsize=10, color="darkgreen")
+        sec_ax.tick_params(axis="x", colors="darkgreen")
+
+    for j in range(i + 1, len(axes.flatten())):
+        axes.flatten()[j].set_visible(False)
+
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()

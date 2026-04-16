@@ -2961,14 +2961,14 @@ test = ["pytest", "pytest-doctestplus (>=0.7)"]
 
 [[package]]
 name = "pygeoinf"
-version = "1.6.9"
+version = "1.7.0"
 description = "A package for solving geophysical inference and inverse problems"
 optional = false
 python-versions = ">=3.12"
 groups = ["main"]
 files = [
-    {file = "pygeoinf-1.6.9-py3-none-any.whl", hash = "sha256:71aaacac374addb10b73c08fc36ed31cccde44dc60ba5bdca891a5e48441d9b3"},
-    {file = "pygeoinf-1.6.9.tar.gz", hash = "sha256:37aded0d7483ef8dad9283865e01e905be8802fa36f8e254e9630dde6005789b"},
+    {file = "pygeoinf-1.7.0-py3-none-any.whl", hash = "sha256:819309e80e29a976727ac273d27a180a40a9e85ff532e7c74446fc2a7e285a75"},
+    {file = "pygeoinf-1.7.0.tar.gz", hash = "sha256:8c5b9fe57800786852b80a173e8475319bfc06d9545bbaf241aa38fd7f326eb5"},
 ]
 
 [package.dependencies]
@@ -4587,4 +4587,4 @@ viz = ["cartopy (>=0.23)", "matplotlib", "nc-time-axis", "seaborn"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12"
-content-hash = "ec9e4a6dafa1b7cc9972330502578d3a546e01f29ad703db72df9fd0d965692f"
+content-hash = "e89f848808bb6bd73e173cd46787d825187918a3afd0dcb8fd1b37c4c2abbd11"

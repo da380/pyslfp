@@ -426,7 +426,7 @@ def sobolev_response_space(
     """
     field_space = Sobolev(
         earth_model.lmax,
-        order + 1,
+        order,
         scale,
         radius=earth_model.parameters.mean_sea_floor_radius,
         grid=earth_model.grid,
@@ -434,16 +434,6 @@ def sobolev_response_space(
     return HilbertSpaceDirectSum(
         [field_space, field_space, field_space, EuclideanSpace(2)]
     )
-
-
-"""
-Core physical operators for the Sea Level Equation.
-
-These operators represent the fundamental mathematical mappings of the Earth's 
-elastic, gravitational, and rotational responses. By composing these operators, 
-users can construct the full Sea Level Equation as a generalized linear system 
-(e.g., for Krylov solvers or adjoint state methods).
-"""
 
 
 # ================================================================ #

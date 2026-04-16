@@ -95,7 +95,7 @@ def parse_arguments():
     parser.add_argument(
         "--prior-shift",
         type=float,
-        default=0.0,
+        default=1.0,
         help="Shift the prior expectation by drawing a sample and multiplying by this factor.",
     )
     parser.add_argument(
@@ -107,7 +107,7 @@ def parse_arguments():
     parser.add_argument(
         "--noise-std-factor",
         type=float,
-        default=0.1,
+        default=0.05,
         help="Factor scaling the noise standard deviation relative to the prior.",
     )
     parser.add_argument(

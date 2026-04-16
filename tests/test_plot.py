@@ -12,7 +12,6 @@ import matplotlib.pyplot as plt
 from cartopy.mpl.geoaxes import GeoAxes
 import cartopy.crs as ccrs
 from matplotlib.contour import QuadContourSet
-from matplotlib.collections import PathCollection
 
 from pyshtools import SHCoeffs
 from pyslfp.plot import plot, create_map_figure, plot_coastline

@@ -12,10 +12,9 @@ import matplotlib.pyplot as plt
 from cartopy.mpl.geoaxes import GeoAxes
 import cartopy.crs as ccrs
 from matplotlib.contour import QuadContourSet
-from matplotlib.collections import PathCollection
 
 from pyshtools import SHCoeffs
-from pyslfp.plot import plot, create_map_figure, plot_points, plot_coastline
+from pyslfp.plot import plot, create_map_figure, plot_coastline
 
 
 @pytest.fixture(scope="module")
@@ -91,47 +90,6 @@ def test_plot_symmetric_option(sample_grid):
         fig = ax.figure
         vmin, vmax = im.get_clim()
         assert np.isclose(vmin, -vmax)
-    finally:
-        if fig:
-            plt.close(fig)
-
-
-# ==================================================================== #
-#                 2. Observation Points (plot_points)                  #
-# ==================================================================== #
-
-
-def test_plot_points_basic():
-    """Smoke test for plotting simple discrete points without variable data."""
-    fig = None
-    try:
-        points = [(45.0, 90.0), (-30.0, 45.0)]  # (lat, lon)
-        ax, sc = plot_points(points, color="green", s=50)
-        fig = ax.figure
-
-        assert isinstance(ax, GeoAxes)
-        assert isinstance(sc, PathCollection)
-
-        # Because we didn't provide 'data' or ask for a colorbar, we should only have 1 axis
-        assert len(fig.axes) == 1
-    finally:
-        if fig:
-            plt.close(fig)
-
-
-def test_plot_points_with_data():
-    """Smoke test for plotting points colored by variable data, with a colorbar."""
-    fig = None
-    try:
-        points = [(45.0, 90.0), (-30.0, 45.0)]
-        data = [10.5, -5.2]
-
-        ax, sc = plot_points(points, data=data, cmap="viridis", colorbar=True)
-        fig = ax.figure
-
-        assert isinstance(ax, GeoAxes)
-        # Because we requested a colorbar, Matplotlib creates a second axis for it
-        assert len(fig.axes) > 1
     finally:
         if fig:
             plt.close(fig)

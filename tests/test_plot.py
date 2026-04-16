@@ -1,5 +1,5 @@
 """
-Test suite for the plotting and visualization utilities.
+Test suite for the plot and visualization utilities.
 """
 
 import pytest
@@ -15,13 +15,13 @@ from matplotlib.contour import QuadContourSet
 from matplotlib.collections import PathCollection
 
 from pyshtools import SHCoeffs
-from pyslfp.plotting import plot, create_map_figure, plot_points, plot_coastline
+from pyslfp.plot import plot, create_map_figure, plot_points, plot_coastline
 
 
 @pytest.fixture(scope="module")
 def sample_grid():
     """
-    Provides a simple, non-trivial SHGrid object for plotting tests.
+    Provides a simple, non-trivial SHGrid object for plot tests.
     This creates a simple dipole (degree 1, order 1) field.
     """
     lmax = 16

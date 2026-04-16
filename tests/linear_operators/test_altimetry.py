@@ -42,9 +42,9 @@ def fingerprint_operator(operator_lmax):
     """
     return FingerPrintOperator.for_testing(
         operator_lmax,
-        load_parameters=(1.0, 0.1),
-        response_parameters=(2.0, 0.1),
-        rotational_feedbacks=True,  # Leave True so we can test the centrifugal corrections
+        load_parameters=(2.0, 0.1),
+        response_parameters=(3.0, 0.1),
+        rotational_feedbacks=True,
     )
 
 
@@ -192,19 +192,3 @@ def test_joint_altimetry_observation_model_adjoint(fingerprint_operator, sample_
         domain_measure=domain_measure,
         codomain_measure=codomain_measure,
     )
-
-
-def test_create_forward_problem(fingerprint_operator, sample_points):
-    """
-    Tests the instantiation of the LinearForwardProblem and noise covariance setups.
-    """
-    model = AltimetryObservationModel(fingerprint_operator, sample_points)
-
-    prob_scalar = model.create_forward_problem(noise_std=0.1)
-    assert isinstance(prob_scalar, inf.LinearForwardProblem)
-
-    prob_array = model.create_forward_problem(noise_std=np.array([0.1, 0.2, 0.3]))
-    assert isinstance(prob_array, inf.LinearForwardProblem)
-
-    with pytest.raises(ValueError, match="does not match number of altimetry points"):
-        model.create_forward_problem(noise_std=np.array([0.1, 0.2]))

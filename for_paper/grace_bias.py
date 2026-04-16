@@ -67,7 +67,7 @@ def parse_arguments():
     parser.add_argument(
         "--load-scale-km",
         type=float,
-        default=250.0,
+        default=500.0,
         help="Length scale (in km) defining the load space.",
     )
     parser.add_argument(
@@ -92,7 +92,7 @@ def parse_arguments():
     parser.add_argument(
         "--prior-shift",
         type=float,
-        default=0.0,
+        default=1.0,
         help="Shift the prior expectation by drawing a sample and multiplying by this factor.",
     )
     parser.add_argument(

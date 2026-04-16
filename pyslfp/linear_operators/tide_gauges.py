@@ -8,15 +8,12 @@ specific geographic coordinates.
 
 from __future__ import annotations
 import csv
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple
 
-import numpy as np
 
 from pygeoinf import (
     LinearOperator,
     HilbertSpaceDirectSum,
-    GaussianMeasure,
-    LinearForwardProblem,
 )
 
 from pyslfp.data.downloader import ensure_data
@@ -138,7 +135,7 @@ class TideGaugeObservationModel:
 
         # 2. The full composite forward operator (Load Space -> Euclidean Space)
         self._forward_operator = (
-            self.response_to_data_operator @ self.fingerprint_operator
+            self._response_to_data_operator @ self.fingerprint_operator
         )
 
     @classmethod
@@ -181,43 +178,8 @@ class TideGaugeObservationModel:
         return self._names
 
     @property
-    def response_to_data_operator(self) -> LinearOperator:
-        """
-        Returns the linear operator from the response space to the data space.
-        """
-        return self._response_to_data_operator
-
-    @property
     def forward_operator(self) -> LinearOperator:
         """
         Returns the forward operator mapping direct loads to tide gauge observations.
         """
         return self._forward_operator
-
-    def create_forward_problem(
-        self, noise_std: Union[float, np.ndarray]
-    ) -> LinearForwardProblem:
-        """
-        Wraps the composite forward operator in a Pygeoinf LinearForwardProblem,
-        automatically generating the diagonal Euclidean noise measure.
-
-        Args:
-            noise_std: The non-dimensional standard deviation of the measurement noise.
-                Can be a single float (uniform noise) or an array matching the number of points.
-        """
-        data_space = self.forward_operator.codomain
-
-        if isinstance(noise_std, (float, int)):
-            stds = np.full(data_space.dim, float(noise_std))
-        else:
-            stds = np.asarray(noise_std)
-            if len(stds) != data_space.dim:
-                raise ValueError(
-                    f"Provided noise array length ({len(stds)}) does not match "
-                    f"number of tide gauges ({data_space.dim})."
-                )
-
-        noise_meas = GaussianMeasure.from_standard_deviations(data_space, stds)
-        return LinearForwardProblem(
-            self.forward_operator, data_error_measure=noise_meas
-        )

@@ -52,13 +52,13 @@ def parse_arguments():
     parser.add_argument(
         "--lmax",
         type=int,
-        default=64,
+        default=128,
         help="Maximum spherical harmonic degree for the Earth model.",
     )
     parser.add_argument(
         "--obs-degree",
         type=int,
-        default=32,
+        default=100,
         help="Maximum spherical harmonic degree of the GRACE observations.",
     )
     parser.add_argument(
@@ -76,7 +76,7 @@ def parse_arguments():
     parser.add_argument(
         "--smoothing-scale-km",
         type=float,
-        default=None,
+        default=100.0,
         help="Scale (in km) for spatial smoothing. Defaults to --load-scale-km.",
     )
 
@@ -145,11 +145,9 @@ def main():
         prior_shift=args.prior_shift,
     )
 
-    # 1. Initialize WMBMethod using the model API
     wmb = sl.linear_operators.WMBMethod(state.model, args.obs_degree)
     data_error_measure = wmb.load_measure_to_observation_measure(noise)
 
-    # 2. Use the new GraceObservationModel wrapper to handle the forward operators
     obs_model = sl.linear_operators.GraceObservationModel(fp_op, args.obs_degree)
     forward_problem = inf.LinearForwardProblem(
         obs_model.forward_operator, data_error_measure=data_error_measure
@@ -163,8 +161,7 @@ def main():
     preconditioner = wmb.bayesian_normal_operator_preconditioner(
         init_prior, data_error_measure
     )
-    callback = None  # inverse_problem.normal_residual_callback(synthetic_grace_data)
-    solver = inf.CGMatrixSolver(callback=callback)
+    solver = inf.CGMatrixSolver()
 
     print("Solving for posterior...")
     load_posterior = inverse_problem.model_posterior_measure(
@@ -180,8 +177,8 @@ def main():
     )
 
     tot_avg_op = avg_op @ tot_op
-    wmb_avg_op = wmb.potential_coefficient_to_load_operator(load_space)
-    wmb_direct_avg_op = avg_op @ wmb_avg_op
+    wmb_op = wmb.potential_coefficient_to_load_operator(load_space)
+    wmb_direct_avg_op = avg_op @ wmb_op
 
     if args.plot_pdfs or args.mc_trials > 0:
         print("Forming load average estimates")

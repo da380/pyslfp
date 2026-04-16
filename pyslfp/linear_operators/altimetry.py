@@ -14,12 +14,14 @@ import numpy as np
 from scipy.interpolate import RegularGridInterpolator
 from pyshtools import SHGrid
 
+
 from pygeoinf import (
     LinearOperator,
     HilbertSpaceDirectSum,
     RowLinearOperator,
-    GaussianMeasure,
-    LinearForwardProblem,
+    BlockDiagonalLinearOperator,
+    EuclideanSpace,
+    ColumnLinearOperator,
 )
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
@@ -160,6 +162,7 @@ def altimetry_point_operator(
     /,
     *,
     remove_rotational_contribution: bool = True,
+    matrix_free: bool = False,
 ) -> LinearOperator:
     """
     Returns an operator mapping the SLE response space directly to SSH values
@@ -170,9 +173,39 @@ def altimetry_point_operator(
         response_space,
         remove_rotational_contribution=remove_rotational_contribution,
     )
-    point_eval_op = ssh_op.codomain.point_evaluation_operator(points)
+    point_eval_op = ssh_op.codomain.point_evaluation_operator(
+        points,
+        matrix_free=matrix_free,
+    )
 
     return point_eval_op @ ssh_op
+
+
+def altimetry_averaging_operator(points: List[Tuple[float, float]]) -> LinearOperator:
+    """
+    Creates a LinearOperator that maps a vector of altimetry observations
+    to a Global Mean Sea Level (GMSL) estimate using a latitude-weighted average.
+
+    Args:
+        points: A list of (latitude, longitude) tuples representing the
+                observation locations in degrees.
+
+    Returns:
+        A LinearOperator mapping from EuclideanSpace(N) to EuclideanSpace(1).
+    """
+    n_points = len(points)
+
+    if n_points == 0:
+        raise ValueError("The list of altimetry points cannot be empty.")
+
+    domain = EuclideanSpace(n_points)
+    codomain = EuclideanSpace(1)
+    lats = np.array([p[0] for p in points])
+    lats_rad = np.radians(lats)
+    weights = np.cos(lats_rad)
+    weights /= np.sum(weights)
+    matrix = weights.reshape(1, n_points)
+    return LinearOperator.from_matrix(domain, codomain, matrix)
 
 
 # ================================================================ #
@@ -195,6 +228,7 @@ class JointAltimetryObservationModel:
         ice_space: Optional[Union[Lebesgue, Sobolev]] = None,
         ocean_space: Optional[Union[Lebesgue, Sobolev]] = None,
         remove_rotational_contribution: bool = True,
+        matrix_free: bool = False,
     ):
         """
         Args:
@@ -204,6 +238,8 @@ class JointAltimetryObservationModel:
             ocean_space: The Hilbert space for the ocean prior. Defaults to the SLE load space.
             remove_rotational_contribution: If True, adds the centrifugal potential
                 correction to the SSH calculation.
+            matrix_free: If True, point evaluation is done using a matrix-free implementation.
+                This is slower, but avoids building a potentially large matrix internally.
         """
         self._fingerprint_operator = fingerprint_operator
         self._points = points
@@ -214,25 +250,50 @@ class JointAltimetryObservationModel:
         self._ice_space = ice_space if ice_space is not None else load_space
         self._ocean_space = ocean_space if ocean_space is not None else load_space
 
-        # 1. The Pre-Physics Operator: [Ice, Ocean] -> Direct Load
         self._joint_to_load_operator = joint_ice_ocean_to_load_operator(
             state, self._ice_space, self._ocean_space, load_space
         )
-
-        # 2. The Post-Physics Operator: SLE Response -> Discrete SSH Points
         self._response_to_data_operator = altimetry_point_operator(
             state,
             fingerprint_operator.codomain,
             self._points,
             remove_rotational_contribution=remove_rotational_contribution,
+            matrix_free=matrix_free,
         )
 
-        # 3. The Full Composite Forward Operator
-        self._forward_operator = (
-            self._response_to_data_operator
-            @ self._fingerprint_operator
-            @ self._joint_to_load_operator
+        # --- Construct the Corrected Full Composite Forward Operator ---
+
+        # Map [Ice, Ocean] -> [Total Load, Ocean]
+        joint_space = HilbertSpaceDirectSum([self._ice_space, self._ocean_space])
+        op1 = ColumnLinearOperator(
+            [self._joint_to_load_operator, joint_space.subspace_projection(1)]
         )
+
+        # Map [Total Load, Ocean] -> [Static SSH, Ocean]
+        static_ssh_op = sea_surface_height_operator(
+            state,
+            fingerprint_operator.codomain,
+            remove_rotational_contribution=remove_rotational_contribution,
+        )
+        ssh_inclusion = static_ssh_op.codomain.order_inclusion_operator(
+            load_space.order
+        )
+
+        op2 = BlockDiagonalLinearOperator(
+            [
+                ssh_inclusion @ static_ssh_op @ self._fingerprint_operator,
+                self._ocean_space.identity_operator(),
+            ]
+        )
+
+        # Map [Static SSH, Ocean] -> Total SSH Field
+        ocean_to_ssh = self._ocean_space.order_inclusion_operator(load_space.order)
+        op3 = RowLinearOperator([load_space.identity_operator(), ocean_to_ssh])
+
+        # Evaluate at the discrete altimetry points
+        point_eval = load_space.point_evaluation_operator(self._points)
+
+        self._forward_operator = point_eval @ op3 @ op2 @ op1
 
     @property
     def fingerprint_operator(self) -> FingerPrintOperator:
@@ -243,39 +304,13 @@ class JointAltimetryObservationModel:
         return self._points
 
     @property
-    def response_to_data_operator(self) -> LinearOperator:
-        return self._response_to_data_operator
-
-    @property
     def forward_operator(self) -> LinearOperator:
         return self._forward_operator
 
-    def create_forward_problem(
-        self, noise_std: Union[float, np.ndarray]
-    ) -> LinearForwardProblem:
-        """
-        Wraps the composite forward operator in a Pygeoinf LinearForwardProblem.
-
-        Args:
-            noise_std: The non-dimensional standard deviation of the measurement noise.
-                Can be a single float (uniform noise) or an array matching the number of points.
-        """
-        data_space = self.forward_operator.codomain
-
-        if isinstance(noise_std, (float, int)):
-            stds = np.full(data_space.dim, float(noise_std))
-        else:
-            stds = np.asarray(noise_std)
-            if len(stds) != data_space.dim:
-                raise ValueError(
-                    f"Provided noise array length ({len(stds)}) does not match "
-                    f"number of altimetry points ({data_space.dim})."
-                )
-
-        noise_meas = GaussianMeasure.from_standard_deviations(data_space, stds)
-        return LinearForwardProblem(
-            self.forward_operator, data_error_measure=noise_meas
-        )
+    @property
+    def joint_to_load_operator(self) -> LinearOperator:
+        """Exposes the operator mapping [Ice, Ocean] -> Total Direct Load."""
+        return self._joint_to_load_operator
 
 
 class AltimetryObservationModel:
@@ -321,7 +356,7 @@ class AltimetryObservationModel:
             remove_rotational_contribution=remove_rotational_contribution,
         )
 
-        # 3. The Full Composite Forward Operator
+        # 3. The Full Composite Forward Operator (No Ocean Dynamic Topography to add here)
         self._forward_operator = (
             self._response_to_data_operator
             @ self._fingerprint_operator
@@ -343,26 +378,3 @@ class AltimetryObservationModel:
     @property
     def forward_operator(self) -> LinearOperator:
         return self._forward_operator
-
-    def create_forward_problem(
-        self, noise_std: Union[float, np.ndarray]
-    ) -> LinearForwardProblem:
-        """
-        Wraps the composite forward operator in a Pygeoinf LinearForwardProblem.
-        """
-        data_space = self.forward_operator.codomain
-
-        if isinstance(noise_std, (float, int)):
-            stds = np.full(data_space.dim, float(noise_std))
-        else:
-            stds = np.asarray(noise_std)
-            if len(stds) != data_space.dim:
-                raise ValueError(
-                    f"Provided noise array length ({len(stds)}) does not match "
-                    f"number of altimetry points ({data_space.dim})."
-                )
-
-        noise_meas = GaussianMeasure.from_standard_deviations(data_space, stds)
-        return LinearForwardProblem(
-            self.forward_operator, data_error_measure=noise_meas
-        )

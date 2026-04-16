@@ -19,6 +19,7 @@ from .physics import (
 from .spatial import (
     ocean_average_operator,
     ice_projection_operator,
+    ocean_projection_operator,
     land_projection_operator,
     ice_average_operator,
     land_average_operator,
@@ -38,6 +39,9 @@ from .altimetry import (
     ice_altimetry_points,
     sea_surface_height_operator,
     altimetry_point_operator,
+    altimetry_averaging_operator,
+    JointAltimetryObservationModel,
+    AltimetryObservationModel,
 )
 
 from .loads import (
@@ -68,6 +72,7 @@ __all__ = [
     # .spatial
     "ocean_average_operator",
     "ice_projection_operator",
+    "ocean_projection_operator",
     "land_projection_operator",
     "ice_average_operator",
     "land_average_operator",
@@ -83,6 +88,9 @@ __all__ = [
     "ice_altimetry_points",
     "sea_surface_height_operator",
     "altimetry_point_operator",
+    "altimetry_averaging_operator",
+    "AltimetryObservationModel",
+    "JointAltimetryObservationModel",
     # .loads
     "ice_thickness_change_to_load_operator",
     "sea_level_change_to_load_operator",

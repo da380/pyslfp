@@ -17,7 +17,7 @@ from .physics import SeaLevelEquation, LinearSeaLevelEquation
 # ---------------------------------------------------------------------------
 # 4. Visualization Utilities
 # ---------------------------------------------------------------------------
-from .plotting import plot, plot_points, create_map_figure, plot_coastline
+from .plot import plot, plot_points, create_map_figure, plot_coastline
 
 # ---------------------------------------------------------------------------
 # 5. Expose Sub-packages for Namespaced Access

@@ -35,10 +35,10 @@ from pyslfp.linear_operators.physics import FingerPrintOperator
 
 def grace_observation_operator(
     response_space: HilbertSpaceDirectSum,
-    obs_degree: int,
+    max_obs_degree: int,
     /,
     *,
-    minimum_degree: int = 2,
+    min_obs_degree: int = 2,
 ) -> LinearOperator:
     """
     Maps the physical response fields to a vector of spherical harmonic
@@ -46,8 +46,8 @@ def grace_observation_operator(
 
     Args:
         response_space: The 4-component composite response space.
-        obs_degree: The maximum spherical harmonic degree of the observations.
-        minimum_degree: The minimum degree (usually 2, dropping degrees 0 and 1).
+       max_obs_degree: The maximum spherical harmonic degree of the observations.
+        min_obs_degree: The minimum degree (usually 2, dropping degrees 0 and 1).
 
     Returns:
         A LinearOperator mapping from the response space to an N-dimensional
@@ -56,7 +56,7 @@ def grace_observation_operator(
     check_response_space(response_space, point_values=False)
     gpc_space = response_space.subspace(2)
     spatial_to_coeffs = gpc_space.to_coefficient_operator(
-        obs_degree, lmin=minimum_degree
+        max_obs_degree, lmin=min_obs_degree
     )
     return spatial_to_coeffs @ response_space.subspace_projection(2)
 
@@ -70,38 +70,48 @@ class GraceObservationModel:
     def __init__(
         self,
         fingerprint_operator: FingerPrintOperator,
-        obs_degree: int,
+        max_obs_degree: int,
         /,
         *,
-        minimum_degree: int = 2,
+        min_obs_degree: int = 2,
     ):
         """
         Args:
             fingerprint_operator: The physics operator mapping loads to responses.
-            obs_degree: The maximum spherical harmonic degree of the observations.
-            minimum_degree: The minimum degree to extract (defaults to 2).
+           max_obs_degree: The maximum spherical harmonic degree of the observations.
+            min_obs_degree: The minimum degree to extract (defaults to 2).
         """
         self._fingerprint_operator = fingerprint_operator
-        self._obs_degree = obs_degree
-        self._minimum_degree = minimum_degree
+        self._obs_degree = max_obs_degree
+        self._min_obs_degree = min_obs_degree
 
         self._response_to_data_operator = grace_observation_operator(
             self.fingerprint_operator.codomain,
-            obs_degree,
-            minimum_degree=minimum_degree,
+            max_obs_degree,
+            min_obs_degree=min_obs_degree,
         )
 
         self._forward_operator = (
-            self.response_to_data_operator @ self.fingerprint_operator
+            self._response_to_data_operator @ self.fingerprint_operator
         )
+
+    @property
+    def min_obs_degree(self) -> int:
+        """
+        Returns the minimum observation degree
+        """
+        return self._min_obs_degree
+
+    @property
+    def max_obs_degree(self) -> int:
+        """
+        Returns the maximum observation degree
+        """
+        return self._max_obs_degree
 
     @property
     def fingerprint_operator(self) -> FingerPrintOperator:
         return self._fingerprint_operator
-
-    @property
-    def response_to_data_operator(self) -> LinearOperator:
-        return self._response_to_data_operator
 
     @property
     def forward_operator(self) -> LinearOperator:
@@ -124,14 +134,35 @@ class WMBMethod:
     """
 
     def __init__(
-        self, model: EarthModel, obs_degree: int, /, *, minimum_degree: int = 2
+        self, model: EarthModel, max_obs_degree: int, /, *, min_obs_degree: int = 2
     ):
-        self.model = model
-        self.obs_degree = obs_degree
-        self.minimum_degree = minimum_degree
+        self._model = model
+        self._max_obs_degree = max_obs_degree
+        self._min_obs_degree = min_obs_degree
 
         # Total number of spherical harmonic coefficients in the observation vector
-        self.observation_dim = (obs_degree + 1) ** 2 - minimum_degree**2
+        self._observation_dim = (max_obs_degree + 1) ** 2 - min_obs_degree**2
+
+    @property
+    def min_obs_degree(self) -> int:
+        """
+        Returns the minimum observation degree
+        """
+        return self._min_obs_degree
+
+    @property
+    def max_obs_degree(self) -> int:
+        """
+        Returns the maximum observation degree
+        """
+        return self._max_obs_degree
+
+    @property
+    def observation_dim(self) -> int:
+        """
+        Returns the dimension of the data space.
+        """
+        return self._observation_dim
 
     # ---------------------------------------------------------#
     #             Core Euclidean Coefficient Operators         #
@@ -144,13 +175,13 @@ class WMBMethod:
         Maps load SH coefficients to potential SH coefficients by multiplying
         each degree by its elastic load Love number (k_l).
         """
-        domain = EuclideanSpace(self.observation_dim)
-        scaling_factors = np.zeros(self.observation_dim)
+        domain = EuclideanSpace(self._observation_dim)
+        scaling_factors = np.zeros(self._observation_dim)
 
-        for l in range(self.minimum_degree, self.obs_degree + 1):
-            idx_start = l**2 - self.minimum_degree**2
-            idx_end = (l + 1) ** 2 - self.minimum_degree**2
-            scaling_factors[idx_start:idx_end] = self.model.love_numbers.k[l]
+        for l in range(self.min_obs_degree, self.max_obs_degree + 1):
+            idx_start = l**2 - self.min_obs_degree**2
+            idx_end = (l + 1) ** 2 - self.min_obs_degree**2
+            scaling_factors[idx_start:idx_end] = self._model.love_numbers.k[l]
 
         return DiagonalSparseMatrixLinearOperator.from_diagonal_values(
             domain, domain, scaling_factors
@@ -176,7 +207,7 @@ class WMBMethod:
         check_load_space(load_space)
 
         coeffs_to_load = load_space.from_coefficient_operator(
-            self.obs_degree, lmin=self.minimum_degree
+            self.max_obs_degree, lmin=self.min_obs_degree
         )
         scaling_operator = self.potential_coefficient_to_load_coefficient_operator()
 
@@ -198,22 +229,22 @@ class WMBMethod:
 
         prior_variances = load_measure.spectral_variances
         prior_lmax = load_measure.domain.lmax
-        max_mapped_degree = min(prior_lmax, self.obs_degree)
+        max_mapped_degree = min(prior_lmax, self.max_obs_degree)
 
-        observed_stds = np.zeros(self.observation_dim)
+        observed_stds = np.zeros(self._observation_dim)
 
-        for l in range(self.minimum_degree, max_mapped_degree + 1):
+        for l in range(self.min_obs_degree, max_mapped_degree + 1):
             in_start = l**2
             in_end = (l + 1) ** 2
-            out_start = l**2 - self.minimum_degree**2
-            out_end = (l + 1) ** 2 - self.minimum_degree**2
+            out_start = l**2 - self.min_obs_degree**2
+            out_end = (l + 1) ** 2 - self.min_obs_degree**2
 
             prior_stds = np.sqrt(prior_variances[in_start:in_end])
             observed_stds[out_start:out_end] = prior_stds * abs(
-                self.model.love_numbers.k[l]
+                self._model.love_numbers.k[l]
             )
 
-        observation_space = EuclideanSpace(self.observation_dim)
+        observation_space = EuclideanSpace(self._observation_dim)
         return GaussianMeasure.from_standard_deviations(
             observation_space, observed_stds
         )

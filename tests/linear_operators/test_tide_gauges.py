@@ -3,7 +3,6 @@ Test suite for tide gauge observation models and operators.
 """
 
 import pytest
-import numpy as np
 
 import pygeoinf as inf
 from pyslfp.linear_operators.physics import FingerPrintOperator
@@ -162,23 +161,3 @@ def test_tide_gauge_forward_operator_adjoint(fingerprint_operator, sample_points
         domain_measure=domain_measure,
         codomain_measure=codomain_measure,
     )
-
-
-def test_create_forward_problem(fingerprint_operator, sample_points):
-    """
-    Tests the creation of the LinearForwardProblem and ensures the noise
-    covariances are built correctly.
-    """
-    model = TideGaugeObservationModel(fingerprint_operator, sample_points)
-
-    # 1. Test with scalar noise
-    prob_scalar = model.create_forward_problem(noise_std=0.1)
-    assert isinstance(prob_scalar, inf.LinearForwardProblem)
-
-    # 2. Test with array noise
-    prob_array = model.create_forward_problem(noise_std=np.array([0.1, 0.2, 0.3]))
-    assert isinstance(prob_array, inf.LinearForwardProblem)
-
-    # 3. Test failure on mismatched array length
-    with pytest.raises(ValueError, match="does not match number of tide gauges"):
-        model.create_forward_problem(noise_std=np.array([0.1, 0.2]))

@@ -219,7 +219,6 @@ class Regions:
         }
 
         for r in regions:
-            # --- MOVED THIS TO THE TOP ---
             if r == "Caspian Sea" or r == "Glaciers":
                 warnings.warn(
                     f"'{r}' is a hardcoded array mask and has no vector boundaries to plot."
@@ -251,8 +250,41 @@ class Regions:
                 f"Universal plot failed: Region '{r}' not found in any dataset."
             )
 
+        # Repackage line arguments cleanly for regionmask plotting methods
+        rm_kwargs = kwargs.copy()
+        line_kws = rm_kwargs.pop("line_kws", {})
+
+        # Pop all common Matplotlib styling arguments into line_kws
+        if "edgecolor" in rm_kwargs:
+            line_kws["color"] = rm_kwargs.pop("edgecolor")
+        if "color" in rm_kwargs:
+            line_kws["color"] = rm_kwargs.pop("color")
+        if "linewidth" in rm_kwargs:
+            line_kws["linewidth"] = rm_kwargs.pop("linewidth")
+        if "lw" in rm_kwargs:
+            line_kws["linewidth"] = rm_kwargs.pop("lw")
+        if "zorder" in rm_kwargs:
+            line_kws["zorder"] = rm_kwargs.pop("zorder")
+        if "alpha" in rm_kwargs:
+            line_kws["alpha"] = rm_kwargs.pop("alpha")
+        if "linestyle" in rm_kwargs:
+            line_kws["linestyle"] = rm_kwargs.pop("linestyle")
+        if "ls" in rm_kwargs:
+            line_kws["linestyle"] = rm_kwargs.pop("ls")
+
+        if line_kws:
+            rm_kwargs["line_kws"] = line_kws
+
+        # Regionmask datasets get the safely repackaged kwargs
         if grouped["AR6"]:
-            self.plot_ar6_boundaries(ax, region_names=grouped["AR6"], **kwargs)
+            self.plot_ar6_boundaries(ax, region_names=grouped["AR6"], **rm_kwargs)
+
+        if grouped["NE_OCEAN"]:
+            self.plot_ne_ocean_boundaries(
+                ax, region_names=grouped["NE_OCEAN"], **rm_kwargs
+            )
+
+        # Geopandas datasets can safely accept the raw, standard matplotlib kwargs
         if grouped["IHO"]:
             self.plot_iho_sea_boundaries(ax, region_names=grouped["IHO"], **kwargs)
         if grouped["HYDRO"]:
@@ -261,10 +293,6 @@ class Regions:
             self.plot_imbie_ant_boundaries(ax, region_names=grouped["ANT"], **kwargs)
         if grouped["GRL"]:
             self.plot_mouginot_grl_boundaries(ax, region_names=grouped["GRL"], **kwargs)
-        if grouped["NE_OCEAN"]:
-            self.plot_ne_ocean_boundaries(
-                ax, region_names=grouped["NE_OCEAN"], **kwargs
-            )
 
     # ==================================================================== #
     #                         3. Listing Methods                           #

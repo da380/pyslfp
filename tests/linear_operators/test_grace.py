@@ -57,15 +57,15 @@ def test_grace_observation_operator_adjoint(fingerprint_operator):
     spherical harmonic coefficients of the Gravity Potential Change.
     """
     response_space = fingerprint_operator.codomain
-    obs_degree = 10
+    max_obs_degree = 10
     min_degree = 2
 
     A = grace_observation_operator(
-        response_space, obs_degree, minimum_degree=min_degree
+        response_space, max_obs_degree, min_obs_degree=min_degree
     )
 
     # Expected Euclidean dimension: (L+1)^2 - lmin^2
-    expected_dim = (obs_degree + 1) ** 2 - min_degree**2
+    expected_dim = (max_obs_degree + 1) ** 2 - min_degree**2
     assert A.codomain.dim == expected_dim
 
     domain_measure = fingerprint_operator.response_measure_for_testing()
@@ -85,7 +85,7 @@ def test_grace_observation_model_adjoint(fingerprint_operator):
     Tests the full composite forward operator mapping from Mass Load
     straight to GRACE potential coefficients.
     """
-    model = GraceObservationModel(fingerprint_operator, 10, minimum_degree=2)
+    model = GraceObservationModel(fingerprint_operator, 10, min_obs_degree=2)
     A = model.forward_operator
 
     domain_measure = fingerprint_operator.load_measure_for_testing()
@@ -114,7 +114,7 @@ def test_wmb_potential_to_load_operator_adjoint(testing_state, sobolev):
     model = testing_state.model
     b = model.parameters.mean_sea_floor_radius
 
-    wmb = WMBMethod(model, 10, minimum_degree=2)
+    wmb = WMBMethod(model, 10, min_obs_degree=2)
 
     if sobolev:
         load_space = sobolev_load_space(model, 1.0, 0.1 * b)
@@ -143,7 +143,7 @@ def test_wmb_preconditioner_generation(testing_state):
     model = testing_state.model
     b = model.parameters.mean_sea_floor_radius
 
-    wmb = WMBMethod(model, 10, minimum_degree=2)
+    wmb = WMBMethod(model, 10, min_obs_degree=2)
     load_space = lebesgue_load_space(model)
 
     prior_measure = load_space.heat_kernel_gaussian_measure(0.5 * b)

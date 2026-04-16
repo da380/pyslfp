@@ -40,7 +40,7 @@ def plot(
     projection: Optional[Projection] = None,
     contour: bool = False,
     cmap: str = "RdBu",
-    coasts: bool = True,  # pyslfp default (pygeoinf is False)
+    coasts: bool = True,
     rivers: bool = False,
     borders: bool = False,
     map_extent: Optional[List[float]] = None,
@@ -97,6 +97,12 @@ def plot_points(
     marker: str = "o",
     edgecolors: str = "none",
     zorder: int = 5,
+    coasts: bool = True,  # pyslfp default (pygeoinf is False)
+    rivers: bool = False,
+    borders: bool = False,
+    map_extent: Optional[List[float]] = None,
+    gridlines: bool = True,
+    symmetric: bool = False,
     colorbar: bool = False,
     colorbar_kwargs: Optional[dict] = None,
     **kwargs,
@@ -104,63 +110,34 @@ def plot_points(
     """
     Plots discrete observation points (e.g., tide gauges or altimetry tracks) on a map.
 
-    Args:
-        points: A list of (latitude, longitude) tuples in degrees.
-        data: Optional array of values to color the points by.
-        ax: An existing Cartopy GeoAxes object. If None, creates a new one.
-        projection: A cartopy projection instance if creating a new axes.
-        cmap: The colormap to use if `data` is provided.
-        color: The fixed color to use if `data` is NOT provided.
-        s: The marker size.
-        marker: The marker style (e.g., 'o', '*', '^').
-        edgecolors: The color of the marker edges.
-        zorder: The drawing order (higher means drawn on top of other elements).
-        colorbar: If True and `data` is provided, attaches a colorbar.
-        colorbar_kwargs: Formatting options for the colorbar.
-        **kwargs: Additional keyword arguments passed to `ax.scatter`
-            (e.g., vmin, vmax, alpha).
-
-    Returns:
-        A tuple `(ax, sc)` containing the GeoAxes and the PathCollection artist.
+    This acts as a transparent wrapper around pygeoinf.sphere.plot_points. It shares
+    the exact same API signature, but injects pyslfp's preferred defaults
+    (Robinson projection, enabled coastlines).
     """
-    if ax is None:
-        fig, ax = create_map_figure(projection=projection)
-        # If we created a new map, it's nice to add coasts by default
-        ax.set_global()
-        ax.coastlines(linewidth=0.5, alpha=0.5)
-    else:
-        fig = ax.get_figure()
+    if projection is None and ax is None:
+        projection = ccrs.Robinson()
 
-    lats = [p[0] for p in points]
-    lons = [p[1] for p in points]
-
-    # If data is provided, map it to the colormap. Otherwise, use the fixed color.
-    if data is not None:
-        c = data
-        kwargs.setdefault("cmap", cmap)
-    else:
-        c = color
-
-    sc = ax.scatter(
-        lons,
-        lats,
-        c=c,
+    return sphere.plot_points(
+        points,
+        data=data,
+        ax=ax,
+        projection=projection,
+        cmap=cmap,
+        color=color,
         s=s,
         marker=marker,
         edgecolors=edgecolors,
         zorder=zorder,
-        transform=ccrs.PlateCarree(),
+        coasts=coasts,
+        rivers=rivers,
+        borders=borders,
+        map_extent=map_extent,
+        gridlines=gridlines,
+        symmetric=symmetric,
+        colorbar=colorbar,
+        colorbar_kwargs=colorbar_kwargs,
         **kwargs,
     )
-
-    if colorbar and data is not None and fig:
-        cb_opts = colorbar_kwargs or {}
-        cb_opts.setdefault("orientation", "horizontal")
-        cb_opts.setdefault("shrink", 0.7)
-        cb_opts.setdefault("pad", 0.05)
-        fig.colorbar(sc, ax=ax, **cb_opts)
-
-    return ax, sc
 
 
 def plot_coastline(

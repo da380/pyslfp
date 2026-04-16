@@ -19,7 +19,7 @@ from cartopy.mpl.geoaxes import GeoAxes
 from .core import EarthModel
 from .regions import Regions
 from .ice import IceNG, AnalyticalIceModel
-from .plotting import plot_coastline
+from .plot import plot_coastline
 
 
 class EarthState(Regions):

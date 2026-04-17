@@ -38,7 +38,7 @@ def parse_arguments():
     parser.add_argument("--mc-trials", type=int, default=0, help="Number of MC trials.")
 
     parser.add_argument("--lmax", type=int, default=128)
-    parser.add_argument("--surrogate-degree", type=int, default=64)
+    parser.add_argument("--surrogate-degree", type=int, default=32)
     parser.add_argument("--obs-degree", type=int, default=100)
     parser.add_argument("--no-precond", action="store_true")
 
@@ -60,7 +60,7 @@ def parse_arguments():
 
     parser.add_argument("--alt-noise-std-factor", type=float, default=0.5)
     parser.add_argument("--grace-noise-scale-km", type=float, default=250.0)
-    parser.add_argument("--grace-noise-std-mm", type=float, default=5.0)
+    parser.add_argument("--grace-noise-std-factor", type=float, default=0.5)
 
     return parser.parse_args()
 
@@ -99,7 +99,7 @@ def main():
         args.ocean_std_factor,
         args.alt_noise_std_factor,
         args.grace_noise_scale_km,
-        args.grace_noise_std_mm,
+        args.grace_noise_std_factor,
         args.obs_degree,
         points,
         exact_phys["scale_mm"],
@@ -147,7 +147,7 @@ def main():
             args.ocean_std_factor,
             args.alt_noise_std_factor,
             args.grace_noise_scale_km,
-            args.grace_noise_std_mm,
+            args.grace_noise_std_factor,
             args.obs_degree,
             points,
             surr_phys["scale_mm"],

@@ -107,7 +107,7 @@ def parse_arguments():
     parser.add_argument(
         "--noise-std-factor",
         type=float,
-        default=0.05,
+        default=0.5,
         help="Factor scaling the noise standard deviation relative to the prior.",
     )
     parser.add_argument(
@@ -332,7 +332,6 @@ def main():
         max_err = max(np.max(np.abs(w_errs)), np.max(np.abs(b_errs)))
         plot_limit = np.ceil(max_err) + 0.5
 
-        # --- DYNAMIC GRID CALCULATOR ---
         ncols = int(np.ceil(np.sqrt(n_reg)))
         nrows = int(np.ceil(n_reg / ncols))
 

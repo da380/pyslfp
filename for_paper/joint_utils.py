@@ -39,31 +39,33 @@ def build_physics_components(
         max_iterations=max_iters,
     )
 
-    load_space = finger_print_operator.domain
+    field_space = finger_print_operator.domain
 
     # --- 1. Assembly: Joint Space -> [Total Load, Ocean] ---
-    ice_to_load = ice_thickness_change_to_load_operator(state, load_space, load_space)
+    ice_to_load = ice_thickness_change_to_load_operator(state, field_space, field_space)
     if is_surrogate:
-        ocean_to_load = load_space.zero_operator(load_space)
+        ocean_to_load = field_space.zero_operator(field_space)
     else:
-        ocean_to_load = sea_level_change_to_load_operator(state, load_space, load_space)
+        ocean_to_load = sea_level_change_to_load_operator(
+            state, field_space, field_space
+        )
 
     joint_to_load = inf.RowLinearOperator([ice_to_load, ocean_to_load])
-    joint_space = inf.HilbertSpaceDirectSum([load_space, load_space])
+    joint_space = joint_to_load.domain
 
     op1 = inf.ColumnLinearOperator([joint_to_load, joint_space.subspace_projection(1)])
 
     # --- 2. Physics: [Total Load, Ocean] -> [SLE Response, Ocean] ---
     op2 = inf.BlockDiagonalLinearOperator(
-        [finger_print_operator, load_space.identity_operator()]
+        [finger_print_operator, field_space.identity_operator()]
     )
 
     # --- 3a. Altimetry Track: [SLE Response, Ocean] -> Discrete SSH Points ---
     static_ssh_op = sea_surface_height_operator(state, finger_print_operator.codomain)
     alt_continuous_op = inf.RowLinearOperator(
-        [static_ssh_op, load_space.identity_operator()]
+        [static_ssh_op, field_space.identity_operator()]
     )
-    point_eval = load_space.point_evaluation_operator(points)
+    point_eval = field_space.point_evaluation_operator(points)
     alt_track = point_eval @ alt_continuous_op
 
     # --- 3b. GRACE Track: [SLE Response, Ocean] -> Potential SH Coefficients ---
@@ -71,7 +73,7 @@ def build_physics_components(
         finger_print_operator.codomain, obs_degree
     )
     grace_track = inf.RowLinearOperator(
-        [grace_obs_op, load_space.zero_operator(codomain=grace_obs_op.codomain)]
+        [grace_obs_op, field_space.zero_operator(codomain=grace_obs_op.codomain)]
     )
 
     # --- 4. Combine Tracks: [SLE Response, Ocean] -> [Alt Data, GRACE Data] ---
@@ -83,10 +85,10 @@ def build_physics_components(
     # Return as a dictionary for clean extraction in the main script
     return {
         "state": state,
-        "load_space": load_space,
+        "load_space": field_space,
         "fp_op": finger_print_operator,
-        "alt_track": alt_track @ op2 @ op1,  # Isolated Alt Forward
-        "grace_track": grace_track @ op2 @ op1,  # Isolated GRACE Forward
+        "alt_track": alt_track @ op2 @ op1,
+        "grace_track": grace_track @ op2 @ op1,
         "joint_forward": joint_forward_operator,
         "continuous_ssh": continuous_ssh_operator,
         "scale_mm": scale_mm,
@@ -102,7 +104,7 @@ def build_measures(
     ocean_std_factor,
     alt_noise_std_factor,
     grace_noise_scale_km,
-    grace_noise_std_mm,
+    grace_noise_std_factor,
     obs_degree,
     points,
     scale_mm,
@@ -164,25 +166,13 @@ def build_measures(
     grace_spatial_scale = (
         grace_noise_scale_km * 1000.0 / state.model.parameters.length_scale
     )
-    grace_spatial_std = grace_noise_std_mm / scale_mm
+    grace_spatial_std = grace_noise_std_factor * ice_std
 
-    if load_space.lmax < obs_degree:
-        if isinstance(load_space, Sobolev):
-            noise_load_space = Sobolev(
-                obs_degree,
-                load_space.order,
-                load_space.scale,
-                radius=state.model.parameters.mean_sea_floor_radius,
-                grid=state.model.grid,
-            )
-        else:
-            noise_load_space = Lebesgue(
-                obs_degree,
-                radius=state.model.parameters.mean_sea_floor_radius,
-                grid=state.model.grid,
-            )
-    else:
-        noise_load_space = load_space
+    noise_load_space = (
+        load_space
+        if load_space.degree >= obs_degree
+        else load_space.with_degree(obs_degree)
+    )
 
     grace_spatial_noise_meas = (
         noise_load_space.point_value_scaled_heat_kernel_gaussian_measure(
@@ -190,12 +180,11 @@ def build_measures(
         )
     )
 
-    if state.model.lmax < obs_degree:
-        wmb_model = EarthModel(
-            obs_degree, parameters=state.model.parameters, grid=state.model.grid_name
-        )
-    else:
-        wmb_model = state.model
+    wmb_model = (
+        state.model.with_degree(obs_degree)
+        if state.model.lmax < obs_degree
+        else state.model
+    )
 
     wmb = WMBMethod(wmb_model, obs_degree)
     grace_noise_meas = wmb.load_measure_to_observation_measure(grace_spatial_noise_meas)

@@ -13,8 +13,9 @@ import scipy.stats as stats
 import matplotlib.pyplot as plt
 from cartopy import crs as ccrs
 import pygeoinf as inf
-import pyslfp as sl
+
 import grace_utils as utils
+import pyslfp as sl
 
 
 def parse_arguments():
@@ -76,7 +77,7 @@ def parse_arguments():
     parser.add_argument(
         "--smoothing-scale-km",
         type=float,
-        default=100.0,
+        default=None,
         help="Scale (in km) for spatial smoothing. Defaults to --load-scale-km.",
     )
 
@@ -107,7 +108,7 @@ def parse_arguments():
     parser.add_argument(
         "--noise-std-factor",
         type=float,
-        default=0.5,
+        default=0.1,
         help="Factor scaling the noise standard deviation relative to the prior.",
     )
     parser.add_argument(
@@ -170,10 +171,8 @@ def main():
     print(f"Solution in {solver.iterations} iterations")
 
     tot_op = utils.build_total_load_operator(state, response_space, load_space, fp_op)
-    region_names, avg_op, weighting_functions, regions_dict = (
-        utils.get_regional_averaging(
-            state, load_space, smoothing_scale_km=args.smoothing_scale_km
-        )
+    region_names, avg_op, _, regions_dict = utils.get_regional_averaging(
+        state, load_space, smoothing_scale_km=args.smoothing_scale_km
     )
 
     tot_avg_op = avg_op @ tot_op
@@ -205,7 +204,7 @@ def main():
             np.max(np.abs(true_dir_mm.data)), np.max(np.abs(post_dir_mm.data))
         )
 
-        fig_maps, axes_maps = plt.subplots(
+        _, axes_maps = plt.subplots(
             1,
             2,
             figsize=(14, 5),

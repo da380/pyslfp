@@ -18,6 +18,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pygeoinf as inf
 
+import grace_utils as utils
 
 from pyslfp import create_map_figure, plot
 from pyslfp.linear_operators import (
@@ -25,8 +26,6 @@ from pyslfp.linear_operators import (
     grace_observation_operator,
     sea_level_change_to_load_operator,
 )
-
-import grace_utils as utils
 
 
 def parse_arguments():
@@ -41,7 +40,7 @@ def parse_arguments():
         help="Number of Monte Carlo samples to draw for validating analytical error distributions.",
     )
     parser.add_argument(
-        "--plot-loads",
+        "--plot-maps",
         action="store_true",
         help="Plot an example of the direct load and the induced water load with region boxes.",
     )
@@ -49,7 +48,7 @@ def parse_arguments():
     parser.add_argument(
         "--lmax",
         type=int,
-        default=128,
+        default=256,
         help="Maximum spherical harmonic degree for the Earth model.",
     )
     parser.add_argument(
@@ -104,7 +103,7 @@ def parse_arguments():
     parser.add_argument(
         "--noise-std-factor",
         type=float,
-        default=0.05,
+        default=0.1,
         help="Factor scaling the noise standard deviation.",
     )
     parser.add_argument(
@@ -125,7 +124,6 @@ def main():
         args.lmax, args.load_order, args.load_scale_km
     )
 
-    # Extract the decoupled state and model from the operator
     state = fp_op.state
     model = fp_op.model
 
@@ -140,7 +138,6 @@ def main():
         prior_shift=args.prior_shift,
     )
 
-    # Use the refactored WMBMethod which now takes an EarthModel
     wmb = WMBMethod(model, args.obs_degree)
 
     region_names, avg_op, weighting_functions, regions_dict = (
@@ -156,20 +153,19 @@ def main():
 
     sea_level_proj = response_space.subspace_projection(0)
 
-    # Use the new sea_level_change_to_load_operator taking EarthState
     sle_to_load = sea_level_change_to_load_operator(
         state, sea_level_proj.codomain, load_space
     )
 
     # ------------------ OPTION: PLOT EXAMPLE LOADS ------------------
-    if args.plot_loads:
+    if args.plot_maps:
         print("Plotting example direct and induced loads...")
 
         sample_direct = cond_prior.sample()
         sample_induced = (sle_to_load @ sea_level_proj @ fp_op)(sample_direct)
 
-        fig1, ax1 = create_map_figure(figsize=(14, 8))
-        _, im1 = plot(
+        _, ax1 = create_map_figure(figsize=(14, 8))
+        plot(
             sample_direct * scale_mm,
             ax=ax1,
             colorbar_kwargs={"label": "EWT (mm)"},
@@ -178,8 +174,8 @@ def main():
         ax1.set_title("Example Direct Load Sample")
         utils.draw_region_boundaries(state, ax1, regions_dict)
 
-        fig2, ax2 = create_map_figure(figsize=(14, 8))
-        _, im2 = plot(
+        _, ax2 = create_map_figure(figsize=(14, 8))
+        plot(
             sample_induced * scale_mm,
             ax=ax2,
             colorbar_kwargs={"label": "EWT (mm)"},
@@ -187,6 +183,20 @@ def main():
         )
         ax2.set_title("Resulting Induced Water Load")
         utils.draw_region_boundaries(state, ax2, regions_dict)
+
+        summed_weights = model.zero_grid()
+        for weight in weighting_functions:
+            summed_weights.data += weight.data
+
+        _, ax3 = create_map_figure(figsize=(14, 8))
+        plot(
+            summed_weights,
+            ax=ax3,
+            colorbar_kwargs={"label": "Weighting functions"},
+            cmap="Blues",
+        )
+        ax3.set_title("Weighting funtions")
+        utils.draw_region_boundaries(state, ax3, regions_dict)
 
     # ------------------ CORE BIAS EVALUATION ------------------
     op1 = inf.BlockLinearOperator(

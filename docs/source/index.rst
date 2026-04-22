@@ -27,7 +27,7 @@ The core of the library is built around the `EarthState` and `FingerPrintOperato
    :caption: User Guide
    :hidden:
 
-   tutorials
+   
 
 .. toctree::
    :maxdepth: 2

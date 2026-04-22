@@ -50,8 +50,8 @@ You can run the interactive tutorials directly in Google Colab to get started wi
 
 | Tutorial Name | Link to Colab |
 | :--- | :--- |
-| Tutorial 1 - Calculating a Basic Sea Level Fingerprint | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/docs/source/tutorials/tutorial1.ipynb) |
-| Tutorial 2 - A Deeper Dive into the Sea Level Equation | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/docs/source/tutorials/tutorial2.ipynb) |
+| Tutorial 1 - Calculating a Basic Sea Level Fingerprint | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/tutorial1.ipynb) |
+| Tutorial 2 - A Deeper Dive into the Sea Level Equation | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/tutorial2.ipynb) |
 
 ---
 

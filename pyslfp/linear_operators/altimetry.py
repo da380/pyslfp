@@ -63,13 +63,13 @@ def ocean_altimetry_points(
     state: EarthState,
     /,
     *,
-    spacing_degrees: float = 2.0,
+    spacing: float = 2.0,
     latitude_min: float = -66.0,
     latitude_max: float = 66.0,
 ) -> List[Tuple[float, float]]:
     """Generates a regular grid of points returning only those in valid oceans."""
-    lats = np.arange(latitude_min, latitude_max + 1e-9, spacing_degrees)
-    lons = np.arange(0.0, 360.0, spacing_degrees)
+    lats = np.arange(latitude_min, latitude_max + 1e-9, spacing)
+    lons = np.arange(0.0, 360.0, spacing)
     lat_mesh, lon_mesh = np.meshgrid(lats, lons, indexing="ij")
     candidate_points = np.column_stack((lat_mesh.ravel(), lon_mesh.ravel()))
 
@@ -83,13 +83,13 @@ def ice_altimetry_points(
     state: EarthState,
     /,
     *,
-    spacing_degrees: float = 2.0,
+    spacing: float = 2.0,
     exclude_ice_shelves: bool = False,
     exclude_glaciers: bool = True,
 ) -> List[Tuple[float, float]]:
     """Generates a regular grid of points returning only those over ice sheets."""
-    lats = np.arange(-90.0, 90.0 + 1e-9, spacing_degrees)
-    lons = np.arange(0.0, 360.0, spacing_degrees)
+    lats = np.arange(-90.0, 90.0 + 1e-9, spacing)
+    lons = np.arange(0.0, 360.0, spacing)
     lat_mesh, lon_mesh = np.meshgrid(lats, lons, indexing="ij")
     candidate_points = np.column_stack((lat_mesh.ravel(), lon_mesh.ravel()))
 

@@ -6,7 +6,14 @@ satellite altimetry inversions and bias evaluation.
 """
 
 import numpy as np
+import scipy.sparse as sps
+
+
 import pygeoinf as inf
+
+from pygeoinf import GaussianMeasure
+from pygeoinf.symmetric_space.sphere import Lebesgue
+
 from pyslfp.state import EarthState
 from pyslfp.linear_operators import (
     FingerPrintOperator,
@@ -93,9 +100,12 @@ def build_measures(
     ice_std_mm,
     ocean_scale_km,
     ocean_std_factor,
+    noise_scale_factor,
     noise_std_factor,
     points,
     scale_mm,
+    /,
+    *,
     prior_shift=0.0,
 ):
     """Constructs the joint prior and observation noise measures."""
@@ -148,11 +158,19 @@ def build_measures(
             translation=model_prior.domain.multiply(prior_shift, offset_shape)
         )
 
-    n_points = len(points)
-    data_space = inf.EuclideanSpace(n_points)
-    noise_meas = inf.GaussianMeasure.from_standard_deviations(
-        data_space, np.full(n_points, noise_std)
-    )
+    if noise_scale_factor == 0.0:
+        n_points = len(points)
+        data_space = inf.EuclideanSpace(n_points)
+        noise_meas = inf.GaussianMeasure.from_standard_deviation(data_space, noise_std)
+    else:
+        continuous_noise_meas = (
+            load_space.point_value_scaled_heat_kernel_gaussian_measure(
+                ocean_scale * noise_scale_factor, std=noise_std
+            )
+        )
+        noise_meas = continuous_noise_meas.affine_mapping(
+            operator=load_space.point_evaluation_operator(points)
+        )
 
     return model_prior, noise_meas, GMSL_prior_std
 
@@ -169,12 +187,6 @@ def regional_decomposition_operators(state, load_space, finger_print_operator, r
     Builds operators to isolate the Dynamic Ocean Topography and Ice Melt (SLE)
     contributions to regional sea level changes.
     """
-    import pygeoinf as inf
-    from pyslfp.linear_operators import (
-        averaging_operator,
-        ice_thickness_change_to_load_operator,
-        sea_surface_height_operator,
-    )
 
     # Resolve the physical regions into SHGrid masks
     masks = [state.get_projection(r, value=0.0) for r in regions]
@@ -200,3 +212,70 @@ def regional_decomposition_operators(state, load_space, finger_print_operator, r
     )
 
     return op_dynamic, op_ice_fingerprint
+
+
+def create_native_sparse_noise_measure(
+    points: list[tuple[float, float]],
+    variance: float,
+    length_scale: float,
+    radius: float = 1.0,
+    rank_estimate: int = 100,
+    rtol: float = 1e-3,
+) -> GaussianMeasure:
+    """
+    Creates a zero-mean Gaussian measure for spatially correlated noise at specific points.
+    Uses the library's native randomized low-rank approximation to enable sampling
+    without needing scikit-sparse.
+    """
+
+    dummy_space = Lebesgue(0, radius=radius)
+    cutoff_distance = 2.0 * length_scale
+    row_indices, col_indices, dists = dummy_space.pairs_within_distance(
+        points, cutoff_distance
+    )
+
+    z = dists / length_scale
+    taper = np.zeros_like(z)
+
+    mask1 = z <= 1.0
+    z1 = z[mask1]
+    taper[mask1] = (
+        1.0
+        - (5.0 / 3.0) * z1**2
+        + (5.0 / 8.0) * z1**3
+        + (1.0 / 2.0) * z1**4
+        - (1.0 / 4.0) * z1**5
+    )
+
+    mask2 = (z > 1.0) & (z <= 2.0)
+    z2 = z[mask2]
+    taper[mask2] = (
+        4.0
+        - 5.0 * z2
+        + (5.0 / 3.0) * z2**2
+        + (5.0 / 8.0) * z2**3
+        - (1.0 / 2.0) * z2**4
+        + (1.0 / 12.0) * z2**5
+        - (2.0 / 3.0) / z2
+    )
+
+    values = taper * variance
+
+    n_points = len(points)
+    cov_matrix = sps.coo_matrix(
+        (values, (row_indices, col_indices)), shape=(n_points, n_points)
+    ).tocsr()
+
+    domain = inf.EuclideanSpace(n_points)
+
+    cov_operator = inf.LinearOperator.self_adjoint_from_matrix(domain, cov_matrix)
+
+    base_measure = GaussianMeasure(covariance=cov_operator)
+
+    sampleable_measure = base_measure.low_rank_approximation(
+        rank_estimate,
+        method="variable",
+        rtol=rtol,
+    )
+
+    return sampleable_measure

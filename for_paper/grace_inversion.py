@@ -49,12 +49,17 @@ def parse_arguments():
         default=0,
         help="Number of Monte Carlo trials for statistical comparison of estimators.",
     )
-
     parser.add_argument(
         "--lmax",
         type=int,
         default=128,
         help="Maximum spherical harmonic degree for the Earth model.",
+    )
+    parser.add_argument(
+        "--surrogate-degree",
+        type=int,
+        default=None,
+        help="Surrogate degree for building the Woodbury preconditioner. Default is None, in which case the WMB preconditioner is applied",
     )
     parser.add_argument(
         "--obs-degree",
@@ -80,7 +85,6 @@ def parse_arguments():
         default=None,
         help="Scale (in km) for spatial smoothing. Defaults to --load-scale-km.",
     )
-
     parser.add_argument(
         "--direct-scale-km",
         type=float,
@@ -159,28 +163,63 @@ def main():
     ).sample()
 
     inverse_problem = inf.LinearBayesianInversion(forward_problem, cond_prior)
-    preconditioner = wmb.bayesian_normal_operator_preconditioner(
-        init_prior, data_error_measure
-    )
-    solver = inf.CGMatrixSolver()
+
+    print("Building the preconditioner...")
+    if args.surrogate_degree is None:
+        preconditioner = wmb.bayesian_normal_operator_preconditioner(
+            init_prior, data_error_measure
+        )
+    else:
+
+        sur_state, sur_load_space, _, sur_fp_op, _ = utils.build_physics_components(
+            args.surrogate_degree, args.load_order, args.load_scale_km
+        )
+
+        _, sur_cond_prior, _ = utils.build_measures(
+            sur_state,
+            sur_load_space,
+            args.direct_scale_km,
+            args.direct_std_m,
+            args.noise_scale_factor,
+            args.noise_std_factor,
+            remove_degree_1=args.remove_degree_1,
+        )
+
+        sur_obs_model = sl.linear_operators.GraceObservationModel(
+            sur_fp_op, args.obs_degree
+        )
+
+        sur_inverse_problem = inverse_problem.surrogate_inversion(
+            alternate_forward_operator=sur_obs_model.forward_operator,
+            alternate_prior_measure=sur_cond_prior,
+        )
+
+        preconditioner = sur_inverse_problem.woodbury_data_preconditioner(
+            parallel=True, n_jobs=10
+        )
 
     print("Solving for posterior...")
+    solver = inf.CGMatrixSolver()
     load_posterior = inverse_problem.model_posterior_measure(
         synthetic_grace_data, solver, preconditioner=preconditioner
     )
     print(f"Solution in {solver.iterations} iterations")
 
-    tot_op = utils.build_total_load_operator(state, response_space, load_space, fp_op)
-    region_names, avg_op, _, regions_dict = utils.get_regional_averaging(
-        state, load_space, smoothing_scale_km=args.smoothing_scale_km
-    )
-
-    tot_avg_op = avg_op @ tot_op
-    wmb_op = wmb.potential_coefficient_to_load_operator(load_space)
-    wmb_direct_avg_op = avg_op @ wmb_op
-
+    regions_dict = None
     if args.plot_pdfs or args.mc_trials > 0:
         print("Forming load average estimates")
+
+        tot_op = utils.build_total_load_operator(
+            state, response_space, load_space, fp_op
+        )
+        region_names, avg_op, _, regions_dict = utils.get_regional_averaging(
+            state, load_space, smoothing_scale_km=args.smoothing_scale_km
+        )
+
+        tot_avg_op = avg_op @ tot_op
+        wmb_op = wmb.potential_coefficient_to_load_operator(load_space)
+        wmb_direct_avg_op = avg_op @ wmb_op
+
         post_avg_measure = load_posterior.affine_mapping(operator=tot_avg_op)
         post_stds_mm = (
             np.sqrt(np.diag(post_avg_measure.covariance.matrix(dense=True))) * scale_mm
@@ -221,8 +260,9 @@ def main():
             vmax=vmax_dir,
             symmetric=True,
         )
-        axes_maps[0].set_title("True Direct Load")
-        utils.draw_region_boundaries(state, axes_maps[0], regions_dict)
+        axes_maps[0].set_title("Direct Load (True)")
+        if regions_dict is not None:
+            utils.draw_region_boundaries(state, axes_maps[0], regions_dict)
 
         sl.plot(
             post_dir_mm,
@@ -233,8 +273,9 @@ def main():
             vmax=vmax_dir,
             symmetric=True,
         )
-        axes_maps[1].set_title("Posterior Expectation (Direct Load)")
-        utils.draw_region_boundaries(state, axes_maps[1], regions_dict)
+        axes_maps[1].set_title("Direct load (Posterior Expecation)")
+        if regions_dict is not None:
+            utils.draw_region_boundaries(state, axes_maps[1], regions_dict)
 
     # ------------------ OPTION 2: PDFs ------------------
     if args.plot_pdfs:
@@ -334,7 +375,7 @@ def main():
         ncols = int(np.ceil(np.sqrt(n_reg)))
         nrows = int(np.ceil(n_reg / ncols))
 
-        fig_mc, axes_mc = plt.subplots(
+        _, axes_mc = plt.subplots(
             nrows=nrows,
             ncols=ncols,
             figsize=(5 * ncols, 5 * nrows),
@@ -429,12 +470,6 @@ def main():
 
         for j in range(n_reg, len(axes_flat)):
             axes_flat[j].set_visible(False)
-
-        fig_mc.suptitle(
-            "Monte Carlo Validation: Distribution of Normalized Residuals",
-            fontsize=18,
-            fontweight="bold",
-        )
 
     if any(
         [

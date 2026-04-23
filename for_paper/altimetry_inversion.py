@@ -83,45 +83,51 @@ def parse_arguments():
         help="Length scale (in km) defining the load space.",
     )
     parser.add_argument(
-        "--spacing-degrees",
+        "--spacing",
         type=float,
-        default=2.0,
+        default=4.0,
         help="Spacing in degrees for the altimetry observation points.",
     )
     parser.add_argument(
-        "--ice-scale-km",
+        "--ice-scale-factor",
         type=float,
-        default=500.0,
-        help="Correlation length scale (in km) for the ice thickness prior.",
+        default=1.0,
+        help="Relative correlation length scale for the ice thickness prior.",
     )
     parser.add_argument(
         "--ice-std-mm",
         type=float,
-        default=20.0,
+        default=10.0,
         help="Pointwise standard deviation (in mm) for the ice thickness prior.",
     )
     parser.add_argument(
-        "--ocean-scale-km",
+        "--ocean-scale-factor",
         type=float,
-        default=250.0,
-        help="Correlation length scale (in km) for the ocean dynamic thickness prior.",
+        default=0.2,
+        help="Relative correlation length scale for the ocean dynamic thickness prior.",
     )
     parser.add_argument(
         "--ocean-std-factor",
         type=float,
-        default=0.5,
-        help="Ocean dynamic thickness noise std as a factor of the expected GMSL std.",
+        default=1.0,
+        help="Ocean dynamic thickness noise standard deviation as a factor of the expected GMSL std.",
     )
     parser.add_argument(
         "--noise-std-factor",
         type=float,
-        default=0.5,
-        help="Instrument noise std per point as a factor of the expected GMSL std.",
+        default=0.2,
+        help="Instrument noise standard deviation per point as a factor of the expected GMSL std.",
+    )
+    parser.add_argument(
+        "--noise-scale-factor",
+        type=float,
+        default=0.0,
+        help="Relative correlation length scale for the noise field.",
     )
     parser.add_argument(
         "--prior-shift",
         type=float,
-        default=0.0,
+        default=1.0,
         help="Shift the prior expectation by drawing a sample and multiplying by this factor.",
     )
 
@@ -137,7 +143,7 @@ def main():
 
     print("Generating altimetry points...")
     state_dummy = EarthState.from_defaults(lmax=args.lmax)
-    points = ocean_altimetry_points(state_dummy, spacing_degrees=args.spacing_degrees)
+    points = ocean_altimetry_points(state_dummy, spacing=args.spacing)
     print(f"Generated {len(points)} ocean altimetry observation points.")
 
     # ------------------ EXACT MODEL SETUP ------------------
@@ -156,10 +162,11 @@ def main():
     exact_model_prior, noise_meas, GMSL_prior_std = utils.build_measures(
         exact_state,
         exact_load_space,
-        args.ice_scale_km,
+        args.ice_scale_factor,
         args.ice_std_mm,
-        args.ocean_scale_km,
+        args.ocean_scale_factor,
         args.ocean_std_factor,
+        args.noise_scale_factor,
         args.noise_std_factor,
         points,
         scale_mm,
@@ -193,13 +200,14 @@ def main():
             )
         )
 
-        surr_prior, _, _ = utils.build_measures(
+        surr_prior, surr_noise_meas, _ = utils.build_measures(
             surr_state,
             surr_load_space,
-            args.ice_scale_km,
+            args.ice_scale_factor,
             args.ice_std_mm,
-            args.ocean_scale_km,
+            args.ocean_scale_factor,
             args.ocean_std_factor,
+            args.noise_scale_factor,
             args.noise_std_factor,
             points,
             scale_mm,
@@ -210,8 +218,11 @@ def main():
         surrogate_inv = inverse_problem.surrogate_inversion(
             alternate_forward_operator=surr_forward_op,
             alternate_prior_measure=surr_prior,
+            alternate_data_error_measure=surr_noise_meas,
         )
-        preconditioner = surrogate_inv.woodbury_data_preconditioner()
+        preconditioner = surrogate_inv.woodbury_data_preconditioner(
+            inf.EigenSolver(galerkin=True)
+        )
 
     # ------------------ POSTERIOR SOLVE ------------------
     callback = inf.ProgressCallback()
@@ -527,7 +538,6 @@ def main():
     if args.plot_regions:
         print("\nDecomposing Regional Sea Level Signals...")
         # Using built-in IHO sea boundaries
-        regions_to_analyze = ["Mediterranean Sea", "Caribbean Sea"]
 
         op_dynamic, op_ice_fp = utils.regional_decomposition_operators(
             exact_state, exact_load_space, exact_fp_op, regions_to_analyze

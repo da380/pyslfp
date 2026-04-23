@@ -195,7 +195,7 @@ def main():
         )
 
         preconditioner = sur_inverse_problem.woodbury_data_preconditioner(
-            parallel=True, n_jobs=10
+            inf.CholeskySolver(galerkin=True)
         )
 
     print("Solving for posterior...")

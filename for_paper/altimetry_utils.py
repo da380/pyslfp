@@ -96,9 +96,9 @@ def build_physics_components(
 def build_measures(
     state,
     load_space,
-    ice_scale_km,
+    ice_scale_factor,
     ice_std_mm,
-    ocean_scale_km,
+    ocean_scale_factor,
     ocean_std_factor,
     noise_scale_factor,
     noise_std_factor,
@@ -109,16 +109,19 @@ def build_measures(
     prior_shift=0.0,
 ):
     """Constructs the joint prior and observation noise measures."""
-    ice_scale = ice_scale_km * 1000.0 / state.model.parameters.length_scale
+    ice_scale = load_space.scale * ice_scale_factor
     ice_std = ice_std_mm / scale_mm
 
     ice_thickness_prior = load_space.point_value_scaled_heat_kernel_gaussian_measure(
         ice_scale, std=ice_std
     )
+    ice_thickness_prior.affine_mapping(
+        operator=ice_projection_operator(state, load_space)
+    )
 
     GMSL_weighting_function = (
         -state.model.parameters.ice_density
-        * state.ice_projection(value=0.0)
+        * state.one_minus_ocean_function
         / (state.model.parameters.water_density * state.ocean_area)
     )
 
@@ -126,30 +129,20 @@ def build_measures(
     GMSL_prior_measure = ice_thickness_prior.affine_mapping(operator=B)
     GMSL_prior_std = np.sqrt(GMSL_prior_measure.covariance.matrix(dense=True)[0, 0])
 
-    ocean_scale = ocean_scale_km * 1000.0 / state.model.parameters.length_scale
+    ocean_scale = load_space.scale * ocean_scale_factor
     ocean_std = ocean_std_factor * GMSL_prior_std
-    noise_std = noise_std_factor * GMSL_prior_std
 
     ocean_thickness_prior = load_space.point_value_scaled_heat_kernel_gaussian_measure(
         ocean_scale, std=ocean_std
     )
-    # Enforce zero ocean mean for dynamic topography
+
     ocean_thickness_prior = ocean_thickness_prior.affine_mapping(
-        operator=remove_ocean_average_operator(state, load_space)
+        operator=ocean_projection_operator(state, load_space)
+        @ remove_ocean_average_operator(state, load_space)
     )
 
     model_prior = inf.GaussianMeasure.from_direct_sum(
         [ice_thickness_prior, ocean_thickness_prior]
-    )
-
-    # Enforce geographic masking
-    model_prior = model_prior.affine_mapping(
-        operator=inf.BlockDiagonalLinearOperator(
-            [
-                ice_projection_operator(state, load_space),
-                ocean_projection_operator(state, load_space),
-            ]
-        )
     )
 
     if prior_shift != 0.0:
@@ -158,6 +151,7 @@ def build_measures(
             translation=model_prior.domain.multiply(prior_shift, offset_shape)
         )
 
+    noise_std = noise_std_factor * GMSL_prior_std
     if noise_scale_factor == 0.0:
         n_points = len(points)
         data_space = inf.EuclideanSpace(n_points)
@@ -165,7 +159,7 @@ def build_measures(
     else:
         continuous_noise_meas = (
             load_space.point_value_scaled_heat_kernel_gaussian_measure(
-                ocean_scale * noise_scale_factor, std=noise_std
+                load_space.scale * noise_scale_factor, std=noise_std
             )
         )
         noise_meas = continuous_noise_meas.affine_mapping(
@@ -212,70 +206,3 @@ def regional_decomposition_operators(state, load_space, finger_print_operator, r
     )
 
     return op_dynamic, op_ice_fingerprint
-
-
-def create_native_sparse_noise_measure(
-    points: list[tuple[float, float]],
-    variance: float,
-    length_scale: float,
-    radius: float = 1.0,
-    rank_estimate: int = 100,
-    rtol: float = 1e-3,
-) -> GaussianMeasure:
-    """
-    Creates a zero-mean Gaussian measure for spatially correlated noise at specific points.
-    Uses the library's native randomized low-rank approximation to enable sampling
-    without needing scikit-sparse.
-    """
-
-    dummy_space = Lebesgue(0, radius=radius)
-    cutoff_distance = 2.0 * length_scale
-    row_indices, col_indices, dists = dummy_space.pairs_within_distance(
-        points, cutoff_distance
-    )
-
-    z = dists / length_scale
-    taper = np.zeros_like(z)
-
-    mask1 = z <= 1.0
-    z1 = z[mask1]
-    taper[mask1] = (
-        1.0
-        - (5.0 / 3.0) * z1**2
-        + (5.0 / 8.0) * z1**3
-        + (1.0 / 2.0) * z1**4
-        - (1.0 / 4.0) * z1**5
-    )
-
-    mask2 = (z > 1.0) & (z <= 2.0)
-    z2 = z[mask2]
-    taper[mask2] = (
-        4.0
-        - 5.0 * z2
-        + (5.0 / 3.0) * z2**2
-        + (5.0 / 8.0) * z2**3
-        - (1.0 / 2.0) * z2**4
-        + (1.0 / 12.0) * z2**5
-        - (2.0 / 3.0) / z2
-    )
-
-    values = taper * variance
-
-    n_points = len(points)
-    cov_matrix = sps.coo_matrix(
-        (values, (row_indices, col_indices)), shape=(n_points, n_points)
-    ).tocsr()
-
-    domain = inf.EuclideanSpace(n_points)
-
-    cov_operator = inf.LinearOperator.self_adjoint_from_matrix(domain, cov_matrix)
-
-    base_measure = GaussianMeasure(covariance=cov_operator)
-
-    sampleable_measure = base_measure.low_rank_approximation(
-        rank_estimate,
-        method="variable",
-        rtol=rtol,
-    )
-
-    return sampleable_measure

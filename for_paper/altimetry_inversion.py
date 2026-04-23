@@ -215,13 +215,13 @@ def main():
         )
 
         print("Constructing Woodbury preconditioner from surrogate model...")
-        surrogate_inv = inverse_problem.surrogate_inversion(
+        woodbury_solver = inf.CholeskySolver(galerkin=True)
+
+        preconditioner = inverse_problem.surrogate_woodbury_data_preconditioner(
+            woodbury_solver,
             alternate_forward_operator=surr_forward_op,
             alternate_prior_measure=surr_prior,
             alternate_data_error_measure=surr_noise_meas,
-        )
-        preconditioner = surrogate_inv.woodbury_data_preconditioner(
-            inf.EigenSolver(galerkin=True)
         )
 
     # ------------------ POSTERIOR SOLVE ------------------

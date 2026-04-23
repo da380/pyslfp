@@ -169,8 +169,8 @@ def main():
         preconditioner = wmb.bayesian_normal_operator_preconditioner(
             init_prior, data_error_measure
         )
-    else:
 
+    else:
         sur_state, sur_load_space, _, sur_fp_op, _ = utils.build_physics_components(
             args.surrogate_degree, args.load_order, args.load_scale_km
         )
@@ -189,13 +189,12 @@ def main():
             sur_fp_op, args.obs_degree
         )
 
-        sur_inverse_problem = inverse_problem.surrogate_inversion(
+        woodbury_solver = inf.CholeskySolver(galerkin=True)
+
+        preconditioner = inverse_problem.surrogate_woodbury_data_preconditioner(
+            woodbury_solver,
             alternate_forward_operator=sur_obs_model.forward_operator,
             alternate_prior_measure=sur_cond_prior,
-        )
-
-        preconditioner = sur_inverse_problem.woodbury_data_preconditioner(
-            inf.CholeskySolver(galerkin=True)
         )
 
     print("Solving for posterior...")

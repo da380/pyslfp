@@ -52,7 +52,7 @@ def parse_arguments():
     parser.add_argument(
         "--lmax",
         type=int,
-        default=128,
+        default=256,
         help="Maximum spherical harmonic degree for the Earth model.",
     )
     parser.add_argument(
@@ -106,7 +106,7 @@ def parse_arguments():
     parser.add_argument(
         "--noise-scale-factor",
         type=float,
-        default=0.25,
+        default=0.1,
         help="Factor scaling the noise correlation length relative to the prior.",
     )
     parser.add_argument(
@@ -272,7 +272,7 @@ def main():
             vmax=vmax_dir,
             symmetric=True,
         )
-        axes_maps[1].set_title("Direct load (Posterior Expecation)")
+        axes_maps[1].set_title("Direct load (Posterior Expectation)")
         if regions_dict is not None:
             utils.draw_region_boundaries(state, axes_maps[1], regions_dict)
 

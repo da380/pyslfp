@@ -24,7 +24,6 @@ from pyslfp.linear_operators import (
     sea_surface_height_operator,
     sea_level_change_to_load_operator,
 )
-from pygeoinf.symmetric_space.sphere import Sobolev
 
 
 def main():
@@ -40,10 +39,10 @@ def main():
         "--std-mm", type=float, default=100.0, help="Ocean dynamic std in mm."
     )
     parser.add_argument(
-        "--noise-std-factor", type=float, default=0.25, help="Relative noise std."
+        "--noise-std-factor", type=float, default=0.5, help="Relative noise std."
     )
     parser.add_argument(
-        "--noise-scale-factor", type=float, default=0.1, help="Relative noise scale."
+        "--noise-scale-factor", type=float, default=0.0, help="Relative noise scale."
     )
     parser.add_argument(
         "--spacing",
@@ -52,6 +51,8 @@ def main():
         help="Spacing of observation points in degrees.",
     )
     args = parser.parse_args()
+
+    inf.configure_threading(n_threads=1)
 
     # =========================================================================
     # 1. EXACT PHYSICS (Masked & Singular)
@@ -80,12 +81,15 @@ def main():
     ) @ remove_ocean_average_operator(state, model_space)
     masked_prior = invariant_prior.affine_mapping(operator=masking_op)
 
-    points = sl.linear_operators.ocean_altimetry_points(state, spacing=args.spacing)
+    points = ocean_altimetry_points(state, spacing=args.spacing)
     point_evaluation_operator = model_space.point_evaluation_operator(points)
 
-    ssh_op = model_space.identity_operator() + sea_surface_height_operator(
-        state, response_space
-    ) @ fp @ sea_level_change_to_load_operator(state, model_space, model_space)
+    ind_ssh_op = (
+        sea_surface_height_operator(state, response_space)
+        @ fp
+        @ sea_level_change_to_load_operator(state, model_space, model_space)
+    )
+    ssh_op = model_space.identity_operator() + ind_ssh_op
     forward_op = point_evaluation_operator @ ssh_op
 
     noise_scale = args.noise_scale_factor * scale
@@ -127,7 +131,6 @@ def main():
         surr_state,
         load_parameters=(order, scale),
         response_parameters=(order, scale),
-        max_iterations=2,
     )
 
     surr_model_space = surr_fp.domain
@@ -141,18 +144,18 @@ def main():
 
     surr_point_evaluation_operator = surr_model_space.point_evaluation_operator(points)
 
-    surr_ssh_op = surr_model_space.identity_operator() + sea_surface_height_operator(
-        surr_state, surr_response_space
-    ) @ surr_fp @ sea_level_change_to_load_operator(
-        surr_state, surr_model_space, surr_model_space
-    )
+    surr_ssh_op = surr_model_space.identity_operator()  # + sea_surface_height_operator(
+    # surr_state, surr_response_space
+    # ) @ surr_fp @ sea_level_change_to_load_operator(
+    #    surr_state, surr_model_space, surr_model_space
+    # )
     surr_forward_op = surr_point_evaluation_operator @ surr_ssh_op
 
     surr_noise_meas = inf.GaussianMeasure.from_standard_deviation(
         surr_forward_op.codomain, noise_std
     )
 
-    woodbury_solver = inf.CholeskySolver(galerkin=True)
+    woodbury_solver = inf.LUSolver(galerkin=True)
     woodbury_preconditioner = inverse_problem.surrogate_woodbury_data_preconditioner(
         woodbury_solver,
         alternate_forward_operator=surr_forward_op,
@@ -172,11 +175,13 @@ def main():
 
     # callback = inverse_problem.normal_residual_callback(synthetic_data)
     callback = inf.ProgressCallback()
-    solver = inf.CGSolver(callback=callback, rtol=1e-3)
+    solver = inf.CGSolver(callback=callback, rtol=0.01 * args.noise_std_factor)
     model_posterior = inverse_problem.model_posterior_measure(
         synthetic_data, solver, preconditioner=preconditioner
     )
     print(f"Solution converged in {solver.iterations} iterations.")
+
+    to_mm = 1000 * state.model.parameters.length_scale
 
     print("\nPlotting spatial maps...")
     _, axes = plt.subplots(
@@ -187,19 +192,16 @@ def main():
         layout="constrained",
     )
 
-    ssh_true = ssh_op(true_ocean_model)
+    ind_ssh_true = ind_ssh_op(true_ocean_model)
 
-    vmax = max(
-        np.nanmax(np.abs(ssh_true.data)), np.nanmax(np.abs(true_ocean_model.data))
-    )
+    vmax = np.nanmax(np.abs(true_ocean_model.data)) * to_mm
 
     sl.plot(
-        ssh_true * state.ocean_projection(),
+        ind_ssh_true * state.ocean_projection() * to_mm,
         ax=axes[0, 0],
-        vmin=-vmax,
-        vmax=vmax,
+        symmetric=True,
         colorbar_kwargs={
-            "label": "SSH (mm)",
+            "label": "SLA SSH (mm)",
             "shrink": 0.8,
             "orientation": "horizontal",
         },
@@ -208,7 +210,7 @@ def main():
     axes[0, 1].set_global()
     sl.plot_points(
         points,
-        data=synthetic_data,
+        data=synthetic_data * to_mm,
         ax=axes[0, 1],
         vmin=-vmax,
         vmax=vmax,
@@ -223,7 +225,7 @@ def main():
     )
 
     sl.plot(
-        true_ocean_model * state.ocean_projection(),
+        true_ocean_model * state.ocean_projection() * to_mm,
         ax=axes[1, 0],
         vmin=-vmax,
         vmax=vmax,
@@ -235,7 +237,7 @@ def main():
     )
 
     sl.plot(
-        model_posterior.expectation * state.ocean_projection(),
+        model_posterior.expectation * state.ocean_projection() * to_mm,
         ax=axes[1, 1],
         vmin=-vmax,
         vmax=vmax,

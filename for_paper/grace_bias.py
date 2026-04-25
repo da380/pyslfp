@@ -171,7 +171,7 @@ def main():
             colorbar_kwargs={"label": "EWT (mm)"},
             symmetric=True,
         )
-        ax1.set_title("Example Direct Load Sample")
+
         utils.draw_region_boundaries(state, ax1, regions_dict)
 
         _, ax2 = create_map_figure(figsize=(14, 8))
@@ -181,7 +181,6 @@ def main():
             colorbar_kwargs={"label": "EWT (mm)"},
             symmetric=True,
         )
-        ax2.set_title("Resulting Induced Water Load")
         utils.draw_region_boundaries(state, ax2, regions_dict)
 
         summed_weights = model.zero_grid()
@@ -195,7 +194,7 @@ def main():
             colorbar_kwargs={"label": "Weighting functions"},
             cmap="Blues",
         )
-        ax3.set_title("Weighting funtions")
+        
         utils.draw_region_boundaries(state, ax3, regions_dict)
 
     # ------------------ CORE BIAS EVALUATION ------------------

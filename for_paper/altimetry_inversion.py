@@ -16,7 +16,11 @@ import pygeoinf as inf
 import pyslfp as sl
 
 from pyslfp.state import EarthState
-from pyslfp.linear_operators import ocean_altimetry_points, altimetry_averaging_operator
+from pyslfp.linear_operators import (
+    ocean_altimetry_points,
+    altimetry_averaging_operator,
+    ice_thickness_change_to_load_operator,
+)
 
 import altimetry_utils as utils
 
@@ -115,7 +119,7 @@ def parse_arguments():
     parser.add_argument(
         "--noise-std-factor",
         type=float,
-        default=0.2,
+        default=0.5,
         help="Instrument noise standard deviation per point as a factor of the expected GMSL std.",
     )
     parser.add_argument(
@@ -145,6 +149,8 @@ def main():
     state_dummy = EarthState.from_defaults(lmax=args.lmax)
     points = ocean_altimetry_points(state_dummy, spacing=args.spacing)
     print(f"Generated {len(points)} ocean altimetry observation points.")
+
+    inf.configure_threading(n_threads=1)
 
     # ------------------ EXACT MODEL SETUP ------------------
     print(f"\nBuilding EXACT physical operators (lmax={args.lmax})...")
@@ -200,58 +206,77 @@ def main():
             )
         )
 
-        surr_prior, surr_noise_meas, _ = utils.build_measures(
-            surr_state,
-            surr_load_space,
-            args.ice_scale_factor,
-            args.ice_std_mm,
-            args.ocean_scale_factor,
-            args.ocean_std_factor,
-            args.noise_scale_factor,
-            args.noise_std_factor,
-            points,
-            scale_mm,
-            prior_shift=args.prior_shift,
+        woodbury_solver = inf.LUSolver(galerkin=True, parallel=True, n_jobs=8)
+
+        # [MODIFIED]: Build unmasked, invariant priors for the surrogate directly
+        # to ensure the covariance is strictly invertible for the Woodbury identity.
+        print("Constructing unmasked surrogate priors...")
+        ice_scale = surr_load_space.scale * args.ice_scale_factor
+        ice_std = args.ice_std_mm / scale_mm
+        surr_ice_prior = (
+            surr_load_space.point_value_scaled_heat_kernel_gaussian_measure(
+                ice_scale, std=ice_std
+            )
         )
+
+        ocean_scale = surr_load_space.scale * args.ocean_scale_factor
+        ocean_std = args.ocean_std_factor * GMSL_prior_std
+        surr_ocean_prior = (
+            surr_load_space.point_value_scaled_heat_kernel_gaussian_measure(
+                ocean_scale, std=ocean_std
+            )
+        )
+
+        # Combine into an unmasked joint prior
+        surr_prior = inf.GaussianMeasure.from_direct_sum(
+            [surr_ice_prior, surr_ocean_prior]
+        )
+
+        # Build surrogate noise measure
+        noise_std = args.noise_std_factor * GMSL_prior_std
+        if args.noise_scale_factor == 0.0:
+            data_space = inf.EuclideanSpace(len(points))
+            surr_noise_meas = inf.GaussianMeasure.from_standard_deviation(
+                data_space, noise_std
+            )
+        else:
+            surr_continuous_noise = (
+                surr_load_space.point_value_scaled_heat_kernel_gaussian_measure(
+                    surr_load_space.scale * args.noise_scale_factor, std=noise_std
+                )
+            )
+            surr_noise_meas = surr_continuous_noise.affine_mapping(
+                operator=surr_load_space.point_evaluation_operator(points)
+            )
 
         print("Constructing Woodbury preconditioner from surrogate model...")
-        woodbury_solver = inf.CholeskySolver(galerkin=True)
 
-        preconditioner = inverse_problem.surrogate_woodbury_data_preconditioner(
-            woodbury_solver,
-            alternate_forward_operator=surr_forward_op,
-            alternate_prior_measure=surr_prior,
-            alternate_data_error_measure=surr_noise_meas,
+        woodbury_preconditioner = (
+            inverse_problem.surrogate_woodbury_data_preconditioner(
+                woodbury_solver,
+                alternate_forward_operator=surr_forward_op,
+                alternate_prior_measure=surr_prior,
+                alternate_data_error_measure=surr_noise_meas,
+            )
         )
+
+        # [MODIFIED]: Apply the regularization mixing trick from the simplified script
+        alpha = 0.1
+        preconditioner = (
+            1 - alpha
+        ) * woodbury_preconditioner + alpha * surr_noise_meas.inverse_covariance
 
     # ------------------ POSTERIOR SOLVE ------------------
     callback = inf.ProgressCallback()
-    solver = inf.CGMatrixSolver(callback=callback)
+
+    # [MODIFIED]: Switch to CGSolver with relative tolerance matching the simplified script
+    solver = inf.CGSolver(callback=callback, rtol=0.01 * args.noise_std_factor)
 
     print("\nSolving for posterior expectation...")
     model_posterior = inverse_problem.model_posterior_measure(
         synthetic_data, solver, preconditioner=preconditioner
     )
     print(f"\nSolution reached in {solver.iterations} iterations.")
-
-    # ------------------ EXTRACT GMSL OPERATORS ------------------
-    if args.plot_pdfs or args.mc_trials:
-        true_gmsl_op = utils.true_gmsl_operator(
-            exact_state, exact_load_space, exact_continuous_ssh
-        )
-        alt_avg_op = altimetry_averaging_operator(points)
-
-        post_gmsl_measure = model_posterior.affine_mapping(operator=true_gmsl_op)
-        post_gmsl_std_mm = (
-            np.sqrt(post_gmsl_measure.covariance.matrix(dense=True)[0, 0]) * scale_mm
-        )
-
-        std_noise_measure = noise_meas.affine_mapping(operator=alt_avg_op)
-        std_noise_std_mm = (
-            np.sqrt(std_noise_measure.covariance.matrix(dense=True)[0, 0]) * scale_mm
-        )
-
-        true_gmsl_val_mm = true_gmsl_op(true_model)[0] * scale_mm
 
     # ------------------ DEFINE REGIONS FOR ANALYSIS ------------------
     regions_to_analyze = ["Mediterranean Sea - Western Basin", "South Atlantic Ocean"]
@@ -285,7 +310,7 @@ def main():
         )
 
         sl.plot(
-            true_ice * ice_mask,
+            true_ice * scale_mm,
             ax=axes_maps[0, 0],
             colorbar=True,
             colorbar_kwargs={"label": "Ice Thickness Change (mm)"},
@@ -296,7 +321,7 @@ def main():
         axes_maps[0, 0].set_title("True Ice Thickness Change")
 
         sl.plot(
-            post_ice * ice_mask,
+            post_ice * scale_mm,
             ax=axes_maps[0, 1],
             colorbar=True,
             colorbar_kwargs={"label": "Ice Thickness Change (mm)"},
@@ -350,7 +375,7 @@ def main():
         )
 
         sl.plot(
-            true_ssh * scale_mm,
+            true_ssh * ocean_mask,
             ax=axes_ssh[0],
             colorbar=True,
             colorbar_kwargs={"label": "SSH Change (mm)"},
@@ -358,7 +383,7 @@ def main():
             vmax=vmax_ssh,
             cmap=cmap,
         )
-        axes_ssh[0].set_title("True Continuous SSH Change")
+        axes_ssh[0].set_title("True  SSH Change")
 
         axes_ssh[1].set_global()
         axes_ssh[1].coastlines(linewidth=0.5, alpha=0.5, zorder=10)
@@ -388,6 +413,49 @@ def main():
                 exact_state.plot_boundaries(
                     ax, regions_to_analyze, edgecolor="black", linewidth=2.0, zorder=10
                 )
+
+        sl_op = (
+            exact_fp_op.codomain.subspace_projection(0)
+            @ exact_fp_op
+            @ ice_thickness_change_to_load_operator(
+                exact_state, exact_load_space, exact_load_space
+            )
+        )
+
+        true_sl = sl_op(true_ice)
+        post_sl = sl_op(model_posterior.expectation[0])
+
+        vmax_sl = np.max(np.abs(true_sl.data * scale_mm))
+
+        fig_sl, axes_sl = plt.subplots(
+            1,
+            2,
+            figsize=(14, 5),
+            subplot_kw={"projection": ccrs.Robinson()},
+            layout="constrained",
+        )
+
+        sl.plot(
+            true_sl * ocean_mask,
+            ax=axes_sl[0],
+            colorbar=True,
+            colorbar_kwargs={"label": "SL Change (mm)"},
+            vmin=-vmax_sl,
+            vmax=vmax_sl,
+            cmap=cmap,
+        )
+        axes_sl[0].set_title("SL Change (True)")
+
+        sl.plot(
+            post_sl * ocean_mask,
+            ax=axes_sl[1],
+            colorbar=True,
+            colorbar_kwargs={"label": "SL Change (mm)"},
+            vmin=-vmax_sl,
+            vmax=vmax_sl,
+            cmap=cmap,
+        )
+        axes_sl[1].set_title("SL Change (Posterior Expectation)")
 
     # ------------------ OPTION 2: PDF ------------------
     if args.plot_pdfs:

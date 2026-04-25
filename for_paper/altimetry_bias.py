@@ -35,7 +35,7 @@ def parse_arguments():
     parser.add_argument(
         "--lmax",
         type=int,
-        default=128,
+        default=256,
         help="Maximum spherical harmonic degree for the Earth model.",
     )
     parser.add_argument(
@@ -77,19 +77,19 @@ def parse_arguments():
     parser.add_argument(
         "--ocean-std-factor",
         type=float,
-        default=40.0,
+        default=10.0,
         help="Ocean dynamic thickness noise standard deviation as a factor of the expected GMSL std.",
     )
     parser.add_argument(
         "--noise-std-factor",
         type=float,
-        default=0.25,
+        default=2.0,
         help="Instrument noise standard deviation per point as a factor of the expected GMSL std.",
     )
     parser.add_argument(
         "--noise-scale-factor",
         type=float,
-        default=10.0,
+        default=00.0,
         help="Relative correlation length scale for the noise field.",
     )
     parser.add_argument(

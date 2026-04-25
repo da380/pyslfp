@@ -15,14 +15,13 @@ from cartopy import crs as ccrs
 import pygeoinf as inf
 import pyslfp as sl
 
+import altimetry_utils as utils
+
 from pyslfp.state import EarthState
 from pyslfp.linear_operators import (
     ocean_altimetry_points,
-    altimetry_averaging_operator,
     ice_thickness_change_to_load_operator,
 )
-
-import altimetry_utils as utils
 
 
 def parse_arguments():
@@ -113,19 +112,19 @@ def parse_arguments():
     parser.add_argument(
         "--ocean-std-factor",
         type=float,
-        default=1.0,
+        default=5.0,
         help="Ocean dynamic thickness noise standard deviation as a factor of the expected GMSL std.",
     )
     parser.add_argument(
         "--noise-std-factor",
         type=float,
-        default=0.5,
+        default=1.0,
         help="Instrument noise standard deviation per point as a factor of the expected GMSL std.",
     )
     parser.add_argument(
         "--noise-scale-factor",
         type=float,
-        default=0.0,
+        default=0.00,
         help="Relative correlation length scale for the noise field.",
     )
     parser.add_argument(
@@ -155,19 +154,19 @@ def main():
     # ------------------ EXACT MODEL SETUP ------------------
     print(f"\nBuilding EXACT physical operators (lmax={args.lmax})...")
     (
-        exact_state,
-        exact_load_space,
-        exact_fp_op,
-        exact_continuous_ssh,
-        exact_forward_op,
+        state,
+        load_space,
+        fp_op,
+        continuous_ssh,
+        forward_op,
         scale_mm,
     ) = utils.build_physics_components(
         args.lmax, args.load_order, args.load_scale_km, points, is_surrogate=False
     )
 
-    exact_model_prior, noise_meas, GMSL_prior_std = utils.build_measures(
-        exact_state,
-        exact_load_space,
+    model_prior, noise_meas, GMSL_prior_std = utils.build_measures(
+        state,
+        load_space,
         args.ice_scale_factor,
         args.ice_std_mm,
         args.ocean_scale_factor,
@@ -183,12 +182,10 @@ def main():
 
     print("Setting up Bayesian Inversion...")
     forward_problem = inf.LinearForwardProblem(
-        exact_forward_op, data_error_measure=noise_meas
+        forward_op, data_error_measure=noise_meas
     )
-    true_model, synthetic_data = forward_problem.synthetic_model_and_data(
-        exact_model_prior
-    )
-    inverse_problem = inf.LinearBayesianInversion(forward_problem, exact_model_prior)
+    true_model, synthetic_data = forward_problem.synthetic_model_and_data(model_prior)
+    inverse_problem = inf.LinearBayesianInversion(forward_problem, model_prior)
 
     # ------------------ PRECONDITIONER SETUP ------------------
     preconditioner = None
@@ -234,20 +231,10 @@ def main():
 
         # Build surrogate noise measure
         noise_std = args.noise_std_factor * GMSL_prior_std
-        if args.noise_scale_factor == 0.0:
-            data_space = inf.EuclideanSpace(len(points))
-            surr_noise_meas = inf.GaussianMeasure.from_standard_deviation(
-                data_space, noise_std
-            )
-        else:
-            surr_continuous_noise = (
-                surr_load_space.point_value_scaled_heat_kernel_gaussian_measure(
-                    surr_load_space.scale * args.noise_scale_factor, std=noise_std
-                )
-            )
-            surr_noise_meas = surr_continuous_noise.affine_mapping(
-                operator=surr_load_space.point_evaluation_operator(points)
-            )
+        data_space = inf.EuclideanSpace(len(points))
+        surr_noise_meas = inf.GaussianMeasure.from_standard_deviation(
+            data_space, noise_std
+        )
 
         print("Constructing Woodbury preconditioner from surrogate model...")
 
@@ -289,8 +276,8 @@ def main():
         true_ice, true_ocean = true_model
         post_ice, post_ocean = model_posterior.expectation
 
-        ocean_mask = scale_mm * exact_state.ocean_projection(value=0.0)
-        ice_mask = scale_mm * exact_state.ice_projection(value=0.0)
+        ocean_mask = scale_mm * state.ocean_projection(value=0.0)
+        ice_mask = scale_mm * state.ice_projection(value=0.0)
 
         vmax_ice = max(
             np.max(np.abs(true_ice.data * scale_mm)),
@@ -356,11 +343,11 @@ def main():
         # Overlay boundaries on the component maps if regional analysis is active
         if args.plot_regions:
             for ax in axes_maps.flatten():
-                exact_state.plot_boundaries(ax, regions_to_analyze)
+                state.plot_boundaries(ax, regions_to_analyze)
 
         # Sea Surface Height Observations
         print("Generating Sea Surface Height maps with observation overlays...")
-        true_ssh = exact_continuous_ssh(true_model)
+        true_ssh = continuous_ssh(true_model)
         obs_data_mm = synthetic_data * scale_mm
         vmax_ssh = max(
             np.max(np.abs(true_ssh.data * scale_mm)), np.max(np.abs(obs_data_mm))
@@ -410,16 +397,14 @@ def main():
         # Overlay boundaries on the SSH maps if regional analysis is active
         if args.plot_regions:
             for ax in axes_ssh:
-                exact_state.plot_boundaries(
+                state.plot_boundaries(
                     ax, regions_to_analyze, edgecolor="black", linewidth=2.0, zorder=10
                 )
 
         sl_op = (
-            exact_fp_op.codomain.subspace_projection(0)
-            @ exact_fp_op
-            @ ice_thickness_change_to_load_operator(
-                exact_state, exact_load_space, exact_load_space
-            )
+            fp_op.codomain.subspace_projection(0)
+            @ fp_op
+            @ ice_thickness_change_to_load_operator(state, load_space, load_space)
         )
 
         true_sl = sl_op(true_ice)
@@ -608,7 +593,7 @@ def main():
         # Using built-in IHO sea boundaries
 
         op_dynamic, op_ice_fp = utils.regional_decomposition_operators(
-            exact_state, exact_load_space, exact_fp_op, regions_to_analyze
+            state, load_space, fp_op, regions_to_analyze
         )
 
         # Combine into a single operator and scale directly to mm
@@ -624,7 +609,7 @@ def main():
 
         # Extract Analytical Marginal Posteriors and Priors (now guaranteed to be flat)
         post_meas = model_posterior.affine_mapping(operator=final_op)
-        prior_meas = exact_model_prior.affine_mapping(operator=final_op)
+        prior_meas = model_prior.affine_mapping(operator=final_op)
 
         labels = [
             "Med: Dynamic (mm)",

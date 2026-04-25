@@ -115,7 +115,7 @@ def build_measures(
     ice_thickness_prior = load_space.point_value_scaled_heat_kernel_gaussian_measure(
         ice_scale, std=ice_std
     )
-    ice_thickness_prior.affine_mapping(
+    ice_thickness_prior = ice_thickness_prior.affine_mapping(
         operator=ice_projection_operator(state, load_space)
     )
 

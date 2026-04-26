@@ -265,6 +265,41 @@ def main():
     )
     print(f"\nSolution reached in {solver.iterations} iterations.")
 
+    # ==========================================
+    #  GMSL EXTRACTION & MAPPING
+    # ==========================================
+
+    print("\nComputing GMSL estimators...")
+
+    # 1. True GMSL Operator (Spatial integration over the continuous SSH field)
+    true_gmsl_op = utils.true_gmsl_operator(state, load_space, continuous_ssh)
+    true_gmsl_val_mm = true_gmsl_op(true_model)[0] * scale_mm
+
+    # 2. Standard Altimetry Averaging Operator (Simple mean of the data points)
+    alt_avg_op = sl.linear_operators.altimetry_averaging_operator(points)
+
+    if args.plot_pdfs or args.mc_trials:
+
+        # Standard estimator noise standard deviation
+        std_noise_meas = noise_meas.affine_mapping(operator=alt_avg_op)
+        std_noise_std_mm = (
+            np.sqrt(std_noise_meas.covariance.matrix(dense=True)[0, 0]) * scale_mm
+        )
+
+        # 3. Bayesian Estimator (Map the posterior model back to true continuous GMSL)
+        post_gmsl_measure = model_posterior.affine_mapping(operator=true_gmsl_op)
+        post_gmsl_std_mm = (
+            np.sqrt(post_gmsl_measure.covariance.matrix(dense=True)[0, 0]) * scale_mm
+        )
+
+        print(f"True GMSL:               {true_gmsl_val_mm:.2f} mm")
+        print(
+            f"Standard Averaged GMSL:  {alt_avg_op(synthetic_data)[0] * scale_mm:.2f} mm +/- {std_noise_std_mm:.2f} mm"
+        )
+        print(
+            f"Bayesian Expected GMSL:  {post_gmsl_measure.expectation[0] * scale_mm:.2f} mm +/- {post_gmsl_std_mm:.2f} mm"
+        )
+
     # ------------------ DEFINE REGIONS FOR ANALYSIS ------------------
     regions_to_analyze = ["Mediterranean Sea - Western Basin", "South Atlantic Ocean"]
 
@@ -288,62 +323,77 @@ def main():
             np.max(np.abs(post_ocean.data * scale_mm)),
         )
 
-        fig_maps, axes_maps = plt.subplots(
-            2,
-            2,
-            figsize=(14, 10),
+        # --- True Ice Map ---
+        fig_ice_true, ax_ice_true = plt.subplots(
+            figsize=(8, 5),
             subplot_kw={"projection": ccrs.Robinson()},
             layout="constrained",
         )
-
         sl.plot(
             true_ice * scale_mm,
-            ax=axes_maps[0, 0],
+            ax=ax_ice_true,
             colorbar=True,
-            colorbar_kwargs={"label": "Ice Thickness Change (mm)"},
+            colorbar_kwargs={"label": "Ice Thickness Change (True, mm)"},
             vmin=-vmax_ice,
             vmax=vmax_ice,
             cmap=cmap,
         )
-        axes_maps[0, 0].set_title("True Ice Thickness Change")
+        if args.plot_regions:
+            state.plot_boundaries(ax_ice_true, regions_to_analyze)
 
+        # --- Posterior Ice Map ---
+        fig_ice_post, ax_ice_post = plt.subplots(
+            figsize=(8, 5),
+            subplot_kw={"projection": ccrs.Robinson()},
+            layout="constrained",
+        )
         sl.plot(
             post_ice * scale_mm,
-            ax=axes_maps[0, 1],
+            ax=ax_ice_post,
             colorbar=True,
-            colorbar_kwargs={"label": "Ice Thickness Change (mm)"},
+            colorbar_kwargs={"label": "Ice Thickness Change (Posterior, mm)"},
             vmin=-vmax_ice,
             vmax=vmax_ice,
             cmap=cmap,
         )
-        axes_maps[0, 1].set_title("Posterior Expected Ice Thickness")
+        if args.plot_regions:
+            state.plot_boundaries(ax_ice_post, regions_to_analyze)
 
+        # --- True Ocean Map ---
+        fig_ocean_true, ax_ocean_true = plt.subplots(
+            figsize=(8, 5),
+            subplot_kw={"projection": ccrs.Robinson()},
+            layout="constrained",
+        )
         sl.plot(
             true_ocean * ocean_mask,
-            ax=axes_maps[1, 0],
+            ax=ax_ocean_true,
             colorbar=True,
-            colorbar_kwargs={"label": "Dynamic Ocean (mm)"},
+            colorbar_kwargs={"label": "Dynamic Ocean Component (True, mm)"},
             vmin=-vmax_ocean,
             vmax=vmax_ocean,
             cmap=cmap,
         )
-        axes_maps[1, 0].set_title("True Dynamic Ocean Component")
+        if args.plot_regions:
+            state.plot_boundaries(ax_ocean_true, regions_to_analyze)
 
+        # --- Posterior Ocean Map ---
+        fig_ocean_post, ax_ocean_post = plt.subplots(
+            figsize=(8, 5),
+            subplot_kw={"projection": ccrs.Robinson()},
+            layout="constrained",
+        )
         sl.plot(
             post_ocean * ocean_mask,
-            ax=axes_maps[1, 1],
+            ax=ax_ocean_post,
             colorbar=True,
-            colorbar_kwargs={"label": "Dynamic Ocean (mm)"},
+            colorbar_kwargs={"label": "Dynamic Ocean Component (Posterior, mm)"},
             vmin=-vmax_ocean,
             vmax=vmax_ocean,
             cmap=cmap,
         )
-        axes_maps[1, 1].set_title("Posterior Expected Dynamic Ocean Component")
-
-        # Overlay boundaries on the component maps if regional analysis is active
         if args.plot_regions:
-            for ax in axes_maps.flatten():
-                state.plot_boundaries(ax, regions_to_analyze)
+            state.plot_boundaries(ax_ocean_post, regions_to_analyze)
 
         # Sea Surface Height Observations
         print("Generating Sea Surface Height maps with observation overlays...")
@@ -353,31 +403,42 @@ def main():
             np.max(np.abs(true_ssh.data * scale_mm)), np.max(np.abs(obs_data_mm))
         )
 
-        fig_ssh, axes_ssh = plt.subplots(
-            1,
-            2,
-            figsize=(14, 5),
+        # --- True SSH Map ---
+        fig_ssh_true, ax_ssh_true = plt.subplots(
+            figsize=(8, 5),
             subplot_kw={"projection": ccrs.Robinson()},
             layout="constrained",
         )
-
         sl.plot(
             true_ssh * ocean_mask,
-            ax=axes_ssh[0],
+            ax=ax_ssh_true,
             colorbar=True,
-            colorbar_kwargs={"label": "SSH Change (mm)"},
+            colorbar_kwargs={"label": "SSH Change (True, mm)"},
             vmin=-vmax_ssh,
             vmax=vmax_ssh,
             cmap=cmap,
         )
-        axes_ssh[0].set_title("True  SSH Change")
+        if args.plot_regions:
+            state.plot_boundaries(
+                ax_ssh_true,
+                regions_to_analyze,
+                edgecolor="black",
+                linewidth=2.0,
+                zorder=10,
+            )
 
-        axes_ssh[1].set_global()
-        axes_ssh[1].coastlines(linewidth=0.5, alpha=0.5, zorder=10)
+        # --- Altimetry Observations Map ---
+        fig_ssh_obs, ax_ssh_obs = plt.subplots(
+            figsize=(8, 5),
+            subplot_kw={"projection": ccrs.Robinson()},
+            layout="constrained",
+        )
+        ax_ssh_obs.set_global()
+        ax_ssh_obs.coastlines(linewidth=0.5, alpha=0.5, zorder=10)
         sl.plot_points(
             points,
             data=obs_data_mm,
-            ax=axes_ssh[1],
+            ax=ax_ssh_obs,
             cmap=cmap,
             vmin=-vmax_ssh,
             vmax=vmax_ssh,
@@ -385,22 +446,23 @@ def main():
             edgecolors="none",
             colorbar=True,
             colorbar_kwargs={
-                "label": "Observed SSH (mm)",
+                "label": "Observed SSH Data (mm)",
                 "orientation": "horizontal",
                 "shrink": 0.7,
                 "pad": 0.05,
             },
             zorder=5,
         )
-        axes_ssh[1].set_title("Altimetry Observations")
-
-        # Overlay boundaries on the SSH maps if regional analysis is active
         if args.plot_regions:
-            for ax in axes_ssh:
-                state.plot_boundaries(
-                    ax, regions_to_analyze, edgecolor="black", linewidth=2.0, zorder=10
-                )
+            state.plot_boundaries(
+                ax_ssh_obs,
+                regions_to_analyze,
+                edgecolor="black",
+                linewidth=2.0,
+                zorder=10,
+            )
 
+        # --- Sea Level Operators ---
         sl_op = (
             fp_op.codomain.subspace_projection(0)
             @ fp_op
@@ -412,36 +474,37 @@ def main():
 
         vmax_sl = np.max(np.abs(true_sl.data * scale_mm))
 
-        fig_sl, axes_sl = plt.subplots(
-            1,
-            2,
-            figsize=(14, 5),
+        # --- True SL Map ---
+        fig_sl_true, ax_sl_true = plt.subplots(
+            figsize=(8, 5),
             subplot_kw={"projection": ccrs.Robinson()},
             layout="constrained",
         )
-
         sl.plot(
             true_sl * ocean_mask,
-            ax=axes_sl[0],
+            ax=ax_sl_true,
             colorbar=True,
-            colorbar_kwargs={"label": "SL Change (mm)"},
+            colorbar_kwargs={"label": "Sea Level Change (True, mm)"},
             vmin=-vmax_sl,
             vmax=vmax_sl,
             cmap=cmap,
         )
-        axes_sl[0].set_title("SL Change (True)")
 
+        # --- Posterior SL Map ---
+        fig_sl_post, ax_sl_post = plt.subplots(
+            figsize=(8, 5),
+            subplot_kw={"projection": ccrs.Robinson()},
+            layout="constrained",
+        )
         sl.plot(
             post_sl * ocean_mask,
-            ax=axes_sl[1],
+            ax=ax_sl_post,
             colorbar=True,
-            colorbar_kwargs={"label": "SL Change (mm)"},
+            colorbar_kwargs={"label": "Sea Level Change (Posterior, mm)"},
             vmin=-vmax_sl,
             vmax=vmax_sl,
             cmap=cmap,
         )
-        axes_sl[1].set_title("SL Change (Posterior Expectation)")
-
     # ------------------ OPTION 2: PDF ------------------
     if args.plot_pdfs:
         print("Plotting Head-to-Head GMSL PDF...")

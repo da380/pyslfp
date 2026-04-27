@@ -111,6 +111,7 @@ def build_measures(
     points,
     scale_mm,
     prior_shift=0.0,
+    is_surrogate=False,  # <-- ADDED
 ):
     # --- 1. PRIORS ---
     ice_scale = ice_scale_km * 1000.0 / state.model.parameters.length_scale
@@ -135,21 +136,24 @@ def build_measures(
     ocean_thickness_prior = load_space.point_value_scaled_heat_kernel_gaussian_measure(
         ocean_scale, std=ocean_std
     )
-    ocean_thickness_prior = ocean_thickness_prior.affine_mapping(
-        operator=remove_ocean_average_operator(state, load_space)
-    )
 
-    # Capture the strictly positive-definite unmasked prior for Woodbury
+    # Leave both priors structurally invariant (strictly positive-definite) so the
+    # Woodbury preconditioner can safely invert the covariance matrix.
     unmasked_prior = inf.GaussianMeasure.from_direct_sum(
         [ice_thickness_prior, ocean_thickness_prior]
     )
+
+    # Combine the ocean mask AND the zero-average constraint together
+    ocean_masking_op = ocean_projection_operator(
+        state, load_space
+    ) @ remove_ocean_average_operator(state, load_space)
 
     # Apply spatial masking projections to form the true, physically constrained prior
     model_prior = unmasked_prior.affine_mapping(
         operator=inf.BlockDiagonalLinearOperator(
             [
                 ice_projection_operator(state, load_space),
-                ocean_projection_operator(state, load_space),
+                ocean_masking_op,
             ]
         )
     )
@@ -159,6 +163,16 @@ def build_measures(
         model_prior = model_prior.affine_mapping(
             translation=model_prior.domain.multiply(prior_shift, offset_shape)
         )
+
+    # --- SHORT CIRCUIT FOR SURROGATE ---
+    if is_surrogate:
+        return {
+            "model_prior": model_prior,
+            "unmasked_prior": unmasked_prior,
+            "gmsl_std": GMSL_prior_std,
+            "ice_scale": ice_scale,
+            "ice_std": ice_std,
+        }
 
     # --- 2. NOISE MEASURES ---
     n_points = len(points)

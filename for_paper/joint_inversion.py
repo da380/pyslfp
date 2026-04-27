@@ -30,42 +30,133 @@ def parse_arguments():
     parser = argparse.ArgumentParser(
         description="Joint Bayesian Inversion of GRACE and Altimetry Data."
     )
+    # --- Output Options ---
     parser.add_argument(
         "--all", action="store_true", help="Enable all plotting options."
     )
     parser.add_argument(
-        "--plot-pdfs", action="store_true", help="Plot 1D analytical PDFs."
+        "--plot-pdfs",
+        action="store_true",
+        help="Plot 1D analytical PDFs of the GMSL estimate.",
     )
-    parser.add_argument("--plot-maps", action="store_true", help="Plot spatial maps.")
     parser.add_argument(
-        "--plot-regions", action="store_true", help="Plot regional Corner Plot."
+        "--plot-maps",
+        action="store_true",
+        help="Plot spatial maps of true loads, posterior expectations, and SSH.",
     )
-    parser.add_argument("--mc-trials", type=int, default=0, help="Number of MC trials.")
+    parser.add_argument(
+        "--plot-regions",
+        action="store_true",
+        help="Plot regional Corner Plot decomposing the signal.",
+    )
+    parser.add_argument(
+        "--mc-trials",
+        type=int,
+        default=0,
+        help="Number of Monte Carlo trials for statistical comparison.",
+    )
 
-    parser.add_argument("--lmax", type=int, default=128)
-    parser.add_argument("--surrogate-degree", type=int, default=32)
-    parser.add_argument("--obs-degree", type=int, default=100)
-    parser.add_argument("--no-precond", action="store_true")
+    # --- Resolution & Physics Settings ---
+    parser.add_argument(
+        "--lmax",
+        type=int,
+        default=256,
+        help="Maximum spherical harmonic degree for the exact Earth model.",
+    )
+    parser.add_argument(
+        "--surrogate-degree",
+        type=int,
+        default=32,
+        help="Maximum spherical harmonic degree for the surrogate preconditioner.",
+    )
+    parser.add_argument(
+        "--obs-degree",
+        type=int,
+        default=100,
+        help="Maximum spherical harmonic degree of the GRACE observations.",
+    )
+    parser.add_argument(
+        "--load-order",
+        type=float,
+        default=2.0,
+        help="Sobolev space order for the load.",
+    )
+    parser.add_argument(
+        "--load-scale-km",
+        type=float,
+        default=500.0,
+        help="Length scale (in km) defining the load space.",
+    )
 
-    # Toggle for the Preconditioner style
+    # --- Preconditioner Options ---
+    parser.add_argument(
+        "--no-precond",
+        action="store_true",
+        help="Disable the surrogate sparse preconditioner entirely.",
+    )
     parser.add_argument(
         "--full-woodbury",
         action="store_true",
-        help="Use monolithic Joint Woodbury instead of the Hybrid Block-Diagonal preconditioner.",
+        help="Use monolithic Joint Woodbury preconditioner instead of the Hybrid Block-Diagonal preconditioner.",
     )
 
-    parser.add_argument("--load-order", type=float, default=2.0)
-    parser.add_argument("--load-scale-km", type=float, default=500.0)
-    parser.add_argument("--spacing-degrees", type=float, default=10.0)
-    parser.add_argument("--ice-scale-km", type=float, default=500.0)
-    parser.add_argument("--ice-std-mm", type=float, default=20.0)
-    parser.add_argument("--ocean-scale-km", type=float, default=250.0)
-    parser.add_argument("--ocean-std-factor", type=float, default=0.5)
-    parser.add_argument("--prior-shift", type=float, default=0.0)
+    # --- Observation & Prior Settings ---
+    parser.add_argument(
+        "--spacing",
+        type=float,
+        default=1.0,
+        help="Spacing in degrees for the altimetry observation points.",
+    )
+    parser.add_argument(
+        "--ice-scale-km",
+        type=float,
+        default=500.0,
+        help="Correlation length scale (in km) for the ice thickness prior.",
+    )
+    parser.add_argument(
+        "--ice-std-mm",
+        type=float,
+        default=10.0,
+        help="Pointwise standard deviation (in mm) for the ice thickness prior.",
+    )
+    parser.add_argument(
+        "--ocean-scale-km",
+        type=float,
+        default=100.0,
+        help="Correlation length scale (in km) for the ocean dynamic prior.",
+    )
+    parser.add_argument(
+        "--ocean-std-factor",
+        type=float,
+        default=2.0,
+        help="Ocean dynamic standard deviation as a factor of GMSL std.",
+    )
+    parser.add_argument(
+        "--prior-shift",
+        type=float,
+        default=1.0,
+        help="Shift the prior expectation by drawing a sample and multiplying by this factor.",
+    )
 
-    parser.add_argument("--alt-noise-std-factor", type=float, default=0.5)
-    parser.add_argument("--grace-noise-scale-km", type=float, default=250.0)
-    parser.add_argument("--grace-noise-std-factor", type=float, default=0.5)
+    # --- Noise Settings ---
+    parser.add_argument(
+        "--alt-noise-std-factor",
+        type=float,
+        default=1.0,
+        help="Altimetry instrument noise std per point as a factor of GMSL std.",
+    )
+    parser.add_argument(
+        "--grace-noise-scale-km",
+        type=float,
+        default=50.0,
+        help="Correlation length scale (in km) for GRACE spatial noise.",
+    )
+    parser.add_argument(
+        "--grace-noise-std-factor",
+        type=float,
+        default=0.1,
+        help="GRACE spatial noise std as a factor of the ice prior std.",
+    )
 
     return parser.parse_args()
 
@@ -78,13 +169,13 @@ def main():
             args.mc_trials = 500
 
     # Setup directory to save plots
-    output_dir = "output_plots_joint"
+    output_dir = "output_plots"
     os.makedirs(output_dir, exist_ok=True)
     figures_to_save = {}
 
     print("Generating altimetry points...")
     state_dummy = EarthState.from_defaults(lmax=args.lmax)
-    points = ocean_altimetry_points(state_dummy, spacing=args.spacing_degrees)
+    points = ocean_altimetry_points(state_dummy, spacing=args.spacing)
     print(f"Generated {len(points)} ocean altimetry observation points.")
 
     inf.configure_threading(n_threads=1)
@@ -150,6 +241,7 @@ def main():
             args.obs_degree,
             is_surrogate=True,
         )
+
         surr_meas = utils.build_measures(
             surr_phys["state"],
             surr_phys["load_space"],
@@ -164,6 +256,7 @@ def main():
             points,
             surr_phys["scale_mm"],
             prior_shift=args.prior_shift,
+            is_surrogate=True,
         )
 
         woodbury_solver = inf.LUSolver(galerkin=True, parallel=True, n_jobs=8)
@@ -176,10 +269,10 @@ def main():
                     woodbury_solver,
                     alternate_forward_operator=surr_phys["joint_forward"],
                     alternate_prior_measure=surr_meas["unmasked_prior"],
-                    alternate_data_error_measure=surr_meas["joint_noise"],
+                    alternate_data_error_measure=exact_meas["joint_noise"],
                 )
             )
-            preconditioner = (1 - alpha) * woodbury_preconditioner + alpha * surr_meas[
+            preconditioner = (1 - alpha) * woodbury_preconditioner + alpha * exact_meas[
                 "joint_noise"
             ].inverse_covariance
 
@@ -188,13 +281,14 @@ def main():
 
             # --- 1. Altimetry Block (Woodbury Surrogate) ---
             surr_alt_fwd = inf.LinearForwardProblem(
-                surr_phys["alt_track"], data_error_measure=surr_meas["alt_noise"]
+                surr_phys["alt_track"],
+                data_error_measure=exact_meas["alt_noise"],
             )
             surr_alt_inv = inf.LinearBayesianInversion(
                 surr_alt_fwd, surr_meas["unmasked_prior"]
             )
             woodbury_P_alt = surr_alt_inv.woodbury_data_preconditioner(woodbury_solver)
-            P_alt = (1 - alpha) * woodbury_P_alt + alpha * surr_meas[
+            P_alt = (1 - alpha) * woodbury_P_alt + alpha * exact_meas[
                 "alt_noise"
             ].inverse_covariance
 
@@ -254,7 +348,7 @@ def main():
 
         true_gmsl_val_mm = true_gmsl_op(true_model)[0] * scale_mm
 
-    regions_to_analyze = ["Mediterranean Sea", "Tasman Sea"]
+    regions_to_analyze = ["Tasman Sea"]
 
     # ------------------ OPTION 1: MAPS ------------------
     if args.plot_maps:
@@ -334,7 +428,7 @@ def main():
                     ax, regions_to_analyze, edgecolor="black", linewidth=2.0, zorder=10
                 )
 
-        figures_to_save["joint_posterior_maps"] = fig_maps
+        figures_to_save["joint_inversion_posterior_maps"] = fig_maps
 
         print("Generating Sea Surface Height maps with observation overlays...")
         true_ssh = exact_phys["continuous_ssh"](true_model)
@@ -390,7 +484,7 @@ def main():
                     ax, regions_to_analyze, edgecolor="black", linewidth=2.0, zorder=10
                 )
 
-        figures_to_save["joint_ssh_maps"] = fig_ssh
+        figures_to_save["joint_inversion_ssh_maps"] = fig_ssh
 
     # ------------------ OPTION 2: PDF ------------------
     if args.plot_pdfs:
@@ -419,7 +513,7 @@ def main():
             title="Global Mean Sea Level Estimators",
             posterior_labels=list(results.keys()),
         )
-        figures_to_save["gmsl_pdf_comparison"] = fig_pdf
+        figures_to_save["joint_inversion_gmsl_pdf_comparison"] = fig_pdf
 
     # ------------------ OPTION 3: MONTE CARLO ------------------
     if args.mc_trials > 0:
@@ -540,7 +634,7 @@ def main():
 
         ax_mc.plot([], [], color="indigo", linewidth=1.5, label="Analytical 2D PDF")
         ax_mc.legend(loc="upper left", fontsize=10)
-        figures_to_save["mc_validation_scatter"] = fig_mc
+        figures_to_save["joint_inversion_mc_validation_scatter"] = fig_mc
 
     # ------------------ OPTION 4: REGIONAL DECOMPOSITION ------------------
     if args.plot_regions:
@@ -563,11 +657,9 @@ def main():
         post_meas = model_posterior.affine_mapping(operator=final_op)
         prior_meas = exact_meas["model_prior"].affine_mapping(operator=final_op)
 
-        labels = [
-            f"{regions_to_analyze[0]}: Dynamic (mm)",
-            f"{regions_to_analyze[1]}: Dynamic (mm)",
-            f"{regions_to_analyze[0]}: Ice/SLE (mm)",
-            f"{regions_to_analyze[1]}: Ice/SLE (mm)",
+        # Build dynamic labels based on regions_to_analyze
+        labels = [f"{region}: Dynamic (mm)" for region in regions_to_analyze] + [
+            f"{region}: Ice/SLE (mm)" for region in regions_to_analyze
         ]
 
         inf.plot_corner_distributions(
@@ -578,7 +670,7 @@ def main():
             title="Joint Bayes Signal Separation: Dynamic Ocean vs. Ice Melt",
             fill_density=False,
         )
-        figures_to_save["regional_corner_plot"] = plt.gcf()
+        figures_to_save["joint_inversion_regional_corner_plot"] = plt.gcf()
 
     # ------------------ SAVE ALL FIGURES ------------------
     if figures_to_save:

@@ -14,10 +14,15 @@ sea-level equation).
 """
 
 import argparse
+import os
 import numpy as np
-import matplotlib.pyplot as plt
-import pygeoinf as inf
+import matplotlib
 
+# Force headless backend to avoid Wayland/Qt display errors
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+import pygeoinf as inf
 import grace_utils as utils
 
 from pyslfp import create_map_figure, plot
@@ -44,7 +49,6 @@ def parse_arguments():
         action="store_true",
         help="Plot an example of the direct load and the induced water load with region boxes.",
     )
-
     parser.add_argument(
         "--lmax",
         type=int,
@@ -75,7 +79,6 @@ def parse_arguments():
         default=None,
         help="Scale (in km) for spatial smoothing. Defaults to --load-scale-km.",
     )
-
     parser.add_argument(
         "--direct-scale-km",
         type=float,
@@ -119,6 +122,11 @@ def main():
     args = parse_arguments()
     if args.smoothing_scale_km is None:
         args.smoothing_scale_km = args.load_scale_km
+
+    # Setup directory to save plots
+    output_dir = "output_plots"
+    os.makedirs(output_dir, exist_ok=True)
+    figures_to_save = {}
 
     state, load_space, response_space, fp_op, scale_mm = utils.build_physics_components(
         args.lmax, args.load_order, args.load_scale_km
@@ -164,7 +172,7 @@ def main():
         sample_direct = cond_prior.sample()
         sample_induced = (sle_to_load @ sea_level_proj @ fp_op)(sample_direct)
 
-        _, ax1 = create_map_figure(figsize=(14, 8))
+        fig1, ax1 = create_map_figure(figsize=(14, 8))
         plot(
             sample_direct * scale_mm,
             ax=ax1,
@@ -173,8 +181,9 @@ def main():
         )
 
         utils.draw_region_boundaries(state, ax1, regions_dict)
+        figures_to_save["grace_bias_direct_load"] = fig1
 
-        _, ax2 = create_map_figure(figsize=(14, 8))
+        fig2, ax2 = create_map_figure(figsize=(14, 8))
         plot(
             sample_induced * scale_mm,
             ax=ax2,
@@ -182,20 +191,21 @@ def main():
             symmetric=True,
         )
         utils.draw_region_boundaries(state, ax2, regions_dict)
+        figures_to_save["grace_bias_induced_load"] = fig2
 
         summed_weights = model.zero_grid()
         for weight in weighting_functions:
             summed_weights.data += weight.data
 
-        _, ax3 = create_map_figure(figsize=(14, 8))
+        fig3, ax3 = create_map_figure(figsize=(14, 8))
         plot(
             summed_weights,
             ax=ax3,
             colorbar_kwargs={"label": "Weighting functions"},
             cmap="Blues",
         )
-        
         utils.draw_region_boundaries(state, ax3, regions_dict)
+        figures_to_save["grace_bias_weighting_functions"] = fig3
 
     # ------------------ CORE BIAS EVALUATION ------------------
     op1 = inf.BlockLinearOperator(
@@ -260,7 +270,7 @@ def main():
         return lambda x: x * std_val
 
     nrows = int(np.ceil(len(region_names) / 2))
-    fig, axes = plt.subplots(
+    fig_pdf, axes = plt.subplots(
         nrows=nrows, ncols=2, figsize=(14, 5 * nrows), layout="constrained"
     )
     for i, region in enumerate(region_names):
@@ -315,7 +325,16 @@ def main():
     for j in range(i + 1, len(axes.flatten())):
         axes.flatten()[j].set_visible(False)
 
-    plt.show()
+    figures_to_save["grace_bias_pdfs"] = fig_pdf
+
+    # ------------------ SAVE ALL FIGURES ------------------
+    if figures_to_save:
+        print(f"\nSaving {len(figures_to_save)} plots to '{output_dir}/'...")
+        for name, fig_obj in figures_to_save.items():
+            filepath = os.path.join(output_dir, f"{name}.png")
+            fig_obj.savefig(filepath, dpi=600, bbox_inches="tight")
+            print(f"  Saved: {filepath}")
+            plt.close(fig_obj)
 
 
 if __name__ == "__main__":

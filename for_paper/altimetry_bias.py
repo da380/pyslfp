@@ -4,11 +4,16 @@ Altimetry Bias Evaluation
 """
 
 import argparse
+import os
 import numpy as np
+import matplotlib
+
+# Force headless backend to avoid Wayland/Qt display errors
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
 import pygeoinf as inf
 import pyslfp as sl
-
 import altimetry_utils as utils
 
 from pyslfp.state import EarthState
@@ -31,7 +36,6 @@ def parse_arguments():
         action="store_true",
         help="Plot an example of the SSH sample and altimetry points.",
     )
-
     parser.add_argument(
         "--lmax",
         type=int,
@@ -105,6 +109,11 @@ def parse_arguments():
 def main():
     args = parse_arguments()
 
+    # Setup directory to save plots
+    output_dir = "output_plots"
+    os.makedirs(output_dir, exist_ok=True)
+    figures_to_save = {}
+
     print("Initializing Earth State and Fingerprint Operators...")
     state_dummy = EarthState.from_defaults(lmax=args.lmax)
     points = ocean_altimetry_points(state_dummy, spacing=args.spacing)
@@ -163,21 +172,23 @@ def main():
         ocean_mask = scale_mm * state.ocean_projection(value=0.0)
         ice_mask = scale_mm * state.ice_projection(value=0.0)
 
-        _, ax1 = sl.create_map_figure(figsize=(12, 6))
+        fig1, ax1 = sl.create_map_figure(figsize=(12, 6))
         sl.plot(
             ice_thickness * ice_mask,
             ax=ax1,
             colorbar_kwargs={"label": "Ice Thickness (mm)"},
             symmetric=True,
         )
+        figures_to_save["altimetry_biasice_thickness"] = fig1
 
-        _, ax2 = sl.create_map_figure(figsize=(12, 6))
+        fig2, ax2 = sl.create_map_figure(figsize=(12, 6))
         sl.plot(
             ocean_thickness * ocean_mask,
             ax=ax2,
             colorbar_kwargs={"label": "Ocean Dynamic (mm)"},
             symmetric=True,
         )
+        figures_to_save["altimetry_biasocean_dynamic"] = fig2
 
         ssh_grid_mm = ssh_sample * ocean_mask
         observed_data_mm = (
@@ -187,7 +198,7 @@ def main():
             np.max(np.abs(ssh_grid_mm.data)), np.max(np.abs(observed_data_mm))
         )
 
-        _, ax3 = sl.create_map_figure(figsize=(12, 6))
+        fig3, ax3 = sl.create_map_figure(figsize=(12, 6))
         sl.plot(
             ssh_grid_mm,
             ax=ax3,
@@ -196,8 +207,9 @@ def main():
             vmax=shared_vmax,
             colorbar_kwargs={"label": "SSH (mm)"},
         )
+        figures_to_save["altimetry_biasssh_map"] = fig3
 
-        _, ax4 = sl.create_map_figure(figsize=(12, 6))
+        fig4, ax4 = sl.create_map_figure(figsize=(12, 6))
         ax4.set_global()
         sl.plot_points(
             points,
@@ -212,6 +224,7 @@ def main():
             colorbar_kwargs={"label": "SSH (mm)"},
             zorder=5,
         )
+        figures_to_save["altimetry_biasssh_points"] = fig4
 
     err_samples = None
     if args.samples > 0:
@@ -227,7 +240,7 @@ def main():
             -0.5 * ((x - mean) / std) ** 2
         )
 
-    _, ax = plt.subplots(figsize=(10, 6), layout="constrained")
+    fig_pdf, ax = plt.subplots(figsize=(10, 6), layout="constrained")
     x_vals = np.linspace(err_mean - 4 * err_std, err_mean + 4 * err_std, 300)
 
     if err_samples is not None:
@@ -269,8 +282,16 @@ def main():
     )
     sec_ax.tick_params(axis="x", colors="darkgreen")
 
-    if any([args.plot_maps, args.samples > 0, True]):
-        plt.show()
+    figures_to_save["altimetry_biaspdf"] = fig_pdf
+
+    # -- Save all figures --
+    if figures_to_save:
+        print(f"\nSaving {len(figures_to_save)} plots to '{output_dir}/'...")
+        for name, fig in figures_to_save.items():
+            filepath = os.path.join(output_dir, f"{name}.png")
+            fig.savefig(filepath, dpi=600, bbox_inches="tight")
+            print(f"  Saved: {filepath}")
+            plt.close(fig)
 
 
 if __name__ == "__main__":

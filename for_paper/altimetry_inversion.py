@@ -231,39 +231,6 @@ def main():
             is_surrogate=True,
         )
 
-        """
-
-        print("Constructing unmasked surrogate priors...")
-        ice_scale = surr_load_space.scale * args.ice_scale_factor
-        ice_std = args.ice_std_mm / scale_mm
-        surr_ice_prior = (
-            surr_load_space.point_value_scaled_heat_kernel_gaussian_measure(
-                ice_scale, std=ice_std
-            )
-        )
-
-        ocean_scale = surr_load_space.scale * args.ocean_scale_factor
-        ocean_std = args.ocean_std_factor * GMSL_prior_std
-        surr_ocean_prior = (
-            surr_load_space.point_value_scaled_heat_kernel_gaussian_measure(
-                ocean_scale, std=ocean_std
-            )
-        )
-
-        surr_prior = inf.GaussianMeasure.from_direct_sum(
-            [surr_ice_prior, surr_ocean_prior]
-        )
-
-
-
-        noise_std = args.noise_std_factor * GMSL_prior_std
-        data_space = inf.EuclideanSpace(len(points))
-        surr_noise_meas = inf.GaussianMeasure.from_standard_deviation(
-            data_space, noise_std
-        )
-
-        """
-
         print("Constructing Woodbury preconditioner from surrogate model...")
 
         woodbury_preconditioner = (
@@ -334,7 +301,6 @@ def main():
         post_ice, post_ocean = model_posterior.expectation
 
         ocean_mask = scale_mm * state.ocean_projection(value=0.0)
-        # ice_mask = scale_mm * state.ice_projection(value=0.0)
 
         vmax_ice = max(
             np.max(np.abs(true_ice.data * scale_mm)),
@@ -362,7 +328,7 @@ def main():
         )
         if args.plot_regions:
             state.plot_boundaries(ax_ice_true, regions_to_analyze)
-        figures_to_save["true_ice_thickness"] = fig_ice_true
+        figures_to_save["altimetry_inversion_true_ice_thickness"] = fig_ice_true
 
         # --- Posterior Ice Map ---
         fig_ice_post, ax_ice_post = plt.subplots(
@@ -381,7 +347,7 @@ def main():
         )
         if args.plot_regions:
             state.plot_boundaries(ax_ice_post, regions_to_analyze)
-        figures_to_save["posterior_ice_thickness"] = fig_ice_post
+        figures_to_save["altimetry_inversion_posterior_ice_thickness"] = fig_ice_post
 
         # --- True Ocean Map ---
         fig_ocean_true, ax_ocean_true = plt.subplots(
@@ -400,7 +366,7 @@ def main():
         )
         if args.plot_regions:
             state.plot_boundaries(ax_ocean_true, regions_to_analyze)
-        figures_to_save["true_ocean_dynamic"] = fig_ocean_true
+        figures_to_save["altimetry_inversion_true_ocean_dynamic"] = fig_ocean_true
 
         # --- Posterior Ocean Map ---
         fig_ocean_post, ax_ocean_post = plt.subplots(
@@ -419,7 +385,7 @@ def main():
         )
         if args.plot_regions:
             state.plot_boundaries(ax_ocean_post, regions_to_analyze)
-        figures_to_save["posterior_ocean_dynamic"] = fig_ocean_post
+        figures_to_save["altimetry_inversion_posterior_ocean_dynamic"] = fig_ocean_post
 
         # Sea Surface Height Observations
         print("Generating Sea Surface Height maps with observation overlays...")
@@ -452,7 +418,7 @@ def main():
                 linewidth=2.0,
                 zorder=10,
             )
-        figures_to_save["true_ssh"] = fig_ssh_true
+        figures_to_save["altimetry_inversion_true_ssh"] = fig_ssh_true
 
         # --- Altimetry Observations Map ---
         fig_ssh_obs, ax_ssh_obs = plt.subplots(
@@ -488,7 +454,7 @@ def main():
                 linewidth=2.0,
                 zorder=10,
             )
-        figures_to_save["observed_ssh"] = fig_ssh_obs
+        figures_to_save["altimetry_inversion_observed_ssh"] = fig_ssh_obs
 
         # --- Sea Level Operators ---
         sl_op = (
@@ -517,7 +483,7 @@ def main():
             vmax=vmax_sl,
             cmap=cmap,
         )
-        figures_to_save["true_sea_level"] = fig_sl_true
+        figures_to_save["altimetry_inversion_true_sea_level"] = fig_sl_true
 
         # --- Posterior SL Map ---
         fig_sl_post, ax_sl_post = plt.subplots(
@@ -534,7 +500,7 @@ def main():
             vmax=vmax_sl,
             cmap=cmap,
         )
-        figures_to_save["posterior_sea_level"] = fig_sl_post
+        figures_to_save["altimetry_inversion_posterior_sea_level"] = fig_sl_post
 
     # ------------------ OPTION 2: PDF ------------------
     if args.plot_pdfs:
@@ -563,7 +529,7 @@ def main():
             title="Global Mean Sea Level Estimators",
             posterior_labels=list(results.keys()),
         )
-        figures_to_save["gmsl_pdf_comparison"] = fig_pdf
+        figures_to_save["altimetry_inversion_gmsl_pdf_comparison"] = fig_pdf
 
     # ------------------ OPTION 3: MONTE CARLO ------------------
     if args.mc_trials > 0:
@@ -681,7 +647,7 @@ def main():
 
         ax_mc.plot([], [], color="indigo", linewidth=1.5, label="Analytical 2D PDF")
         ax_mc.legend(loc="upper left", fontsize=10)
-        figures_to_save["mc_validation_scatter"] = fig_mc
+        figures_to_save["altimetry_inversion_mc_validation_scatter"] = fig_mc
 
     # ------------------ OPTION 4: REGIONAL DECOMPOSITION ------------------
     if args.plot_regions:
@@ -711,7 +677,7 @@ def main():
             title="Bayesian Signal Separation: Dynamic Ocean vs. Ice Melt",
             fill_density=False,
         )
-        figures_to_save["regional_corner_plot"] = plt.gcf()
+        figures_to_save["altimetry_inversion_regional_corner_plot"] = plt.gcf()
 
     # ------------------ SAVE ALL FIGURES ------------------
     if figures_to_save:

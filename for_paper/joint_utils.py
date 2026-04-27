@@ -61,8 +61,12 @@ def build_physics_components(
 
     # --- 3a. Altimetry Track: [SLE Response, Ocean] -> Discrete SSH Points ---
     static_ssh_op = sea_surface_height_operator(state, finger_print_operator.codomain)
+
+    # Explicit Sobolev order inclusion for SSH mappings
+    ssh_inclusion = static_ssh_op.codomain.order_inclusion_operator(field_space.order)
+
     alt_continuous_op = inf.RowLinearOperator(
-        [static_ssh_op, field_space.identity_operator()]
+        [ssh_inclusion @ static_ssh_op, field_space.identity_operator()]
     )
     point_eval = field_space.point_evaluation_operator(points)
     alt_track = point_eval @ alt_continuous_op
@@ -81,7 +85,6 @@ def build_physics_components(
     joint_forward_operator = op3 @ op2 @ op1
     continuous_ssh_operator = alt_continuous_op @ op2 @ op1
 
-    # Return as a dictionary for clean extraction in the main script
     return {
         "state": state,
         "load_space": field_space,
@@ -116,9 +119,10 @@ def build_measures(
         ice_scale, std=ice_std
     )
 
+    # Calculate implied GMSL standard deviation
     GMSL_weighting_function = (
         -state.model.parameters.ice_density
-        * state.ice_projection(value=0.0)
+        * state.one_minus_ocean_function
         / (state.model.parameters.water_density * state.ocean_area)
     )
 
@@ -135,11 +139,13 @@ def build_measures(
         operator=remove_ocean_average_operator(state, load_space)
     )
 
-    model_prior = inf.GaussianMeasure.from_direct_sum(
+    # Capture the strictly positive-definite unmasked prior for Woodbury
+    unmasked_prior = inf.GaussianMeasure.from_direct_sum(
         [ice_thickness_prior, ocean_thickness_prior]
     )
 
-    model_prior = model_prior.affine_mapping(
+    # Apply spatial masking projections to form the true, physically constrained prior
+    model_prior = unmasked_prior.affine_mapping(
         operator=inf.BlockDiagonalLinearOperator(
             [
                 ice_projection_operator(state, load_space),
@@ -167,34 +173,22 @@ def build_measures(
     )
     grace_spatial_std = grace_noise_std_factor * ice_std
 
-    noise_load_space = (
-        load_space
-        if load_space.degree >= obs_degree
-        else load_space.with_degree(obs_degree)
-    )
-
     grace_spatial_noise_meas = (
-        noise_load_space.point_value_scaled_heat_kernel_gaussian_measure(
+        load_space.point_value_scaled_heat_kernel_gaussian_measure(
             grace_spatial_scale, std=grace_spatial_std
         )
     )
 
-    wmb_model = (
-        state.model.with_degree(obs_degree)
-        if state.model.lmax < obs_degree
-        else state.model
-    )
-
-    wmb = WMBMethod(wmb_model, obs_degree)
+    wmb = WMBMethod(state.model, obs_degree)
     grace_noise_meas = wmb.load_measure_to_observation_measure(grace_spatial_noise_meas)
 
     joint_noise_meas = inf.GaussianMeasure.from_direct_sum(
         [alt_noise_meas, grace_noise_meas]
     )
 
-    # Return as a dictionary for clean extraction
     return {
         "model_prior": model_prior,
+        "unmasked_prior": unmasked_prior,
         "alt_noise": alt_noise_meas,
         "grace_noise": grace_noise_meas,
         "joint_noise": joint_noise_meas,
@@ -221,8 +215,11 @@ def regional_decomposition_operators(state, load_space, finger_print_operator, r
     ice_to_load = ice_thickness_change_to_load_operator(state, load_space, load_space)
     static_ssh_op = sea_surface_height_operator(state, finger_print_operator.codomain)
 
+    ssh_inclusion = static_ssh_op.codomain.order_inclusion_operator(load_space.order)
+
     op_ice_fingerprint = (
         avg_op
+        @ ssh_inclusion
         @ static_ssh_op
         @ finger_print_operator
         @ ice_to_load

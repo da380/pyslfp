@@ -6,13 +6,10 @@ satellite altimetry inversions and bias evaluation.
 """
 
 import numpy as np
-import scipy.sparse as sps
 
 
 import pygeoinf as inf
 
-from pygeoinf import GaussianMeasure
-from pygeoinf.symmetric_space.sphere import Lebesgue
 
 from pyslfp.state import EarthState
 from pyslfp.linear_operators import (

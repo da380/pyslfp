@@ -104,6 +104,7 @@ def build_measures(
     /,
     *,
     prior_shift=0.0,
+    is_surrogate=False,
 ):
     """Constructs the joint prior and observation noise measures."""
     ice_scale = load_space.scale * ice_scale_factor
@@ -112,9 +113,11 @@ def build_measures(
     ice_thickness_prior = load_space.point_value_scaled_heat_kernel_gaussian_measure(
         ice_scale, std=ice_std
     )
-    ice_thickness_prior = ice_thickness_prior.affine_mapping(
-        operator=ice_projection_operator(state, load_space)
-    )
+
+    if not is_surrogate:
+        ice_thickness_prior = ice_thickness_prior.affine_mapping(
+            operator=ice_projection_operator(state, load_space)
+        )
 
     GMSL_weighting_function = (
         -state.model.parameters.ice_density
@@ -133,10 +136,11 @@ def build_measures(
         ocean_scale, std=ocean_std
     )
 
-    ocean_thickness_prior = ocean_thickness_prior.affine_mapping(
-        operator=ocean_projection_operator(state, load_space)
-        @ remove_ocean_average_operator(state, load_space)
-    )
+    if not is_surrogate:
+        ocean_thickness_prior = ocean_thickness_prior.affine_mapping(
+            operator=ocean_projection_operator(state, load_space)
+            @ remove_ocean_average_operator(state, load_space)
+        )
 
     model_prior = inf.GaussianMeasure.from_direct_sum(
         [ice_thickness_prior, ocean_thickness_prior]
@@ -149,7 +153,7 @@ def build_measures(
         )
 
     noise_std = noise_std_factor * GMSL_prior_std
-    if noise_scale_factor == 0.0:
+    if noise_scale_factor == 0.0 or is_surrogate:
         n_points = len(points)
         data_space = inf.EuclideanSpace(n_points)
         noise_meas = inf.GaussianMeasure.from_standard_deviation(data_space, noise_std)

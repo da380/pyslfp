@@ -65,7 +65,7 @@ def parse_arguments():
     parser.add_argument(
         "--lmax",
         type=int,
-        default=256,
+        default=128,
         help="Maximum spherical harmonic degree for the exact Earth model.",
     )
     parser.add_argument(
@@ -94,7 +94,7 @@ def parse_arguments():
     parser.add_argument(
         "--spacing",
         type=float,
-        default=1.0,
+        default=4.0,
         help="Spacing in degrees for the altimetry observation points.",
     )
     parser.add_argument(
@@ -216,6 +216,23 @@ def main():
 
         woodbury_solver = inf.LUSolver(galerkin=True, parallel=True, n_jobs=8)
 
+        surr_model_prior, surr_noise_meas, _ = utils.build_measures(
+            surr_state,
+            surr_load_space,
+            args.ice_scale_factor,
+            args.ice_std_mm,
+            args.ocean_scale_factor,
+            args.ocean_std_factor,
+            args.noise_scale_factor,
+            args.noise_std_factor,
+            points,
+            scale_mm,
+            prior_shift=args.prior_shift,
+            is_surrogate=True,
+        )
+
+        """
+
         print("Constructing unmasked surrogate priors...")
         ice_scale = surr_load_space.scale * args.ice_scale_factor
         ice_std = args.ice_std_mm / scale_mm
@@ -237,11 +254,15 @@ def main():
             [surr_ice_prior, surr_ocean_prior]
         )
 
+
+
         noise_std = args.noise_std_factor * GMSL_prior_std
         data_space = inf.EuclideanSpace(len(points))
         surr_noise_meas = inf.GaussianMeasure.from_standard_deviation(
             data_space, noise_std
         )
+
+        """
 
         print("Constructing Woodbury preconditioner from surrogate model...")
 
@@ -249,7 +270,7 @@ def main():
             inverse_problem.surrogate_woodbury_data_preconditioner(
                 woodbury_solver,
                 alternate_forward_operator=surr_forward_op,
-                alternate_prior_measure=surr_prior,
+                alternate_prior_measure=surr_model_prior,
                 alternate_data_error_measure=surr_noise_meas,
             )
         )

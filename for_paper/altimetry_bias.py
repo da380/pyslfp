@@ -35,7 +35,7 @@ def parse_arguments():
     parser.add_argument(
         "--lmax",
         type=int,
-        default=256,
+        default=128,
         help="Maximum spherical harmonic degree for the Earth model.",
     )
     parser.add_argument(
@@ -53,7 +53,7 @@ def parse_arguments():
     parser.add_argument(
         "--spacing",
         type=float,
-        default=1.0,
+        default=4.0,
         help="Spacing in degrees for the altimetry observation points.",
     )
     parser.add_argument(

@@ -17,7 +17,8 @@ htmlcov/
 # Sphinx documentation build output
 docs/build/
 
-
+# Any images
+*.png
 
 
 

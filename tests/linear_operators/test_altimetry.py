@@ -63,7 +63,7 @@ def test_ocean_altimetry_points(testing_state):
     """Verifies that the ocean altimetry grid generator filters correctly."""
     # Use a huge spacing (30 degrees) so the test runs instantly
     points = ocean_altimetry_points(
-        testing_state, spacing_degrees=30.0, latitude_min=-60.0, latitude_max=60.0
+        testing_state, spacing=30.0, latitude_min=-60.0, latitude_max=60.0
     )
 
     assert isinstance(points, list)
@@ -78,7 +78,7 @@ def test_ocean_altimetry_points(testing_state):
 
 def test_ice_altimetry_points(testing_state):
     """Verifies that the ice altimetry grid generator filters correctly."""
-    points = ice_altimetry_points(testing_state, spacing_degrees=30.0)
+    points = ice_altimetry_points(testing_state, spacing=30.0)
 
     assert isinstance(points, list)
     if points:  # Depends on the analytical mock state having ice coverage

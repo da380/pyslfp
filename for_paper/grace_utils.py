@@ -109,8 +109,8 @@ def get_regional_averaging(
 
     if regions_dict is None:
         regions_dict = {
-            "GRL (NW Basin)": "NW",
-            "WAIS (Amundsen G-H)": "G-H",
+            "GRL (S Basin)": ["SE", "SW"],
+            "WAIS": ["F-G", "Ep-F", "J-Jpp", "G-H", "H-Hp"],
             "Gulf of Mexico": "Gulf of Mexico",
             "GBM basin": "4030025450",
         }

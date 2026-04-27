@@ -19,8 +19,7 @@ repos:
     hooks:
       - id: pytest
         name: pytest (full suite)
-        # Forces pytest to run all tests, including those marked as slow
-        #entry: poetry run pytest -m "slow or not slow"
+        # Forces pytest to run all tests, including those marked as slow        
         entry: poetry run pytest
         language: system
         pass_filenames: false

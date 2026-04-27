@@ -9,16 +9,16 @@ license = "BSD-3-Clause"
 
 [tool.poetry.dependencies]
 python = ">=3.12"
-numpy = ">=1.26.0"
-scipy = ">=1.0.0"
-pyshtools = ">=4.0.0"
-matplotlib = ">=3.0.0"
-pyqt6 = ">=6.0.0"
-Cartopy = "^0.23.0"
-pygeoinf = ">=1.7.0"
+numpy = ">=2.0.0"
+scipy = ">=1.13.0"
+pyshtools = ">=4.14.1"
+matplotlib = ">=3.9.0"
+pyqt6 = ">=6.11.0"
+Cartopy = "^0.25.0"
+pygeoinf = ">=1.7.7"
 regionmask = "^0.13.0"
-cf-xarray = "^0.10.9"
-pre-commit = "^4.5.1"
+cf-xarray = "^0.10.11"
+pre-commit = "^4.6.0"
 
 [tool.poetry.group.dev]
 optional = true
@@ -29,7 +29,6 @@ pytest-cov = "^6.2.1"
 jupyter = "^1.1.1"
 furo = "^2025.7.19"
 sphinx = "<8.2"
-nbsphinx = "^0.9.7"
 ruff = "^0.5.5"
 
 

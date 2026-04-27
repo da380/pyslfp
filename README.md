@@ -6,18 +6,17 @@
 
 `pyslfp` is a Python package for computing elastic sea level "fingerprints". It provides a robust and user-friendly framework for solving the sea level equation, accounting for the Earth's elastic deformation, gravitational self-consistency between the ice, oceans, and solid Earth, and rotational feedback effects.
 
-The core of the library is the `FingerPrint` class, which implements an iterative solver to determine the unique pattern of sea-level change that results from a change in a surface load, such as the melting of an ice sheet.
+The core of the library is built around the `EarthState` and `FingerPrintOperator` classes, which implement an iterative solver to determine the unique pattern of sea-level change that results from a change in a surface load, such as the melting of an ice sheet.
 
 ---
 
 ## Key Features 
 
-* **Elastic Sea Level Equation Solver:** Implements an iterative solver for the  sea level equation and the generalised sea level equation needed within adjoint calculations.
+* **Elastic Sea Level Equation Solver:** Implements an iterative solver for the sea level equation and the generalised sea level equation needed within adjoint calculations.
 * **Comprehensive Physics:** Accounts for Earth's elastic response (via load Love numbers), self-consistent gravity, and rotational feedbacks (polar wander).
 * **Ice History Models:** Includes a data loader for the ICE-5G, ICE-6G, and ICE-7G global ice history models, allowing for easy setup of realistic background states.
-* **Forward and Adjoint Modeling:** Provides a high-level interface for both forward calculations (predicting sea level change from a load) and  adjoint modeling (for use in inverse problems), powered by `pygeoinf`, and based on the theory of [Al-Attar et al.(2024)](https://academic.oup.com/gji/article/236/1/362/7338265)
-* **Built-in Visualization:** Comes with high-quality map plotting utilities built on `matplotlib` and `cartopy` for easy visualization of global data grids.
-
+* **Forward and Adjoint Modeling:** Provides a high-level interface for both forward calculations (predicting sea level change from a load) and adjoint modeling (for use in inverse problems), natively integrated with `pygeoinf` and based on the theory of [Al-Attar et al. (2024)](https://academic.oup.com/gji/article/236/1/362/7338265).
+* **Built-in Visualization:** Comes with high-quality map plotting utilities built on `matplotlib` and `cartopy` for easy visualization of global data grids and regional boundaries (e.g., IHO Seas, AR6, IMBIE).
 
 ---
 
@@ -31,7 +30,7 @@ pip install pyslfp
 
 ### Installation with Poetry 
 
-Alternatively, for development purposes, you can install pyslfp using Poetry. First, clone the repository and then run:
+Alternatively, for development purposes, you can install `pyslfp` using Poetry. First, clone the repository and then run:
 
 ```bash 
 poetry install 
@@ -45,91 +44,29 @@ poetry install --with dev
 
 ---
 
-## Citation 
-
-If you use `pyslfp` in your published work, please cite the following paper:
-
-*   Al-Attar, D., Syvret, F., Crawford, O., Mitrovica, J.X. and Lloyd, A.J., 2024. Reciprocity and sensitivity kernels for sea level fingerprints. *Geophysical Journal International*, **236**(1), 362-378.
-    
-Additionally, please cite the appropriate ice history model if you use the `IceNG` class from
-
-*   [Peltier group data sets](https://www.atmosp.physics.utoronto.ca/~peltier/data.php)
-
----
-
-
 ## Tutorials
 
 You can run the interactive tutorials directly in Google Colab to get started with the core concepts of the library.
 
-
-| Tutorial Name                 | Link to Colab                                                                                                                                                                                                                                    |
-| :---------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Tutorial 1 -  Calculating a Basic Sea Level Fingerprint | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/docs/source/tutorials/tutorial1.ipynb)                                                                                  |
-| Tutorial 2 - A Deeper Dive into the Sea Level Equation   | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/docs/source/tutorials/tutorial2.ipynb)                                                                                  |
-| Tutorial 3 - Reciprocity and Generalised Sea Level Forcing  | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/docs/source/tutorials/tutorial3.ipynb)                                                                                  |
-| Tutorial 4 -  Adjoints and Sensitivity Kernels with `pygeoinf` | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/docs/source/tutorials/tutorial4.ipynb)                                                                                  |
-| Tutorial 5 - A Bayesian Inverse Problem - Inferring Ice Melt from Tide Gauges | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/docs/source/tutorials/tutorial5.ipynb)                                                                                  |
-
-
-
-## Quick Start
-
-Here's a simple example of how to compute and plot the sea level fingerprint for the melting of 10% of the Northern Hemisphere's ice sheets.
-
-```python
-import matplotlib.pyplot as plt
-from pyslfp import FingerPrint, plot, IceModel
-
-# 1. Initialise the fingerprint model
-# lmax sets the spherical harmonic resolution.
-fp = FingerPrint(lmax=256)
-
-# 2. Set the background state (ice and sea level) to the present day
-# This uses the built-in ICE-7G model loader.
-fp.set_state_from_ice_ng(version=IceModel.ICE7G, date=0.0)
-
-# 3. Define a surface mass load
-# This function calculates the load corresponding to melting 10% of
-# the Northern Hemisphere's ice mass.
-direct_load = fp.northern_hemisphere_load(fraction=0.1)
-
-# 4. Solve the sea level equation for the given load
-# This returns the sea level change, surface displacement, gravity change,
-# and angular velocity change. In this instance, only the first of the
-# returned fields is used. 
-sea_level_change, _, _, _ = fp(direct_load=direct_load)
-
-# 5. Plot the resulting sea level fingerprint,
-# showing the result only over the oceans.
-fig, ax, im = plot(
-    sea_level_change * fp.ocean_projection(),
-)
-
-# Customize the plot
-ax.set_title("Sea Level Fingerprint of Northern Hemisphere Ice Melt", y=1.1)
-cbar = fig.colorbar(im, ax=ax, orientation="horizontal", pad=0.05, shrink=0.7)
-cbar.set_label("Sea Level Change (meters)")
-
-plt.show()
-```
-
-The output of the above script will look similar to the following figure:
-
-![Example of Bayesian Inference on a Circle](docs/figures/sl.png)
+| Tutorial Name | Link to Colab |
+| :--- | :--- |
+| Tutorial 1 - Calculating a Basic Sea Level Fingerprint | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/tutorial1.ipynb) |
+| Tutorial 2 - A Deeper Dive into the Sea Level Equation | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/tutorial2.ipynb) |
 
 ---
+
+
+---
+
 ## Core Components
 
-* The library is organized into a few key modules:
+The library is organized into several key modules designed around abstract Hilbert spaces and linear operators:
 
-* finger_print.py: Contains the main FingerPrint class, which orchestrates the calculations.
-
-* ice_ng.py: Provides the IceNG class for loading and interpolating global ice history models.
-
-* plotting.py: Includes the plot function for visualizing pyshtools.SHGrid objects.
-
-* physical_parameters.py: Defines the EarthModelParameters class, which manages physical constants and non-dimensionalization schemes.
+* `state.py`: Contains the `EarthState` and `EarthModel` classes for managing planetary parameters, resolutions, and static background topologies.
+* `linear_operators.py`: Contains the `FingerPrintOperator`, `WMBMethod`, and associated mappings required to formulate sea level and gravimetry equations as rigorous linear inverse problems.
+* `regions.py`: Provides the `Regions` mixin for automated spatial masking and boundary plotting (including IHO Seas, IMBIE, HydroBASINS, and AR6).
+* `ice_ng.py`: Provides the `IceNG` class for loading and interpolating global ice history models.
+* `plotting.py`: Includes plotting functions for visualizing `pyshtools.SHGrid` objects natively on Cartopy projections.
 
 ---
 
@@ -138,16 +75,11 @@ The output of the above script will look similar to the following figure:
 `pyslfp` is built on top of a robust stack of scientific Python packages:
 
 * **numpy & scipy**: For numerical operations.
-
 * **pyshtools**: For spherical harmonic transforms and grid representations.
-
-* **pygeoinf**: For formulating and solving associated inverse problems
-
+* **pygeoinf**: For formulating and solving associated Bayesian inverse problems.
 * **Cartopy & matplotlib**: For creating high-quality map projections and plots.
+* **regionmask & geopandas**: For working with geospatial vector masks and boundaries.
 
-* **regionmask & cf-xarray**: For working with geospatial masks.
- 
-* **pyqt6**: As a backend for interactive plotting.
 ---
 
 ## License
@@ -160,11 +92,13 @@ This project is licensed under the BSD-3-Clause License.
 
 If you use `pyslfp` in your published work, please cite the following paper:
 
-*    Al-Attar, D., Syvret, F., Crawford, O., Mitrovica, J.X. and Lloyd, A.J., 2024. *Reciprocity and sensitivity kernels for sea level fingerprints*. Geophysical Journal International, **236(1)**, pp.362-378.
+* Al-Attar, D., Syvret, F., Crawford, O., Mitrovica, J.X. and Lloyd, A.J., 2024. *Reciprocity and sensitivity kernels for sea level fingerprints*. Geophysical Journal International, **236(1)**, pp.362-378.
   
 Furthermore, if you use the ice models contained in the `IceNG` class, please cite the appropriate ice history model:
 
-[Peltier Group Data Sets](https://www.atmosp.physics.utoronto.ca/~peltier/data.php)
+* [Peltier Group Data Sets](https://www.atmosp.physics.utoronto.ca/~peltier/data.php)
+
+---
 
 ## Contributing
 

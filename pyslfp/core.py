@@ -536,6 +536,7 @@ class EarthModel:
         """
         self._lmax = lmax
         self._parameters = parameters or EarthModelParameters.from_defaults()
+        self._love_number_file = love_number_file
         self._love_numbers = LoveNumbers(lmax, self._parameters, file=love_number_file)
 
         if grid == "DH2":
@@ -698,4 +699,16 @@ class EarthModel:
         """
         return (
             self._integration_factor * self.expand_field(f, lmax_calc=0).coeffs[0, 0, 0]
+        )
+
+    def with_degree(self, lmax) -> EarthModel:
+        """
+        Returns a version of the EarthModel that is identical but for a change
+        in the associated truncation degree.
+        """
+        return EarthModel(
+            lmax,
+            parameters=self.parameters,
+            love_number_file=self._love_number_file,
+            grid=self.grid,
         )

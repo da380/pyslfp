@@ -8,8 +8,13 @@ and ocean dynamic topography.
 """
 
 import argparse
+import os
 import numpy as np
 import scipy.stats as stats
+import matplotlib
+
+# Force headless backend to avoid Wayland/Qt display errors
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from cartopy import crs as ccrs
 import pygeoinf as inf
@@ -38,7 +43,7 @@ def parse_arguments():
     parser.add_argument("--mc-trials", type=int, default=0, help="Number of MC trials.")
 
     parser.add_argument("--lmax", type=int, default=128)
-    parser.add_argument("--surrogate-degree", type=int, default=64)
+    parser.add_argument("--surrogate-degree", type=int, default=32)
     parser.add_argument("--obs-degree", type=int, default=100)
     parser.add_argument("--no-precond", action="store_true")
 
@@ -60,7 +65,7 @@ def parse_arguments():
 
     parser.add_argument("--alt-noise-std-factor", type=float, default=0.5)
     parser.add_argument("--grace-noise-scale-km", type=float, default=250.0)
-    parser.add_argument("--grace-noise-std-mm", type=float, default=5.0)
+    parser.add_argument("--grace-noise-std-factor", type=float, default=0.5)
 
     return parser.parse_args()
 
@@ -72,10 +77,17 @@ def main():
         if args.mc_trials == 0:
             args.mc_trials = 500
 
+    # Setup directory to save plots
+    output_dir = "output_plots_joint"
+    os.makedirs(output_dir, exist_ok=True)
+    figures_to_save = {}
+
     print("Generating altimetry points...")
     state_dummy = EarthState.from_defaults(lmax=args.lmax)
-    points = ocean_altimetry_points(state_dummy, spacing_degrees=args.spacing_degrees)
+    points = ocean_altimetry_points(state_dummy, spacing=args.spacing_degrees)
     print(f"Generated {len(points)} ocean altimetry observation points.")
+
+    inf.configure_threading(n_threads=1)
 
     # ==========================================
     # 1. BUILD EXACT PHYSICS
@@ -99,7 +111,7 @@ def main():
         args.ocean_std_factor,
         args.alt_noise_std_factor,
         args.grace_noise_scale_km,
-        args.grace_noise_std_mm,
+        args.grace_noise_std_factor,
         args.obs_degree,
         points,
         exact_phys["scale_mm"],
@@ -147,24 +159,29 @@ def main():
             args.ocean_std_factor,
             args.alt_noise_std_factor,
             args.grace_noise_scale_km,
-            args.grace_noise_std_mm,
+            args.grace_noise_std_factor,
             args.obs_degree,
             points,
             surr_phys["scale_mm"],
             prior_shift=args.prior_shift,
         )
 
+        woodbury_solver = inf.LUSolver(galerkin=True, parallel=True, n_jobs=8)
+        alpha = 0.1
+
         if args.full_woodbury:
             print("Constructing Full Joint Woodbury Preconditioner...")
-            surr_joint_fwd = inf.LinearForwardProblem(
-                surr_phys["joint_forward"], data_error_measure=surr_meas["joint_noise"]
+            woodbury_preconditioner = (
+                inverse_problem.surrogate_woodbury_data_preconditioner(
+                    woodbury_solver,
+                    alternate_forward_operator=surr_phys["joint_forward"],
+                    alternate_prior_measure=surr_meas["unmasked_prior"],
+                    alternate_data_error_measure=surr_meas["joint_noise"],
+                )
             )
-            surr_joint_inv = inf.LinearBayesianInversion(
-                surr_joint_fwd, surr_meas["model_prior"]
-            )
-            preconditioner = surr_joint_inv.woodbury_data_preconditioner(
-                parallel=True, n_jobs=8
-            )
+            preconditioner = (1 - alpha) * woodbury_preconditioner + alpha * surr_meas[
+                "joint_noise"
+            ].inverse_covariance
 
         else:
             print("Constructing Hybrid Block-Diagonal Preconditioner...")
@@ -174,9 +191,12 @@ def main():
                 surr_phys["alt_track"], data_error_measure=surr_meas["alt_noise"]
             )
             surr_alt_inv = inf.LinearBayesianInversion(
-                surr_alt_fwd, surr_meas["model_prior"]
+                surr_alt_fwd, surr_meas["unmasked_prior"]
             )
-            P_alt = surr_alt_inv.woodbury_data_preconditioner()
+            woodbury_P_alt = surr_alt_inv.woodbury_data_preconditioner(woodbury_solver)
+            P_alt = (1 - alpha) * woodbury_P_alt + alpha * surr_meas[
+                "alt_noise"
+            ].inverse_covariance
 
             # --- 2. GRACE Block (WMB Spectral) ---
             wmb_proxy_prior = exact_phys[
@@ -188,14 +208,15 @@ def main():
                 wmb_proxy_prior, exact_meas["grace_noise"]
             )
 
-            # Fuse Blocks. Note: Altimetry is index 0 and GRACE is index 1 in the ColumnOperator.
+            # Fuse Blocks
             preconditioner = inf.BlockDiagonalLinearOperator([P_alt, P_grace])
 
     # ==========================================
     # 3. POSTERIOR SOLVE
     # ==========================================
-    callback = inverse_problem.normal_residual_callback(synthetic_data)
-    solver = inf.CGMatrixSolver(callback=callback)
+    callback = inf.ProgressCallback()
+    tolerance = 0.01 * min(args.alt_noise_std_factor, args.grace_noise_std_factor)
+    solver = inf.CGSolver(callback=callback, rtol=tolerance)
 
     print("\nSolving for posterior expectation...")
     model_posterior = inverse_problem.model_posterior_measure(
@@ -313,6 +334,8 @@ def main():
                     ax, regions_to_analyze, edgecolor="black", linewidth=2.0, zorder=10
                 )
 
+        figures_to_save["joint_posterior_maps"] = fig_maps
+
         print("Generating Sea Surface Height maps with observation overlays...")
         true_ssh = exact_phys["continuous_ssh"](true_model)
         obs_data_mm = synthetic_data[0] * scale_mm
@@ -367,6 +390,8 @@ def main():
                     ax, regions_to_analyze, edgecolor="black", linewidth=2.0, zorder=10
                 )
 
+        figures_to_save["joint_ssh_maps"] = fig_ssh
+
     # ------------------ OPTION 2: PDF ------------------
     if args.plot_pdfs:
         print("Plotting Head-to-Head GMSL PDF...")
@@ -394,6 +419,7 @@ def main():
             title="Global Mean Sea Level Estimators",
             posterior_labels=list(results.keys()),
         )
+        figures_to_save["gmsl_pdf_comparison"] = fig_pdf
 
     # ------------------ OPTION 3: MONTE CARLO ------------------
     if args.mc_trials > 0:
@@ -514,6 +540,7 @@ def main():
 
         ax_mc.plot([], [], color="indigo", linewidth=1.5, label="Analytical 2D PDF")
         ax_mc.legend(loc="upper left", fontsize=10)
+        figures_to_save["mc_validation_scatter"] = fig_mc
 
     # ------------------ OPTION 4: REGIONAL DECOMPOSITION ------------------
     if args.plot_regions:
@@ -551,9 +578,17 @@ def main():
             title="Joint Bayes Signal Separation: Dynamic Ocean vs. Ice Melt",
             fill_density=False,
         )
+        figures_to_save["regional_corner_plot"] = plt.gcf()
 
-    if any([args.plot_maps, args.plot_pdfs, args.mc_trials, args.plot_regions]):
-        plt.show()
+    # ------------------ SAVE ALL FIGURES ------------------
+    if figures_to_save:
+        print(f"\nSaving {len(figures_to_save)} plots to '{output_dir}/'...")
+        for name, fig in figures_to_save.items():
+            filepath = os.path.join(output_dir, f"{name}.png")
+            fig.savefig(filepath, dpi=300, bbox_inches="tight")
+            print(f"  Saved: {filepath}")
+            # Explicitly close the figure to free up memory
+            plt.close(fig)
 
 
 if __name__ == "__main__":

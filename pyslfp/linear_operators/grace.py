@@ -213,6 +213,22 @@ class WMBMethod:
 
         return coeffs_to_load @ scaling_operator
 
+    def load_to_potential_coefficient_operator(
+        self, load_space: Union[Lebesgue, Sobolev]
+    ) -> LinearOperator:
+        """
+        Maps a load to the corresponding potential coefficients based on the WMB theory.
+        """
+
+        check_load_space(load_space)
+
+        load_to_coeffs = load_space.to_coefficient_operator(
+            self.max_obs_degree, lmin=self.min_obs_degree
+        )
+        scaling_operator = self.load_coefficient_to_potential_coefficient_operator()
+
+        return scaling_operator @ load_to_coeffs
+
     # ---------------------------------------------------------#
     #                     Bayesian Preconditioning             #
     # ---------------------------------------------------------#

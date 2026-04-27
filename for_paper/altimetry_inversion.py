@@ -8,17 +8,26 @@ resulting Global Mean Sea Level (GMSL).
 """
 
 import argparse
+import os
 import numpy as np
 import scipy.stats as stats
+import matplotlib
+
+# Force headless backend to avoid Wayland/Qt display errors
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from cartopy import crs as ccrs
 import pygeoinf as inf
-import pyslfp as sl
 
-from pyslfp.state import EarthState
-from pyslfp.linear_operators import ocean_altimetry_points, altimetry_averaging_operator
 
 import altimetry_utils as utils
+
+import pyslfp as sl
+from pyslfp.state import EarthState
+from pyslfp.linear_operators import (
+    ocean_altimetry_points,
+    ice_thickness_change_to_load_operator,
+)
 
 
 def parse_arguments():
@@ -56,7 +65,7 @@ def parse_arguments():
     parser.add_argument(
         "--lmax",
         type=int,
-        default=128,
+        default=256,
         help="Maximum spherical harmonic degree for the exact Earth model.",
     )
     parser.add_argument(
@@ -83,45 +92,51 @@ def parse_arguments():
         help="Length scale (in km) defining the load space.",
     )
     parser.add_argument(
-        "--spacing-degrees",
+        "--spacing",
         type=float,
-        default=2.0,
+        default=1.0,
         help="Spacing in degrees for the altimetry observation points.",
     )
     parser.add_argument(
-        "--ice-scale-km",
+        "--ice-scale-factor",
         type=float,
-        default=500.0,
-        help="Correlation length scale (in km) for the ice thickness prior.",
+        default=1.0,
+        help="Relative correlation length scale for the ice thickness prior.",
     )
     parser.add_argument(
         "--ice-std-mm",
         type=float,
-        default=20.0,
+        default=10.0,
         help="Pointwise standard deviation (in mm) for the ice thickness prior.",
     )
     parser.add_argument(
-        "--ocean-scale-km",
+        "--ocean-scale-factor",
         type=float,
-        default=250.0,
-        help="Correlation length scale (in km) for the ocean dynamic thickness prior.",
+        default=0.2,
+        help="Relative correlation length scale for the ocean dynamic thickness prior.",
     )
     parser.add_argument(
         "--ocean-std-factor",
         type=float,
-        default=0.5,
-        help="Ocean dynamic thickness noise std as a factor of the expected GMSL std.",
+        default=2.0,
+        help="Ocean dynamic thickness noise standard deviation as a factor of the expected GMSL std.",
     )
     parser.add_argument(
         "--noise-std-factor",
         type=float,
-        default=0.5,
-        help="Instrument noise std per point as a factor of the expected GMSL std.",
+        default=1.0,
+        help="Instrument noise standard deviation per point as a factor of the expected GMSL std.",
+    )
+    parser.add_argument(
+        "--noise-scale-factor",
+        type=float,
+        default=0.00,
+        help="Relative correlation length scale for the noise field.",
     )
     parser.add_argument(
         "--prior-shift",
         type=float,
-        default=0.0,
+        default=1.0,
         help="Shift the prior expectation by drawing a sample and multiplying by this factor.",
     )
 
@@ -135,31 +150,39 @@ def main():
         if args.mc_trials == 0:
             args.mc_trials = 500
 
+    # Setup directory to save plots
+    output_dir = "output_plots"
+    os.makedirs(output_dir, exist_ok=True)
+    figures_to_save = {}
+
     print("Generating altimetry points...")
     state_dummy = EarthState.from_defaults(lmax=args.lmax)
-    points = ocean_altimetry_points(state_dummy, spacing_degrees=args.spacing_degrees)
+    points = ocean_altimetry_points(state_dummy, spacing=args.spacing)
     print(f"Generated {len(points)} ocean altimetry observation points.")
+
+    inf.configure_threading(n_threads=1)
 
     # ------------------ EXACT MODEL SETUP ------------------
     print(f"\nBuilding EXACT physical operators (lmax={args.lmax})...")
     (
-        exact_state,
-        exact_load_space,
-        exact_fp_op,
-        exact_continuous_ssh,
-        exact_forward_op,
+        state,
+        load_space,
+        fp_op,
+        continuous_ssh,
+        forward_op,
         scale_mm,
     ) = utils.build_physics_components(
         args.lmax, args.load_order, args.load_scale_km, points, is_surrogate=False
     )
 
-    exact_model_prior, noise_meas, GMSL_prior_std = utils.build_measures(
-        exact_state,
-        exact_load_space,
-        args.ice_scale_km,
+    model_prior, noise_meas, GMSL_prior_std = utils.build_measures(
+        state,
+        load_space,
+        args.ice_scale_factor,
         args.ice_std_mm,
-        args.ocean_scale_km,
+        args.ocean_scale_factor,
         args.ocean_std_factor,
+        args.noise_scale_factor,
         args.noise_std_factor,
         points,
         scale_mm,
@@ -170,12 +193,10 @@ def main():
 
     print("Setting up Bayesian Inversion...")
     forward_problem = inf.LinearForwardProblem(
-        exact_forward_op, data_error_measure=noise_meas
+        forward_op, data_error_measure=noise_meas
     )
-    true_model, synthetic_data = forward_problem.synthetic_model_and_data(
-        exact_model_prior
-    )
-    inverse_problem = inf.LinearBayesianInversion(forward_problem, exact_model_prior)
+    true_model, synthetic_data = forward_problem.synthetic_model_and_data(model_prior)
+    inverse_problem = inf.LinearBayesianInversion(forward_problem, model_prior)
 
     # ------------------ PRECONDITIONER SETUP ------------------
     preconditioner = None
@@ -193,29 +214,55 @@ def main():
             )
         )
 
-        surr_prior, _, _ = utils.build_measures(
-            surr_state,
-            surr_load_space,
-            args.ice_scale_km,
-            args.ice_std_mm,
-            args.ocean_scale_km,
-            args.ocean_std_factor,
-            args.noise_std_factor,
-            points,
-            scale_mm,
-            prior_shift=args.prior_shift,
+        woodbury_solver = inf.LUSolver(galerkin=True, parallel=True, n_jobs=8)
+
+        print("Constructing unmasked surrogate priors...")
+        ice_scale = surr_load_space.scale * args.ice_scale_factor
+        ice_std = args.ice_std_mm / scale_mm
+        surr_ice_prior = (
+            surr_load_space.point_value_scaled_heat_kernel_gaussian_measure(
+                ice_scale, std=ice_std
+            )
+        )
+
+        ocean_scale = surr_load_space.scale * args.ocean_scale_factor
+        ocean_std = args.ocean_std_factor * GMSL_prior_std
+        surr_ocean_prior = (
+            surr_load_space.point_value_scaled_heat_kernel_gaussian_measure(
+                ocean_scale, std=ocean_std
+            )
+        )
+
+        surr_prior = inf.GaussianMeasure.from_direct_sum(
+            [surr_ice_prior, surr_ocean_prior]
+        )
+
+        noise_std = args.noise_std_factor * GMSL_prior_std
+        data_space = inf.EuclideanSpace(len(points))
+        surr_noise_meas = inf.GaussianMeasure.from_standard_deviation(
+            data_space, noise_std
         )
 
         print("Constructing Woodbury preconditioner from surrogate model...")
-        surrogate_inv = inverse_problem.surrogate_inversion(
-            alternate_forward_operator=surr_forward_op,
-            alternate_prior_measure=surr_prior,
+
+        woodbury_preconditioner = (
+            inverse_problem.surrogate_woodbury_data_preconditioner(
+                woodbury_solver,
+                alternate_forward_operator=surr_forward_op,
+                alternate_prior_measure=surr_prior,
+                alternate_data_error_measure=surr_noise_meas,
+            )
         )
-        preconditioner = surrogate_inv.woodbury_data_preconditioner()
+
+        alpha = 0.1
+        preconditioner = (
+            1 - alpha
+        ) * woodbury_preconditioner + alpha * surr_noise_meas.inverse_covariance
 
     # ------------------ POSTERIOR SOLVE ------------------
     callback = inf.ProgressCallback()
-    solver = inf.CGMatrixSolver(callback=callback)
+
+    solver = inf.CGSolver(callback=callback, rtol=0.01 * args.noise_std_factor)
 
     print("\nSolving for posterior expectation...")
     model_posterior = inverse_problem.model_posterior_measure(
@@ -223,27 +270,39 @@ def main():
     )
     print(f"\nSolution reached in {solver.iterations} iterations.")
 
-    # ------------------ EXTRACT GMSL OPERATORS ------------------
+    # ==========================================
+    #  GMSL EXTRACTION & MAPPING
+    # ==========================================
+
+    print("\nComputing GMSL estimators...")
+
+    true_gmsl_op = utils.true_gmsl_operator(state, load_space, continuous_ssh)
+    true_gmsl_val_mm = true_gmsl_op(true_model)[0] * scale_mm
+
+    alt_avg_op = sl.linear_operators.altimetry_averaging_operator(points)
+
     if args.plot_pdfs or args.mc_trials:
-        true_gmsl_op = utils.true_gmsl_operator(
-            exact_state, exact_load_space, exact_continuous_ssh
+
+        std_noise_meas = noise_meas.affine_mapping(operator=alt_avg_op)
+        std_noise_std_mm = (
+            np.sqrt(std_noise_meas.covariance.matrix(dense=True)[0, 0]) * scale_mm
         )
-        alt_avg_op = altimetry_averaging_operator(points)
 
         post_gmsl_measure = model_posterior.affine_mapping(operator=true_gmsl_op)
         post_gmsl_std_mm = (
             np.sqrt(post_gmsl_measure.covariance.matrix(dense=True)[0, 0]) * scale_mm
         )
 
-        std_noise_measure = noise_meas.affine_mapping(operator=alt_avg_op)
-        std_noise_std_mm = (
-            np.sqrt(std_noise_measure.covariance.matrix(dense=True)[0, 0]) * scale_mm
+        print(f"True GMSL:               {true_gmsl_val_mm:.2f} mm")
+        print(
+            f"Standard Averaged GMSL:  {alt_avg_op(synthetic_data)[0] * scale_mm:.2f} mm +/- {std_noise_std_mm:.2f} mm"
+        )
+        print(
+            f"Bayesian Expected GMSL:  {post_gmsl_measure.expectation[0] * scale_mm:.2f} mm +/- {post_gmsl_std_mm:.2f} mm"
         )
 
-        true_gmsl_val_mm = true_gmsl_op(true_model)[0] * scale_mm
-
     # ------------------ DEFINE REGIONS FOR ANALYSIS ------------------
-    regions_to_analyze = ["Mediterranean Sea - Western Basin", "South Atlantic Ocean"]
+    regions_to_analyze = ["Tasman Sea"]
 
     # ------------------ OPTION 1: MAPS ------------------
     if args.plot_maps:
@@ -253,8 +312,8 @@ def main():
         true_ice, true_ocean = true_model
         post_ice, post_ocean = model_posterior.expectation
 
-        ocean_mask = scale_mm * exact_state.ocean_projection(value=0.0)
-        ice_mask = scale_mm * exact_state.ice_projection(value=0.0)
+        ocean_mask = scale_mm * state.ocean_projection(value=0.0)
+        # ice_mask = scale_mm * state.ice_projection(value=0.0)
 
         vmax_ice = max(
             np.max(np.abs(true_ice.data * scale_mm)),
@@ -265,118 +324,196 @@ def main():
             np.max(np.abs(post_ocean.data * scale_mm)),
         )
 
-        fig_maps, axes_maps = plt.subplots(
-            2,
-            2,
-            figsize=(14, 10),
+        # --- True Ice Map ---
+        fig_ice_true, ax_ice_true = plt.subplots(
+            figsize=(8, 5),
             subplot_kw={"projection": ccrs.Robinson()},
             layout="constrained",
         )
-
         sl.plot(
-            true_ice * ice_mask,
-            ax=axes_maps[0, 0],
+            true_ice * scale_mm,
+            ax=ax_ice_true,
             colorbar=True,
-            colorbar_kwargs={"label": "Ice Thickness Change (mm)"},
+            colorbar_kwargs={"label": "Ice Thickness Change (True, mm)"},
             vmin=-vmax_ice,
             vmax=vmax_ice,
             cmap=cmap,
         )
-        axes_maps[0, 0].set_title("True Ice Thickness Change")
+        if args.plot_regions:
+            state.plot_boundaries(ax_ice_true, regions_to_analyze)
+        figures_to_save["true_ice_thickness"] = fig_ice_true
 
+        # --- Posterior Ice Map ---
+        fig_ice_post, ax_ice_post = plt.subplots(
+            figsize=(8, 5),
+            subplot_kw={"projection": ccrs.Robinson()},
+            layout="constrained",
+        )
         sl.plot(
-            post_ice * ice_mask,
-            ax=axes_maps[0, 1],
+            post_ice * scale_mm,
+            ax=ax_ice_post,
             colorbar=True,
-            colorbar_kwargs={"label": "Ice Thickness Change (mm)"},
+            colorbar_kwargs={"label": "Ice Thickness Change (Posterior, mm)"},
             vmin=-vmax_ice,
             vmax=vmax_ice,
             cmap=cmap,
         )
-        axes_maps[0, 1].set_title("Posterior Expected Ice Thickness")
+        if args.plot_regions:
+            state.plot_boundaries(ax_ice_post, regions_to_analyze)
+        figures_to_save["posterior_ice_thickness"] = fig_ice_post
 
+        # --- True Ocean Map ---
+        fig_ocean_true, ax_ocean_true = plt.subplots(
+            figsize=(8, 5),
+            subplot_kw={"projection": ccrs.Robinson()},
+            layout="constrained",
+        )
         sl.plot(
             true_ocean * ocean_mask,
-            ax=axes_maps[1, 0],
+            ax=ax_ocean_true,
             colorbar=True,
-            colorbar_kwargs={"label": "Dynamic Ocean (mm)"},
+            colorbar_kwargs={"label": "Dynamic Ocean Component (True, mm)"},
             vmin=-vmax_ocean,
             vmax=vmax_ocean,
             cmap=cmap,
         )
-        axes_maps[1, 0].set_title("True Dynamic Ocean Component")
+        if args.plot_regions:
+            state.plot_boundaries(ax_ocean_true, regions_to_analyze)
+        figures_to_save["true_ocean_dynamic"] = fig_ocean_true
 
+        # --- Posterior Ocean Map ---
+        fig_ocean_post, ax_ocean_post = plt.subplots(
+            figsize=(8, 5),
+            subplot_kw={"projection": ccrs.Robinson()},
+            layout="constrained",
+        )
         sl.plot(
             post_ocean * ocean_mask,
-            ax=axes_maps[1, 1],
+            ax=ax_ocean_post,
             colorbar=True,
-            colorbar_kwargs={"label": "Dynamic Ocean (mm)"},
+            colorbar_kwargs={"label": "Dynamic Ocean Component (Posterior, mm)"},
             vmin=-vmax_ocean,
             vmax=vmax_ocean,
             cmap=cmap,
         )
-        axes_maps[1, 1].set_title("Posterior Expected Dynamic Ocean Component")
-
-        # Overlay boundaries on the component maps if regional analysis is active
         if args.plot_regions:
-            for ax in axes_maps.flatten():
-                exact_state.plot_boundaries(ax, regions_to_analyze)
+            state.plot_boundaries(ax_ocean_post, regions_to_analyze)
+        figures_to_save["posterior_ocean_dynamic"] = fig_ocean_post
 
         # Sea Surface Height Observations
         print("Generating Sea Surface Height maps with observation overlays...")
-        true_ssh = exact_continuous_ssh(true_model)
+        true_ssh = continuous_ssh(true_model)
         obs_data_mm = synthetic_data * scale_mm
         vmax_ssh = max(
             np.max(np.abs(true_ssh.data * scale_mm)), np.max(np.abs(obs_data_mm))
         )
 
-        fig_ssh, axes_ssh = plt.subplots(
-            1,
-            2,
-            figsize=(14, 5),
+        # --- True SSH Map ---
+        fig_ssh_true, ax_ssh_true = plt.subplots(
+            figsize=(8, 5),
             subplot_kw={"projection": ccrs.Robinson()},
             layout="constrained",
         )
-
         sl.plot(
-            true_ssh * scale_mm,
-            ax=axes_ssh[0],
+            true_ssh * ocean_mask,
+            ax=ax_ssh_true,
             colorbar=True,
-            colorbar_kwargs={"label": "SSH Change (mm)"},
+            colorbar_kwargs={"label": "SSH Change (True, mm)"},
             vmin=-vmax_ssh,
             vmax=vmax_ssh,
             cmap=cmap,
         )
-        axes_ssh[0].set_title("True Continuous SSH Change")
+        if args.plot_regions:
+            state.plot_boundaries(
+                ax_ssh_true,
+                regions_to_analyze,
+                edgecolor="black",
+                linewidth=2.0,
+                zorder=10,
+            )
+        figures_to_save["true_ssh"] = fig_ssh_true
 
-        axes_ssh[1].set_global()
-        axes_ssh[1].coastlines(linewidth=0.5, alpha=0.5, zorder=10)
+        # --- Altimetry Observations Map ---
+        fig_ssh_obs, ax_ssh_obs = plt.subplots(
+            figsize=(8, 5),
+            subplot_kw={"projection": ccrs.Robinson()},
+            layout="constrained",
+        )
+        ax_ssh_obs.set_global()
+        ax_ssh_obs.coastlines(linewidth=0.5, alpha=0.5, zorder=10)
         sl.plot_points(
             points,
             data=obs_data_mm,
-            ax=axes_ssh[1],
+            ax=ax_ssh_obs,
             cmap=cmap,
             vmin=-vmax_ssh,
             vmax=vmax_ssh,
-            s=5,
+            s=4,
             edgecolors="none",
             colorbar=True,
             colorbar_kwargs={
-                "label": "Observed SSH (mm)",
+                "label": "Observed SSH Data (mm)",
                 "orientation": "horizontal",
                 "shrink": 0.7,
                 "pad": 0.05,
             },
             zorder=5,
         )
-        axes_ssh[1].set_title("Altimetry Observations")
-
-        # Overlay boundaries on the SSH maps if regional analysis is active
         if args.plot_regions:
-            for ax in axes_ssh:
-                exact_state.plot_boundaries(
-                    ax, regions_to_analyze, edgecolor="black", linewidth=2.0, zorder=10
-                )
+            state.plot_boundaries(
+                ax_ssh_obs,
+                regions_to_analyze,
+                edgecolor="black",
+                linewidth=2.0,
+                zorder=10,
+            )
+        figures_to_save["observed_ssh"] = fig_ssh_obs
+
+        # --- Sea Level Operators ---
+        sl_op = (
+            fp_op.codomain.subspace_projection(0)
+            @ fp_op
+            @ ice_thickness_change_to_load_operator(state, load_space, load_space)
+        )
+
+        true_sl = sl_op(true_ice)
+        post_sl = sl_op(model_posterior.expectation[0])
+
+        vmax_sl = np.max(np.abs(true_sl.data * scale_mm))
+
+        # --- True SL Map ---
+        fig_sl_true, ax_sl_true = plt.subplots(
+            figsize=(8, 5),
+            subplot_kw={"projection": ccrs.Robinson()},
+            layout="constrained",
+        )
+        sl.plot(
+            true_sl * ocean_mask,
+            ax=ax_sl_true,
+            colorbar=True,
+            colorbar_kwargs={"label": "Sea Level Change (True, mm)"},
+            vmin=-vmax_sl,
+            vmax=vmax_sl,
+            cmap=cmap,
+        )
+        figures_to_save["true_sea_level"] = fig_sl_true
+
+        # --- Posterior SL Map ---
+        fig_sl_post, ax_sl_post = plt.subplots(
+            figsize=(8, 5),
+            subplot_kw={"projection": ccrs.Robinson()},
+            layout="constrained",
+        )
+        sl.plot(
+            post_sl * ocean_mask,
+            ax=ax_sl_post,
+            colorbar=True,
+            colorbar_kwargs={"label": "Sea Level Change (Posterior, mm)"},
+            vmin=-vmax_sl,
+            vmax=vmax_sl,
+            cmap=cmap,
+        )
+        figures_to_save["posterior_sea_level"] = fig_sl_post
 
     # ------------------ OPTION 2: PDF ------------------
     if args.plot_pdfs:
@@ -405,6 +542,7 @@ def main():
             title="Global Mean Sea Level Estimators",
             posterior_labels=list(results.keys()),
         )
+        figures_to_save["gmsl_pdf_comparison"] = fig_pdf
 
     # ------------------ OPTION 3: MONTE CARLO ------------------
     if args.mc_trials > 0:
@@ -435,7 +573,7 @@ def main():
             operator=joint_err_op, translation=translation
         )
 
-        joint_err_dense = joint_err_meas.with_dense_covariance()
+        joint_err_dense = joint_err_meas.with_dense_covariance(parallel=True, n_jobs=4)
         samples = joint_err_dense.samples(args.mc_trials)
 
         std_errs, bayes_errs = np.zeros(args.mc_trials), np.zeros(args.mc_trials)
@@ -522,40 +660,28 @@ def main():
 
         ax_mc.plot([], [], color="indigo", linewidth=1.5, label="Analytical 2D PDF")
         ax_mc.legend(loc="upper left", fontsize=10)
+        figures_to_save["mc_validation_scatter"] = fig_mc
 
     # ------------------ OPTION 4: REGIONAL DECOMPOSITION ------------------
     if args.plot_regions:
         print("\nDecomposing Regional Sea Level Signals...")
-        # Using built-in IHO sea boundaries
-        regions_to_analyze = ["Mediterranean Sea", "Caribbean Sea"]
 
         op_dynamic, op_ice_fp = utils.regional_decomposition_operators(
-            exact_state, exact_load_space, exact_fp_op, regions_to_analyze
+            state, load_space, fp_op, regions_to_analyze
         )
 
-        # Combine into a single operator and scale directly to mm
         combined_op = inf.ColumnLinearOperator([op_dynamic, op_ice_fp]) * scale_mm
-
-        # Flatten for convenience to an operator on Euclidean space.
         final_op = combined_op.codomain.coordinate_projection @ combined_op
 
-        # Apply the completely flattened operator to the True Model
-        true_vals_mm = final_op(
-            true_model
-        )  # Append the flattening step to the end of the chain
+        true_vals_mm = final_op(true_model)
 
-        # Extract Analytical Marginal Posteriors and Priors (now guaranteed to be flat)
         post_meas = model_posterior.affine_mapping(operator=final_op)
-        prior_meas = exact_model_prior.affine_mapping(operator=final_op)
+        prior_meas = model_prior.affine_mapping(operator=final_op)
 
-        labels = [
-            "Med: Dynamic (mm)",
-            "Carib: Dynamic (mm)",
-            "Med: Ice/SLE (mm)",
-            "Carib: Ice/SLE (mm)",
+        labels = [f"{region}: Dynamic (mm)" for region in regions_to_analyze] + [
+            f"{region}: Ice/SLE (mm)" for region in regions_to_analyze
         ]
 
-        # Plotting using pygeoinf's corner plot
         inf.plot_corner_distributions(
             post_meas,
             prior_measure=prior_meas,
@@ -564,10 +690,17 @@ def main():
             title="Bayesian Signal Separation: Dynamic Ocean vs. Ice Melt",
             fill_density=False,
         )
+        figures_to_save["regional_corner_plot"] = plt.gcf()
 
-    # ----------------------------------------------------------------------
-    if any([args.plot_maps, args.plot_pdfs, args.mc_trials, args.plot_regions]):
-        plt.show()
+    # ------------------ SAVE ALL FIGURES ------------------
+    if figures_to_save:
+        print(f"\nSaving {len(figures_to_save)} plots to '{output_dir}/'...")
+        for name, fig in figures_to_save.items():
+            filepath = os.path.join(output_dir, f"{name}.png")
+            fig.savefig(filepath, dpi=600, bbox_inches="tight")
+            print(f"  Saved: {filepath}")
+            # Explicitly close the figure to free up memory
+            plt.close(fig)
 
 
 if __name__ == "__main__":

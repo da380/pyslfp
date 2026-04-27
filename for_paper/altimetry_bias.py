@@ -9,10 +9,10 @@ import matplotlib.pyplot as plt
 import pygeoinf as inf
 import pyslfp as sl
 
+import altimetry_utils as utils
+
 from pyslfp.state import EarthState
 from pyslfp.linear_operators import ocean_altimetry_points, altimetry_averaging_operator
-
-import altimetry_utils as utils
 
 
 def parse_arguments():
@@ -27,7 +27,7 @@ def parse_arguments():
         help="Number of Monte Carlo samples to draw for validating analytical error distributions.",
     )
     parser.add_argument(
-        "--plot-loads",
+        "--plot-maps",
         action="store_true",
         help="Plot an example of the SSH sample and altimetry points.",
     )
@@ -35,13 +35,13 @@ def parse_arguments():
     parser.add_argument(
         "--lmax",
         type=int,
-        default=128,
+        default=256,
         help="Maximum spherical harmonic degree for the Earth model.",
     )
     parser.add_argument(
         "--load-order",
         type=float,
-        default=1.25,
+        default=2.0,
         help="Sobolev space order for the load.",
     )
     parser.add_argument(
@@ -51,41 +51,46 @@ def parse_arguments():
         help="Length scale (in km) defining the load space.",
     )
     parser.add_argument(
-        "--spacing-degrees",
+        "--spacing",
         type=float,
-        default=2.0,
+        default=1.0,
         help="Spacing in degrees for the altimetry observation points.",
     )
-
     parser.add_argument(
-        "--ice-scale-km",
+        "--ice-scale-factor",
         type=float,
-        default=500.0,
-        help="Correlation length scale (in km) for the ice thickness prior.",
+        default=1.0,
+        help="Relative correlation length scale for the ice thickness prior.",
     )
     parser.add_argument(
         "--ice-std-mm",
         type=float,
-        default=5.0,
+        default=10.0,
         help="Pointwise standard deviation (in mm) for the ice thickness prior.",
     )
     parser.add_argument(
-        "--ocean-scale-km",
+        "--ocean-scale-factor",
         type=float,
-        default=250.0,
-        help="Correlation length scale (in km) for the ocean dynamic thickness prior.",
+        default=0.2,
+        help="Relative correlation length scale for the ocean dynamic thickness prior.",
     )
     parser.add_argument(
         "--ocean-std-factor",
         type=float,
-        default=0.1,
+        default=10.0,
         help="Ocean dynamic thickness noise standard deviation as a factor of the expected GMSL std.",
     )
     parser.add_argument(
         "--noise-std-factor",
         type=float,
-        default=0.1,
+        default=2.0,
         help="Instrument noise standard deviation per point as a factor of the expected GMSL std.",
+    )
+    parser.add_argument(
+        "--noise-scale-factor",
+        type=float,
+        default=00.0,
+        help="Relative correlation length scale for the noise field.",
     )
     parser.add_argument(
         "--prior-shift",
@@ -102,9 +107,9 @@ def main():
 
     print("Initializing Earth State and Fingerprint Operators...")
     state_dummy = EarthState.from_defaults(lmax=args.lmax)
-    points = ocean_altimetry_points(state_dummy, spacing_degrees=args.spacing_degrees)
+    points = ocean_altimetry_points(state_dummy, spacing=args.spacing)
 
-    (state, load_space, fp_op, continuous_ssh_op, model_to_ssh_op, scale_mm) = (
+    (state, load_space, _, continuous_ssh_op, model_to_ssh_op, scale_mm) = (
         utils.build_physics_components(
             args.lmax, args.load_order, args.load_scale_km, points, is_surrogate=False
         )
@@ -113,10 +118,11 @@ def main():
     model_prior, noise_meas, _ = utils.build_measures(
         state,
         load_space,
-        args.ice_scale_km,
+        args.ice_scale_factor,
         args.ice_std_mm,
-        args.ocean_scale_km,
+        args.ocean_scale_factor,
         args.ocean_std_factor,
+        args.noise_scale_factor,
         args.noise_std_factor,
         points,
         scale_mm,
@@ -126,14 +132,9 @@ def main():
     joint_meas = inf.GaussianMeasure.from_direct_sum([model_prior, noise_meas])
     data_space = noise_meas.domain
 
-    # 1. True GMSL
     true_gmsl_op = utils.true_gmsl_operator(state, load_space, continuous_ssh_op)
-
-    # 2. Estimated GMSL
     alt_avg_op = altimetry_averaging_operator(points)
     est_gmsl_op = alt_avg_op @ model_to_ssh_op
-
-    # 3. Error Mapping
     err_gmsl_op = true_gmsl_op - est_gmsl_op
 
     op_true = inf.RowLinearOperator(
@@ -154,7 +155,7 @@ def main():
     )
 
     # -- Plotting --
-    if args.plot_loads:
+    if args.plot_maps:
         model_sample = model_prior.sample()
         ssh_sample = continuous_ssh_op(model_sample)
 
@@ -162,23 +163,21 @@ def main():
         ocean_mask = scale_mm * state.ocean_projection(value=0.0)
         ice_mask = scale_mm * state.ice_projection(value=0.0)
 
-        fig1, ax1 = sl.create_map_figure(figsize=(12, 6))
+        _, ax1 = sl.create_map_figure(figsize=(12, 6))
         sl.plot(
             ice_thickness * ice_mask,
             ax=ax1,
             colorbar_kwargs={"label": "Ice Thickness (mm)"},
             symmetric=True,
         )
-        ax1.set_title("Example Ice Thickness Sample")
 
-        fig2, ax2 = sl.create_map_figure(figsize=(12, 6))
+        _, ax2 = sl.create_map_figure(figsize=(12, 6))
         sl.plot(
             ocean_thickness * ocean_mask,
             ax=ax2,
             colorbar_kwargs={"label": "Ocean Dynamic (mm)"},
             symmetric=True,
         )
-        ax2.set_title("Example Ocean Dynamic Thickness Sample")
 
         ssh_grid_mm = ssh_sample * ocean_mask
         observed_data_mm = (
@@ -188,7 +187,7 @@ def main():
             np.max(np.abs(ssh_grid_mm.data)), np.max(np.abs(observed_data_mm))
         )
 
-        fig3, ax3 = sl.create_map_figure(figsize=(12, 6))
+        _, ax3 = sl.create_map_figure(figsize=(12, 6))
         sl.plot(
             ssh_grid_mm,
             ax=ax3,
@@ -197,10 +196,8 @@ def main():
             vmax=shared_vmax,
             colorbar_kwargs={"label": "SSH (mm)"},
         )
-        ax3.set_title("Example Continuous Sea Surface Height Sample")
 
-        fig4, ax4 = sl.create_map_figure(figsize=(12, 6))
-        ax4.set_title("Example Altimetry Observations")
+        _, ax4 = sl.create_map_figure(figsize=(12, 6))
         ax4.set_global()
         sl.plot_points(
             points,
@@ -230,7 +227,7 @@ def main():
             -0.5 * ((x - mean) / std) ** 2
         )
 
-    fig, ax = plt.subplots(figsize=(10, 6), layout="constrained")
+    _, ax = plt.subplots(figsize=(10, 6), layout="constrained")
     x_vals = np.linspace(err_mean - 4 * err_std, err_mean + 4 * err_std, 300)
 
     if err_samples is not None:
@@ -248,17 +245,16 @@ def main():
         gaussian_pdf(x_vals, err_mean, err_std),
         "r-",
         linewidth=2.5,
-        label=rf"Total Estimator Error ($\mu$={err_mean:.3f}, $\sigma$={err_std:.3f})",
+        label=rf"Actual error ($\mu$={err_mean:.3f}, $\sigma$={err_std:.3f})",
     )
     ax.plot(
         x_vals,
         gaussian_pdf(x_vals, 0, alt_noise_std),
         "b",
         linewidth=2,
-        label=rf"Theoretical Noise Floor ($\mu$=0.000, $\sigma$={alt_noise_std:.3f})",
+        label=rf"Theoretical error ($\mu$=0.000, $\sigma$={alt_noise_std:.3f})",
     )
 
-    ax.set_title("GMSL Altimetry Estimator Bias", fontsize=16)
     ax.set_xlabel("Error in GMSL estimate (mm)", fontsize=14)
     ax.set_ylabel("Probability Density", fontsize=14)
     ax.axvline(0, color="black", linestyle="--", linewidth=1.5)
@@ -273,7 +269,7 @@ def main():
     )
     sec_ax.tick_params(axis="x", colors="darkgreen")
 
-    if any([args.plot_loads, args.samples > 0, True]):
+    if any([args.plot_maps, args.samples > 0, True]):
         plt.show()
 
 

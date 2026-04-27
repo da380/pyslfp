@@ -6,7 +6,11 @@ satellite altimetry inversions and bias evaluation.
 """
 
 import numpy as np
+
+
 import pygeoinf as inf
+
+
 from pyslfp.state import EarthState
 from pyslfp.linear_operators import (
     FingerPrintOperator,
@@ -89,26 +93,32 @@ def build_physics_components(
 def build_measures(
     state,
     load_space,
-    ice_scale_km,
+    ice_scale_factor,
     ice_std_mm,
-    ocean_scale_km,
+    ocean_scale_factor,
     ocean_std_factor,
+    noise_scale_factor,
     noise_std_factor,
     points,
     scale_mm,
+    /,
+    *,
     prior_shift=0.0,
 ):
     """Constructs the joint prior and observation noise measures."""
-    ice_scale = ice_scale_km * 1000.0 / state.model.parameters.length_scale
+    ice_scale = load_space.scale * ice_scale_factor
     ice_std = ice_std_mm / scale_mm
 
     ice_thickness_prior = load_space.point_value_scaled_heat_kernel_gaussian_measure(
         ice_scale, std=ice_std
     )
+    ice_thickness_prior = ice_thickness_prior.affine_mapping(
+        operator=ice_projection_operator(state, load_space)
+    )
 
     GMSL_weighting_function = (
         -state.model.parameters.ice_density
-        * state.ice_projection(value=0.0)
+        * state.one_minus_ocean_function
         / (state.model.parameters.water_density * state.ocean_area)
     )
 
@@ -116,30 +126,20 @@ def build_measures(
     GMSL_prior_measure = ice_thickness_prior.affine_mapping(operator=B)
     GMSL_prior_std = np.sqrt(GMSL_prior_measure.covariance.matrix(dense=True)[0, 0])
 
-    ocean_scale = ocean_scale_km * 1000.0 / state.model.parameters.length_scale
+    ocean_scale = load_space.scale * ocean_scale_factor
     ocean_std = ocean_std_factor * GMSL_prior_std
-    noise_std = noise_std_factor * GMSL_prior_std
 
     ocean_thickness_prior = load_space.point_value_scaled_heat_kernel_gaussian_measure(
         ocean_scale, std=ocean_std
     )
-    # Enforce zero ocean mean for dynamic topography
+
     ocean_thickness_prior = ocean_thickness_prior.affine_mapping(
-        operator=remove_ocean_average_operator(state, load_space)
+        operator=ocean_projection_operator(state, load_space)
+        @ remove_ocean_average_operator(state, load_space)
     )
 
     model_prior = inf.GaussianMeasure.from_direct_sum(
         [ice_thickness_prior, ocean_thickness_prior]
-    )
-
-    # Enforce geographic masking
-    model_prior = model_prior.affine_mapping(
-        operator=inf.BlockDiagonalLinearOperator(
-            [
-                ice_projection_operator(state, load_space),
-                ocean_projection_operator(state, load_space),
-            ]
-        )
     )
 
     if prior_shift != 0.0:
@@ -148,11 +148,20 @@ def build_measures(
             translation=model_prior.domain.multiply(prior_shift, offset_shape)
         )
 
-    n_points = len(points)
-    data_space = inf.EuclideanSpace(n_points)
-    noise_meas = inf.GaussianMeasure.from_standard_deviations(
-        data_space, np.full(n_points, noise_std)
-    )
+    noise_std = noise_std_factor * GMSL_prior_std
+    if noise_scale_factor == 0.0:
+        n_points = len(points)
+        data_space = inf.EuclideanSpace(n_points)
+        noise_meas = inf.GaussianMeasure.from_standard_deviation(data_space, noise_std)
+    else:
+        continuous_noise_meas = (
+            load_space.point_value_scaled_heat_kernel_gaussian_measure(
+                load_space.scale * noise_scale_factor, std=noise_std
+            )
+        )
+        noise_meas = continuous_noise_meas.affine_mapping(
+            operator=load_space.point_evaluation_operator(points)
+        )
 
     return model_prior, noise_meas, GMSL_prior_std
 
@@ -169,12 +178,6 @@ def regional_decomposition_operators(state, load_space, finger_print_operator, r
     Builds operators to isolate the Dynamic Ocean Topography and Ice Melt (SLE)
     contributions to regional sea level changes.
     """
-    import pygeoinf as inf
-    from pyslfp.linear_operators import (
-        averaging_operator,
-        ice_thickness_change_to_load_operator,
-        sea_surface_height_operator,
-    )
 
     # Resolve the physical regions into SHGrid masks
     masks = [state.get_projection(r, value=0.0) for r in regions]

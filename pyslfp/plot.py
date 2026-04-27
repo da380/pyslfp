@@ -5,6 +5,7 @@ Module for plotting functions using matplotlib and cartopy.
 from typing import Tuple, Optional, List, Any
 
 import numpy as np
+import matplotlib.pyplot as plt
 from pyshtools import SHGrid
 
 # Directly import the fully-featured corner plot from pygeoinf
@@ -14,6 +15,33 @@ import cartopy.crs as ccrs
 from cartopy.crs import Projection
 from cartopy.mpl.geoaxes import GeoAxes
 from matplotlib.figure import Figure
+
+
+def subplots(
+    nrows: int = 1, ncols: int = 1, projection: Optional[Projection] = None, /, **kwargs
+) -> Tuple[plt.Figure, GeoAxes]:
+    """
+    A wrapper for matplotlib.pyplot subplots that returns cartopy compatible axes.
+
+    Args:
+        nrows: Number of rows in the axes grid
+        ncols: Number of columns in the axes grid
+        projection: A `cartopy.crs` projection instance. Defaults to PlateCarree.
+        **kwargs: Additional keyword arguments passed to `plt.subplots()`.
+
+    Returns:
+        A tuple `(fig, ax)` containing the Matplotlib Figure and Cartopy GeoAxes.
+    """
+    if projection is None:
+        projection = ccrs.Robinson()
+
+    kwargs.setdefault("layout", "constrained")
+
+    fig, axes = plt.subplots(
+        nrows, ncols, subplot_kw={"projection": projection}, **kwargs
+    )
+
+    return fig, axes
 
 
 def create_map_figure(

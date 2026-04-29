@@ -55,7 +55,7 @@ def parse_arguments():
     parser.add_argument(
         "--lmax",
         type=int,
-        default=64,
+        default=256,
         help="Maximum spherical harmonic degree for the exact Earth model.",
     )
     parser.add_argument(
@@ -67,7 +67,7 @@ def parse_arguments():
     parser.add_argument(
         "--obs-degree",
         type=int,
-        default=32,
+        default=100,
         help="Maximum spherical harmonic degree of the GRACE observations.",
     )
     parser.add_argument(
@@ -94,7 +94,7 @@ def parse_arguments():
     parser.add_argument(
         "--spacing",
         type=float,
-        default=4.0,
+        default=1.0,
         help="Spacing in degrees for the altimetry observation points.",
     )
     parser.add_argument(

@@ -500,6 +500,65 @@ def main():
 
         figures_to_save["extended_posterior_maps"] = fig_maps
 
+        #  Sea Surface Height & Observations Plot
+        print("Generating Sea Surface Height maps with observation overlays...")
+
+        # The true continuous SSH from our forward operator
+        true_ssh = continuous_ssh(true_model)
+
+        # The discrete noisy observations
+        obs_data_mm = synthetic_data * scale_mm
+
+        # Shared color scale for the SSH plots
+        vmax_ssh = max(
+            np.max(np.abs(true_ssh.data * scale_mm)), np.max(np.abs(obs_data_mm))
+        )
+
+        fig_ssh, axes_ssh = plt.subplots(
+            1,
+            2,
+            figsize=(14, 5),
+            subplot_kw={"projection": ccrs.Robinson()},
+            layout="constrained",
+        )
+
+        # True SSH Map (Masked to oceans)
+        sl.plot(
+            true_ssh * ocean_mask_mm,
+            ax=axes_ssh[0],
+            colorbar=True,
+            colorbar_kwargs={"label": "SSH Change (mm)"},
+            vmin=-vmax_ssh,
+            vmax=vmax_ssh,
+            cmap=cmap,
+        )
+        axes_ssh[0].set_title("True Continuous SSH Change")
+
+        # Altimetry Observations Scatter
+        axes_ssh[1].set_global()
+        axes_ssh[1].coastlines(linewidth=0.5, alpha=0.5, zorder=10)
+        sl.plot_points(
+            points,
+            data=obs_data_mm,
+            ax=axes_ssh[1],
+            cmap=cmap,
+            vmin=-vmax_ssh,
+            vmax=vmax_ssh,
+            s=4,
+            edgecolors="none",
+            colorbar=True,
+            colorbar_kwargs={
+                "label": "Observed SSH Data (mm)",
+                "orientation": "horizontal",
+                "shrink": 0.7,
+                "pad": 0.05,
+            },
+            zorder=5,
+        )
+        axes_ssh[1].set_title("Altimetry Observations")
+
+        figures_to_save["extended_observed_ssh"] = fig_ssh
+
     if args.plot_regions:
         print("\nDecomposing Regional Sea Level Signals (3-way)...")
 

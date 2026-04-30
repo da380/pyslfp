@@ -13,16 +13,13 @@ import argparse
 import os
 import numpy as np
 import matplotlib
-
-# Force headless backend to avoid Wayland/Qt display errors
+import scipy.stats as stats
 
 import matplotlib.pyplot as plt
-from cartopy import crs as ccrs
 import pygeoinf as inf
+import grace_utils as utils
 import pyslfp as sl
 
-
-import grace_utils as utils
 
 matplotlib.use("Agg")
 
@@ -37,15 +34,26 @@ def parse_arguments():
     )
     parser.add_argument("--plot-maps", action="store_true", help="Plot spatial maps.")
     parser.add_argument(
-        "--plot-regions", action="store_true", help="Plot regional PDFs."
+        "--plot-pdfs",
+        action="store_true",
+        help="Plot head-to-head analytical PDFs of regional averages (Bayesian vs WMB).",
+    )
+
+    parser.add_argument(
+        "--plot-deg1",
+        action="store_true",
+        help="Plot Degree 1 coefficient corner plots.",
+    )
+    parser.add_argument(
+        "--mc-trials",
+        type=int,
+        default=0,
+        help="Number of MC trials for error validation.",
     )
 
     # --- Resolution & Physics Settings ---
     parser.add_argument(
         "--lmax", type=int, default=128, help="Exact model max SH degree."
-    )
-    parser.add_argument(
-        "--surrogate-degree", type=int, default=32, help="Preconditioner max SH degree."
     )
     parser.add_argument(
         "--obs-degree",
@@ -58,6 +66,12 @@ def parse_arguments():
     )
     parser.add_argument(
         "--load-scale-km", type=float, default=500.0, help="Sobolev length scale."
+    )
+    parser.add_argument(
+        "--smoothing-scale-km",
+        type=float,
+        default=None,
+        help="Scale (in km) for spatial smoothing. Defaults to --load-scale-km.",
     )
 
     # --- Prior Settings ---
@@ -88,20 +102,20 @@ def parse_arguments():
         "--noise-std-factor", type=float, default=0.1, help="Noise std factor."
     )
 
-    # --- Preconditioner Options ---
-    parser.add_argument(
-        "--no-precond", action="store_true", help="Disable the preconditioner entirely."
-    )
-
     return parser.parse_args()
 
 
 def main():
     args = parse_arguments()
     if args.all:
-        args.plot_maps = args.plot_regions = True
+        args.plot_maps = args.plot_pdfs = args.plot_deg1 = True
+        if args.mc_trials == 0:
+            args.mc_trials = 500
 
-    output_dir = "output_plots_grace"
+    if args.smoothing_scale_km is None:
+        args.smoothing_scale_km = args.load_scale_km
+
+    output_dir = "output_plots_grace_inversion"
     os.makedirs(output_dir, exist_ok=True)
     figures_to_save = {}
 
@@ -113,7 +127,7 @@ def main():
         utils.build_physics_components(args.lmax, args.load_order, args.load_scale_km)
     )
 
-    initial_prior, model_prior, noise_spatial = utils.build_measures(
+    initial_prior, model_prior, noise_spatial, noise_scale = utils.build_measures(
         state,
         load_space,
         args.direct_scale_km,
@@ -122,6 +136,10 @@ def main():
         args.noise_std_factor,
         remove_degree_1=args.remove_degree_1,
         prior_shift=args.prior_shift,
+    )
+
+    region_names, avg_op, _, regions_dict = utils.get_regional_averaging(
+        state, load_space, smoothing_scale_km=args.smoothing_scale_km
     )
 
     # Construct the exact forward observation operator
@@ -145,127 +163,329 @@ def main():
     inverse_problem = inf.LinearBayesianInversion(forward_problem, model_prior)
 
     # ------------------ 2. PRECONDITIONER SETUP ------------------
-    preconditioner = None
-    if not args.no_precond:
-        print(
-            f"\nBuilding SURROGATE operators (lmax={args.surrogate_degree}) for WMB preconditioning..."
-        )
-
-        preconditioner = wmb_method.bayesian_normal_operator_preconditioner(
-            initial_prior, data_error_measure
-        )
+    preconditioner = wmb_method.bayesian_normal_operator_preconditioner(
+        initial_prior, data_error_measure
+    )
 
     # ------------------ 3. POSTERIOR SOLVE ------------------
     print("\nSolving for posterior expectation...")
     callback = inf.ProgressCallback()
-    solver = inf.CGSolver(callback=callback, rtol=1e-4)
+    solver = inf.CGSolver(callback=callback, rtol=0.01 * args.noise_std_factor)
 
     model_posterior = inverse_problem.model_posterior_measure(
         synthetic_data, solver, preconditioner=preconditioner
     )
     print(f"\nSolution reached in {solver.iterations} iterations.")
 
+    post_stds_mm = None
+    wmb_stds_mm = None
+    if args.plot_pdfs or args.mc_trials > 0 or args.plot_deg1:
+        print("Forming load average estimates")
+
+        tot_avg_op = avg_op @ total_load_op
+        wmb_op = wmb_method.potential_coefficient_to_load_operator(load_space)
+        wmb_direct_avg_op = avg_op @ wmb_op
+
+        post_avg_measure = model_posterior.affine_mapping(operator=tot_avg_op)
+        post_stds_mm = (
+            np.sqrt(np.diag(post_avg_measure.covariance.matrix(dense=True))) * ewt_scale
+        )
+
+        wmb_noise_measure = data_error_measure.affine_mapping(
+            operator=wmb_direct_avg_op
+        )
+        wmb_stds_mm = (
+            np.sqrt(np.diag(wmb_noise_measure.covariance.matrix(dense=True)))
+            * ewt_scale
+        )
+
     # ------------------ 4. MAPPING ------------------
     if args.plot_maps:
         print("Generating spatial maps...")
         cmap = "seismic"
 
-        true_load = true_model
-        post_load = model_posterior.expectation
+        post_model = model_posterior.expectation
 
-        # Calculate the WMB direct data inversion (Spectral Only, No SLE)
         wmb_inv_op = wmb_method.potential_coefficient_to_load_operator(load_space)
         wmb_estimate = wmb_inv_op(synthetic_data)
 
+        smoothing_operator = load_space.heat_kernel_gaussian_measure(
+            2 * noise_scale
+        ).covariance
+        smoothed_wmb_estimate = smoothing_operator(wmb_estimate)
+
         vmax = max(
-            np.max(np.abs(true_load.data * ewt_scale)),
-            np.max(np.abs(post_load.data * ewt_scale)),
+            np.max(np.abs(true_model.data * ewt_scale)),
+            np.max(np.abs(post_model.data * ewt_scale)),
             np.max(np.abs(wmb_estimate.data * ewt_scale)),
         )
 
-        fig_maps, axes = plt.subplots(
-            1,
-            3,
-            figsize=(18, 5),
-            subplot_kw={"projection": ccrs.Robinson()},
-            layout="constrained",
+        fig_maps, axes = sl.subplots(
+            2,
+            2,
+            figsize=(20, 12),
         )
 
         sl.plot(
-            true_load * ewt_scale,
-            ax=axes[0],
+            true_model * ewt_scale,
+            ax=axes[0, 0],
             colorbar=True,
             vmin=-vmax,
             vmax=vmax,
             cmap=cmap,
             colorbar_kwargs={"label": "Load (mm EWT)"},
         )
-        axes[0].set_title("True Mass Load")
+        axes[0, 0].set_title("True direct Load")
 
         sl.plot(
             wmb_estimate * ewt_scale,
-            ax=axes[1],
+            ax=axes[0, 1],
             colorbar=True,
             vmin=-vmax,
             vmax=vmax,
             cmap=cmap,
             colorbar_kwargs={"label": "Load (mm EWT)"},
         )
-        axes[1].set_title("WMB Spectral Estimate\n(No SLE / Mass Conserv.)")
+        axes[0, 1].set_title("WMB Spectral Estimate)")
 
         sl.plot(
-            post_load * ewt_scale,
-            ax=axes[2],
+            smoothed_wmb_estimate * ewt_scale,
+            ax=axes[1, 0],
             colorbar=True,
             vmin=-vmax,
             vmax=vmax,
             cmap=cmap,
             colorbar_kwargs={"label": "Load (mm EWT)"},
         )
-        axes[2].set_title("Exact Bayesian Posterior\n(Full SLE Constraints)")
+        axes[1, 0].set_title("Smoothed WMB Spectral Estimate)")
+
+        sl.plot(
+            post_model * ewt_scale,
+            ax=axes[1, 1],
+            colorbar=True,
+            vmin=-vmax,
+            vmax=vmax,
+            cmap=cmap,
+            colorbar_kwargs={"label": "Load (mm EWT)"},
+        )
+        axes[1, 1].set_title("Bayesian Posterior")
+
+        for ax in axes.flatten():
+            utils.draw_region_boundaries(state, ax, regions_dict)
 
         figures_to_save["grace_posterior_maps"] = fig_maps
 
     # ------------------ 5. REGIONAL ANALYSIS ------------------
-    if args.plot_regions:
+    if args.plot_pdfs:
         print("\nDecomposing Regional Signals...")
-        region_names, avg_op, _, _ = utils.get_regional_averaging(
-            state, load_space, smoothing_scale_km=args.load_scale_km
-        )
 
-        # Extract true regional averages
-        true_avgs_mm = avg_op(true_load) * ewt_scale
-
-        # WMB Estimator Distribution (Data Space -> Regional Average)
-        wmb_avg_op = avg_op @ wmb_method.potential_coefficient_to_load_operator(
-            load_space
-        )
-        # Because we need the full distribution of the WMB estimator, we map the Master Joint Measure
-        # The joint measure is a direct sum of [Prior, Noise]. We map it using: [WMB @ Forward, WMB]
-        op_wmb_err = inf.RowLinearOperator([wmb_avg_op @ exact_forward_op, wmb_avg_op])
-
-        # We need the joint measure defined over [model_space, data_space]
-        joint_prior = inverse_problem.joint_prior_measure
-        wmb_meas = joint_prior.affine_mapping(operator=op_wmb_err)
-
-        # Exact Bayesian Estimator Distribution (Model Posterior -> Regional Average)
-        post_meas = model_posterior.affine_mapping(operator=avg_op)
-
-        results_dict = {
-            "WMB Spectral": {
-                "means": wmb_meas.expectation * ewt_scale,
-                "stds": np.sqrt(np.diag(wmb_meas.covariance.matrix(dense=True)))
-                * ewt_scale,
+        results = {
+            "Bayesian": {
+                "means": post_avg_measure.expectation * ewt_scale,
+                "stds": post_stds_mm,
             },
-            "Exact Bayesian": {
-                "means": post_meas.expectation * ewt_scale,
-                "stds": np.sqrt(np.diag(post_meas.covariance.matrix(dense=True)))
-                * ewt_scale,
+            "WMB": {
+                "means": wmb_direct_avg_op(synthetic_data) * ewt_scale,
+                "stds": wmb_stds_mm,
             },
         }
 
-        utils.plot_regional_pdfs(results_dict, region_names, true_avgs_mm)
+        utils.plot_regional_pdfs(
+            results,
+            region_names,
+            tot_avg_op(true_model) * ewt_scale,
+        )
         figures_to_save["grace_regional_pdfs"] = plt.gcf()
+
+    # ------------------ 6: Corner Plot ------------------
+    if args.plot_deg1:
+        print("Generating Degree-1 Corner Plot...")
+        deg1_op = (
+            load_space.to_coefficient_operator(1, lmin=1) * ewt_scale @ total_load_op
+        )
+
+        deg1_prior = model_prior.affine_mapping(operator=deg1_op).with_dense_covariance(
+            parallel=True, n_jobs=3
+        )
+
+        deg1_post = model_posterior.affine_mapping(
+            operator=deg1_op
+        ).with_dense_covariance(parallel=True, n_jobs=3)
+
+        kl_div = deg1_post.kl_divergence(deg1_prior)
+
+        inf.plot_corner_distributions(
+            deg1_post,
+            prior_measure=deg1_prior,
+            true_values=deg1_op(true_model),
+            labels=[
+                r"$\zeta_{1-1}$ (mm)",
+                r"$\zeta_{10}$ (mm)",
+                r"$\zeta_{11}$ (mm)",
+            ],
+            title=f"Degree 1 Recovery (Information Gained: {kl_div:.2f} nats)",
+        )
+        figures_to_save["grace_degree_1_corner"] = plt.gcf()
+
+    # ------------------ OPTION 4: Monte Carlo ------------------
+    if args.mc_trials > 0:
+        print(f"Running {args.mc_trials} MC trials via dense joint measure mapping...")
+        w_errs, b_errs = (
+            np.zeros((args.mc_trials, len(region_names))),
+            np.zeros((args.mc_trials, len(region_names))),
+        )
+
+        post_exp_op = inverse_problem.posterior_expectation_operator(
+            solver, preconditioner=preconditioner
+        )
+
+        if isinstance(post_exp_op, inf.AffineOperator):
+            bayes_linear = post_exp_op.linear_part
+            bayes_translation = tot_avg_op(post_exp_op.translation_part)
+        else:
+            bayes_linear = post_exp_op
+            bayes_translation = None
+
+        wmb_err_op = inf.RowLinearOperator([-1 * tot_avg_op, wmb_direct_avg_op])
+        bayes_err_op = inf.RowLinearOperator(
+            [-1 * tot_avg_op, tot_avg_op @ bayes_linear]
+        )
+
+        joint_err_op = inf.ColumnLinearOperator([wmb_err_op, bayes_err_op])
+
+        joint_meas = inverse_problem.joint_prior_measure
+
+        translation = (
+            [avg_op.codomain.zero, bayes_translation]
+            if bayes_translation is not None
+            else None
+        )
+
+        joint_err_meas = joint_meas.affine_mapping(
+            operator=joint_err_op, translation=translation
+        )
+
+        print("Constructing dense error covariance...")
+        joint_err_dense = joint_err_meas.with_dense_covariance()
+        samples = joint_err_dense.samples(args.mc_trials)
+
+        for i, (w_err, b_err) in enumerate(samples):
+            w_errs[i, :] = (w_err * ewt_scale) / wmb_stds_mm
+            b_errs[i, :] = (b_err * ewt_scale) / post_stds_mm
+
+        n_reg = len(region_names)
+        raw_cov = joint_err_dense.covariance.matrix(dense=True) * (ewt_scale**2)
+
+        if joint_err_dense.has_zero_expectation:
+            raw_mean_w = np.zeros(n_reg)
+            raw_mean_b = np.zeros(n_reg)
+        else:
+            raw_mean_w = joint_err_dense.expectation[0] * ewt_scale
+            raw_mean_b = joint_err_dense.expectation[1] * ewt_scale
+
+        max_err = max(np.max(np.abs(w_errs)), np.max(np.abs(b_errs)))
+        plot_limit = np.ceil(max_err) + 0.5
+
+        ncols = int(np.ceil(np.sqrt(n_reg)))
+        nrows = int(np.ceil(n_reg / ncols))
+
+        fig_mc, axes_mc = plt.subplots(
+            nrows=nrows,
+            ncols=ncols,
+            figsize=(5 * ncols, 5 * nrows),
+            sharex=True,
+            sharey=True,
+            layout="constrained",
+        )
+
+        axes_flat = np.atleast_1d(axes_mc).flatten()
+
+        for j, region in enumerate(region_names):
+            ax = axes_flat[j]
+
+            ax.scatter(
+                w_errs[:, j],
+                b_errs[:, j],
+                alpha=0.6,
+                color="purple",
+                edgecolor="white",
+                s=20,
+                zorder=3,
+            )
+
+            # --- Analytical 2D PDF Contours ---
+            mu_2d = np.array(
+                [raw_mean_w[j] / wmb_stds_mm[j], raw_mean_b[j] / post_stds_mm[j]]
+            )
+
+            var_w = raw_cov[j, j] / (wmb_stds_mm[j] ** 2)
+            var_b = raw_cov[j + n_reg, j + n_reg] / (post_stds_mm[j] ** 2)
+            cov_wb = raw_cov[j, j + n_reg] / (wmb_stds_mm[j] * post_stds_mm[j])
+            cov_2d = np.array([[var_w, cov_wb], [cov_wb, var_b]])
+
+            x_grid, y_grid = np.mgrid[
+                -plot_limit:plot_limit:500j, -plot_limit:plot_limit:500j
+            ]
+            pos = np.dstack((x_grid, y_grid))
+            rv = stats.multivariate_normal(mu_2d, cov_2d)
+            Z = rv.pdf(pos)
+
+            max_density = rv.pdf(mu_2d)
+            levels = [max_density * np.exp(-0.5 * k**2) for k in [4, 3, 2, 1]]
+            ax.contour(
+                x_grid,
+                y_grid,
+                Z,
+                levels=levels,
+                colors="indigo",
+                linewidths=[0.5, 1.0, 1.5],
+                alpha=0.8,
+                zorder=4,
+            )
+
+            ax.axhline(0, color="black", linestyle="-", alpha=0.5, zorder=1)
+            ax.axvline(0, color="black", linestyle="-", alpha=0.5, zorder=1)
+            ax.axhspan(
+                -1,
+                1,
+                color="blue",
+                alpha=0.15,
+                zorder=0,
+                label=r"Bayes 1$\sigma$ Expected",
+            )
+            ax.axhspan(-2, 2, color="blue", alpha=0.05, zorder=0)
+            ax.axvspan(
+                -1,
+                1,
+                color="red",
+                alpha=0.15,
+                zorder=0,
+                label=r"WMB 1$\sigma$ Expected",
+            )
+            ax.axvspan(-2, 2, color="red", alpha=0.05, zorder=0)
+
+            ax.set_xlim(-plot_limit, plot_limit)
+            ax.set_ylim(-plot_limit, plot_limit)
+            ax.set_aspect("equal")
+
+            ax.set_title(region, fontsize=14)
+            ax.grid(True, linestyle=":", alpha=0.4)
+
+            if j >= (nrows - 1) * ncols or (j + ncols >= n_reg):
+                ax.set_xlabel(r"WMB Normalized Error", fontsize=11)
+            if j % ncols == 0:
+                ax.set_ylabel(r"Bayes Normalized Error", fontsize=11)
+
+            if j == 0:
+                ax.plot(
+                    [], [], color="indigo", linewidth=1.5, label="Analytical 2D PDF"
+                )
+                ax.legend(loc="upper left", fontsize=9)
+
+        for j in range(n_reg, len(axes_flat)):
+            axes_flat[j].set_visible(False)
+
+        figures_to_save["grace_mc_validation"] = fig_mc
 
     # ------------------ SAVE ALL FIGURES ------------------
     if figures_to_save:

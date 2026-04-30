@@ -18,8 +18,7 @@ import os
 import numpy as np
 import matplotlib
 
-# Force headless backend to avoid Wayland/Qt display errors
-matplotlib.use("Agg")
+
 import matplotlib.pyplot as plt
 
 import pygeoinf as inf
@@ -31,6 +30,8 @@ from pyslfp.linear_operators import (
     grace_observation_operator,
     sea_level_change_to_load_operator,
 )
+
+matplotlib.use("Agg")
 
 
 def parse_arguments():
@@ -124,7 +125,7 @@ def main():
         args.smoothing_scale_km = args.load_scale_km
 
     # Setup directory to save plots
-    output_dir = "output_plots"
+    output_dir = "output_plots_grace_bias"
     os.makedirs(output_dir, exist_ok=True)
     figures_to_save = {}
 
@@ -135,7 +136,7 @@ def main():
     state = fp_op.state
     model = fp_op.model
 
-    _, cond_prior, noise = utils.build_measures(
+    _, cond_prior, noise, _ = utils.build_measures(
         state,
         load_space,
         args.direct_scale_km,

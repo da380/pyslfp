@@ -87,7 +87,12 @@ def build_measures(
         noise_load_measure_scale, std=noise_load_measure_std
     )
 
-    return initial_direct_load_prior, direct_load_prior, noise_load_measure
+    return (
+        initial_direct_load_prior,
+        direct_load_prior,
+        noise_load_measure,
+        noise_load_measure_scale,
+    )
 
 
 def build_total_load_operator(state, response_space, load_space, finger_print_operator):
@@ -132,7 +137,12 @@ def get_regional_averaging(
 
     avg_operator = averaging_operator(state, load_space, weighting_functions)
 
-    return region_names, avg_operator, weighting_functions, regions_dict
+    return (
+        region_names,
+        avg_operator,
+        weighting_functions,
+        regions_dict,
+    )
 
 
 def draw_region_boundaries(state, ax, regions_dict, **kwargs):

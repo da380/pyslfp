@@ -20,7 +20,6 @@ from pyslfp.linear_operators import (
     ocean_average_operator,
     averaging_operator,
 )
-from pyslfp.linear_operators.utils import spatial_multiplication_operator
 
 
 def build_physics_components(
@@ -58,35 +57,41 @@ def build_physics_components(
             state, load_space, load_space
         )
 
-    # Joint to Total Load: [Ice, OceanDyn, OceanRho] -> Total Mass Load
     joint_to_load = inf.RowLinearOperator(
         [ice_to_load, ocean_dyn_to_load, ocean_rho_to_load]
     )
     joint_space = joint_to_load.domain
 
-    # 2. Extract specific physical responses needed for Sea Surface Height
     # Map [Ice, Dyn, Rho] -> [Total Load, OceanDyn]
-    # The Rho component is dropped here as it only contributes to the Total Mass Load
     op1 = inf.ColumnLinearOperator([joint_to_load, joint_space.subspace_projection(1)])
 
-    # 3. Resolve the Sea Surface Height Components
-    # Barystatic SSH from SLE
+    # --- A. Resolve the Sea Surface Height Components (For Altimetry) ---
     static_ssh_op = sea_surface_height_operator(state, finger_print_operator.codomain)
-    slc_operator = static_ssh_op @ finger_print_operator
+    barystatic_ssh_op = static_ssh_op @ finger_print_operator
 
-    # Map [Total Load, OceanDyn] -> [Barystatic SSH, Dynamic Topo]
-    op2 = inf.BlockDiagonalLinearOperator(
-        [slc_operator, load_space.identity_operator()]
+    op2_ssh = inf.BlockDiagonalLinearOperator(
+        [barystatic_ssh_op, load_space.identity_operator()]
     )
 
-    # Combine into Total Continuous SSH (Barystatic + Dynamic)
     op3 = inf.RowLinearOperator(
         [load_space.identity_operator(), load_space.identity_operator()]
     )
 
-    continuous_ssh_operator = op3 @ op2 @ op1
+    continuous_ssh_operator = op3 @ op2_ssh @ op1
 
-    # Extract discrete altimetry points
+    # --- B. Resolve the True Sea Level Components (For GMSL Integration) ---
+    # Sea Level Change is strictly subspace 0 of the SLE response!
+    barystatic_sl_op = (
+        finger_print_operator.codomain.subspace_projection(0) @ finger_print_operator
+    )
+
+    op2_sl = inf.BlockDiagonalLinearOperator(
+        [barystatic_sl_op, load_space.identity_operator()]
+    )
+
+    continuous_sl_operator = op3 @ op2_sl @ op1
+
+    # --- Extract discrete altimetry points from SSH ---
     point_eval = load_space.point_evaluation_operator(points)
     forward_operator = point_eval @ continuous_ssh_operator
 
@@ -95,9 +100,17 @@ def build_physics_components(
         load_space,
         finger_print_operator,
         continuous_ssh_operator,
+        continuous_sl_operator,  # New return!
         forward_operator,
         scale_mm,
     )
+
+
+def true_gmsl_operator(state, load_space, continuous_sl_operator):
+    """Returns the true spatial integration of continuous Sea Level."""
+    true_avg_weight = state.ocean_projection(value=0.0) / state.ocean_area
+    true_avg_op = averaging_operator(state, load_space, [true_avg_weight])
+    return true_avg_op @ continuous_sl_operator
 
 
 def build_measures(
@@ -149,7 +162,17 @@ def build_measures(
 
     # --- 3. OCEAN DENSITY PRIOR ---
     ocean_rho_scale = load_space.scale * ocean_rho_scale_factor
-    ocean_rho_std = ocean_rho_std_factor * GMSL_prior_std
+
+    # Extract mean ocean depth from the model state
+    mean_ocean_depth = state.model.integrate(state.sea_level) / state.ocean_area
+    water_density = state.model.parameters.water_density
+
+    # The target standard deviation for the *effective steric sea level*
+    effective_steric_std = ocean_rho_std_factor * GMSL_prior_std
+
+    # Convert that effective height std back into the required density std
+    ocean_rho_std = effective_steric_std * (water_density / mean_ocean_depth)
+
     ocean_rho_prior = load_space.point_value_scaled_heat_kernel_gaussian_measure(
         ocean_rho_scale, std=ocean_rho_std
     )
@@ -188,9 +211,7 @@ def build_measures(
         mass_subspace = inf.AffineSubspace.from_linear_equation(
             operator=mass_constraint_op,
             value=zero_val,
-            solver=inf.CholeskySolver(
-                galerkin=True
-            ),  # 1D constraint, Cholesky is trivial
+            solver=inf.CholeskySolver(galerkin=True),
         )
 
         # Condition the spatial prior strictly onto this subspace

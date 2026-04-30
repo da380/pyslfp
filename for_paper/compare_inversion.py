@@ -11,7 +11,6 @@ reduce uncertainty in estimating ice mass loss and ocean dynamic topography.
 import argparse
 import os
 import numpy as np
-import scipy.stats as stats
 import matplotlib
 
 # Force headless backend to avoid Wayland/Qt display errors
@@ -329,7 +328,7 @@ def main():
 
     # Calculate GMSL Statistics
     std_noise_measure = exact_meas["alt_noise"].affine_mapping(operator=alt_avg_op)
-    std_noise_std_mm = (
+    (
         np.sqrt(std_noise_measure.covariance.matrix(dense=True)[0, 0]) * scale_mm
     )
     std_alt_gmsl = alt_avg_op(alt_data)[0] * scale_mm

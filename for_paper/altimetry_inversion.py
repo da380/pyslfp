@@ -25,7 +25,7 @@ import pyslfp as sl
 from pyslfp.state import EarthState
 from pyslfp.linear_operators import ocean_altimetry_points
 
-import altimetry_extended_utils as utils
+import altimetry_utils as utils
 
 
 def parse_arguments():
@@ -129,7 +129,7 @@ def main():
         if args.mc_trials == 0:
             args.mc_trials = 500
 
-    output_dir = "output_plots_extended"
+    output_dir = "output_plots_altimetry_inversion"
     os.makedirs(output_dir, exist_ok=True)
     figures_to_save = {}
 
@@ -274,7 +274,7 @@ def main():
             title="Global Mean Sea Level Estimators",
             posterior_labels=list(results.keys()),
         )
-        figures_to_save["extended_gmsl_pdf"] = fig_pdf
+        figures_to_save["gmsl_pdf"] = fig_pdf
 
     if args.mc_trials > 0:
         print(f"Running {args.mc_trials} MC trials via dense joint measure mapping...")
@@ -390,7 +390,7 @@ def main():
 
         ax_mc.plot([], [], color="indigo", linewidth=1.5, label="Analytical 2D PDF")
         ax_mc.legend(loc="upper left", fontsize=10)
-        figures_to_save["extended_mc_validation"] = fig_mc
+        figures_to_save["mc_validation"] = fig_mc
 
     if args.plot_maps:
         print("Generating 3-component spatial maps...")
@@ -498,7 +498,7 @@ def main():
             for ax in axes.flatten():
                 state.plot_boundaries(ax, regions_to_analyze)
 
-        figures_to_save["extended_posterior_maps"] = fig_maps
+        figures_to_save["posterior_maps"] = fig_maps
 
         #  Sea Surface Height & Observations Plot
         print("Generating Sea Surface Height maps with observation overlays...")
@@ -557,7 +557,7 @@ def main():
         )
         axes_ssh[1].set_title("Altimetry Observations")
 
-        figures_to_save["extended_observed_ssh"] = fig_ssh
+        figures_to_save["observed_ssh"] = fig_ssh
 
     if args.plot_regions:
         print("\nDecomposing Regional Sea Level Signals (3-way)...")
@@ -598,7 +598,7 @@ def main():
             title="3-Component Signal Separation",
             fill_density=False,
         )
-        figures_to_save["extended_regional_corner"] = plt.gcf()
+        figures_to_save["regional_corner"] = plt.gcf()
 
     # ------------------ SAVE ALL FIGURES ------------------
     if figures_to_save:

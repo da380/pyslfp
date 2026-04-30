@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 
 import pygeoinf as inf
 import pyslfp as sl
-import altimetry_extended_utils as utils
+import altimetry_utils as utils
 
 from pyslfp.state import EarthState
 from pyslfp.linear_operators import ocean_altimetry_points, altimetry_averaging_operator
@@ -114,7 +114,7 @@ def main():
     args = parse_arguments()
 
     # Setup directory to save plots
-    output_dir = "output_plots_extended_bias"
+    output_dir = "output_plots_altimetry_bias"
     os.makedirs(output_dir, exist_ok=True)
     figures_to_save = {}
 

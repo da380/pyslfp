@@ -53,7 +53,7 @@ def parse_arguments():
 
     # --- Resolution & Physics Settings ---
     parser.add_argument(
-        "--lmax", type=int, default=128, help="Exact model max SH degree."
+        "--lmax", type=int, default=256, help="Exact model max SH degree."
     )
     parser.add_argument(
         "--obs-degree",
@@ -186,7 +186,9 @@ def main():
         wmb_op = wmb_method.potential_coefficient_to_load_operator(load_space)
         wmb_direct_avg_op = avg_op @ wmb_op
 
-        post_avg_measure = model_posterior.affine_mapping(operator=tot_avg_op)
+        post_avg_measure = model_posterior.affine_mapping(
+            operator=tot_avg_op
+        ).with_dense_covariance(parallel=True, n_jobs=4)
         post_stds_mm = (
             np.sqrt(np.diag(post_avg_measure.covariance.matrix(dense=True))) * ewt_scale
         )
@@ -366,7 +368,7 @@ def main():
         )
 
         print("Constructing dense error covariance...")
-        joint_err_dense = joint_err_meas.with_dense_covariance()
+        joint_err_dense = joint_err_meas.with_dense_covariance(parallel=True, n_jobs=8)
         samples = joint_err_dense.samples(args.mc_trials)
 
         for i, (w_err, b_err) in enumerate(samples):

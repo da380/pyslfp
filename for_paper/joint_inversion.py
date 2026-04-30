@@ -26,7 +26,7 @@ import pyslfp as sl
 from pyslfp.state import EarthState
 from pyslfp.linear_operators import ocean_altimetry_points
 
-import joint_extended_utils as utils
+import joint_utils as utils
 
 
 def parse_arguments():
@@ -164,7 +164,7 @@ def main():
         if args.mc_trials == 0 and not args.compare:
             args.mc_trials = 500
 
-    output_dir = "output_plots_joint_extended"
+    output_dir = "output_plots_joint_inversion"
     os.makedirs(output_dir, exist_ok=True)
     figures_to_save = {}
 
@@ -643,7 +643,7 @@ def main():
             title="GMSL Estimators",
             posterior_labels=list(results.keys()),
         )
-        figures_to_save["extended_gmsl_pdf"] = fig_pdf
+        figures_to_save["gmsl_pdf"] = fig_pdf
 
     # ------------------ 8. REGIONAL DECOMPOSITION ------------------
     if args.plot_regions:
@@ -687,7 +687,7 @@ def main():
                     title=f"{title_prefix} 3-Component Signal Separation",
                     fill_density=False,
                 )
-                figures_to_save[f"extended_regional_corner_{key}"] = plt.gcf()
+                figures_to_save[f"regional_corner_{key}"] = plt.gcf()
         else:
             post_meas = post_joint.affine_mapping(operator=final_op)
             inf.plot_corner_distributions(
@@ -698,7 +698,7 @@ def main():
                 title="Joint Bayes 3-Component Signal Separation",
                 fill_density=False,
             )
-            figures_to_save["extended_regional_corner"] = plt.gcf()
+            figures_to_save["regional_corner"] = plt.gcf()
 
     # ------------------ 9. MC VALIDATION (JOINT ONLY) ------------------
     if args.mc_trials > 0 and not args.compare:

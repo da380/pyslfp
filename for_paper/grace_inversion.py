@@ -21,6 +21,7 @@ import scipy.stats as stats
 
 import pygeoinf as inf
 import grace_utils as utils
+from plot_utils import plot_normalized_mc_errors
 import pyslfp as sl
 
 
@@ -112,8 +113,8 @@ def main():
     args = parse_arguments()
     if args.all:
         args.plot_maps = args.plot_pdfs = args.plot_deg1 = True
-        if args.mc_trials == 0:
-            args.mc_trials = 500
+        if args.mc_trials <= 0:
+            args.mc_trials = -1
 
     if args.smoothing_scale_km is None:
         args.smoothing_scale_km = args.load_scale_km
@@ -181,7 +182,7 @@ def main():
     )
     print(f"\nSolution reached in {solver.iterations} iterations.")
 
-    if args.plot_pdfs or args.mc_trials > 0 or args.plot_deg1:
+    if args.plot_pdfs or args.mc_trials != 0 or args.plot_deg1:
         print("Forming load average estimates")
 
         tot_avg_op = ewt_mm_scale * avg_op @ total_load_op
@@ -197,9 +198,13 @@ def main():
             operator=tot_avg_op
         ).with_dense_covariance(parallel=True, n_jobs=4)
 
+        prior_avg_measure = model_prior.affine_mapping(
+            operator=tot_avg_op
+        ).with_dense_covariance(parallel=True, n_jobs=4)
+
         true_avg = tot_avg_op(model)
 
-        # ------------------ 5. REGIONAL ANALYSIS ------------------
+        # ------------------ REGIONAL ANALYSIS ------------------
         if args.plot_pdfs:
             print("\nDecomposing Regional Signals...")
 
@@ -214,22 +219,33 @@ def main():
             )
             axes_flat = axes.flatten()
 
-            labels = list(regions_dict.keys())
-
             for i, region in enumerate(region_names):
                 ax = axes_flat[i]
                 coordinate_projection = post_avg_measure.domain.subspace_projection(i)
 
+                coord_prior = prior_avg_measure.affine_mapping(
+                    operator=coordinate_projection
+                )
+                coord_post = post_avg_measure.affine_mapping(
+                    operator=coordinate_projection
+                )
+
+                kl_div = coord_post.kl_divergence(coord_prior)
+
+                coord_wmb = wmb_avg_measure.affine_mapping(
+                    operator=coordinate_projection
+                )
+
                 inf.plot_1d_distributions(
-                    [
-                        post_avg_measure.affine_mapping(operator=coordinate_projection),
-                        wmb_avg_measure.affine_mapping(operator=coordinate_projection),
-                    ],
+                    [coord_post, coord_wmb],
                     ax=ax,
                     true_value=true_avg[i],
                     xlabel="Regional Average Mass (mm EWT)",
                     title=f"{region}",
-                    posterior_labels=labels,
+                    posterior_labels=[
+                        f"Bayesian ({kl_div:.2f} nats)",
+                        "WMB",
+                    ],
                 )
 
             for j in range(i + 1, len(axes_flat)):
@@ -237,6 +253,7 @@ def main():
 
             figures_to_save["grace_regional_pdfs"] = plt.gcf()
 
+        # ------------------ DEGREE ONE ------------------
         if args.plot_deg1:
             print("Generating Degree-1 Corner Plot...")
             deg1_op = (
@@ -264,11 +281,120 @@ def main():
                     r"$\zeta_{10}$ (mm)",
                     r"$\zeta_{11}$ (mm)",
                 ],
-                title=f"Degree 1 Recovery (Information Gained: {kl_div:.2f} nats)",
+                title=f"Bayesian Degree 1 Recovery ({kl_div:.2f} nats)",
             )
             figures_to_save["grace_degree_1_corner"] = plt.gcf()
 
-    # ------------------ 4. MAPPING ------------------
+        # ------------------ OPTION 4: Monte Carlo ------------------
+        if args.mc_trials != 0:
+            print(
+                f"\nExtracting analytical distributions for MC validation (trials={'skipped' if args.mc_trials == -1 else args.mc_trials})..."
+            )
+
+            post_exp_op = inverse_problem.posterior_expectation_operator(
+                solver, preconditioner=preconditioner
+            )
+
+            if isinstance(post_exp_op, inf.AffineOperator):
+                bayes_linear = post_exp_op.linear_part
+                bayes_translation = tot_avg_op(post_exp_op.translation_part)
+            else:
+                bayes_linear = post_exp_op
+                bayes_translation = None
+
+            wmb_err_op = inf.RowLinearOperator([-1 * tot_avg_op, wmb_avg_op])
+            bayes_err_op = inf.RowLinearOperator(
+                [-1 * tot_avg_op, tot_avg_op @ bayes_linear]
+            )
+
+            joint_err_op = inf.ColumnLinearOperator([wmb_err_op, bayes_err_op])
+
+            joint_meas = inverse_problem.joint_prior_measure
+
+            translation = (
+                [avg_op.codomain.zero, bayes_translation]
+                if bayes_translation is not None
+                else None
+            )
+
+            # 1. Map to dense covariance
+            joint_err_dense = joint_meas.affine_mapping(
+                operator=joint_err_op, translation=translation
+            ).with_dense_covariance(parallel=True, n_jobs=8)
+
+            # Conditional Sampling
+            if args.mc_trials > 0:
+                w_errs = np.zeros((args.mc_trials, len(region_names)))
+                b_errs = np.zeros((args.mc_trials, len(region_names)))
+
+                samples = joint_err_dense.samples(args.mc_trials)
+                for i, (w_err, b_err) in enumerate(samples):
+                    w_errs[i, :] = w_err
+                    b_errs[i, :] = b_err
+            else:
+                w_errs, b_errs = None, None
+
+            # 2. Extract standard deviations
+            wmb_avg_stds = np.sqrt(wmb_avg_measure.covariance.extract_diagonal())
+            post_avg_stds = np.sqrt(post_avg_measure.covariance.extract_diagonal())
+
+            # 3. Extract the full analytical mean and covariance
+            n_reg = len(region_names)
+            raw_cov_full = joint_err_dense.covariance.matrix(dense=True)
+            raw_mean_full = joint_err_dense.expectation
+
+            # Setup the subplots
+            ncols = int(np.ceil(np.sqrt(n_reg)))
+            nrows = int(np.ceil(n_reg / ncols))
+
+            fig_mc, axes_mc = plt.subplots(
+                nrows=nrows,
+                ncols=ncols,
+                figsize=(6 * ncols, 6 * nrows),
+                layout="constrained",
+            )
+
+            axes_flat = np.atleast_1d(axes_mc).flatten()
+
+            # 4. Loop through regions and plot
+            for j, region in enumerate(region_names):
+                ax = axes_flat[j]
+
+                # Extract the 2x2 mean and covariance block for this region
+                raw_mean_2d = [raw_mean_full[0][j], raw_mean_full[1][j]]
+                var_w = raw_cov_full[j, j]
+                var_b = raw_cov_full[n_reg + j, n_reg + j]
+                cov_wb = raw_cov_full[j, n_reg + j]
+                raw_cov_2d = np.array([[var_w, cov_wb], [cov_wb, var_b]])
+
+                # Conditionally extract raw errors if sampling was performed
+                raw_errs_w = w_errs[:, j] if w_errs is not None else None
+                raw_errs_b = b_errs[:, j] if b_errs is not None else None
+
+                plot_normalized_mc_errors(
+                    ax,
+                    raw_errs_w,
+                    raw_errs_b,
+                    raw_mean_2d,
+                    raw_cov_2d,
+                    wmb_avg_stds[j],
+                    post_avg_stds[j],
+                    title=f"{region} Error Distribution",
+                    xlabel=r"WMB Normalized Error",
+                    ylabel=r"Bayesian Normalized Error",
+                    label_x="WMB",
+                    label_y="Bayes",
+                    show_legend=(j == 0),
+                    show_samples=(args.mc_trials > 0),  # Pass the flag down
+                )
+
+            # Hide any empty subplots
+            for k in range(j + 1, len(axes_flat)):
+                axes_flat[k].set_visible(False)
+
+            figures_to_save["grace_mc_validation"] = fig_mc
+
+    # ------------------ MAPS ------------------
     if args.plot_maps:
         print("Generating spatial maps...")
         cmap = "seismic"
@@ -343,168 +469,6 @@ def main():
             utils.draw_region_boundaries(state, ax, regions_dict)
 
         figures_to_save["grace_posterior_maps"] = fig_maps
-
-    # ------------------ 6: Corner Plot ------------------
-
-    # ------------------ OPTION 4: Monte Carlo ------------------
-    if args.mc_trials > 0:
-        print(f"Running {args.mc_trials} MC trials via dense joint measure mapping...")
-        w_errs, b_errs = (
-            np.zeros((args.mc_trials, len(region_names))),
-            np.zeros((args.mc_trials, len(region_names))),
-        )
-
-        post_exp_op = inverse_problem.posterior_expectation_operator(
-            solver, preconditioner=preconditioner
-        )
-
-        if isinstance(post_exp_op, inf.AffineOperator):
-            bayes_linear = post_exp_op.linear_part
-            bayes_translation = tot_avg_op(post_exp_op.translation_part)
-        else:
-            bayes_linear = post_exp_op
-            bayes_translation = None
-
-        wmb_err_op = inf.RowLinearOperator([-1 * tot_avg_op, wmb_direct_avg_op])
-        bayes_err_op = inf.RowLinearOperator(
-            [-1 * tot_avg_op, tot_avg_op @ bayes_linear]
-        )
-
-        joint_err_op = inf.ColumnLinearOperator([wmb_err_op, bayes_err_op])
-
-        joint_meas = inverse_problem.joint_prior_measure
-
-        translation = (
-            [avg_op.codomain.zero, bayes_translation]
-            if bayes_translation is not None
-            else None
-        )
-
-        joint_err_meas = joint_meas.affine_mapping(
-            operator=joint_err_op, translation=translation
-        )
-
-        print("Constructing dense error covariance...")
-        joint_err_dense = joint_err_meas.with_dense_covariance(parallel=True, n_jobs=8)
-        samples = joint_err_dense.samples(args.mc_trials)
-
-        for i, (w_err, b_err) in enumerate(samples):
-            w_errs[i, :] = (w_err * ewt_mm_scale) / wmb_stds_mm
-            b_errs[i, :] = (b_err * ewt_mm_scale) / post_stds_mm
-
-        n_reg = len(region_names)
-        raw_cov = joint_err_dense.covariance.matrix(dense=True) * (ewt_mm_scale**2)
-
-        if joint_err_dense.has_zero_expectation:
-            raw_mean_w = np.zeros(n_reg)
-            raw_mean_b = np.zeros(n_reg)
-        else:
-            raw_mean_w = joint_err_dense.expectation[0] * ewt_mm_scale
-            raw_mean_b = joint_err_dense.expectation[1] * ewt_mm_scale
-
-        max_err = max(np.max(np.abs(w_errs)), np.max(np.abs(b_errs)))
-        plot_limit = np.ceil(max_err) + 0.5
-
-        ncols = int(np.ceil(np.sqrt(n_reg)))
-        nrows = int(np.ceil(n_reg / ncols))
-
-        fig_mc, axes_mc = plt.subplots(
-            nrows=nrows,
-            ncols=ncols,
-            figsize=(5 * ncols, 5 * nrows),
-            sharex=True,
-            sharey=True,
-            layout="constrained",
-        )
-
-        axes_flat = np.atleast_1d(axes_mc).flatten()
-
-        for j, region in enumerate(region_names):
-            ax = axes_flat[j]
-
-            ax.scatter(
-                w_errs[:, j],
-                b_errs[:, j],
-                alpha=0.6,
-                color="purple",
-                edgecolor="white",
-                s=20,
-                zorder=3,
-            )
-
-            # --- Analytical 2D PDF Contours ---
-            mu_2d = np.array(
-                [raw_mean_w[j] / wmb_stds_mm[j], raw_mean_b[j] / post_stds_mm[j]]
-            )
-
-            var_w = raw_cov[j, j] / (wmb_stds_mm[j] ** 2)
-            var_b = raw_cov[j + n_reg, j + n_reg] / (post_stds_mm[j] ** 2)
-            cov_wb = raw_cov[j, j + n_reg] / (wmb_stds_mm[j] * post_stds_mm[j])
-            cov_2d = np.array([[var_w, cov_wb], [cov_wb, var_b]])
-
-            x_grid, y_grid = np.mgrid[
-                -plot_limit:plot_limit:500j, -plot_limit:plot_limit:500j
-            ]
-            pos = np.dstack((x_grid, y_grid))
-            rv = stats.multivariate_normal(mu_2d, cov_2d)
-            Z = rv.pdf(pos)
-
-            max_density = rv.pdf(mu_2d)
-            levels = [max_density * np.exp(-0.5 * k**2) for k in [4, 3, 2, 1]]
-            ax.contour(
-                x_grid,
-                y_grid,
-                Z,
-                levels=levels,
-                colors="indigo",
-                linewidths=[0.5, 1.0, 1.5],
-                alpha=0.8,
-                zorder=4,
-            )
-
-            ax.axhline(0, color="black", linestyle="-", alpha=0.5, zorder=1)
-            ax.axvline(0, color="black", linestyle="-", alpha=0.5, zorder=1)
-            ax.axhspan(
-                -1,
-                1,
-                color="blue",
-                alpha=0.15,
-                zorder=0,
-                label=r"Bayes 1$\sigma$ Expected",
-            )
-            ax.axhspan(-2, 2, color="blue", alpha=0.05, zorder=0)
-            ax.axvspan(
-                -1,
-                1,
-                color="red",
-                alpha=0.15,
-                zorder=0,
-                label=r"WMB 1$\sigma$ Expected",
-            )
-            ax.axvspan(-2, 2, color="red", alpha=0.05, zorder=0)
-
-            ax.set_xlim(-plot_limit, plot_limit)
-            ax.set_ylim(-plot_limit, plot_limit)
-            ax.set_aspect("equal")
-
-            ax.set_title(region, fontsize=14)
-            ax.grid(True, linestyle=":", alpha=0.4)
-
-            if j >= (nrows - 1) * ncols or (j + ncols >= n_reg):
-                ax.set_xlabel(r"WMB Normalized Error", fontsize=11)
-            if j % ncols == 0:
-                ax.set_ylabel(r"Bayes Normalized Error", fontsize=11)
-
-            if j == 0:
-                ax.plot(
-                    [], [], color="indigo", linewidth=1.5, label="Analytical 2D PDF"
-                )
-                ax.legend(loc="upper left", fontsize=9)
-
-        for j in range(n_reg, len(axes_flat)):
-            axes_flat[j].set_visible(False)
-
-        figures_to_save["grace_mc_validation"] = fig_mc
 
     # ------------------ SAVE ALL FIGURES ------------------
     if figures_to_save:

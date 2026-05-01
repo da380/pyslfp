@@ -126,8 +126,8 @@ def main():
     args = parse_arguments()
     if args.all:
         args.plot_pdfs = args.plot_maps = args.plot_regions = True
-        if args.mc_trials == 0:
-            args.mc_trials = 500
+        if args.mc_trials <= 0:
+            args.mc_trials = -1
 
     output_dir = "output_plots_altimetry_inversion"
     os.makedirs(output_dir, exist_ok=True)
@@ -234,7 +234,7 @@ def main():
 
     # ------------------ 4. GMSL & MC SETUP ------------------
 
-    if args.plot_pdfs or args.mc_trials > 0:
+    if args.plot_pdfs or args.mc_trials != 0:
 
         true_gmsl_op = (
             utils.true_gmsl_operator(state, load_space, continuous_sl) * mm_scale
@@ -268,11 +268,12 @@ def main():
             )
             figures_to_save["gmsl_pdf"] = fig_pdf
 
-        if args.mc_trials > 0:
+        if args.mc_trials != 0:
 
             print(
-                f"Running {args.mc_trials} MC trials via dense joint measure mapping..."
+                f"\nExtracting analytical distributions for MC validation (trials={'skipped' if args.mc_trials == -1 else args.mc_trials})..."
             )
+
             post_exp_op = inverse_problem.posterior_expectation_operator(
                 solver, preconditioner=preconditioner
             )
@@ -302,7 +303,17 @@ def main():
             joint_err_dense = joint_err_meas.with_dense_covariance(
                 parallel=True, n_jobs=4
             )
-            samples = joint_err_dense.samples(args.mc_trials)
+
+            if args.mc_trials > 0:
+                samples = joint_err_dense.samples(args.mc_trials)
+
+                raw_errs_x = np.zeros(args.mc_trials)
+                raw_errs_y = np.zeros(args.mc_trials)
+                for i, (s_err, b_err) in enumerate(samples):
+                    raw_errs_x[i] = s_err[0]
+                    raw_errs_y[i] = b_err[0]
+            else:
+                raw_errs_x, raw_errs_y = None, None
 
             std_noise_std_mm = np.sqrt(
                 alt_gmsl_measure.covariance.matrix(dense=True)[0, 0]
@@ -311,21 +322,12 @@ def main():
                 post_gmsl_measure.covariance.matrix(dense=True)[0, 0]
             )
 
-            # 1. Collect raw unnormalized errors
-            raw_errs_x = np.zeros(args.mc_trials)
-            raw_errs_y = np.zeros(args.mc_trials)
-            for i, (s_err, b_err) in enumerate(samples):
-                raw_errs_x[i] = s_err[0]
-                raw_errs_y[i] = b_err[0]
-
-            # 2. Extract raw mean and covariance
             raw_cov = joint_err_dense.covariance.matrix(dense=True)
             raw_mean = joint_err_dense.expectation
             raw_mean_2d = [raw_mean[0][0], raw_mean[1][0]]
 
             fig_mc, ax_mc = plt.subplots(figsize=(7, 7), layout="constrained")
 
-            # 3. Plot
             plot_normalized_mc_errors(
                 ax_mc,
                 raw_errs_x,
@@ -348,17 +350,14 @@ def main():
         print("Generating 3-component spatial maps...")
         cmap = "seismic"
 
-        # Scaling factors
         density_scale = state.model.parameters.density_scale
 
-        # We need a scaled mask for heights and an unscaled mask for density
         ocean_mask_mm = mm_scale * state.ocean_projection(value=0.0)
         ocean_mask_raw = state.ocean_projection(value=0.0)
 
         true_ice, true_dyn, true_rho = model
         post_ice, post_dyn, post_rho = model_posterior.expectation
 
-        # Calculate symmetric vmin/vmax for each row, applying correct physical scales
         vmax_ice = max(
             np.max(np.abs(true_ice.data * mm_scale)),
             np.max(np.abs(post_ice.data * mm_scale)),
@@ -380,7 +379,6 @@ def main():
             layout="constrained",
         )
 
-        # Row 1: Ice (Height in mm)
         sl.plot(
             true_ice * mm_scale,
             ax=axes[0, 0],
@@ -402,7 +400,6 @@ def main():
         )
         axes[0, 1].set_title("Posterior Ice Change")
 
-        # Row 2: Ocean Dynamic (Height in mm)
         sl.plot(
             true_dyn * ocean_mask_mm,
             ax=axes[1, 0],
@@ -424,7 +421,6 @@ def main():
         )
         axes[1, 1].set_title("Posterior Dynamic Topography")
 
-        # Row 3: Ocean Density (kg/m^3)
         sl.plot(
             true_rho * density_scale * ocean_mask_raw,
             ax=axes[2, 0],
@@ -452,16 +448,12 @@ def main():
 
         figures_to_save["posterior_maps"] = fig_maps
 
-        #  Sea Surface Height & Observations Plot
         print("Generating Sea Surface Height maps with observation overlays...")
 
-        # The true continuous SSH from our forward operator
         true_ssh = continuous_ssh(model)
 
-        # The discrete noisy observations
         data_mm = data * mm_scale
 
-        # Shared color scale for the SSH plots
         vmax_ssh = max(
             np.max(np.abs(true_ssh.data * mm_scale)), np.max(np.abs(data_mm))
         )
@@ -474,7 +466,6 @@ def main():
             layout="constrained",
         )
 
-        # True SSH Map (Masked to oceans)
         sl.plot(
             true_ssh * ocean_mask_mm,
             ax=axes_ssh[0],
@@ -486,7 +477,6 @@ def main():
         )
         axes_ssh[0].set_title("True Continuous SSH Change")
 
-        # Altimetry Observations Scatter
         axes_ssh[1].set_global()
         axes_ssh[1].coastlines(linewidth=0.5, alpha=0.5, zorder=10)
         sl.plot_points(

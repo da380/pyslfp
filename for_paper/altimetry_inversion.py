@@ -27,6 +27,8 @@ from pyslfp.linear_operators import ocean_altimetry_points
 
 import altimetry_utils as utils
 
+from plot_utils import plot_normalized_mc_errors
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
@@ -144,13 +146,13 @@ def main():
 
     # ------------------ 1. EXACT MODEL SETUP ------------------
     print(f"\nBuilding EXACT 3-Component physical operators (lmax={args.lmax})...")
-    (state, load_space, fp_op, continuous_ssh, continuous_sl, forward_op, scale_mm) = (
+    (state, load_space, fp_op, continuous_ssh, continuous_sl, forward_op, mm_scale) = (
         utils.build_physics_components(
             args.lmax, args.load_order, args.load_scale_km, points, is_surrogate=False
         )
     )
 
-    model_prior, noise_meas, GMSL_prior_std = utils.build_measures(
+    model_prior, noise_measure, GMSL_prior_std = utils.build_measures(
         state,
         load_space,
         args.ice_scale_factor,
@@ -162,18 +164,19 @@ def main():
         args.noise_scale_factor,
         args.noise_std_factor,
         points,
-        scale_mm,
+        mm_scale,
         prior_shift=args.prior_shift,
         is_surrogate=False,
     )
 
-    print(f"Implied GMSL prior standard deviation: {GMSL_prior_std * scale_mm:.3f} mm")
+    print(f"Implied GMSL prior standard deviation: {GMSL_prior_std * mm_scale:.3f} mm")
 
     print("Setting up Bayesian Inversion...")
     forward_problem = inf.LinearForwardProblem(
-        forward_op, data_error_measure=noise_meas
+        forward_op, data_error_measure=noise_measure
     )
-    true_model, synthetic_data = forward_problem.synthetic_model_and_data(model_prior)
+    model, data = forward_problem.synthetic_model_and_data(model_prior)
+    data_measure = noise_measure.affine_mapping(translation=data)
     inverse_problem = inf.LinearBayesianInversion(forward_problem, model_prior)
 
     # ------------------ 2. PRECONDITIONER SETUP ------------------
@@ -190,7 +193,7 @@ def main():
         )
     )
 
-    surr_model_prior, surr_noise_meas, _ = utils.build_measures(
+    surr_model_prior, surr_noise_measure, _ = utils.build_measures(
         surr_state,
         surr_load_space,
         args.ice_scale_factor,
@@ -202,7 +205,7 @@ def main():
         args.noise_scale_factor,
         args.noise_std_factor,
         points,
-        scale_mm,
+        mm_scale,
         prior_shift=args.prior_shift,
         is_surrogate=True,
     )
@@ -213,13 +216,13 @@ def main():
         woodbury_solver,
         alternate_forward_operator=surr_forward_op,
         alternate_prior_measure=surr_model_prior,
-        alternate_data_error_measure=surr_noise_meas,
+        alternate_data_error_measure=surr_noise_measure,
     )
 
     alpha = 0.1
     preconditioner = (
         1 - alpha
-    ) * woodbury_preconditioner + alpha * surr_noise_meas.inverse_covariance
+    ) * woodbury_preconditioner + alpha * surr_noise_measure.inverse_covariance
 
     # ------------------ 3. POSTERIOR SOLVE ------------------
     callback = inf.ProgressCallback()
@@ -227,170 +230,121 @@ def main():
 
     print("\nSolving for 3-component posterior expectation...")
     model_posterior = inverse_problem.model_posterior_measure(
-        synthetic_data, solver, preconditioner=preconditioner
+        data, solver, preconditioner=preconditioner
     )
     print(f"\nSolution reached in {solver.iterations} iterations.")
 
     # ------------------ 4. GMSL & MC SETUP ------------------
-    true_gmsl_op = utils.true_gmsl_operator(state, load_space, continuous_sl)
-    true_gmsl_val_mm = true_gmsl_op(true_model)[0] * scale_mm
-
-    alt_avg_op = sl.linear_operators.altimetry_averaging_operator(points)
 
     if args.plot_pdfs or args.mc_trials > 0:
-        post_gmsl_measure = model_posterior.affine_mapping(operator=true_gmsl_op)
-        post_gmsl_std_mm = (
-            np.sqrt(post_gmsl_measure.covariance.matrix(dense=True)[0, 0]) * scale_mm
+
+        true_gmsl_op = (
+            utils.true_gmsl_operator(state, load_space, continuous_sl) * mm_scale
         )
+        alt_avg_op = sl.linear_operators.altimetry_averaging_operator(points) * mm_scale
 
-        std_noise_meas = noise_meas.affine_mapping(operator=alt_avg_op)
-        std_noise_std_mm = (
-            np.sqrt(std_noise_meas.covariance.matrix(dense=True)[0, 0]) * scale_mm
-        )
+        prior_gmsl_measure = model_prior.affine_mapping(
+            operator=true_gmsl_op
+        ).with_dense_covariance()
+        alt_gmsl_measure = data_measure.affine_mapping(
+            operator=alt_avg_op
+        ).with_dense_covariance()
+        post_gmsl_measure = model_posterior.affine_mapping(
+            operator=true_gmsl_op
+        ).with_dense_covariance()
 
-    # ------------------ 5. PLOTTING ------------------
-    if args.plot_pdfs:
+        true_gmsl = true_gmsl_op(model)[0]
 
-        class MockMeasure:
-            def __init__(self, m, s):
-                self.mean = np.array([m])
-                self.cov = np.array([[s**2]])
+        if args.plot_pdfs:
 
-        results = {
-            "3-Component Bayesian": MockMeasure(
-                post_gmsl_measure.expectation[0] * scale_mm, post_gmsl_std_mm
-            ),
-            "Standard Averaging": MockMeasure(
-                alt_avg_op(synthetic_data)[0] * scale_mm, std_noise_std_mm
-            ),
-        }
+            kl_div = post_gmsl_measure.kl_divergence(prior_gmsl_measure)
 
-        fig_pdf, ax_pdf = plt.subplots(figsize=(8, 5), layout="constrained")
-        inf.plot_1d_distributions(
-            list(results.values()),
-            true_value=true_gmsl_val_mm,
-            ax=ax_pdf,
-            xlabel="GMSL Change (mm)",
-            title="Global Mean Sea Level Estimators",
-            posterior_labels=list(results.keys()),
-        )
-        figures_to_save["gmsl_pdf"] = fig_pdf
+            fig_pdf, ax_pdf = plt.subplots(figsize=(8, 5), layout="constrained")
 
-    if args.mc_trials > 0:
-        print(f"Running {args.mc_trials} MC trials via dense joint measure mapping...")
-        post_exp_op = inverse_problem.posterior_expectation_operator(
-            solver, preconditioner=preconditioner
-        )
+            inf.plot_1d_distributions(
+                [post_gmsl_measure, alt_gmsl_measure],
+                true_value=true_gmsl,
+                ax=ax_pdf,
+                title="Global Mean Sea Level Estimators",
+                posterior_labels=[f"Bayesian ({kl_div:.2f} nats)", "Simple averaging"],
+            )
+            figures_to_save["gmsl_pdf"] = fig_pdf
 
-        if isinstance(post_exp_op, inf.AffineOperator):
-            bayes_linear = post_exp_op.linear_part
-            bayes_translation = true_gmsl_op(post_exp_op.translation_part)
-        else:
-            bayes_linear = post_exp_op
-            bayes_translation = None
+        if args.mc_trials > 0:
 
-        std_err_op = inf.RowLinearOperator([-1.0 * true_gmsl_op, alt_avg_op])
-        bayes_err_op = inf.RowLinearOperator(
-            [-1.0 * true_gmsl_op, true_gmsl_op @ bayes_linear]
-        )
-        joint_err_op = inf.ColumnLinearOperator([std_err_op, bayes_err_op])
+            print(
+                f"Running {args.mc_trials} MC trials via dense joint measure mapping..."
+            )
+            post_exp_op = inverse_problem.posterior_expectation_operator(
+                solver, preconditioner=preconditioner
+            )
 
-        translation = (
-            [true_gmsl_op.codomain.zero, bayes_translation]
-            if bayes_translation is not None
-            else None
-        )
-        joint_err_meas = inverse_problem.joint_prior_measure.affine_mapping(
-            operator=joint_err_op, translation=translation
-        )
+            if isinstance(post_exp_op, inf.AffineOperator):
+                bayes_linear = post_exp_op.linear_part
+                bayes_translation = true_gmsl_op(post_exp_op.translation_part)
+            else:
+                bayes_linear = post_exp_op
+                bayes_translation = None
 
-        joint_err_dense = joint_err_meas.with_dense_covariance(parallel=True, n_jobs=4)
-        samples = joint_err_dense.samples(args.mc_trials)
+            std_err_op = inf.RowLinearOperator([-1.0 * true_gmsl_op, alt_avg_op])
+            bayes_err_op = inf.RowLinearOperator(
+                [-1.0 * true_gmsl_op, true_gmsl_op @ bayes_linear]
+            )
+            joint_err_op = inf.ColumnLinearOperator([std_err_op, bayes_err_op])
 
-        std_errs, bayes_errs = np.zeros(args.mc_trials), np.zeros(args.mc_trials)
-        for i, (s_err, b_err) in enumerate(samples):
-            std_errs[i] = (s_err[0] * scale_mm) / std_noise_std_mm
-            bayes_errs[i] = (b_err[0] * scale_mm) / post_gmsl_std_mm
+            translation = (
+                [true_gmsl_op.codomain.zero, bayes_translation]
+                if bayes_translation is not None
+                else None
+            )
+            joint_err_meas = inverse_problem.joint_prior_measure.affine_mapping(
+                operator=joint_err_op, translation=translation
+            )
 
-        raw_cov = joint_err_dense.covariance.matrix(dense=True) * (scale_mm**2)
-        raw_mean = joint_err_dense.expectation
+            joint_err_dense = joint_err_meas.with_dense_covariance(
+                parallel=True, n_jobs=4
+            )
+            samples = joint_err_dense.samples(args.mc_trials)
 
-        max_err = max(np.max(np.abs(std_errs)), np.max(np.abs(bayes_errs)))
-        plot_limit = np.ceil(max_err) + 0.5
+            std_noise_std_mm = np.sqrt(
+                alt_gmsl_measure.covariance.matrix(dense=True)[0, 0]
+            )
+            post_gmsl_std_mm = np.sqrt(
+                post_gmsl_measure.covariance.matrix(dense=True)[0, 0]
+            )
 
-        fig_mc, ax_mc = plt.subplots(figsize=(7, 7), layout="constrained")
-        ax_mc.scatter(
-            std_errs,
-            bayes_errs,
-            alpha=0.6,
-            color="purple",
-            edgecolor="white",
-            s=30,
-            zorder=3,
-        )
+            # 1. Collect raw unnormalized errors
+            raw_errs_x = np.zeros(args.mc_trials)
+            raw_errs_y = np.zeros(args.mc_trials)
+            for i, (s_err, b_err) in enumerate(samples):
+                raw_errs_x[i] = s_err[0]
+                raw_errs_y[i] = b_err[0]
 
-        mu_2d = np.array(
-            [
-                (raw_mean[0][0] * scale_mm) / std_noise_std_mm,
-                (raw_mean[1][0] * scale_mm) / post_gmsl_std_mm,
-            ]
-        )
-        cov_2d = np.array(
-            [
-                [
-                    raw_cov[0, 0] / (std_noise_std_mm**2),
-                    raw_cov[0, 1] / (std_noise_std_mm * post_gmsl_std_mm),
-                ],
-                [
-                    raw_cov[0, 1] / (std_noise_std_mm * post_gmsl_std_mm),
-                    raw_cov[1, 1] / (post_gmsl_std_mm**2),
-                ],
-            ]
-        )
+            # 2. Extract raw mean and covariance
+            raw_cov = joint_err_dense.covariance.matrix(dense=True)
+            raw_mean = joint_err_dense.expectation
+            raw_mean_2d = [raw_mean[0][0], raw_mean[1][0]]
 
-        x_grid, y_grid = np.mgrid[
-            -plot_limit:plot_limit:500j, -plot_limit:plot_limit:500j
-        ]
-        rv = stats.multivariate_normal(mu_2d, cov_2d)
-        max_density = rv.pdf(mu_2d)
+            fig_mc, ax_mc = plt.subplots(figsize=(7, 7), layout="constrained")
 
-        ax_mc.contour(
-            x_grid,
-            y_grid,
-            rv.pdf(np.dstack((x_grid, y_grid))),
-            levels=[max_density * np.exp(-0.5 * k**2) for k in [4, 3, 2, 1]],
-            colors="indigo",
-            linewidths=[0.5, 1.0, 1.5],
-            alpha=0.8,
-            zorder=4,
-        )
+            # 3. Plot
+            plot_normalized_mc_errors(
+                ax_mc,
+                raw_errs_x,
+                raw_errs_y,
+                raw_mean_2d,
+                raw_cov,
+                std_noise_std_mm,
+                post_gmsl_std_mm,
+                title="GMSL MC Validation: Normalized Residuals",
+                xlabel=r"Standard Estimator Normalized Error",
+                ylabel=r"3-Component Bayesian Normalized Error",
+                label_x="Standard",
+                label_y="Bayes",
+                show_legend=True,
+            )
 
-        ax_mc.axhline(0, color="black", linestyle="-", alpha=0.5, zorder=1)
-        ax_mc.axvline(0, color="black", linestyle="-", alpha=0.5, zorder=1)
-        ax_mc.axhspan(
-            -1, 1, color="blue", alpha=0.15, zorder=0, label=r"Bayes 1$\sigma$ Expected"
-        )
-        ax_mc.axhspan(-2, 2, color="blue", alpha=0.05, zorder=0)
-        ax_mc.axvspan(
-            -1,
-            1,
-            color="red",
-            alpha=0.15,
-            zorder=0,
-            label=r"Standard 1$\sigma$ Expected",
-        )
-        ax_mc.axvspan(-2, 2, color="red", alpha=0.05, zorder=0)
-
-        ax_mc.set_xlim(-plot_limit, plot_limit)
-        ax_mc.set_ylim(-plot_limit, plot_limit)
-        ax_mc.set_aspect("equal")
-        ax_mc.set_xlabel(r"Standard Estimator Normalized Error", fontsize=12)
-        ax_mc.set_ylabel(r"3-Component Bayesian Normalized Error", fontsize=12)
-        ax_mc.set_title("GMSL MC Validation: Normalized Residuals", fontsize=16)
-
-        ax_mc.plot([], [], color="indigo", linewidth=1.5, label="Analytical 2D PDF")
-        ax_mc.legend(loc="upper left", fontsize=10)
-        figures_to_save["mc_validation"] = fig_mc
+            figures_to_save["mc_validation"] = fig_mc
 
     if args.plot_maps:
         print("Generating 3-component spatial maps...")
@@ -400,20 +354,20 @@ def main():
         density_scale = state.model.parameters.density_scale
 
         # We need a scaled mask for heights and an unscaled mask for density
-        ocean_mask_mm = scale_mm * state.ocean_projection(value=0.0)
+        ocean_mask_mm = mm_scale * state.ocean_projection(value=0.0)
         ocean_mask_raw = state.ocean_projection(value=0.0)
 
-        true_ice, true_dyn, true_rho = true_model
+        true_ice, true_dyn, true_rho = model
         post_ice, post_dyn, post_rho = model_posterior.expectation
 
         # Calculate symmetric vmin/vmax for each row, applying correct physical scales
         vmax_ice = max(
-            np.max(np.abs(true_ice.data * scale_mm)),
-            np.max(np.abs(post_ice.data * scale_mm)),
+            np.max(np.abs(true_ice.data * mm_scale)),
+            np.max(np.abs(post_ice.data * mm_scale)),
         )
         vmax_dyn = max(
-            np.max(np.abs(true_dyn.data * scale_mm)),
-            np.max(np.abs(post_dyn.data * scale_mm)),
+            np.max(np.abs(true_dyn.data * mm_scale)),
+            np.max(np.abs(post_dyn.data * mm_scale)),
         )
         vmax_rho = max(
             np.max(np.abs(true_rho.data * density_scale)),
@@ -430,7 +384,7 @@ def main():
 
         # Row 1: Ice (Height in mm)
         sl.plot(
-            true_ice * scale_mm,
+            true_ice * mm_scale,
             ax=axes[0, 0],
             colorbar=True,
             vmin=-vmax_ice,
@@ -440,7 +394,7 @@ def main():
         )
         axes[0, 0].set_title("True Ice Change")
         sl.plot(
-            post_ice * scale_mm,
+            post_ice * mm_scale,
             ax=axes[0, 1],
             colorbar=True,
             vmin=-vmax_ice,
@@ -504,14 +458,14 @@ def main():
         print("Generating Sea Surface Height maps with observation overlays...")
 
         # The true continuous SSH from our forward operator
-        true_ssh = continuous_ssh(true_model)
+        true_ssh = continuous_ssh(model)
 
         # The discrete noisy observations
-        obs_data_mm = synthetic_data * scale_mm
+        data_mm = data * mm_scale
 
         # Shared color scale for the SSH plots
         vmax_ssh = max(
-            np.max(np.abs(true_ssh.data * scale_mm)), np.max(np.abs(obs_data_mm))
+            np.max(np.abs(true_ssh.data * mm_scale)), np.max(np.abs(data_mm))
         )
 
         fig_ssh, axes_ssh = plt.subplots(
@@ -539,7 +493,7 @@ def main():
         axes_ssh[1].coastlines(linewidth=0.5, alpha=0.5, zorder=10)
         sl.plot_points(
             points,
-            data=obs_data_mm,
+            data=data_mm,
             ax=axes_ssh[1],
             cmap=cmap,
             vmin=-vmax_ssh,
@@ -577,10 +531,10 @@ def main():
             avg_op @ barystatic_sl_op @ ice_to_load @ joint_space.subspace_projection(0)
         )
 
-        combined_op = inf.ColumnLinearOperator([op_dyn, op_rho, op_ice_fp]) * scale_mm
+        combined_op = inf.ColumnLinearOperator([op_dyn, op_rho, op_ice_fp]) * mm_scale
         final_op = combined_op.codomain.coordinate_projection @ combined_op
 
-        true_vals_mm = final_op(true_model)
+        true_vals_mm = final_op(model)
         post_meas = model_posterior.affine_mapping(operator=final_op)
         prior_meas = model_prior.affine_mapping(operator=final_op)
 

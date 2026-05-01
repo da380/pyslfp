@@ -123,7 +123,7 @@ def main():
 
     # ------------------ 1. EXACT MODEL SETUP ------------------
     print(f"\nBuilding EXACT physical operators (lmax={args.lmax})...")
-    state, load_space, response_space, fp_op, ewt_scale = (
+    state, load_space, response_space, fp_op, ewt_mm_scale = (
         utils.build_physics_components(args.lmax, args.load_order, args.load_scale_km)
     )
 
@@ -177,8 +177,6 @@ def main():
     )
     print(f"\nSolution reached in {solver.iterations} iterations.")
 
-    post_stds_mm = None
-    wmb_stds_mm = None
     if args.plot_pdfs or args.mc_trials > 0 or args.plot_deg1:
         print("Forming load average estimates")
 
@@ -190,7 +188,8 @@ def main():
             operator=tot_avg_op
         ).with_dense_covariance(parallel=True, n_jobs=4)
         post_stds_mm = (
-            np.sqrt(np.diag(post_avg_measure.covariance.matrix(dense=True))) * ewt_scale
+            np.sqrt(np.diag(post_avg_measure.covariance.matrix(dense=True)))
+            * ewt_mm_scale
         )
 
         wmb_noise_measure = data_error_measure.affine_mapping(
@@ -198,7 +197,7 @@ def main():
         )
         wmb_stds_mm = (
             np.sqrt(np.diag(wmb_noise_measure.covariance.matrix(dense=True)))
-            * ewt_scale
+            * ewt_mm_scale
         )
 
     # ------------------ 4. MAPPING ------------------
@@ -217,9 +216,9 @@ def main():
         smoothed_wmb_estimate = smoothing_operator(wmb_estimate)
 
         vmax = max(
-            np.max(np.abs(true_model.data * ewt_scale)),
-            np.max(np.abs(post_model.data * ewt_scale)),
-            np.max(np.abs(wmb_estimate.data * ewt_scale)),
+            np.max(np.abs(true_model.data * ewt_mm_scale)),
+            np.max(np.abs(post_model.data * ewt_mm_scale)),
+            np.max(np.abs(wmb_estimate.data * ewt_mm_scale)),
         )
 
         fig_maps, axes = sl.subplots(
@@ -229,7 +228,7 @@ def main():
         )
 
         sl.plot(
-            true_model * ewt_scale,
+            true_model * ewt_mm_scale,
             ax=axes[0, 0],
             colorbar=True,
             vmin=-vmax,
@@ -240,7 +239,7 @@ def main():
         axes[0, 0].set_title("True direct Load")
 
         sl.plot(
-            wmb_estimate * ewt_scale,
+            wmb_estimate * ewt_mm_scale,
             ax=axes[0, 1],
             colorbar=True,
             vmin=-vmax,
@@ -251,7 +250,7 @@ def main():
         axes[0, 1].set_title("WMB Spectral Estimate)")
 
         sl.plot(
-            smoothed_wmb_estimate * ewt_scale,
+            smoothed_wmb_estimate * ewt_mm_scale,
             ax=axes[1, 0],
             colorbar=True,
             vmin=-vmax,
@@ -262,7 +261,7 @@ def main():
         axes[1, 0].set_title("Smoothed WMB Spectral Estimate)")
 
         sl.plot(
-            post_model * ewt_scale,
+            post_model * ewt_mm_scale,
             ax=axes[1, 1],
             colorbar=True,
             vmin=-vmax,
@@ -283,11 +282,11 @@ def main():
 
         results = {
             "Bayesian": {
-                "means": post_avg_measure.expectation * ewt_scale,
+                "means": post_avg_measure.expectation * ewt_mm_scale,
                 "stds": post_stds_mm,
             },
             "WMB": {
-                "means": wmb_direct_avg_op(synthetic_data) * ewt_scale,
+                "means": wmb_direct_avg_op(synthetic_data) * ewt_mm_scale,
                 "stds": wmb_stds_mm,
             },
         }
@@ -295,7 +294,7 @@ def main():
         utils.plot_regional_pdfs(
             results,
             region_names,
-            tot_avg_op(true_model) * ewt_scale,
+            tot_avg_op(true_model) * ewt_mm_scale,
         )
         figures_to_save["grace_regional_pdfs"] = plt.gcf()
 
@@ -303,7 +302,7 @@ def main():
     if args.plot_deg1:
         print("Generating Degree-1 Corner Plot...")
         deg1_op = (
-            load_space.to_coefficient_operator(1, lmin=1) * ewt_scale @ total_load_op
+            load_space.to_coefficient_operator(1, lmin=1) * ewt_mm_scale @ total_load_op
         )
 
         deg1_prior = model_prior.affine_mapping(operator=deg1_op).with_dense_covariance(
@@ -372,18 +371,18 @@ def main():
         samples = joint_err_dense.samples(args.mc_trials)
 
         for i, (w_err, b_err) in enumerate(samples):
-            w_errs[i, :] = (w_err * ewt_scale) / wmb_stds_mm
-            b_errs[i, :] = (b_err * ewt_scale) / post_stds_mm
+            w_errs[i, :] = (w_err * ewt_mm_scale) / wmb_stds_mm
+            b_errs[i, :] = (b_err * ewt_mm_scale) / post_stds_mm
 
         n_reg = len(region_names)
-        raw_cov = joint_err_dense.covariance.matrix(dense=True) * (ewt_scale**2)
+        raw_cov = joint_err_dense.covariance.matrix(dense=True) * (ewt_mm_scale**2)
 
         if joint_err_dense.has_zero_expectation:
             raw_mean_w = np.zeros(n_reg)
             raw_mean_b = np.zeros(n_reg)
         else:
-            raw_mean_w = joint_err_dense.expectation[0] * ewt_scale
-            raw_mean_b = joint_err_dense.expectation[1] * ewt_scale
+            raw_mean_w = joint_err_dense.expectation[0] * ewt_mm_scale
+            raw_mean_b = joint_err_dense.expectation[1] * ewt_mm_scale
 
         max_err = max(np.max(np.abs(w_errs)), np.max(np.abs(b_errs)))
         plot_limit = np.ceil(max_err) + 0.5

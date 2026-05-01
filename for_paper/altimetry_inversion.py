@@ -11,23 +11,21 @@ ocean mass conservation. Includes analytical MC error validation.
 import argparse
 import os
 import numpy as np
-import scipy.stats as stats
-import matplotlib
 
-# Force headless backend to avoid Wayland/Qt display errors
-matplotlib.use("Agg")
+import matplotlib
 import matplotlib.pyplot as plt
 from cartopy import crs as ccrs
 
 import pygeoinf as inf
-import pyslfp as sl
 
+import altimetry_utils as utils
+from plot_utils import plot_normalized_mc_errors
+
+import pyslfp as sl
 from pyslfp.state import EarthState
 from pyslfp.linear_operators import ocean_altimetry_points
 
-import altimetry_utils as utils
-
-from plot_utils import plot_normalized_mc_errors
+matplotlib.use("Agg")
 
 
 def parse_arguments():

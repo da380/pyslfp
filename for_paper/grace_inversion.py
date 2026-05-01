@@ -12,10 +12,13 @@ inversion results and preconditioning.
 import argparse
 import os
 import numpy as np
+
 import matplotlib
+import matplotlib.pyplot as plt
+
 import scipy.stats as stats
 
-import matplotlib.pyplot as plt
+
 import pygeoinf as inf
 import grace_utils as utils
 import pyslfp as sl
@@ -53,7 +56,7 @@ def parse_arguments():
 
     # --- Resolution & Physics Settings ---
     parser.add_argument(
-        "--lmax", type=int, default=256, help="Exact model max SH degree."
+        "--lmax", type=int, default=128, help="Exact model max SH degree."
     )
     parser.add_argument(
         "--obs-degree",
@@ -159,7 +162,8 @@ def main():
     forward_problem = inf.LinearForwardProblem(
         exact_forward_op, data_error_measure=data_error_measure
     )
-    true_model, synthetic_data = forward_problem.synthetic_model_and_data(model_prior)
+    model, data = forward_problem.synthetic_model_and_data(model_prior)
+    data_measure = data_error_measure.affine_mapping(translation=data)
     inverse_problem = inf.LinearBayesianInversion(forward_problem, model_prior)
 
     # ------------------ 2. PRECONDITIONER SETUP ------------------
@@ -173,32 +177,96 @@ def main():
     solver = inf.CGSolver(callback=callback, rtol=0.01 * args.noise_std_factor)
 
     model_posterior = inverse_problem.model_posterior_measure(
-        synthetic_data, solver, preconditioner=preconditioner
+        data, solver, preconditioner=preconditioner
     )
     print(f"\nSolution reached in {solver.iterations} iterations.")
 
     if args.plot_pdfs or args.mc_trials > 0 or args.plot_deg1:
         print("Forming load average estimates")
 
-        tot_avg_op = avg_op @ total_load_op
+        tot_avg_op = ewt_mm_scale * avg_op @ total_load_op
+
         wmb_op = wmb_method.potential_coefficient_to_load_operator(load_space)
-        wmb_direct_avg_op = avg_op @ wmb_op
+        wmb_avg_op = ewt_mm_scale * avg_op @ wmb_op
+
+        wmb_avg_measure = data_measure.affine_mapping(
+            operator=wmb_avg_op
+        ).with_dense_covariance()
 
         post_avg_measure = model_posterior.affine_mapping(
             operator=tot_avg_op
         ).with_dense_covariance(parallel=True, n_jobs=4)
-        post_stds_mm = (
-            np.sqrt(np.diag(post_avg_measure.covariance.matrix(dense=True)))
-            * ewt_mm_scale
-        )
 
-        wmb_noise_measure = data_error_measure.affine_mapping(
-            operator=wmb_direct_avg_op
-        )
-        wmb_stds_mm = (
-            np.sqrt(np.diag(wmb_noise_measure.covariance.matrix(dense=True)))
-            * ewt_mm_scale
-        )
+        true_avg = tot_avg_op(model)
+
+        # ------------------ 5. REGIONAL ANALYSIS ------------------
+        if args.plot_pdfs:
+            print("\nDecomposing Regional Signals...")
+
+            ncols = 2
+            nrows = int(np.ceil(len(region_names) / ncols))
+
+            fig, axes = plt.subplots(
+                nrows=nrows,
+                ncols=ncols,
+                figsize=(14, 5 * nrows),
+                layout="constrained",
+            )
+            axes_flat = axes.flatten()
+
+            labels = list(regions_dict.keys())
+
+            for i, region in enumerate(region_names):
+                ax = axes_flat[i]
+                coordinate_projection = post_avg_measure.domain.subspace_projection(i)
+
+                inf.plot_1d_distributions(
+                    [
+                        post_avg_measure.affine_mapping(operator=coordinate_projection),
+                        wmb_avg_measure.affine_mapping(operator=coordinate_projection),
+                    ],
+                    ax=ax,
+                    true_value=true_avg[i],
+                    xlabel="Regional Average Mass (mm EWT)",
+                    title=f"{region}",
+                    posterior_labels=labels,
+                )
+
+            for j in range(i + 1, len(axes_flat)):
+                axes_flat[j].set_visible(False)
+
+            figures_to_save["grace_regional_pdfs"] = plt.gcf()
+
+        if args.plot_deg1:
+            print("Generating Degree-1 Corner Plot...")
+            deg1_op = (
+                load_space.to_coefficient_operator(1, lmin=1)
+                * ewt_mm_scale
+                @ total_load_op
+            )
+
+            deg1_prior = model_prior.affine_mapping(
+                operator=deg1_op
+            ).with_dense_covariance(parallel=True, n_jobs=3)
+
+            deg1_post = model_posterior.affine_mapping(
+                operator=deg1_op
+            ).with_dense_covariance(parallel=True, n_jobs=3)
+
+            kl_div = deg1_post.kl_divergence(deg1_prior)
+
+            inf.plot_corner_distributions(
+                deg1_post,
+                prior_measure=deg1_prior,
+                true_values=deg1_op(model),
+                labels=[
+                    r"$\zeta_{1-1}$ (mm)",
+                    r"$\zeta_{10}$ (mm)",
+                    r"$\zeta_{11}$ (mm)",
+                ],
+                title=f"Degree 1 Recovery (Information Gained: {kl_div:.2f} nats)",
+            )
+            figures_to_save["grace_degree_1_corner"] = plt.gcf()
 
     # ------------------ 4. MAPPING ------------------
     if args.plot_maps:
@@ -208,7 +276,7 @@ def main():
         post_model = model_posterior.expectation
 
         wmb_inv_op = wmb_method.potential_coefficient_to_load_operator(load_space)
-        wmb_estimate = wmb_inv_op(synthetic_data)
+        wmb_estimate = wmb_inv_op(data)
 
         smoothing_operator = load_space.heat_kernel_gaussian_measure(
             2 * noise_scale
@@ -216,7 +284,7 @@ def main():
         smoothed_wmb_estimate = smoothing_operator(wmb_estimate)
 
         vmax = max(
-            np.max(np.abs(true_model.data * ewt_mm_scale)),
+            np.max(np.abs(model.data * ewt_mm_scale)),
             np.max(np.abs(post_model.data * ewt_mm_scale)),
             np.max(np.abs(wmb_estimate.data * ewt_mm_scale)),
         )
@@ -228,7 +296,7 @@ def main():
         )
 
         sl.plot(
-            true_model * ewt_mm_scale,
+            model * ewt_mm_scale,
             ax=axes[0, 0],
             colorbar=True,
             vmin=-vmax,
@@ -276,57 +344,7 @@ def main():
 
         figures_to_save["grace_posterior_maps"] = fig_maps
 
-    # ------------------ 5. REGIONAL ANALYSIS ------------------
-    if args.plot_pdfs:
-        print("\nDecomposing Regional Signals...")
-
-        results = {
-            "Bayesian": {
-                "means": post_avg_measure.expectation * ewt_mm_scale,
-                "stds": post_stds_mm,
-            },
-            "WMB": {
-                "means": wmb_direct_avg_op(synthetic_data) * ewt_mm_scale,
-                "stds": wmb_stds_mm,
-            },
-        }
-
-        utils.plot_regional_pdfs(
-            results,
-            region_names,
-            tot_avg_op(true_model) * ewt_mm_scale,
-        )
-        figures_to_save["grace_regional_pdfs"] = plt.gcf()
-
     # ------------------ 6: Corner Plot ------------------
-    if args.plot_deg1:
-        print("Generating Degree-1 Corner Plot...")
-        deg1_op = (
-            load_space.to_coefficient_operator(1, lmin=1) * ewt_mm_scale @ total_load_op
-        )
-
-        deg1_prior = model_prior.affine_mapping(operator=deg1_op).with_dense_covariance(
-            parallel=True, n_jobs=3
-        )
-
-        deg1_post = model_posterior.affine_mapping(
-            operator=deg1_op
-        ).with_dense_covariance(parallel=True, n_jobs=3)
-
-        kl_div = deg1_post.kl_divergence(deg1_prior)
-
-        inf.plot_corner_distributions(
-            deg1_post,
-            prior_measure=deg1_prior,
-            true_values=deg1_op(true_model),
-            labels=[
-                r"$\zeta_{1-1}$ (mm)",
-                r"$\zeta_{10}$ (mm)",
-                r"$\zeta_{11}$ (mm)",
-            ],
-            title=f"Degree 1 Recovery (Information Gained: {kl_div:.2f} nats)",
-        )
-        figures_to_save["grace_degree_1_corner"] = plt.gcf()
 
     # ------------------ OPTION 4: Monte Carlo ------------------
     if args.mc_trials > 0:

@@ -1,5 +1,5 @@
 """
-Extended Joint Bayesian Inversion (GRACE + Satellite Altimetry)
+Joint Bayesian Inversion (GRACE + Satellite Altimetry)
 ===============================================================
 
 This script performs a joint Bayesian inversion of synthetic GRACE gravimetry
@@ -13,25 +13,30 @@ and Joint inversions on the exact same physical scenario.
 import argparse
 import os
 import numpy as np
-import scipy.stats as stats
+
 import matplotlib
 
 # Force headless backend to avoid Wayland/Qt display errors
-matplotlib.use("Agg")
+
 import matplotlib.pyplot as plt
 from cartopy import crs as ccrs
 import pygeoinf as inf
-import pyslfp as sl
 
+
+import joint_utils as utils
+from plot_utils import plot_normalized_mc_errors
+
+import pyslfp as sl
 from pyslfp.state import EarthState
 from pyslfp.linear_operators import ocean_altimetry_points
 
-import joint_utils as utils
+
+matplotlib.use("Agg")
 
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
-        description="Extended Joint Bayesian Inversion (Ice, Dyn, Rho) with Optional Comparison Mode."
+        description="Joint Bayesian Inversion (Ice, Dyn, Rho) with Optional Comparison Mode."
     )
     # --- Output Options ---
     parser.add_argument(
@@ -150,9 +155,6 @@ def parse_arguments():
     parser.add_argument(
         "--prior-shift", type=float, default=1.0, help="Prior mean shift factor."
     )
-    parser.add_argument(
-        "--no-precond", action="store_true", help="Disable the preconditioner entirely."
-    )
 
     return parser.parse_args()
 
@@ -161,8 +163,9 @@ def main():
     args = parse_arguments()
     if args.all:
         args.plot_pdfs = args.plot_maps = args.plot_regions = True
-        if args.mc_trials == 0 and not args.compare:
-            args.mc_trials = 500
+        args.compare = True
+        if args.mc_trials <= 0:
+            args.mc_trials = -1
 
     output_dir = "output_plots_joint_inversion"
     os.makedirs(output_dir, exist_ok=True)
@@ -210,7 +213,6 @@ def main():
     )
 
     scale_mm = exact_phys["scale_mm"]
-    density_scale = exact_phys["state"].model.parameters.density_scale
     print(
         f"Implied GMSL prior standard deviation: {exact_meas['gmsl_std'] * scale_mm:.3f} mm"
     )
@@ -239,70 +241,69 @@ def main():
         grace_inv = inf.LinearBayesianInversion(grace_fwd, exact_meas["model_prior"])
 
     # ------------------ 3. PRECONDITIONER SETUP ------------------
-    P_alt, P_grace, P_joint = None, None, None
-    if not args.no_precond:
-        print(
-            f"\nBuilding SURROGATE operators (lmax={args.surrogate_degree}) for preconditioning..."
+
+    print(
+        f"\nBuilding SURROGATE operators (lmax={args.surrogate_degree}) for preconditioning..."
+    )
+    surr_phys = utils.build_physics_components(
+        args.surrogate_degree,
+        args.load_order,
+        args.load_scale_km,
+        points,
+        args.obs_degree,
+        is_surrogate=True,
+    )
+
+    surr_meas = utils.build_measures(
+        surr_phys["state"],
+        surr_phys["load_space"],
+        args.ice_scale_factor,
+        args.ice_std_mm,
+        args.ocean_dyn_scale_factor,
+        args.ocean_dyn_std_factor,
+        args.ocean_rho_scale_factor,
+        args.ocean_rho_std_factor,
+        args.alt_noise_scale_factor,
+        args.alt_noise_std_factor,
+        args.grace_noise_scale_km,
+        args.grace_noise_std_factor,
+        args.obs_degree,
+        points,
+        surr_phys["scale_mm"],
+        prior_shift=args.prior_shift,
+        is_surrogate=True,
+    )
+
+    woodbury_solver = inf.LUSolver(galerkin=True, parallel=True, n_jobs=8)
+    alpha = 0.1
+
+    P_joint = (1 - alpha) * joint_inv.surrogate_woodbury_data_preconditioner(
+        woodbury_solver,
+        alternate_forward_operator=surr_phys["joint_forward"],
+        alternate_prior_measure=surr_meas["unmasked_prior"],
+        alternate_data_error_measure=exact_meas["joint_noise"],
+    ) + alpha * exact_meas["joint_noise"].inverse_covariance
+
+    if args.compare:
+        surr_alt_fwd = inf.LinearForwardProblem(
+            surr_phys["alt_track"], data_error_measure=exact_meas["alt_noise"]
         )
-        surr_phys = utils.build_physics_components(
-            args.surrogate_degree,
-            args.load_order,
-            args.load_scale_km,
-            points,
-            args.obs_degree,
-            is_surrogate=True,
+        surr_alt_inv = inf.LinearBayesianInversion(
+            surr_alt_fwd, surr_meas["unmasked_prior"]
         )
+        P_alt = (1 - alpha) * surr_alt_inv.woodbury_data_preconditioner(
+            woodbury_solver
+        ) + alpha * exact_meas["alt_noise"].inverse_covariance
 
-        surr_meas = utils.build_measures(
-            surr_phys["state"],
-            surr_phys["load_space"],
-            args.ice_scale_factor,
-            args.ice_std_mm,
-            args.ocean_dyn_scale_factor,
-            args.ocean_dyn_std_factor,
-            args.ocean_rho_scale_factor,
-            args.ocean_rho_std_factor,
-            args.alt_noise_scale_factor,
-            args.alt_noise_std_factor,
-            args.grace_noise_scale_km,
-            args.grace_noise_std_factor,
-            args.obs_degree,
-            points,
-            surr_phys["scale_mm"],
-            prior_shift=args.prior_shift,
-            is_surrogate=True,
+        surr_grace_fwd = inf.LinearForwardProblem(
+            surr_phys["grace_track"], data_error_measure=exact_meas["grace_noise"]
         )
-
-        woodbury_solver = inf.LUSolver(galerkin=True, parallel=True, n_jobs=8)
-        alpha = 0.1
-
-        P_joint = (1 - alpha) * joint_inv.surrogate_woodbury_data_preconditioner(
-            woodbury_solver,
-            alternate_forward_operator=surr_phys["joint_forward"],
-            alternate_prior_measure=surr_meas["unmasked_prior"],
-            alternate_data_error_measure=exact_meas["joint_noise"],
-        ) + alpha * exact_meas["joint_noise"].inverse_covariance
-
-        if args.compare:
-            surr_alt_fwd = inf.LinearForwardProblem(
-                surr_phys["alt_track"], data_error_measure=exact_meas["alt_noise"]
-            )
-            surr_alt_inv = inf.LinearBayesianInversion(
-                surr_alt_fwd, surr_meas["unmasked_prior"]
-            )
-            P_alt = (1 - alpha) * surr_alt_inv.woodbury_data_preconditioner(
-                woodbury_solver
-            ) + alpha * exact_meas["alt_noise"].inverse_covariance
-
-            surr_grace_fwd = inf.LinearForwardProblem(
-                surr_phys["grace_track"], data_error_measure=exact_meas["grace_noise"]
-            )
-            surr_grace_inv = inf.LinearBayesianInversion(
-                surr_grace_fwd, surr_meas["unmasked_prior"]
-            )
-            P_grace = (1 - alpha) * surr_grace_inv.woodbury_data_preconditioner(
-                woodbury_solver
-            ) + alpha * exact_meas["grace_noise"].inverse_covariance
+        surr_grace_inv = inf.LinearBayesianInversion(
+            surr_grace_fwd, surr_meas["unmasked_prior"]
+        )
+        P_grace = (1 - alpha) * surr_grace_inv.woodbury_data_preconditioner(
+            woodbury_solver
+        ) + alpha * exact_meas["grace_noise"].inverse_covariance
 
     # ------------------ 4. SOLVING POSTERIORS ------------------
     print("\nSolving for Posteriors...")
@@ -325,32 +326,176 @@ def main():
         joint_data, solver, preconditioner=P_joint
     )
 
-    # ------------------ 5. GMSL EXTRACTION ------------------
-    true_gmsl_op = utils.true_gmsl_operator(
-        exact_phys["state"], exact_phys["load_space"], exact_phys["continuous_sl"]
-    )
-    true_gmsl_val_mm = true_gmsl_op(true_model)[0] * scale_mm
+    # ------------------ 5. GMSL & MC SETUP ------------------
+    if args.plot_pdfs or (args.mc_trials != 0 and not args.compare):
 
-    alt_avg_op = sl.linear_operators.altimetry_averaging_operator(points)
+        true_gmsl_op = (
+            utils.true_gmsl_operator(
+                exact_phys["state"],
+                exact_phys["load_space"],
+                exact_phys["continuous_sl"],
+            )
+            * scale_mm
+        )
 
-    # Calculate GMSL Statistics
-    std_noise_measure = exact_meas["alt_noise"].affine_mapping(operator=alt_avg_op)
-    std_noise_std_mm = (
-        np.sqrt(std_noise_measure.covariance.matrix(dense=True)[0, 0]) * scale_mm
-    )
-    std_alt_gmsl = alt_avg_op(alt_data)[0] * scale_mm
+        alt_avg_op = sl.linear_operators.altimetry_averaging_operator(points) * scale_mm
 
-    post_gmsl_joint = post_joint.affine_mapping(operator=true_gmsl_op)
-    if args.compare:
-        post_gmsl_alt = post_alt.affine_mapping(operator=true_gmsl_op)
-        post_gmsl_grace = post_grace.affine_mapping(operator=true_gmsl_op)
+        prior_gmsl_measure = (
+            exact_meas["model_prior"]
+            .affine_mapping(operator=true_gmsl_op)
+            .with_dense_covariance()
+        )
+
+        alt_data_measure = exact_meas["alt_noise"].affine_mapping(translation=alt_data)
+        alt_gmsl_measure = alt_data_measure.affine_mapping(
+            operator=alt_avg_op
+        ).with_dense_covariance()
+
+        post_gmsl_joint = post_joint.affine_mapping(
+            operator=true_gmsl_op
+        ).with_dense_covariance()
+
+        if args.compare:
+            post_gmsl_alt = post_alt.affine_mapping(
+                operator=true_gmsl_op
+            ).with_dense_covariance()
+            post_gmsl_grace = post_grace.affine_mapping(
+                operator=true_gmsl_op
+            ).with_dense_covariance()
+
+        true_gmsl_val_mm = true_gmsl_op(true_model)[0]
+
+        if args.plot_pdfs:
+            print("Plotting GMSL PDFs...")
+            measures = [alt_gmsl_measure]
+            labels = ["Simple averaging"]
+
+            if args.compare:
+                measures.extend([post_gmsl_alt, post_gmsl_grace, post_gmsl_joint])
+                labels.extend(
+                    [
+                        f"Alt-Only ({post_gmsl_alt.kl_divergence(prior_gmsl_measure):.2f} nats)",
+                        f"GRACE-Only ({post_gmsl_grace.kl_divergence(prior_gmsl_measure):.2f} nats)",
+                        f"Joint Bayes ({post_gmsl_joint.kl_divergence(prior_gmsl_measure):.2f} nats)",
+                    ]
+                )
+            else:
+                measures.append(post_gmsl_joint)
+                labels.append(
+                    f"Joint Bayes ({post_gmsl_joint.kl_divergence(prior_gmsl_measure):.2f} nats)"
+                )
+
+            fig_pdf, ax_pdf = plt.subplots(
+                figsize=(10, 6) if args.compare else (8, 5), layout="constrained"
+            )
+            inf.plot_1d_distributions(
+                measures,
+                true_value=true_gmsl_val_mm,
+                ax=ax_pdf,
+                title="Global Mean Sea Level Estimators",
+                posterior_labels=labels,
+            )
+            figures_to_save["gmsl_pdf"] = fig_pdf
+
+        if args.mc_trials != 0 and not args.compare:
+            print(
+                f"\nExtracting analytical distributions for MC validation (trials={'skipped' if args.mc_trials == -1 else args.mc_trials})..."
+            )
+
+            post_exp_op = joint_inv.posterior_expectation_operator(
+                solver, preconditioner=P_joint
+            )
+
+            if isinstance(post_exp_op, inf.AffineOperator):
+                bayes_linear = post_exp_op.linear_part
+                bayes_translation = true_gmsl_op(post_exp_op.translation_part)
+            else:
+                bayes_linear = post_exp_op
+                bayes_translation = None
+
+            # Route standard altimetry averaging solely through the altimetry subspace
+            grace_space = exact_meas["grace_noise"].domain
+            joint_alt_avg_op = inf.RowLinearOperator(
+                [
+                    alt_avg_op,
+                    grace_space.zero_operator(codomain=alt_avg_op.codomain),
+                ]
+            )
+
+            std_err_op = inf.RowLinearOperator([-1.0 * true_gmsl_op, joint_alt_avg_op])
+            bayes_err_op = inf.RowLinearOperator(
+                [-1.0 * true_gmsl_op, true_gmsl_op @ bayes_linear]
+            )
+            joint_err_op = inf.ColumnLinearOperator([std_err_op, bayes_err_op])
+
+            translation = (
+                [true_gmsl_op.codomain.zero, bayes_translation]
+                if bayes_translation is not None
+                else None
+            )
+
+            joint_err_meas = joint_inv.joint_prior_measure.affine_mapping(
+                operator=joint_err_op, translation=translation
+            )
+
+            joint_err_dense = joint_err_meas.with_dense_covariance(
+                parallel=True, n_jobs=4
+            )
+
+            if args.mc_trials > 0:
+                samples = joint_err_dense.samples(args.mc_trials)
+                raw_errs_x = np.zeros(args.mc_trials)
+                raw_errs_y = np.zeros(args.mc_trials)
+                for i, (s_err, b_err) in enumerate(samples):
+                    raw_errs_x[i] = s_err[0]
+                    raw_errs_y[i] = b_err[0]
+            else:
+                raw_errs_x, raw_errs_y = None, None
+
+            std_noise_std_mm = np.sqrt(
+                alt_gmsl_measure.covariance.matrix(dense=True)[0, 0]
+            )
+            post_gmsl_std_mm = np.sqrt(
+                post_gmsl_joint.covariance.matrix(dense=True)[0, 0]
+            )
+
+            raw_cov = joint_err_dense.covariance.matrix(dense=True)
+            raw_mean = joint_err_dense.expectation
+            raw_mean_2d = [raw_mean[0][0], raw_mean[1][0]]
+
+            fig_mc, ax_mc = plt.subplots(figsize=(7, 7), layout="constrained")
+
+            plot_normalized_mc_errors(
+                ax_mc,
+                raw_errs_x,
+                raw_errs_y,
+                raw_mean_2d,
+                raw_cov,
+                std_noise_std_mm,
+                post_gmsl_std_mm,
+                title="GMSL MC Validation: Normalized Residuals",
+                xlabel=r"Standard Estimator Normalized Error",
+                ylabel=r"Joint Bayesian Normalized Error",
+                label_x="Standard",
+                label_y="Joint Bayes",
+                show_legend=True,
+            )
+            figures_to_save["joint_mc_validation"] = fig_mc
 
     # ------------------ 6. MAPPING ------------------
     if args.plot_maps:
         print("\nGenerating spatial maps...")
         cmap = "seismic"
+
+        # Steric scale conversion
+        mean_ocean_depth = (
+            exact_phys["state"].model.integrate(exact_phys["state"].sea_level)
+            / exact_phys["state"].ocean_area
+        )
+        water_density = exact_phys["state"].model.parameters.water_density
+        steric_scale = mean_ocean_depth / water_density
+
         ocean_mask_mm = scale_mm * exact_phys["state"].ocean_projection(value=0.0)
-        ocean_mask_raw = exact_phys["state"].ocean_projection(value=0.0)
         ice_mask_mm = scale_mm * exact_phys["state"].ice_projection(value=0.0)
 
         true_ice, true_dyn, true_rho = true_model
@@ -370,10 +515,14 @@ def main():
                 np.max(np.abs(post_joint.expectation[1].data * scale_mm)),
             )
             vmax_rho = max(
-                np.max(np.abs(true_rho.data * density_scale)),
-                np.max(np.abs(post_alt.expectation[2].data * density_scale)),
-                np.max(np.abs(post_grace.expectation[2].data * density_scale)),
-                np.max(np.abs(post_joint.expectation[2].data * density_scale)),
+                np.max(np.abs(true_rho.data * steric_scale * scale_mm)),
+                np.max(np.abs(post_alt.expectation[2].data * steric_scale * scale_mm)),
+                np.max(
+                    np.abs(post_grace.expectation[2].data * steric_scale * scale_mm)
+                ),
+                np.max(
+                    np.abs(post_joint.expectation[2].data * steric_scale * scale_mm)
+                ),
             )
 
             titles = ["True State", "Altimetry Only", "GRACE Only", "Joint Inversion"]
@@ -440,15 +589,15 @@ def main():
             for i in range(4):
                 idx = grid_indices[i]
                 sl.plot(
-                    models[i][2] * density_scale * ocean_mask_raw,
+                    models[i][2] * steric_scale * ocean_mask_mm,
                     ax=axes_rho[idx],
                     colorbar=True,
                     vmin=-vmax_rho,
                     vmax=vmax_rho,
                     cmap=cmap,
-                    colorbar_kwargs={"label": r"Density Anomaly (kg/m$^3$)"},
+                    colorbar_kwargs={"label": "Steric SL (mm)"},
                 )
-                axes_rho[idx].set_title(f"{titles[i]}\nOcean Density Change")
+                axes_rho[idx].set_title(f"{titles[i]}\nSteric Sea Level Change")
             figures_to_save["compare_maps_rho"] = fig_rho
 
         else:
@@ -463,8 +612,8 @@ def main():
                 np.max(np.abs(post_dyn.data * scale_mm)),
             )
             vmax_rho = max(
-                np.max(np.abs(true_rho.data * density_scale)),
-                np.max(np.abs(post_rho.data * density_scale)),
+                np.max(np.abs(true_rho.data * steric_scale * scale_mm)),
+                np.max(np.abs(post_rho.data * steric_scale * scale_mm)),
             )
 
             fig_maps, axes = plt.subplots(
@@ -517,25 +666,25 @@ def main():
             axes[1, 1].set_title("Posterior Dynamic Topography")
 
             sl.plot(
-                true_rho * density_scale * ocean_mask_raw,
+                true_rho * steric_scale * ocean_mask_mm,
                 ax=axes[2, 0],
                 colorbar=True,
                 vmin=-vmax_rho,
                 vmax=vmax_rho,
                 cmap=cmap,
-                colorbar_kwargs={"label": r"Density Anomaly (kg/m$^3$)"},
+                colorbar_kwargs={"label": r"Steric SL (mm)"},
             )
-            axes[2, 0].set_title("True Ocean Density Change")
+            axes[2, 0].set_title("True Steric Sea Level Change")
             sl.plot(
-                post_rho * density_scale * ocean_mask_raw,
+                post_rho * steric_scale * ocean_mask_mm,
                 ax=axes[2, 1],
                 colorbar=True,
                 vmin=-vmax_rho,
                 vmax=vmax_rho,
                 cmap=cmap,
-                colorbar_kwargs={"label": r"Density Anomaly (kg/m$^3$)"},
+                colorbar_kwargs={"label": r"Steric SL (mm)"},
             )
-            axes[2, 1].set_title("Posterior Ocean Density Change")
+            axes[2, 1].set_title("Posterior Steric Sea Level Change")
 
             if args.plot_regions:
                 for ax in axes.flatten():
@@ -594,58 +743,7 @@ def main():
                     exact_phys["state"].plot_boundaries(ax, regions_to_analyze)
             figures_to_save["joint_observed_ssh"] = fig_ssh
 
-    # ------------------ 7. PDF ------------------
-    if args.plot_pdfs:
-        print("Plotting GMSL PDFs...")
-
-        class MockMeasure:
-            def __init__(self, mean, std):
-                self.mean = np.array([mean])
-                self.cov = np.array([[std**2]])
-
-        if args.compare:
-            results = {
-                "Standard Altimetry": MockMeasure(std_alt_gmsl, std_noise_std_mm),
-                "Bayesian Altimetry Only": MockMeasure(
-                    post_gmsl_alt.expectation[0] * scale_mm,
-                    np.sqrt(post_gmsl_alt.covariance.matrix(dense=True)[0, 0])
-                    * scale_mm,
-                ),
-                "Bayesian GRACE Only": MockMeasure(
-                    post_gmsl_grace.expectation[0] * scale_mm,
-                    np.sqrt(post_gmsl_grace.covariance.matrix(dense=True)[0, 0])
-                    * scale_mm,
-                ),
-                "Joint Bayesian": MockMeasure(
-                    post_gmsl_joint.expectation[0] * scale_mm,
-                    np.sqrt(post_gmsl_joint.covariance.matrix(dense=True)[0, 0])
-                    * scale_mm,
-                ),
-            }
-        else:
-            results = {
-                "Standard Altimetry": MockMeasure(std_alt_gmsl, std_noise_std_mm),
-                "Joint Bayesian": MockMeasure(
-                    post_gmsl_joint.expectation[0] * scale_mm,
-                    np.sqrt(post_gmsl_joint.covariance.matrix(dense=True)[0, 0])
-                    * scale_mm,
-                ),
-            }
-
-        fig_pdf, ax_pdf = plt.subplots(
-            figsize=(10, 6) if args.compare else (8, 5), layout="constrained"
-        )
-        inf.plot_1d_distributions(
-            list(results.values()),
-            true_value=true_gmsl_val_mm,
-            ax=ax_pdf,
-            xlabel="Global Mean Sea Level Change (mm)",
-            title="GMSL Estimators",
-            posterior_labels=list(results.keys()),
-        )
-        figures_to_save["gmsl_pdf"] = fig_pdf
-
-    # ------------------ 8. REGIONAL DECOMPOSITION ------------------
+    # ------------------ 7. REGIONAL DECOMPOSITION ------------------
     if args.plot_regions:
         print("\nDecomposing Regional Sea Level Signals (3-way)...")
         op_dyn, op_rho, op_ice_fp = utils.regional_decomposition_operators(
@@ -655,181 +753,73 @@ def main():
             regions_to_analyze,
         )
 
-        combined_op = inf.ColumnLinearOperator([op_dyn, op_rho, op_ice_fp]) * scale_mm
+        mean_ocean_depth = (
+            exact_phys["state"].model.integrate(exact_phys["state"].sea_level)
+            / exact_phys["state"].ocean_area
+        )
+        water_density = exact_phys["state"].model.parameters.water_density
+        steric_scale = mean_ocean_depth / water_density
+
+        combined_op = (
+            inf.ColumnLinearOperator([op_dyn, op_rho * steric_scale, op_ice_fp])
+            * scale_mm
+        )
         final_op = combined_op.codomain.coordinate_projection @ combined_op
 
         true_vals_mm = final_op(true_model)
         prior_meas = exact_meas["model_prior"].affine_mapping(operator=final_op)
         labels = [
-            f"{regions_to_analyze[0]}: Dynamic (mm)",
-            f"{regions_to_analyze[0]}: Density",
-            f"{regions_to_analyze[0]}: SLE/Ice (mm)",
+            f"{regions_to_analyze[0]}: Dynamic SL (mm)",
+            f"{regions_to_analyze[0]}: Steric SL (mm)",
+            f"{regions_to_analyze[0]}: Barystatic (mm)",
         ]
 
         if args.compare:
             posteriors = {
                 "altimetry": (
                     "Altimetry-Only",
-                    post_alt.affine_mapping(operator=final_op),
+                    post_alt.affine_mapping(operator=final_op).with_dense_covariance(
+                        parallel=True, n_jobs=3
+                    ),
                 ),
-                "grace": ("GRACE-Only", post_grace.affine_mapping(operator=final_op)),
+                "grace": (
+                    "GRACE-Only",
+                    post_grace.affine_mapping(operator=final_op).with_dense_covariance(
+                        parallel=True, n_jobs=3
+                    ),
+                ),
                 "joint": (
                     "Joint Inversion",
-                    post_joint.affine_mapping(operator=final_op),
+                    post_joint.affine_mapping(operator=final_op).with_dense_covariance(
+                        parallel=True, n_jobs=3
+                    ),
                 ),
             }
             for key, (title_prefix, meas) in posteriors.items():
+                kl_div = meas.kl_divergence(prior_meas)
                 inf.plot_corner_distributions(
                     meas,
                     prior_measure=prior_meas,
                     true_values=true_vals_mm,
                     labels=labels,
-                    title=f"{title_prefix} 3-Component Signal Separation",
+                    title=f"{title_prefix} 3-Component Signal Separation ({kl_div:.2f} nats)",
                     fill_density=False,
                 )
                 figures_to_save[f"regional_corner_{key}"] = plt.gcf()
         else:
-            post_meas = post_joint.affine_mapping(operator=final_op)
+            post_meas = post_joint.affine_mapping(
+                operator=final_op
+            ).with_dense_covariance(parallel=True, n_jobs=3)
+            kl_div = post_meas.kl_divergence(prior_meas)
             inf.plot_corner_distributions(
                 post_meas,
                 prior_measure=prior_meas,
                 true_values=true_vals_mm,
                 labels=labels,
-                title="Joint Bayes 3-Component Signal Separation",
+                title=f"Joint Bayes 3-Component Signal Separation ({kl_div:.2f} nats)",
                 fill_density=False,
             )
             figures_to_save["regional_corner"] = plt.gcf()
-
-    # ------------------ 9. MC VALIDATION (JOINT ONLY) ------------------
-    if args.mc_trials > 0 and not args.compare:
-        print(f"Running {args.mc_trials} MC trials via dense joint measure mapping...")
-        joint_alt_avg_op = inf.RowLinearOperator(
-            [
-                alt_avg_op,
-                exact_meas["grace_noise"].domain.zero_operator(inf.EuclideanSpace(1)),
-            ]
-        )
-
-        post_exp_op = joint_inv.posterior_expectation_operator(
-            solver, preconditioner=P_joint
-        )
-        bayes_linear = (
-            post_exp_op.linear_part
-            if isinstance(post_exp_op, inf.AffineOperator)
-            else post_exp_op
-        )
-        bayes_translation = (
-            true_gmsl_op(post_exp_op.translation_part)
-            if isinstance(post_exp_op, inf.AffineOperator)
-            else None
-        )
-
-        std_err_op = inf.RowLinearOperator([-1.0 * true_gmsl_op, joint_alt_avg_op])
-        bayes_err_op = inf.RowLinearOperator(
-            [-1.0 * true_gmsl_op, true_gmsl_op @ bayes_linear]
-        )
-        joint_err_op = inf.ColumnLinearOperator([std_err_op, bayes_err_op])
-
-        translation = (
-            [true_gmsl_op.codomain.zero, bayes_translation]
-            if bayes_translation is not None
-            else None
-        )
-        joint_err_meas = joint_inv.joint_prior_measure.affine_mapping(
-            operator=joint_err_op, translation=translation
-        )
-        joint_err_dense = joint_err_meas.with_dense_covariance(parallel=True, n_jobs=4)
-
-        samples = joint_err_dense.samples(args.mc_trials)
-        std_errs = np.array([(s[0] * scale_mm) / std_noise_std_mm for s, _ in samples])
-        bayes_errs = np.array(
-            [
-                (b[0] * scale_mm)
-                / np.sqrt(
-                    post_gmsl_joint.covariance.matrix(dense=True)[0, 0] * scale_mm**2
-                )
-                for _, b in samples
-            ]
-        )
-
-        raw_cov = joint_err_dense.covariance.matrix(dense=True) * (scale_mm**2)
-        raw_mean = joint_err_dense.expectation
-        post_gmsl_std = (
-            np.sqrt(post_gmsl_joint.covariance.matrix(dense=True)[0, 0]) * scale_mm
-        )
-
-        max_err = max(np.max(np.abs(std_errs)), np.max(np.abs(bayes_errs)))
-        plot_limit = np.ceil(max_err) + 0.5
-
-        fig_mc, ax_mc = plt.subplots(figsize=(7, 7), layout="constrained")
-        ax_mc.scatter(
-            std_errs,
-            bayes_errs,
-            alpha=0.6,
-            color="purple",
-            edgecolor="white",
-            s=30,
-            zorder=3,
-        )
-
-        mu_2d = np.array(
-            [
-                (raw_mean[0][0] * scale_mm) / std_noise_std_mm,
-                (raw_mean[1][0] * scale_mm) / post_gmsl_std,
-            ]
-        )
-        cov_2d = np.array(
-            [
-                [
-                    raw_cov[0, 0] / (std_noise_std_mm**2),
-                    raw_cov[0, 1] / (std_noise_std_mm * post_gmsl_std),
-                ],
-                [
-                    raw_cov[0, 1] / (std_noise_std_mm * post_gmsl_std),
-                    raw_cov[1, 1] / (post_gmsl_std**2),
-                ],
-            ]
-        )
-
-        x_grid, y_grid = np.mgrid[
-            -plot_limit:plot_limit:500j, -plot_limit:plot_limit:500j
-        ]
-        rv = stats.multivariate_normal(mu_2d, cov_2d)
-        ax_mc.contour(
-            x_grid,
-            y_grid,
-            rv.pdf(np.dstack((x_grid, y_grid))),
-            levels=[rv.pdf(mu_2d) * np.exp(-0.5 * k**2) for k in [4, 3, 2, 1]],
-            colors="indigo",
-            linewidths=[0.5, 1.0, 1.5],
-            alpha=0.8,
-            zorder=4,
-        )
-
-        ax_mc.axhline(0, color="black", linestyle="-", alpha=0.5, zorder=1)
-        ax_mc.axvline(0, color="black", linestyle="-", alpha=0.5, zorder=1)
-        ax_mc.axhspan(
-            -1, 1, color="blue", alpha=0.15, zorder=0, label=r"Bayes 1$\sigma$ Expected"
-        )
-        ax_mc.axhspan(-2, 2, color="blue", alpha=0.05, zorder=0)
-        ax_mc.axvspan(
-            -1,
-            1,
-            color="red",
-            alpha=0.15,
-            zorder=0,
-            label=r"Standard 1$\sigma$ Expected",
-        )
-        ax_mc.axvspan(-2, 2, color="red", alpha=0.05, zorder=0)
-
-        ax_mc.set_xlim(-plot_limit, plot_limit)
-        ax_mc.set_ylim(-plot_limit, plot_limit)
-        ax_mc.set_xlabel(r"Standard Estimator Normalized Error", fontsize=12)
-        ax_mc.set_ylabel(r"Joint Bayesian Normalized Error", fontsize=12)
-        ax_mc.set_title("GMSL MC Validation: Normalized Residuals", fontsize=16)
-        ax_mc.plot([], [], color="indigo", linewidth=1.5, label="Analytical 2D PDF")
-        ax_mc.legend(loc="upper left", fontsize=10)
-        figures_to_save["joint_mc_validation"] = fig_mc
 
     # ------------------ SAVE ALL FIGURES ------------------
     if figures_to_save:

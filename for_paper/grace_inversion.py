@@ -16,8 +16,6 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 
-import scipy.stats as stats
-
 
 import pygeoinf as inf
 import grace_utils as utils

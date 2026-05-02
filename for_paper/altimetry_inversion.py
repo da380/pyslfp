@@ -350,10 +350,11 @@ def main():
         print("Generating 3-component spatial maps...")
         cmap = "seismic"
 
-        density_scale = state.model.parameters.density_scale
+        mean_ocean_depth = state.model.integrate(state.sea_level) / state.ocean_area
+        water_density = state.model.parameters.water_density
+        steric_scale = mean_ocean_depth / water_density
 
         ocean_mask_mm = mm_scale * state.ocean_projection(value=0.0)
-        ocean_mask_raw = state.ocean_projection(value=0.0)
 
         true_ice, true_dyn, true_rho = model
         post_ice, post_dyn, post_rho = model_posterior.expectation
@@ -367,8 +368,8 @@ def main():
             np.max(np.abs(post_dyn.data * mm_scale)),
         )
         vmax_rho = max(
-            np.max(np.abs(true_rho.data * density_scale)),
-            np.max(np.abs(post_rho.data * density_scale)),
+            np.max(np.abs(true_rho.data * steric_scale * mm_scale)),
+            np.max(np.abs(post_rho.data * steric_scale * mm_scale)),
         )
 
         fig_maps, axes = plt.subplots(
@@ -407,9 +408,9 @@ def main():
             vmin=-vmax_dyn,
             vmax=vmax_dyn,
             cmap=cmap,
-            colorbar_kwargs={"label": "Dynamic Topo (mm)"},
+            colorbar_kwargs={"label": "Dynamic Topography (mm)"},
         )
-        axes[1, 0].set_title("True Dynamic Topography")
+        axes[1, 0].set_title("True Dynamic Topography change")
         sl.plot(
             post_dyn * ocean_mask_mm,
             ax=axes[1, 1],
@@ -417,30 +418,30 @@ def main():
             vmin=-vmax_dyn,
             vmax=vmax_dyn,
             cmap=cmap,
-            colorbar_kwargs={"label": "Dynamic Topo (mm)"},
+            colorbar_kwargs={"label": "Dynamic Topography (mm)"},
         )
-        axes[1, 1].set_title("Posterior Dynamic Topography")
+        axes[1, 1].set_title("Posterior Dynamic Topography change")
 
         sl.plot(
-            true_rho * density_scale * ocean_mask_raw,
+            true_rho * steric_scale * ocean_mask_mm,
             ax=axes[2, 0],
             colorbar=True,
             vmin=-vmax_rho,
             vmax=vmax_rho,
             cmap=cmap,
-            colorbar_kwargs={"label": r"Density Anomaly (kg/m$^3$)"},
+            colorbar_kwargs={"label": r"Steric SL (mm)"},
         )
-        axes[2, 0].set_title("True Ocean Density Change")
+        axes[2, 0].set_title("True steric sea level change")
         sl.plot(
-            post_rho * density_scale * ocean_mask_raw,
+            post_rho * steric_scale * ocean_mask_mm,
             ax=axes[2, 1],
             colorbar=True,
             vmin=-vmax_rho,
             vmax=vmax_rho,
             cmap=cmap,
-            colorbar_kwargs={"label": r"Density Anomaly (kg/m$^3$)"},
+            colorbar_kwargs={"label": r"Steric SL (mm)"},
         )
-        axes[2, 1].set_title("Posterior Ocean Density Change")
+        axes[2, 1].set_title("Posterior steric sea level change")
 
         if args.plot_regions:
             for ax in axes.flatten():
@@ -499,12 +500,17 @@ def main():
         )
         axes_ssh[1].set_title("Altimetry Observations")
 
+        if args.plot_regions:
+            for ax in axes_ssh.flatten():
+                state.plot_boundaries(ax, regions_to_analyze)
+
         figures_to_save["observed_ssh"] = fig_ssh
 
     if args.plot_regions:
         print("\nDecomposing Regional Sea Level Signals (3-way)...")
 
         masks = [state.get_projection(r, value=0.0) for r in regions_to_analyze]
+
         avg_op = sl.linear_operators.averaging_operator(state, load_space, masks)
         joint_space = inf.HilbertSpaceDirectSum([load_space, load_space, load_space])
 
@@ -519,25 +525,38 @@ def main():
             avg_op @ barystatic_sl_op @ ice_to_load @ joint_space.subspace_projection(0)
         )
 
-        combined_op = inf.ColumnLinearOperator([op_dyn, op_rho, op_ice_fp]) * mm_scale
+        mean_ocean_depth = state.model.integrate(state.sea_level) / state.ocean_area
+        water_density = state.model.parameters.water_density
+        steric_scale = mean_ocean_depth / water_density
+
+        combined_op = (
+            inf.ColumnLinearOperator([op_dyn, op_rho * steric_scale, op_ice_fp])
+            * mm_scale
+        )
         final_op = combined_op.codomain.coordinate_projection @ combined_op
 
-        true_vals_mm = final_op(model)
-        post_meas = model_posterior.affine_mapping(operator=final_op)
-        prior_meas = model_prior.affine_mapping(operator=final_op)
+        true_vals = final_op(model)
+        post_meas = model_posterior.affine_mapping(
+            operator=final_op
+        ).with_dense_covariance(parallel=True, n_jobs=3)
+        prior_meas = model_prior.affine_mapping(
+            operator=final_op
+        ).with_dense_covariance(parallel=True, n_jobs=3)
+
+        kl_div = post_meas.kl_divergence(prior_meas)
 
         labels = [
-            f"{regions_to_analyze[0]}: Dynamic (mm)",
-            f"{regions_to_analyze[0]}: Density",
-            f"{regions_to_analyze[0]}: SLE/Ice (mm)",
+            f"{regions_to_analyze[0]}: Dynamic SL (mm)",
+            f"{regions_to_analyze[0]}: Steric SL (mm)",
+            f"{regions_to_analyze[0]}: Barystatic (mm)",
         ]
 
         inf.plot_corner_distributions(
             post_meas,
             prior_measure=prior_meas,
-            true_values=true_vals_mm,
+            true_values=true_vals,
             labels=labels,
-            title="3-Component Signal Separation",
+            title=f"3-Component Signal Separation ({kl_div:.2f} nats)",
             fill_density=False,
         )
         figures_to_save["regional_corner"] = plt.gcf()

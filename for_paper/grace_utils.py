@@ -4,8 +4,6 @@ grace_utils.py
 Shared utilities, physics initializations, and plotting for Bayesian GRACE inversions.
 """
 
-import numpy as np
-import matplotlib.pyplot as plt
 import pygeoinf as inf
 
 
@@ -87,7 +85,12 @@ def build_measures(
         noise_load_measure_scale, std=noise_load_measure_std
     )
 
-    return initial_direct_load_prior, direct_load_prior, noise_load_measure
+    return (
+        initial_direct_load_prior,
+        direct_load_prior,
+        noise_load_measure,
+        noise_load_measure_scale,
+    )
 
 
 def build_total_load_operator(state, response_space, load_space, finger_print_operator):
@@ -132,7 +135,12 @@ def get_regional_averaging(
 
     avg_operator = averaging_operator(state, load_space, weighting_functions)
 
-    return region_names, avg_operator, weighting_functions, regions_dict
+    return (
+        region_names,
+        avg_operator,
+        weighting_functions,
+        regions_dict,
+    )
 
 
 def draw_region_boundaries(state, ax, regions_dict, **kwargs):
@@ -151,43 +159,3 @@ def draw_region_boundaries(state, ax, regions_dict, **kwargs):
             raw_regions.extend(val)
 
     state.plot_boundaries(ax, raw_regions, **kwargs)
-
-
-def plot_regional_pdfs(results_dict, region_names, true_averages_mm):
-    """Helper function to plot a 2x2 grid of regional PDFs comparing multiple estimators"""
-
-    class MockMeasure:
-        def __init__(self, m, s):
-            self.mean = np.array([m])
-            self.cov = np.array([[s**2]])
-
-    ncols = 2
-    nrows = int(np.ceil(len(region_names) / ncols))
-
-    fig, axes = plt.subplots(
-        nrows=nrows, ncols=ncols, figsize=(14, 5 * nrows), layout="constrained"
-    )
-    axes_flat = axes.flatten()
-
-    labels = list(results_dict.keys())
-
-    for i, region in enumerate(region_names):
-        ax = axes_flat[i]
-        true_val = true_averages_mm[i]
-
-        measures = [
-            MockMeasure(res["means"][i], res["stds"][i])
-            for res in results_dict.values()
-        ]
-
-        inf.plot_1d_distributions(
-            measures,
-            true_value=true_val,
-            ax=ax,
-            xlabel="Regional Average Mass (mm EWT)",
-            title=f"{region}",
-            posterior_labels=labels,
-        )
-
-    for j in range(i + 1, len(axes_flat)):
-        axes_flat[j].set_visible(False)

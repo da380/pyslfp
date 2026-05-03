@@ -4,8 +4,6 @@ grace_utils.py
 Shared utilities, physics initializations, and plotting for Bayesian GRACE inversions.
 """
 
-import numpy as np
-import matplotlib.pyplot as plt
 import pygeoinf as inf
 
 

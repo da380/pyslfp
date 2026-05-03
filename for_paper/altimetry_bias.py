@@ -202,7 +202,7 @@ def main():
             colorbar_kwargs={"label": "Ice Thickness (mm)"},
             symmetric=True,
         )
-        axes_title = ax1.set_title("Sampled Ice Thickness")
+        ax1.set_title("Sampled Ice Thickness")
         figures_to_save["extended_bias_ice_thickness"] = fig1
 
         fig2, ax2 = sl.create_map_figure(figsize=(12, 6))

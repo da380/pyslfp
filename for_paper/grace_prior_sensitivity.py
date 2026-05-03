@@ -395,7 +395,7 @@ def main():
             true_value=true_gom_val,
             ax=axes_pdfs[0],
             title="Tested Priors (Gulf of Mexico)",
-            posterior_labels=[f"Prior: {l}" for l in plot_labels],
+            posterior_labels=[f"Prior: {label}" for label in plot_labels],
             xlabel="Mass Anomaly (mm EWT)",
             fill_density=False,
         )

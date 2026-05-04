@@ -1,14 +1,17 @@
 """
-Prior Sensitivity Analysis for Bayesian GRACE Inversion
+Noise Sensitivity Analysis for Bayesian GRACE Inversion
 =====================================================
 
 This script systematically tests the sensitivity of the Bayesian GRACE inversion
-to misspecifications in the prior distribution and assumed noise levels.
-It performs five distinct parameter sweeps.
+to misspecifications in the assumed instrument/data noise model.
+It performs two distinct parameter sweeps: Assumed Noise Level and Assumed Noise Scale.
+
+The "True" Prior and "True" Data are held strictly constant across all tests.
+Only the noise covariance matrix passed to the inverse problem is altered.
 
 For each sweep, two figures are generated:
   1. Maps (3x2 grid): True Load + 5 Posterior Expectation maps.
-  2. PDFs (3x2 grid): 5 Tested Priors (aggregated) + 5 Individual Posterior PDFs
+  2. PDFs (3x2 grid): True Prior + 5 Individual Posterior PDFs
      for the Gulf of Mexico regional average.
 """
 
@@ -27,7 +30,7 @@ matplotlib.use("Agg")
 
 def main():
     # --- 1. CONFIGURATION & TRUTH SETUP ---
-    output_dir = "output_plots_grace_prior_sensitivity"
+    output_dir = "output_plots_grace_noise_sensitivity"
     os.makedirs(output_dir, exist_ok=True)
     inf.configure_threading(n_threads=1)
 
@@ -57,7 +60,7 @@ def main():
     base_noise_std_fac = 0.1
 
     print("Generating True Load and Synthetic Data...")
-    _, true_prior, true_noise, _ = utils.build_measures(
+    invariant_prior, true_prior, true_noise, _ = utils.build_measures(
         state,
         load_space,
         base_scale,
@@ -67,12 +70,14 @@ def main():
     )
 
     true_data_error_measure = wmb_method.load_measure_to_observation_measure(true_noise)
-    forward_problem = inf.LinearForwardProblem(
+    true_forward_problem = inf.LinearForwardProblem(
         exact_forward_op, data_error_measure=true_data_error_measure
     )
 
     # Draw the single true model and resulting data to be used across ALL sweeps
-    true_model, synthetic_data = forward_problem.synthetic_model_and_data(true_prior)
+    true_model, synthetic_data = true_forward_problem.synthetic_model_and_data(
+        true_prior
+    )
 
     # Setup Regional Averaging for the Map Overlays and the PDF plots
     region_names, avg_op, _, regions_dict = utils.get_regional_averaging(
@@ -87,138 +92,63 @@ def main():
 
     true_gom_val = gom_op(true_model)[0]
 
-    # Calculate the standard deviation of the true prior specifically for the GoM region
-    true_gom_prior_1d = true_prior.affine_mapping(
-        operator=gom_op
-    ).with_dense_covariance()
-    gom_prior_std = np.sqrt(true_gom_prior_1d.covariance.matrix(dense=True)[0, 0])
-
-    # Generate a fixed shape for the mean shift experiments
-    # We loop until we draw a shape with a non-trivial GoM signal (> 0.2 sigma)
-    # to ensure normalizing it doesn't cause the rest of the globe to blow up.
-    while True:
-        fixed_shift_shape = true_prior.sample()
-        shift_gom_val = gom_op(fixed_shift_shape)[0]
-        if np.abs(shift_gom_val) > 0.2 * gom_prior_std:
-            break
-
-    # Normalize the shape so that a shift_mag of 1.0 shifts the GoM average by exactly +1 prior standard deviation
-    fixed_shift_shape = fixed_shift_shape * (gom_prior_std / shift_gom_val)
-
     # Global color scale limits based on the true model
     vmax = np.max(np.abs(true_model.data * ewt_scale)) * 1.2
 
     # --- 2. DEFINE THE EXPERIMENTAL SWEEPS (5 variations per sweep) ---
     sweeps = {
-        "Length_Scale": [
+        "Assumed_Noise_Level": [
             {
-                "scale": 100.0,
-                "std": base_std,
-                "shift_mag": 0.0,
-                "noise_fac": base_noise_std_fac,
-                "title": "Very Short (100 km)",
+                "noise_fac": 0.02,
+                "noise_scale_fac": base_noise_scale_fac,
+                "title": "Assumed Low Noise (x0.02)",
             },
             {
-                "scale": 150.0,
-                "std": base_std,
-                "shift_mag": 0.0,
-                "noise_fac": base_noise_std_fac,
-                "title": "Short (150 km)",
+                "noise_fac": 0.05,
+                "noise_scale_fac": base_noise_scale_fac,
+                "title": "Assumed Med-Low (x0.05)",
             },
             {
-                "scale": 250.0,
-                "std": base_std,
-                "shift_mag": 0.0,
-                "noise_fac": base_noise_std_fac,
-                "title": "Baseline (250 km)",
+                "noise_fac": 0.1,
+                "noise_scale_fac": base_noise_scale_fac,
+                "title": "Baseline Noise (x0.1)",
             },
             {
-                "scale": 350.0,
-                "std": base_std,
-                "shift_mag": 0.0,
-                "noise_fac": base_noise_std_fac,
-                "title": "Long (350 km)",
+                "noise_fac": 0.2,
+                "noise_scale_fac": base_noise_scale_fac,
+                "title": "Assumed High Noise (x0.2)",
             },
             {
-                "scale": 500.0,
-                "std": base_std,
-                "shift_mag": 0.0,
-                "noise_fac": base_noise_std_fac,
-                "title": "Very Long (500 km)",
+                "noise_fac": 0.5,
+                "noise_scale_fac": base_noise_scale_fac,
+                "title": "Assumed V. High (x0.5)",
             },
         ],
-        "Prior_Amplitude": [
+        "Assumed_Noise_Scale": [
             {
-                "scale": base_scale,
-                "std": 0.002,
-                "shift_mag": 0.0,
                 "noise_fac": base_noise_std_fac,
-                "title": "Overconfident (0.002 m)",
+                "noise_scale_fac": 0.1,
+                "title": "Short Noise (x0.1)",
             },
             {
-                "scale": base_scale,
-                "std": 0.005,
-                "shift_mag": 0.0,
                 "noise_fac": base_noise_std_fac,
-                "title": "Tight (0.005 m)",
+                "noise_scale_fac": 0.25,
+                "title": "Baseline Noise (x0.25)",
             },
             {
-                "scale": base_scale,
-                "std": 0.01,
-                "shift_mag": 0.0,
                 "noise_fac": base_noise_std_fac,
-                "title": "Baseline Std (0.01 m)",
+                "noise_scale_fac": 0.5,
+                "title": "Med Noise (x0.5)",
             },
             {
-                "scale": base_scale,
-                "std": 0.02,
-                "shift_mag": 0.0,
                 "noise_fac": base_noise_std_fac,
-                "title": "Loose (0.02 m)",
+                "noise_scale_fac": 0.75,
+                "title": "Long Noise (x0.75)",
             },
             {
-                "scale": base_scale,
-                "std": 0.05,
-                "shift_mag": 0.0,
                 "noise_fac": base_noise_std_fac,
-                "title": "Underconfident (0.05 m)",
-            },
-        ],
-        "Mean_Shift": [
-            {
-                "scale": base_scale,
-                "std": base_std,
-                "shift_mag": 0.0,
-                "noise_fac": base_noise_std_fac,
-                "title": "Baseline (No Shift)",
-            },
-            {
-                "scale": base_scale,
-                "std": base_std,
-                "shift_mag": 0.5,
-                "noise_fac": base_noise_std_fac,
-                "title": "Small Shift (0.5x)",
-            },
-            {
-                "scale": base_scale,
-                "std": base_std,
-                "shift_mag": 1.0,
-                "noise_fac": base_noise_std_fac,
-                "title": "Medium Shift (1.0x)",
-            },
-            {
-                "scale": base_scale,
-                "std": base_std,
-                "shift_mag": 1.5,
-                "noise_fac": base_noise_std_fac,
-                "title": "Large Shift (1.5x)",
-            },
-            {
-                "scale": base_scale,
-                "std": base_std,
-                "shift_mag": 2.0,
-                "noise_fac": base_noise_std_fac,
-                "title": "V. Large Shift (2.0x)",
+                "noise_scale_fac": 1.0,
+                "title": "Matched Scale (x1.0)",
             },
         ],
     }
@@ -250,58 +180,50 @@ def main():
         utils.draw_region_boundaries(state, axes_maps[0], regions_dict)
 
         # Storage for 1D distributions
-        gom_priors = []
         gom_posteriors = []
         plot_labels = []
+
+        # Map the Fixed True Prior to the 1D Gulf of Mexico space
+        gom_prior_1d = true_prior.affine_mapping(
+            operator=gom_op
+        ).with_dense_covariance()
 
         # 2. Iterate through 5 configs
         for i, config in enumerate(configs):
             panel_idx = i + 1
             print(f"  Solving config {panel_idx}/5: {config['title']}...")
 
-            # Build perturbed measures
-            initial_prior_base, test_prior_base, test_noise, _ = utils.build_measures(
+            # Build ONLY the perturbed noise measure. The prior remains strictly TRUE.
+            _, _, assumed_noise, _ = utils.build_measures(
                 state,
                 load_space,
-                config["scale"],
-                config["std"],
-                base_noise_scale_fac,
-                base_noise_std_fac,
+                base_scale,
+                base_std,
+                config["noise_scale_fac"],
+                config["noise_fac"],
             )
 
-            # Apply Shift
-            if config["shift_mag"] != 0.0:
-                test_prior = test_prior_base.affine_mapping(
-                    translation=fixed_shift_shape * config["shift_mag"]
-                )
-            else:
-                test_prior = test_prior_base
-
-            # Invert
-            test_data_err_measure = wmb_method.load_measure_to_observation_measure(
-                test_noise
+            # Setup the misspecified inversion
+            assumed_data_err_measure = wmb_method.load_measure_to_observation_measure(
+                assumed_noise
             )
-            test_forward_prob = inf.LinearForwardProblem(
-                exact_forward_op, data_error_measure=test_data_err_measure
+            assumed_forward_prob = inf.LinearForwardProblem(
+                exact_forward_op, data_error_measure=assumed_data_err_measure
             )
             preconditioner = wmb_method.bayesian_normal_operator_preconditioner(
-                initial_prior_base, test_data_err_measure
+                invariant_prior, assumed_data_err_measure
             )
-            test_inverse = inf.LinearBayesianInversion(test_forward_prob, test_prior)
 
+            # Invert using the TRUE prior, the ASSUMED noise, and the TRUE synthetic data
+            test_inverse = inf.LinearBayesianInversion(assumed_forward_prob, true_prior)
             posterior = test_inverse.model_posterior_measure(
                 synthetic_data, solver, preconditioner=preconditioner
             )
 
-            # Map the Prior and Posterior to the 1D Gulf of Mexico space
-            gom_prior_1d = test_prior.affine_mapping(
-                operator=gom_op
-            ).with_dense_covariance()
+            # Extract 1D Posterior
             gom_post_1d = posterior.affine_mapping(
                 operator=gom_op
             ).with_dense_covariance()
-
-            gom_priors.append(gom_prior_1d)
             gom_posteriors.append(gom_post_1d)
 
             short_label = config["title"].split(" (")[0]
@@ -324,16 +246,15 @@ def main():
         # 3. Plot the PDFs
         print("  Generating Gulf of Mexico PDFs...")
 
-        # PDF Panel 0: All 5 Tested Priors
-        # We pass them as the first argument so they draw on the primary axis cleanly.
+        # PDF Panel 0: The fixed True Prior
         inf.plot_1d_distributions(
-            gom_priors,
+            [gom_prior_1d],
             true_value=true_gom_val,
             ax=axes_pdfs[0],
-            title="Tested Priors (Gulf of Mexico)",
-            posterior_labels=[f"Prior: {label}" for label in plot_labels],
+            title="True Prior (Gulf of Mexico)",
+            posterior_labels=["True Prior PDF"],
             xlabel="Mass Anomaly (mm EWT)",
-            fill_density=False,
+            fill_density=True,
         )
 
         # PDF Panels 1-5: Individual Posteriors
@@ -351,13 +272,13 @@ def main():
 
         # Save both Grid figures
         map_filepath = os.path.join(
-            output_dir, f"prior_sensitivity_maps_{sweep_name}.png"
+            output_dir, f"noise_sensitivity_maps_{sweep_name}.png"
         )
         fig_maps.savefig(map_filepath, dpi=300, bbox_inches="tight")
         print(f"Saved Maps: {map_filepath}")
 
         pdf_filepath = os.path.join(
-            output_dir, f"prior_sensitivity_pdfs_{sweep_name}.png"
+            output_dir, f"noise_sensitivity_pdfs_{sweep_name}.png"
         )
         fig_pdfs.savefig(pdf_filepath, dpi=300, bbox_inches="tight")
         print(f"Saved PDFs: {pdf_filepath}")
@@ -365,7 +286,7 @@ def main():
         plt.close(fig_maps)
         plt.close(fig_pdfs)
 
-    print("\nAll sensitivity sweeps completed successfully.")
+    print("\nAll noise sensitivity sweeps completed successfully.")
 
 
 if __name__ == "__main__":

@@ -51,10 +51,16 @@ def parse_arguments():
         default=0,
         help="Number of MC trials for analytical error validation.",
     )
+    parser.add_argument(
+        "--std-samples",
+        type=int,
+        default=0,
+        help="Number samples for pointwise std estimates.",
+    )
 
     # --- Resolution Settings ---
     parser.add_argument(
-        "--lmax", type=int, default=128, help="Exact model max SH degree."
+        "--lmax", type=int, default=256, help="Exact model max SH degree."
     )
     parser.add_argument(
         "--surrogate-degree", type=int, default=32, help="Preconditioner max SH degree."
@@ -66,7 +72,7 @@ def parse_arguments():
         "--load-scale-km", type=float, default=500.0, help="Sobolev length scale."
     )
     parser.add_argument(
-        "--spacing", type=float, default=4.0, help="Altimetry observation spacing."
+        "--spacing", type=float, default=1.0, help="Altimetry observation spacing."
     )
 
     # --- Prior Settings ---
@@ -128,6 +134,8 @@ def main():
         args.plot_pdfs = args.plot_maps = args.plot_regions = True
         if args.mc_trials <= 0:
             args.mc_trials = -1
+        if args.std_samples == 0:
+            args.std_samples = 100
 
     output_dir = "output_plots_altimetry_inversion"
     os.makedirs(output_dir, exist_ok=True)
@@ -149,6 +157,9 @@ def main():
             args.lmax, args.load_order, args.load_scale_km, points, is_surrogate=False
         )
     )
+
+    ocean_mask_mm = mm_scale * state.ocean_projection(value=0.0)
+    ice_mask_mm = mm_scale * state.ice_projection(value=0.0)
 
     model_prior, noise_measure, GMSL_prior_std = utils.build_measures(
         state,
@@ -263,7 +274,7 @@ def main():
                 [post_gmsl_measure, alt_gmsl_measure],
                 true_value=true_gmsl,
                 ax=ax_pdf,
-                title="Global Mean Sea Level Estimators",
+                title="",
                 posterior_labels=[f"Bayesian ({kl_div:.2f} nats)", "Simple averaging"],
             )
             figures_to_save["gmsl_pdf"] = fig_pdf
@@ -336,9 +347,8 @@ def main():
                 raw_cov,
                 std_noise_std_mm,
                 post_gmsl_std_mm,
-                title="GMSL MC Validation: Normalized Residuals",
                 xlabel=r"Standard Estimator Normalized Error",
-                ylabel=r"3-Component Bayesian Normalized Error",
+                ylabel=r"Bayesian Normalized Error",
                 label_x="Standard",
                 label_y="Bayes",
                 show_legend=True,
@@ -353,8 +363,6 @@ def main():
         mean_ocean_depth = state.model.integrate(state.sea_level) / state.ocean_area
         water_density = state.model.parameters.water_density
         steric_scale = mean_ocean_depth / water_density
-
-        ocean_mask_mm = mm_scale * state.ocean_projection(value=0.0)
 
         true_ice, true_dyn, true_rho = model
         post_ice, post_dyn, post_rho = model_posterior.expectation
@@ -372,14 +380,54 @@ def main():
             np.max(np.abs(post_rho.data * steric_scale * mm_scale)),
         )
 
+        plot_std = args.std_samples > 0
+        ncols = 3 if plot_std else 2
+
+        if plot_std:
+            print(
+                f"\nComputing pointwise standard deviation from {args.std_samples} posterior samples..."
+            )
+            # 1. Draw joint samples
+            samples = model_posterior.samples(
+                args.std_samples, parallel=True, n_jobs=10
+            )
+
+            # 2. Initialize variance accumulators
+            var_ice = load_space.zero
+            var_dyn = load_space.zero
+            var_rho = load_space.zero
+
+            # 3. Compute the sample pointwise variance
+            for s_ice, s_dyn, s_rho in samples:
+                diff_ice = load_space.subtract(s_ice, post_ice)
+                prod_ice = load_space.vector_multiply(diff_ice, diff_ice)
+                load_space.axpy(1.0 / args.std_samples, prod_ice, var_ice)
+
+                diff_dyn = load_space.subtract(s_dyn, post_dyn)
+                prod_dyn = load_space.vector_multiply(diff_dyn, diff_dyn)
+                load_space.axpy(1.0 / args.std_samples, prod_dyn, var_dyn)
+
+                diff_rho = load_space.subtract(s_rho, post_rho)
+                prod_rho = load_space.vector_multiply(diff_rho, diff_rho)
+                load_space.axpy(1.0 / args.std_samples, prod_rho, var_rho)
+
+            # 4. Take pointwise square root
+            std_ice = load_space.vector_sqrt(var_ice)
+            std_dyn = load_space.vector_sqrt(var_dyn)
+            std_rho = load_space.vector_sqrt(var_rho)
+            cmap_std = "Blues"
+
+        # Dynamically scale figure width based on columns
+        fig_width = 20 if plot_std else 14
         fig_maps, axes = plt.subplots(
             3,
-            2,
-            figsize=(14, 15),
+            ncols,
+            figsize=(fig_width, 15),
             subplot_kw={"projection": ccrs.Robinson()},
             layout="constrained",
         )
 
+        # --- ROW 1: ICE ---
         sl.plot(
             true_ice * mm_scale,
             ax=axes[0, 0],
@@ -389,7 +437,7 @@ def main():
             cmap=cmap,
             colorbar_kwargs={"label": "Ice Thickness (mm)"},
         )
-        axes[0, 0].set_title("True Ice Change")
+
         sl.plot(
             post_ice * mm_scale,
             ax=axes[0, 1],
@@ -399,8 +447,17 @@ def main():
             cmap=cmap,
             colorbar_kwargs={"label": "Ice Thickness (mm)"},
         )
-        axes[0, 1].set_title("Posterior Ice Change")
 
+        if plot_std:
+            sl.plot(
+                std_ice * ice_mask_mm,
+                ax=axes[0, 2],
+                colorbar=True,
+                cmap=cmap_std,
+                colorbar_kwargs={"label": "Ice Thickness STD (mm)"},
+            )
+
+        # --- ROW 2: DYNAMIC TOPOGRAPHY ---
         sl.plot(
             true_dyn * ocean_mask_mm,
             ax=axes[1, 0],
@@ -410,7 +467,7 @@ def main():
             cmap=cmap,
             colorbar_kwargs={"label": "Dynamic Topography (mm)"},
         )
-        axes[1, 0].set_title("True Dynamic Topography change")
+
         sl.plot(
             post_dyn * ocean_mask_mm,
             ax=axes[1, 1],
@@ -420,8 +477,17 @@ def main():
             cmap=cmap,
             colorbar_kwargs={"label": "Dynamic Topography (mm)"},
         )
-        axes[1, 1].set_title("Posterior Dynamic Topography change")
 
+        if plot_std:
+            sl.plot(
+                std_dyn * ocean_mask_mm,
+                ax=axes[1, 2],
+                colorbar=True,
+                cmap=cmap_std,
+                colorbar_kwargs={"label": "Dynamic Topography STD (mm)"},
+            )
+
+        # --- ROW 3: STERIC SEA LEVEL ---
         sl.plot(
             true_rho * steric_scale * ocean_mask_mm,
             ax=axes[2, 0],
@@ -431,7 +497,7 @@ def main():
             cmap=cmap,
             colorbar_kwargs={"label": r"Steric SL (mm)"},
         )
-        axes[2, 0].set_title("True steric sea level change")
+
         sl.plot(
             post_rho * steric_scale * ocean_mask_mm,
             ax=axes[2, 1],
@@ -441,11 +507,37 @@ def main():
             cmap=cmap,
             colorbar_kwargs={"label": r"Steric SL (mm)"},
         )
-        axes[2, 1].set_title("Posterior steric sea level change")
+
+        if plot_std:
+            sl.plot(
+                std_rho * steric_scale * ocean_mask_mm,
+                ax=axes[2, 2],
+                colorbar=True,
+                cmap=cmap_std,
+                colorbar_kwargs={"label": "Steric SL STD (mm)"},
+            )
 
         if args.plot_regions:
             for ax in axes.flatten():
                 state.plot_boundaries(ax, regions_to_analyze)
+
+        col_labels = ["True State", "Posterior Expectation", "Pointwise Std. Deviation"]
+        for j in range(ncols):
+            axes[0, j].set_title(col_labels[j], fontsize=16, fontweight="bold", pad=25)
+
+        row_labels = ["Ice Thickness", "Dynamic\nTopography", "Steric\nSea Level"]
+        for i in range(3):
+            axes[i, 0].annotate(
+                row_labels[i],
+                xy=(-0.12, 0.5),
+                xycoords="axes fraction",
+                fontsize=16,
+                fontweight="bold",
+                ha="center",
+                va="center",
+                rotation=90,
+                annotation_clip=False,
+            )
 
         figures_to_save["posterior_maps"] = fig_maps
 
@@ -556,7 +648,7 @@ def main():
             prior_measure=prior_meas,
             true_values=true_vals,
             labels=labels,
-            title=f"3-Component Signal Separation ({kl_div:.2f} nats)",
+            title=f"Signal Separation ({kl_div:.2f} nats)",
             fill_density=False,
         )
         figures_to_save["regional_corner"] = plt.gcf()

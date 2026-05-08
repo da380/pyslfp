@@ -55,7 +55,7 @@ def parse_arguments():
 
     # --- Resolution & Physics Settings ---
     parser.add_argument(
-        "--lmax", type=int, default=128, help="Exact model max SH degree."
+        "--lmax", type=int, default=256, help="Exact model max SH degree."
     )
     parser.add_argument(
         "--obs-degree",
@@ -439,7 +439,7 @@ def main():
             cmap=cmap,
             colorbar_kwargs={"label": "Load (mm EWT)"},
         )
-        axes[0, 1].set_title("WMB Spectral Estimate)")
+        axes[0, 1].set_title("WMB Estimate")
 
         sl.plot(
             smoothed_wmb_estimate * ewt_mm_scale,
@@ -450,7 +450,7 @@ def main():
             cmap=cmap,
             colorbar_kwargs={"label": "Load (mm EWT)"},
         )
-        axes[1, 0].set_title("Smoothed WMB Spectral Estimate)")
+        axes[1, 0].set_title("Smoothed WMB Estimate")
 
         sl.plot(
             post_model * ewt_mm_scale,

@@ -45,7 +45,7 @@ def parse_arguments():
 
     # --- Resolution Settings ---
     parser.add_argument(
-        "--lmax", type=int, default=128, help="Exact model max SH degree."
+        "--lmax", type=int, default=256, help="Exact model max SH degree."
     )
     parser.add_argument(
         "--load-order", type=float, default=2.0, help="Sobolev space order."
@@ -54,7 +54,7 @@ def parse_arguments():
         "--load-scale-km", type=float, default=500.0, help="Sobolev length scale."
     )
     parser.add_argument(
-        "--spacing", type=float, default=4.0, help="Altimetry observation spacing."
+        "--spacing", type=float, default=1.0, help="Altimetry observation spacing."
     )
 
     # --- Prior Settings ---
@@ -94,7 +94,7 @@ def parse_arguments():
     parser.add_argument(
         "--noise-std-factor",
         type=float,
-        default=2.0,
+        default=1.0,
         help="Instrument noise std as factor of GMSL std.",
     )
     parser.add_argument(
@@ -193,7 +193,11 @@ def main():
         ocean_mask_raw = state.ocean_projection(value=0.0)
         ocean_mask_mm = scale_mm * ocean_mask_raw
         ice_mask = scale_mm * state.ice_projection(value=0.0)
-        density_scale = state.model.parameters.density_scale
+
+        # Calculate scaling factor to convert density anomalies to steric sea level change
+        mean_ocean_depth = state.model.integrate(state.sea_level) / state.ocean_area
+        water_density = state.model.parameters.water_density
+        steric_scale = mean_ocean_depth / water_density
 
         fig1, ax1 = sl.create_map_figure(figsize=(12, 6))
         sl.plot(
@@ -202,8 +206,8 @@ def main():
             colorbar_kwargs={"label": "Ice Thickness (mm)"},
             symmetric=True,
         )
-        ax1.set_title("Sampled Ice Thickness")
-        figures_to_save["extended_bias_ice_thickness"] = fig1
+
+        figures_to_save["bias_ice_thickness"] = fig1
 
         fig2, ax2 = sl.create_map_figure(figsize=(12, 6))
         sl.plot(
@@ -212,18 +216,18 @@ def main():
             colorbar_kwargs={"label": "Dynamic Topo (mm)"},
             symmetric=True,
         )
-        ax2.set_title("Sampled Ocean Dynamic Topography")
-        figures_to_save["extended_bias_ocean_dynamic"] = fig2
+
+        figures_to_save["bias_ocean_dynamic"] = fig2
 
         fig3, ax3 = sl.create_map_figure(figsize=(12, 6))
         sl.plot(
-            ocean_rho * density_scale * ocean_mask_raw,
+            ocean_rho * steric_scale * ocean_mask_mm,
             ax=ax3,
-            colorbar_kwargs={"label": r"Density Anomaly (kg/m$^3$)"},
+            colorbar_kwargs={"label": "Steric SL (mm)"},
             symmetric=True,
         )
-        ax3.set_title("Sampled Ocean Density Anomaly")
-        figures_to_save["extended_bias_ocean_density"] = fig3
+
+        figures_to_save["bias_steric_sl"] = fig3
 
         ssh_grid_mm = ssh_sample * ocean_mask_mm
         observed_data_mm = (forward_op(model_sample) + noise_meas.sample()) * scale_mm
@@ -235,13 +239,12 @@ def main():
         sl.plot(
             ssh_grid_mm,
             ax=ax4,
-            cmap="RdBu",
             vmin=-shared_vmax,
             vmax=shared_vmax,
             colorbar_kwargs={"label": "Continuous SSH (mm)"},
         )
-        ax4.set_title("Sampled True Continuous SSH")
-        figures_to_save["extended_bias_ssh_map"] = fig4
+
+        figures_to_save["bias_ssh_map"] = fig4
 
         fig5, ax5 = sl.create_map_figure(figsize=(12, 6))
         ax5.set_global()
@@ -249,17 +252,16 @@ def main():
             points,
             data=observed_data_mm,
             ax=ax5,
-            cmap="RdBu",
             vmin=-shared_vmax,
             vmax=shared_vmax,
-            s=10,
+            s=4,
             edgecolors="none",
             colorbar=True,
             colorbar_kwargs={"label": "Observed SSH (mm)"},
             zorder=5,
         )
-        ax5.set_title("Sampled Noisy Altimetry Track")
-        figures_to_save["extended_bias_ssh_points"] = fig5
+
+        figures_to_save["bias_ssh_points"] = fig5
 
     err_samples = None
     if args.samples > 0:
@@ -320,7 +322,7 @@ def main():
     )
     sec_ax.tick_params(axis="x", colors="darkgreen")
 
-    figures_to_save["extended_bias_pdf"] = fig_pdf
+    figures_to_save["bias_pdf"] = fig_pdf
 
     # -- Save all figures --
     if figures_to_save:

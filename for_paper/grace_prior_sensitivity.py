@@ -31,7 +31,7 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     inf.configure_threading(n_threads=1)
 
-    lmax = 128
+    lmax = 256
     obs_degree = 100
     load_order = 2.0
     load_scale_km = 500.0

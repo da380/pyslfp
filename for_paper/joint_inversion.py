@@ -64,6 +64,12 @@ def parse_arguments():
         help="Number of MC trials for error validation.",
     )
     parser.add_argument(
+        "--std-samples",
+        type=int,
+        default=0,
+        help="Number samples for pointwise std estimates.",
+    )
+    parser.add_argument(
         "--compare",
         action="store_true",
         help="Run Alt-only and GRACE-only alongside the Joint inversion.",
@@ -71,7 +77,7 @@ def parse_arguments():
 
     # --- Resolution Settings ---
     parser.add_argument(
-        "--lmax", type=int, default=128, help="Exact model max SH degree."
+        "--lmax", type=int, default=256, help="Exact model max SH degree."
     )
     parser.add_argument(
         "--surrogate-degree", type=int, default=32, help="Preconditioner max SH degree."
@@ -89,7 +95,7 @@ def parse_arguments():
         "--load-scale-km", type=float, default=500.0, help="Sobolev length scale."
     )
     parser.add_argument(
-        "--spacing", type=float, default=4.0, help="Altimetry observation spacing."
+        "--spacing", type=float, default=1.0, help="Altimetry observation spacing."
     )
 
     # --- Prior Settings ---
@@ -166,6 +172,8 @@ def main():
         args.compare = True
         if args.mc_trials <= 0:
             args.mc_trials = -1
+        if args.std_samples == 0:
+            args.std_samples = 100
 
     output_dir = "output_plots_joint_inversion"
     os.makedirs(output_dir, exist_ok=True)
@@ -216,6 +224,9 @@ def main():
     print(
         f"Implied GMSL prior standard deviation: {exact_meas['gmsl_std'] * scale_mm:.3f} mm"
     )
+
+    ocean_mask_mm = scale_mm * exact_phys["state"].ocean_projection(value=0.0)
+    ice_mask_mm = scale_mm * exact_phys["state"].ice_projection(value=0.0)
 
     print("\nDrawing MASTER synthetic model and dataset...")
     master_forward = inf.LinearForwardProblem(
@@ -392,7 +403,7 @@ def main():
                 measures,
                 true_value=true_gmsl_val_mm,
                 ax=ax_pdf,
-                title="Global Mean Sea Level Estimators",
+                title="",
                 posterior_labels=labels,
             )
             figures_to_save["gmsl_pdf"] = fig_pdf
@@ -473,7 +484,7 @@ def main():
                 raw_cov,
                 std_noise_std_mm,
                 post_gmsl_std_mm,
-                title="GMSL MC Validation: Normalized Residuals",
+                title="",
                 xlabel=r"Standard Estimator Normalized Error",
                 ylabel=r"Joint Bayesian Normalized Error",
                 label_x="Standard",
@@ -484,125 +495,91 @@ def main():
 
     # ------------------ 6. MAPPING ------------------
     if args.plot_maps:
-        print("\nGenerating spatial maps...")
+        print("Generating 3-component spatial maps...")
         cmap = "seismic"
 
-        # Steric scale conversion
-        mean_ocean_depth = (
-            exact_phys["state"].model.integrate(exact_phys["state"].sea_level)
-            / exact_phys["state"].ocean_area
-        )
-        water_density = exact_phys["state"].model.parameters.water_density
+        # 1. Unpack variables specific to the joint_inversion.py namespace
+        state = exact_phys["state"]
+        load_space = exact_phys["load_space"]
+        scale_mm = exact_phys["scale_mm"]
+
+        mean_ocean_depth = state.model.integrate(state.sea_level) / state.ocean_area
+        water_density = state.model.parameters.water_density
         steric_scale = mean_ocean_depth / water_density
 
-        ocean_mask_mm = scale_mm * exact_phys["state"].ocean_projection(value=0.0)
-        ice_mask_mm = scale_mm * exact_phys["state"].ice_projection(value=0.0)
-
+        # Use true_model instead of model for the joint script
         true_ice, true_dyn, true_rho = true_model
 
+        # Determine dimensions dynamically
+        plot_std = args.std_samples > 0
+        ncols = 3 if plot_std else 2
+        fig_width = 20 if plot_std else 14
+        cmap_std = "Blues"
+
+        # Group runs to plot dynamically
+        runs_to_plot = {}
         if args.compare:
-            # --- COMPARISON MODE MAPS ---
-            vmax_ice = max(
-                np.max(np.abs(true_ice.data * scale_mm)),
-                np.max(np.abs(post_alt.expectation[0].data * scale_mm)),
-                np.max(np.abs(post_grace.expectation[0].data * scale_mm)),
-                np.max(np.abs(post_joint.expectation[0].data * scale_mm)),
-            )
-            vmax_dyn = max(
-                np.max(np.abs(true_dyn.data * scale_mm)),
-                np.max(np.abs(post_alt.expectation[1].data * scale_mm)),
-                np.max(np.abs(post_grace.expectation[1].data * scale_mm)),
-                np.max(np.abs(post_joint.expectation[1].data * scale_mm)),
-            )
-            vmax_rho = max(
-                np.max(np.abs(true_rho.data * steric_scale * scale_mm)),
-                np.max(np.abs(post_alt.expectation[2].data * steric_scale * scale_mm)),
-                np.max(
-                    np.abs(post_grace.expectation[2].data * steric_scale * scale_mm)
-                ),
-                np.max(
-                    np.abs(post_joint.expectation[2].data * steric_scale * scale_mm)
-                ),
-            )
-
-            titles = ["True State", "Altimetry Only", "GRACE Only", "Joint Inversion"]
-            models = [
-                true_model,
-                post_alt.expectation,
-                post_grace.expectation,
-                post_joint.expectation,
-            ]
-            grid_indices = [(0, 0), (0, 1), (1, 0), (1, 1)]
-
-            # Ice Maps
-            fig_ice, axes_ice = plt.subplots(
-                2,
-                2,
-                figsize=(12, 10),
-                subplot_kw={"projection": ccrs.Robinson()},
-                layout="constrained",
-            )
-            for i in range(4):
-                idx = grid_indices[i]
-                sl.plot(
-                    models[i][0] * ice_mask_mm,
-                    ax=axes_ice[idx],
-                    colorbar=True,
-                    vmin=-vmax_ice,
-                    vmax=vmax_ice,
-                    cmap=cmap,
-                    colorbar_kwargs={"label": "Ice Thickness (mm)"},
-                )
-                axes_ice[idx].set_title(f"{titles[i]}\nIce Thickness Change")
-            figures_to_save["compare_maps_ice"] = fig_ice
-
-            # Dyn Maps
-            fig_dyn, axes_dyn = plt.subplots(
-                2,
-                2,
-                figsize=(12, 10),
-                subplot_kw={"projection": ccrs.Robinson()},
-                layout="constrained",
-            )
-            for i in range(4):
-                idx = grid_indices[i]
-                sl.plot(
-                    models[i][1] * ocean_mask_mm,
-                    ax=axes_dyn[idx],
-                    colorbar=True,
-                    vmin=-vmax_dyn,
-                    vmax=vmax_dyn,
-                    cmap=cmap,
-                    colorbar_kwargs={"label": "Dynamic Topo (mm)"},
-                )
-                axes_dyn[idx].set_title(f"{titles[i]}\nDynamic Topography")
-            figures_to_save["compare_maps_dyn"] = fig_dyn
-
-            # Rho Maps
-            fig_rho, axes_rho = plt.subplots(
-                2,
-                2,
-                figsize=(12, 10),
-                subplot_kw={"projection": ccrs.Robinson()},
-                layout="constrained",
-            )
-            for i in range(4):
-                idx = grid_indices[i]
-                sl.plot(
-                    models[i][2] * steric_scale * ocean_mask_mm,
-                    ax=axes_rho[idx],
-                    colorbar=True,
-                    vmin=-vmax_rho,
-                    vmax=vmax_rho,
-                    cmap=cmap,
-                    colorbar_kwargs={"label": "Steric SL (mm)"},
-                )
-                axes_rho[idx].set_title(f"{titles[i]}\nSteric Sea Level Change")
-            figures_to_save["compare_maps_rho"] = fig_rho
-
+            runs_to_plot["altimetry"] = ("Altimetry-Only", post_alt)
+            runs_to_plot["grace"] = ("GRACE-Only", post_grace)
+            runs_to_plot["joint"] = ("Joint", post_joint)
         else:
-            # --- DEFAULT JOINT ONLY MAPS ---
-            post_ice, post_dyn, post_rho = post_joint.expectation
+            runs_to_plot["joint"] = ("Joint Bayes", post_joint)
+
+        all_std_results = {}  # Dictionary to store std vectors for uniform scaling
+
+        # --- STEP 1: PRE-CALCULATE ALL UNCERTAINTIES ---
+        if plot_std:
+            for key, (title_prefix, posterior) in runs_to_plot.items():
+                print(f"Sampling {title_prefix} for uniform scaling...")
+                samples = posterior.samples(args.std_samples, parallel=True, n_jobs=10)
+                post_exp = posterior.expectation
+
+                # Initialize variances
+                v_ice = load_space.zero
+                v_dyn = load_space.zero
+                v_rho = load_space.zero
+
+                # Compute the sample pointwise variance iteratively
+                for s_ice, s_dyn, s_rho in samples:
+                    diff_ice = load_space.subtract(s_ice, post_exp[0])
+                    prod_ice = load_space.vector_multiply(diff_ice, diff_ice)
+                    load_space.axpy(1.0 / args.std_samples, prod_ice, v_ice)
+
+                    diff_dyn = load_space.subtract(s_dyn, post_exp[1])
+                    prod_dyn = load_space.vector_multiply(diff_dyn, diff_dyn)
+                    load_space.axpy(1.0 / args.std_samples, prod_dyn, v_dyn)
+
+                    diff_rho = load_space.subtract(s_rho, post_exp[2])
+                    prod_rho = load_space.vector_multiply(diff_rho, diff_rho)
+                    load_space.axpy(1.0 / args.std_samples, prod_rho, v_rho)
+
+                # Convert to Std Dev and store
+                all_std_results[key] = (
+                    load_space.vector_sqrt(v_ice),
+                    load_space.vector_sqrt(v_dyn),
+                    load_space.vector_sqrt(v_rho),
+                )
+
+            # --- STEP 2: FIND GLOBAL MAXIMA ---
+            # We scale by mm and steric factors here to find true plotting maximums
+            vmax_std_ice = max(
+                [np.max(res[0].data * scale_mm) for res in all_std_results.values()]
+            )
+            vmax_std_dyn = max(
+                [np.max(res[1].data * scale_mm) for res in all_std_results.values()]
+            )
+            vmax_std_rho = max(
+                [
+                    np.max(res[2].data * steric_scale * scale_mm)
+                    for res in all_std_results.values()
+                ]
+            )
+
+        # --- STEP 3: PLOTTING LOOP ---
+        for key, (title_prefix, posterior) in runs_to_plot.items():
+            post_ice, post_dyn, post_rho = posterior.expectation
+
+            # Set consistent colorbar limits across True and Expected
             vmax_ice = max(
                 np.max(np.abs(true_ice.data * scale_mm)),
                 np.max(np.abs(post_ice.data * scale_mm)),
@@ -616,25 +593,28 @@ def main():
                 np.max(np.abs(post_rho.data * steric_scale * scale_mm)),
             )
 
+            # Build the dynamically sized figure
             fig_maps, axes = plt.subplots(
                 3,
-                2,
-                figsize=(14, 15),
+                ncols,
+                figsize=(fig_width, 15),
                 subplot_kw={"projection": ccrs.Robinson()},
                 layout="constrained",
             )
+
+            # --- ROW 1: ICE ---
             sl.plot(
-                true_ice * ice_mask_mm,
+                true_ice * scale_mm,
                 ax=axes[0, 0],
                 colorbar=True,
                 vmin=-vmax_ice,
                 vmax=vmax_ice,
                 cmap=cmap,
-                colorbar_kwargs={"label": "Ice Thickness (mm)"},
             )
-            axes[0, 0].set_title("True Ice Change")
+
+            # Posterior Expectation
             sl.plot(
-                post_ice * ice_mask_mm,
+                post_ice * scale_mm,
                 ax=axes[0, 1],
                 colorbar=True,
                 vmin=-vmax_ice,
@@ -642,8 +622,20 @@ def main():
                 cmap=cmap,
                 colorbar_kwargs={"label": "Ice Thickness (mm)"},
             )
-            axes[0, 1].set_title("Posterior Ice Change")
 
+            if plot_std:
+                std_ice, std_dyn, std_rho = all_std_results[key]
+                sl.plot(
+                    std_ice * ice_mask_mm,
+                    ax=axes[0, 2],
+                    colorbar=True,
+                    cmap=cmap_std,
+                    vmin=0,
+                    vmax=vmax_std_ice,
+                    colorbar_kwargs={"label": "Std Dev (mm)"},
+                )
+
+            # --- ROW 2: DYNAMIC TOPOGRAPHY ---
             sl.plot(
                 true_dyn * ocean_mask_mm,
                 ax=axes[1, 0],
@@ -651,9 +643,8 @@ def main():
                 vmin=-vmax_dyn,
                 vmax=vmax_dyn,
                 cmap=cmap,
-                colorbar_kwargs={"label": "Dynamic Topo (mm)"},
             )
-            axes[1, 0].set_title("True Dynamic Topography")
+
             sl.plot(
                 post_dyn * ocean_mask_mm,
                 ax=axes[1, 1],
@@ -661,10 +652,21 @@ def main():
                 vmin=-vmax_dyn,
                 vmax=vmax_dyn,
                 cmap=cmap,
-                colorbar_kwargs={"label": "Dynamic Topo (mm)"},
+                colorbar_kwargs={"label": "Dynamic Topography (mm)"},
             )
-            axes[1, 1].set_title("Posterior Dynamic Topography")
 
+            if plot_std:
+                sl.plot(
+                    std_dyn * ocean_mask_mm,
+                    ax=axes[1, 2],
+                    colorbar=True,
+                    cmap=cmap_std,
+                    vmin=0,
+                    vmax=vmax_std_dyn,
+                    colorbar_kwargs={"label": "Std Dev (mm)"},
+                )
+
+            # --- ROW 3: STERIC SEA LEVEL ---
             sl.plot(
                 true_rho * steric_scale * ocean_mask_mm,
                 ax=axes[2, 0],
@@ -672,9 +674,8 @@ def main():
                 vmin=-vmax_rho,
                 vmax=vmax_rho,
                 cmap=cmap,
-                colorbar_kwargs={"label": r"Steric SL (mm)"},
             )
-            axes[2, 0].set_title("True Steric Sea Level Change")
+
             sl.plot(
                 post_rho * steric_scale * ocean_mask_mm,
                 ax=axes[2, 1],
@@ -684,64 +685,55 @@ def main():
                 cmap=cmap,
                 colorbar_kwargs={"label": r"Steric SL (mm)"},
             )
-            axes[2, 1].set_title("Posterior Steric Sea Level Change")
+
+            if plot_std:
+                sl.plot(
+                    std_rho * steric_scale * ocean_mask_mm,
+                    ax=axes[2, 2],
+                    colorbar=True,
+                    cmap=cmap_std,
+                    vmin=0,
+                    vmax=vmax_std_rho,
+                    colorbar_kwargs={"label": "Std Dev (mm)"},
+                )
 
             if args.plot_regions:
                 for ax in axes.flatten():
-                    exact_phys["state"].plot_boundaries(ax, regions_to_analyze)
-            figures_to_save["joint_posterior_maps"] = fig_maps
+                    state.plot_boundaries(ax, regions_to_analyze)
 
-            # SSH Observation Map
-            true_ssh = exact_phys["continuous_ssh"](true_model)
-            obs_data_mm = alt_data * scale_mm
-            vmax_ssh = max(
-                np.max(np.abs(true_ssh.data * scale_mm)), np.max(np.abs(obs_data_mm))
-            )
+            # ---------------------------------------------------------
+            # --- PUBLICATION FORMATTING: Column and Row Headers ---
+            # ---------------------------------------------------------
 
-            fig_ssh, axes_ssh = plt.subplots(
-                1,
-                2,
-                figsize=(14, 5),
-                subplot_kw={"projection": ccrs.Robinson()},
-                layout="constrained",
-            )
-            sl.plot(
-                true_ssh * ocean_mask_mm,
-                ax=axes_ssh[0],
-                colorbar=True,
-                colorbar_kwargs={"label": "SSH Change (mm)"},
-                vmin=-vmax_ssh,
-                vmax=vmax_ssh,
-                cmap=cmap,
-            )
-            axes_ssh[0].set_title("True Continuous SSH Change")
+            # 1. Column Headers (Applied only to the top row)
+            col_labels = [
+                "True State",
+                "Posterior Expectation",
+                "Pointwise Std. Deviation",
+            ]
+            for j in range(ncols):
+                # pad=25 pushes the text up, separating it from the top plot
+                axes[0, j].set_title(
+                    col_labels[j], fontsize=16, fontweight="bold", pad=25
+                )
 
-            axes_ssh[1].set_global()
-            axes_ssh[1].coastlines(linewidth=0.5, alpha=0.5, zorder=10)
-            sl.plot_points(
-                points,
-                data=obs_data_mm,
-                ax=axes_ssh[1],
-                cmap=cmap,
-                vmin=-vmax_ssh,
-                vmax=vmax_ssh,
-                s=4,
-                edgecolors="none",
-                colorbar=True,
-                colorbar_kwargs={
-                    "label": "Observed SSH Data (mm)",
-                    "orientation": "horizontal",
-                    "shrink": 0.7,
-                    "pad": 0.05,
-                },
-                zorder=5,
-            )
-            axes_ssh[1].set_title("Altimetry Observations")
+            # 2. Row Labels (Applied to the far left column)
+            row_labels = ["Ice Thickness", "Dynamic\nTopography", "Steric\nSea Level"]
+            for i in range(3):
+                # xy=(-0.12, 0.5) pushes the text to the left of the axes
+                axes[i, 0].annotate(
+                    row_labels[i],
+                    xy=(-0.12, 0.5),
+                    xycoords="axes fraction",
+                    fontsize=16,
+                    fontweight="bold",
+                    ha="center",
+                    va="center",
+                    rotation=90,
+                    annotation_clip=False,  # Ensures text isn't cut off by the map boundary
+                )
 
-            if args.plot_regions:
-                for ax in axes_ssh.flatten():
-                    exact_phys["state"].plot_boundaries(ax, regions_to_analyze)
-            figures_to_save["joint_observed_ssh"] = fig_ssh
+            figures_to_save[f"posterior_maps_{key}"] = fig_maps
 
     # ------------------ 7. REGIONAL DECOMPOSITION ------------------
     if args.plot_regions:

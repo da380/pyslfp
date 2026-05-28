@@ -177,6 +177,7 @@ def main():
         plot(
             sample_direct * scale_mm,
             ax=ax1,
+            cmap="seismic",
             colorbar_kwargs={"label": "EWT (mm)"},
             symmetric=True,
         )
@@ -188,6 +189,7 @@ def main():
         plot(
             sample_induced * scale_mm,
             ax=ax2,
+            cmap="seismic",
             colorbar_kwargs={"label": "EWT (mm)"},
             symmetric=True,
         )

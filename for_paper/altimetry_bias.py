@@ -203,6 +203,7 @@ def main():
         sl.plot(
             ice_thickness * ice_mask,
             ax=ax1,
+            cmap="seismic",
             colorbar_kwargs={"label": "Ice Thickness (mm)"},
             symmetric=True,
         )
@@ -213,6 +214,7 @@ def main():
         sl.plot(
             ocean_dyn * ocean_mask_mm,
             ax=ax2,
+            cmap="seismic",
             colorbar_kwargs={"label": "Dynamic Topo (mm)"},
             symmetric=True,
         )
@@ -223,6 +225,7 @@ def main():
         sl.plot(
             ocean_rho * steric_scale * ocean_mask_mm,
             ax=ax3,
+            cmap="seismic",
             colorbar_kwargs={"label": "Steric SL (mm)"},
             symmetric=True,
         )
@@ -239,6 +242,7 @@ def main():
         sl.plot(
             ssh_grid_mm,
             ax=ax4,
+            cmap="seismic",
             vmin=-shared_vmax,
             vmax=shared_vmax,
             colorbar_kwargs={"label": "Continuous SSH (mm)"},
@@ -252,6 +256,7 @@ def main():
             points,
             data=observed_data_mm,
             ax=ax5,
+            cmap="seismic",
             vmin=-shared_vmax,
             vmax=shared_vmax,
             s=4,

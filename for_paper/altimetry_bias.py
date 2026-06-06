@@ -155,6 +155,8 @@ def main():
     joint_meas = inf.GaussianMeasure.from_direct_sum([model_prior, noise_meas])
     data_space = noise_meas.domain
 
+    print(data_space.dim)
+
     # The TRUE GMSL uses the Sea Level Operator (SLC)
     true_gmsl_op = utils.true_gmsl_operator(state, load_space, continuous_sl_op)
 
@@ -200,35 +202,51 @@ def main():
         steric_scale = mean_ocean_depth / water_density
 
         fig1, ax1 = sl.create_map_figure(figsize=(12, 6))
-        sl.plot(
+        _, im1 = sl.plot(
             ice_thickness * ice_mask,
             ax=ax1,
             cmap="seismic",
-            colorbar_kwargs={"label": "Ice Thickness (mm)"},
             symmetric=True,
         )
+
+        im1.colorbar.set_label("Ice Thickness (mm)", fontsize=16)
+        im1.colorbar.ax.tick_params(labelsize=14)
+
+        ax1.gridliner.xlabel_style = {"size": 12, "color": "black"}
+        ax1.gridliner.ylabel_style = {"size": 12, "color": "black"}
 
         figures_to_save["bias_ice_thickness"] = fig1
 
         fig2, ax2 = sl.create_map_figure(figsize=(12, 6))
-        sl.plot(
+        _, im2 = sl.plot(
             ocean_dyn * ocean_mask_mm,
             ax=ax2,
             cmap="seismic",
-            colorbar_kwargs={"label": "Dynamic Topo (mm)"},
             symmetric=True,
         )
+
+        im2.colorbar.set_label("Dynamic Topography (mm)", fontsize=16)
+        im2.colorbar.ax.tick_params(labelsize=14)
+
+        ax2.gridliner.xlabel_style = {"size": 12, "color": "black"}
+        ax2.gridliner.ylabel_style = {"size": 12, "color": "black"}
 
         figures_to_save["bias_ocean_dynamic"] = fig2
 
         fig3, ax3 = sl.create_map_figure(figsize=(12, 6))
-        sl.plot(
+        _, im3 = sl.plot(
             ocean_rho * steric_scale * ocean_mask_mm,
             ax=ax3,
             cmap="seismic",
             colorbar_kwargs={"label": "Steric SL (mm)"},
             symmetric=True,
         )
+
+        im3.colorbar.set_label("Steric Sea level (mm)", fontsize=16)
+        im3.colorbar.ax.tick_params(labelsize=14)
+
+        ax3.gridliner.xlabel_style = {"size": 12, "color": "black"}
+        ax3.gridliner.ylabel_style = {"size": 12, "color": "black"}
 
         figures_to_save["bias_steric_sl"] = fig3
 
@@ -239,7 +257,7 @@ def main():
         )
 
         fig4, ax4 = sl.create_map_figure(figsize=(12, 6))
-        sl.plot(
+        _, im4 = sl.plot(
             ssh_grid_mm,
             ax=ax4,
             cmap="seismic",
@@ -248,11 +266,17 @@ def main():
             colorbar_kwargs={"label": "Continuous SSH (mm)"},
         )
 
+        im4.colorbar.set_label("Continuous SSH (mm)", fontsize=16)
+        im4.colorbar.ax.tick_params(labelsize=14)
+
+        ax4.gridliner.xlabel_style = {"size": 12, "color": "black"}
+        ax4.gridliner.ylabel_style = {"size": 12, "color": "black"}
+
         figures_to_save["bias_ssh_map"] = fig4
 
         fig5, ax5 = sl.create_map_figure(figsize=(12, 6))
         ax5.set_global()
-        sl.plot_points(
+        _, im5 = sl.plot_points(
             points,
             data=observed_data_mm,
             ax=ax5,
@@ -265,6 +289,12 @@ def main():
             colorbar_kwargs={"label": "Observed SSH (mm)"},
             zorder=5,
         )
+
+        im5.colorbar.set_label("Observed SSH (mm)", fontsize=16)
+        im5.colorbar.ax.tick_params(labelsize=14)
+
+        ax5.gridliner.xlabel_style = {"size": 12, "color": "black"}
+        ax5.gridliner.ylabel_style = {"size": 12, "color": "black"}
 
         figures_to_save["bias_ssh_points"] = fig5
 

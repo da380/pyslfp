@@ -16,11 +16,22 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 
+# Set publication-quality font sizes globally
+plt.rcParams.update(
+    {
+        "font.size": 14,
+        "axes.titlesize": 16,
+        "axes.labelsize": 14,
+        "xtick.labelsize": 12,
+        "ytick.labelsize": 12,
+        "figure.titlesize": 18,
+    }
+)
 
 import pygeoinf as inf
 import grace_utils as utils
-from plot_utils import plot_normalized_mc_errors
 import pyslfp as sl
+from pygeoinf.symmetric_space.sphere import plot_points
 
 
 matplotlib.use("Agg")
@@ -45,12 +56,6 @@ def parse_arguments():
         "--plot-deg1",
         action="store_true",
         help="Plot Degree 1 coefficient corner plots.",
-    )
-    parser.add_argument(
-        "--mc-trials",
-        type=int,
-        default=0,
-        help="Number of MC trials for error validation.",
     )
 
     # --- Resolution & Physics Settings ---
@@ -111,8 +116,6 @@ def main():
     args = parse_arguments()
     if args.all:
         args.plot_maps = args.plot_pdfs = args.plot_deg1 = True
-        if args.mc_trials <= 0:
-            args.mc_trials = -1
 
     if args.smoothing_scale_km is None:
         args.smoothing_scale_km = args.load_scale_km
@@ -180,8 +183,10 @@ def main():
     )
     print(f"\nSolution reached in {solver.iterations} iterations.")
 
-    if args.plot_pdfs or args.mc_trials != 0 or args.plot_deg1:
+    if args.plot_pdfs or args.plot_deg1:
         print("Forming load average estimates")
+
+        metrics_file = os.path.join(output_dir, "grace_metrics.txt")
 
         tot_avg_op = ewt_mm_scale * avg_op @ total_load_op
 
@@ -206,50 +211,69 @@ def main():
         if args.plot_pdfs:
             print("\nDecomposing Regional Signals...")
 
-            ncols = 2
-            nrows = int(np.ceil(len(region_names) / ncols))
-
-            fig, axes = plt.subplots(
-                nrows=nrows,
-                ncols=ncols,
-                figsize=(14, 5 * nrows),
-                layout="constrained",
-            )
-            axes_flat = axes.flatten()
-
-            for i, region in enumerate(region_names):
-                ax = axes_flat[i]
-                coordinate_projection = post_avg_measure.domain.subspace_projection(i)
-
-                coord_prior = prior_avg_measure.affine_mapping(
-                    operator=coordinate_projection
+            with open(metrics_file, "w") as f_metrics:
+                f_metrics.write(
+                    f"{'Region':<16} | {'KL Divergence':<15} | {'Prior Var (mm²)':<17} | {'Post Var (mm²)':<16} | {'Variance Reduction':<18}\n"
                 )
-                coord_post = post_avg_measure.affine_mapping(
-                    operator=coordinate_projection
+                f_metrics.write("-" * 92 + "\n")
+
+                ncols = 2
+                nrows = int(np.ceil(len(region_names) / ncols))
+
+                fig, axes = plt.subplots(
+                    nrows=nrows,
+                    ncols=ncols,
+                    figsize=(14, 5 * nrows),
+                    layout="constrained",
                 )
+                axes_flat = axes.flatten()
 
-                kl_div = coord_post.kl_divergence(coord_prior)
+                for i, region in enumerate(region_names):
+                    ax = axes_flat[i]
+                    coordinate_projection = post_avg_measure.domain.subspace_projection(
+                        i
+                    )
 
-                coord_wmb = wmb_avg_measure.affine_mapping(
-                    operator=coordinate_projection
-                )
+                    coord_prior = prior_avg_measure.affine_mapping(
+                        operator=coordinate_projection
+                    )
+                    coord_post = post_avg_measure.affine_mapping(
+                        operator=coordinate_projection
+                    )
 
-                inf.plot_1d_distributions(
-                    [coord_post, coord_wmb],
-                    ax=ax,
-                    true_value=true_avg[i],
-                    xlabel="Regional Average Mass (mm EWT)",
-                    title=f"{region}",
-                    posterior_labels=[
-                        f"Bayesian ({kl_div:.2f} nats)",
-                        "WMB",
-                    ],
-                )
+                    kl_div = coord_post.kl_divergence(coord_prior)
 
-            for j in range(i + 1, len(axes_flat)):
-                axes_flat[j].set_visible(False)
+                    coord_wmb = wmb_avg_measure.affine_mapping(
+                        operator=coordinate_projection
+                    )
 
-            figures_to_save["grace_regional_pdfs"] = plt.gcf()
+                    basis_vec = coord_prior.domain.basis_vector(0)
+                    prior_var = coord_prior.directional_variance(basis_vec)
+                    post_var = coord_post.directional_variance(basis_vec)
+
+                    var_reduction = 100.0 * (1.0 - (post_var / prior_var))
+
+                    f_metrics.write(
+                        f"{region:<16} | {kl_div:<15.2f} | {prior_var:<17.2f} | {post_var:<16.2f} | {var_reduction:>16.2f}%\n"
+                    )
+
+                    inf.plot_1d_distributions(
+                        [coord_post, coord_wmb],
+                        ax=ax,
+                        true_value=true_avg[i],
+                        xlabel="Regional Average Total Load (mm EWT)",
+                        title=f"{region}",
+                        posterior_labels=["Bayesian", "WMB"],
+                    )
+
+                    if ax.get_legend() is not None:
+                        ax.get_legend().remove()
+
+                for j in range(i + 1, len(axes_flat)):
+                    axes_flat[j].set_visible(False)
+
+                figures_to_save["grace_regional_pdfs"] = plt.gcf()
+                print(f"  Regional metrics logged to: {metrics_file}")
 
         # ------------------ DEGREE ONE ------------------
         if args.plot_deg1:
@@ -270,6 +294,10 @@ def main():
 
             kl_div = deg1_post.kl_divergence(deg1_prior)
 
+            with open(metrics_file, "a") as f_metrics:
+                f_metrics.write("\n" + "=" * 92 + "\n")
+                f_metrics.write(f"Degree-1 KL Divergence: {kl_div:.4f} nats\n")
+
             inf.plot_corner_distributions(
                 deg1_post,
                 prior_measure=deg1_prior,
@@ -279,125 +307,20 @@ def main():
                     r"$\zeta_{10}$ (mm)",
                     r"$\zeta_{11}$ (mm)",
                 ],
-                title=f"Bayesian Degree 1 Recovery ({kl_div:.2f} nats)",
+                title="",
             )
             figures_to_save["grace_degree_1_corner"] = plt.gcf()
-
-        # ------------------ OPTION 4: Monte Carlo ------------------
-        if args.mc_trials != 0:
-            print(
-                f"\nExtracting analytical distributions for MC validation (trials={'skipped' if args.mc_trials == -1 else args.mc_trials})..."
-            )
-
-            post_exp_op = inverse_problem.posterior_expectation_operator(
-                solver, preconditioner=preconditioner
-            )
-
-            if isinstance(post_exp_op, inf.AffineOperator):
-                bayes_linear = post_exp_op.linear_part
-                bayes_translation = tot_avg_op(post_exp_op.translation_part)
-            else:
-                bayes_linear = post_exp_op
-                bayes_translation = None
-
-            wmb_err_op = inf.RowLinearOperator([-1 * tot_avg_op, wmb_avg_op])
-            bayes_err_op = inf.RowLinearOperator(
-                [-1 * tot_avg_op, tot_avg_op @ bayes_linear]
-            )
-
-            joint_err_op = inf.ColumnLinearOperator([wmb_err_op, bayes_err_op])
-
-            joint_meas = inverse_problem.joint_prior_measure
-
-            translation = (
-                [avg_op.codomain.zero, bayes_translation]
-                if bayes_translation is not None
-                else None
-            )
-
-            # 1. Map to dense covariance
-            joint_err_dense = joint_meas.affine_mapping(
-                operator=joint_err_op, translation=translation
-            ).with_dense_covariance(parallel=True, n_jobs=8)
-
-            # Conditional Sampling
-            if args.mc_trials > 0:
-                w_errs = np.zeros((args.mc_trials, len(region_names)))
-                b_errs = np.zeros((args.mc_trials, len(region_names)))
-
-                samples = joint_err_dense.samples(args.mc_trials)
-                for i, (w_err, b_err) in enumerate(samples):
-                    w_errs[i, :] = w_err
-                    b_errs[i, :] = b_err
-            else:
-                w_errs, b_errs = None, None
-
-            # 2. Extract standard deviations
-            wmb_avg_stds = np.sqrt(wmb_avg_measure.covariance.extract_diagonal())
-            post_avg_stds = np.sqrt(post_avg_measure.covariance.extract_diagonal())
-
-            # 3. Extract the full analytical mean and covariance
-            n_reg = len(region_names)
-            raw_cov_full = joint_err_dense.covariance.matrix(dense=True)
-            raw_mean_full = joint_err_dense.expectation
-
-            # Setup the subplots
-            ncols = int(np.ceil(np.sqrt(n_reg)))
-            nrows = int(np.ceil(n_reg / ncols))
-
-            fig_mc, axes_mc = plt.subplots(
-                nrows=nrows,
-                ncols=ncols,
-                figsize=(6 * ncols, 6 * nrows),
-                layout="constrained",
-            )
-
-            axes_flat = np.atleast_1d(axes_mc).flatten()
-
-            # 4. Loop through regions and plot
-            for j, region in enumerate(region_names):
-                ax = axes_flat[j]
-
-                # Extract the 2x2 mean and covariance block for this region
-                raw_mean_2d = [raw_mean_full[0][j], raw_mean_full[1][j]]
-                var_w = raw_cov_full[j, j]
-                var_b = raw_cov_full[n_reg + j, n_reg + j]
-                cov_wb = raw_cov_full[j, n_reg + j]
-                raw_cov_2d = np.array([[var_w, cov_wb], [cov_wb, var_b]])
-
-                # Conditionally extract raw errors if sampling was performed
-                raw_errs_w = w_errs[:, j] if w_errs is not None else None
-                raw_errs_b = b_errs[:, j] if b_errs is not None else None
-
-                plot_normalized_mc_errors(
-                    ax,
-                    raw_errs_w,
-                    raw_errs_b,
-                    raw_mean_2d,
-                    raw_cov_2d,
-                    wmb_avg_stds[j],
-                    post_avg_stds[j],
-                    title=f"{region} Error Distribution",
-                    xlabel=r"WMB Normalized Error",
-                    ylabel=r"Bayesian Normalized Error",
-                    label_x="WMB",
-                    label_y="Bayes",
-                    show_legend=(j == 0),
-                    show_samples=(args.mc_trials > 0),  # Pass the flag down
-                )
-
-            # Hide any empty subplots
-            for k in range(j + 1, len(axes_flat)):
-                axes_flat[k].set_visible(False)
-
-            figures_to_save["grace_mc_validation"] = fig_mc
 
     # ------------------ MAPS ------------------
     if args.plot_maps:
         print("Generating spatial maps...")
         cmap = "seismic"
 
-        post_model = model_posterior.expectation
+        total_load_prior = model_prior.affine_mapping(operator=total_load_op)
+        total_load_posterior = model_posterior.affine_mapping(operator=total_load_op)
+
+        true_model = total_load_op(model)
+        post_model = total_load_posterior.expectation
 
         wmb_inv_op = wmb_method.potential_coefficient_to_load_operator(load_space)
         wmb_estimate = wmb_inv_op(data)
@@ -408,65 +331,132 @@ def main():
         smoothed_wmb_estimate = smoothing_operator(wmb_estimate)
 
         vmax = max(
-            np.max(np.abs(model.data * ewt_mm_scale)),
+            np.max(np.abs(true_model.data * ewt_mm_scale)),
             np.max(np.abs(post_model.data * ewt_mm_scale)),
             np.max(np.abs(wmb_estimate.data * ewt_mm_scale)),
         )
 
         fig_maps, axes = sl.subplots(
-            2,
-            2,
-            figsize=(20, 12),
+            2, 2, figsize=(18, 10), gridspec_kw={"hspace": 0.1}
         )
 
-        sl.plot(
-            model * ewt_mm_scale,
+        gl_kwargs = {
+            "xlabel_style": {"size": 12},
+            "ylabel_style": {"size": 12},
+        }
+
+        # 1. True total load
+        _, im = sl.plot(
+            true_model * ewt_mm_scale,
             ax=axes[0, 0],
-            colorbar=True,
+            colorbar=False,
             vmin=-vmax,
             vmax=vmax,
             cmap=cmap,
-            colorbar_kwargs={"label": "Load (mm EWT)"},
+            gridlines_kwargs=gl_kwargs,
         )
-        axes[0, 0].set_title("True direct Load")
+        axes[0, 0].set_title("True Total Load", fontsize=16)
 
+        # 2. WMB Estimate
         sl.plot(
             wmb_estimate * ewt_mm_scale,
             ax=axes[0, 1],
-            colorbar=True,
+            colorbar=False,
             vmin=-vmax,
             vmax=vmax,
             cmap=cmap,
-            colorbar_kwargs={"label": "Load (mm EWT)"},
+            gridlines_kwargs=gl_kwargs,
         )
-        axes[0, 1].set_title("WMB Estimate")
+        axes[0, 1].set_title("WMB Estimate", fontsize=16)
 
+        # 3. Smoothed WMB Estimate
         sl.plot(
             smoothed_wmb_estimate * ewt_mm_scale,
             ax=axes[1, 0],
-            colorbar=True,
+            colorbar=False,
             vmin=-vmax,
             vmax=vmax,
             cmap=cmap,
-            colorbar_kwargs={"label": "Load (mm EWT)"},
+            gridlines_kwargs=gl_kwargs,
         )
-        axes[1, 0].set_title("Smoothed WMB Estimate")
+        axes[1, 0].set_title("Smoothed WMB Estimate", fontsize=16)
 
+        # 4. Bayesian Posterior
         sl.plot(
             post_model * ewt_mm_scale,
             ax=axes[1, 1],
-            colorbar=True,
+            colorbar=False,
             vmin=-vmax,
             vmax=vmax,
             cmap=cmap,
-            colorbar_kwargs={"label": "Load (mm EWT)"},
+            gridlines_kwargs=gl_kwargs,
         )
-        axes[1, 1].set_title("Bayesian Posterior")
+        axes[1, 1].set_title("Bayesian Posterior", fontsize=16)
 
         for ax in axes.flatten():
             utils.draw_region_boundaries(state, ax, regions_dict)
 
+        cb = fig_maps.colorbar(
+            im, ax=axes.ravel().tolist(), orientation="horizontal", shrink=0.6, pad=0.05
+        )
+        cb.set_label("Load (mm EWT)", fontsize=16)
+        cb.ax.tick_params(labelsize=14)
+
         figures_to_save["grace_posterior_maps"] = fig_maps
+
+        # ==============================================================
+        # 3x2 Covariance Maps
+        # ==============================================================
+
+        # Define three distinct, deterministic points representing different geophysical regimes
+        point_ocean = (30.0, -45.0)  # Open Ocean (North Atlantic)
+        point_hydro = (-5.0, -60.0)  # Hydrology (Amazon Basin)
+        point_polar = (-75.0, -110.0)  # Ice Mass (West Antarctica)
+
+        points_to_plot = [
+            (point_ocean, "Ocean"),
+            (point_hydro, "Hydrology (Amazon)"),
+            (point_polar, "Ice (WAIS)"),
+        ]
+
+        fig_maps, axes = sl.subplots(
+            3, 2, figsize=(16, 15), gridspec_kw={"hspace": 0.1}
+        )
+
+        def plot_covariance_map(cov_data, ax, pt, title):
+            """Helper function to keep plotting code clean and DRY."""
+            _, im_cov = sl.plot(
+                cov_data * ewt_mm_scale**2,
+                ax=ax,
+                colorbar=True,
+                cmap="seismic",
+                symmetric=True,
+                colorbar_kwargs={
+                    "shrink": 0.8,
+                    "pad": 0.05,
+                    "orientation": "horizontal",
+                },
+                gridlines_kwargs=gl_kwargs,
+            )
+            ax.set_title(title, fontsize=16)
+
+            plot_points([pt], ax=ax, color="black", gridlines=False)
+
+            im_cov.colorbar.set_label("Covariance (mm² EWT)", fontsize=14)
+            im_cov.colorbar.ax.tick_params(labelsize=12)
+
+        for row_idx, (pt, label) in enumerate(points_to_plot):
+            prior_cov = total_load_prior.two_point_covariance(pt)
+            post_cov = total_load_posterior.two_point_covariance(pt)
+
+            plot_covariance_map(
+                prior_cov, axes[row_idx, 0], pt, f"Prior Covariance: {label}"
+            )
+            plot_covariance_map(
+                post_cov, axes[row_idx, 1], pt, f"Posterior Covariance: {label}"
+            )
+
+        figures_to_save["grace_covariance_maps"] = fig_maps
 
     # ------------------ SAVE ALL FIGURES ------------------
     if figures_to_save:

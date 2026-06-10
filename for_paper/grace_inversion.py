@@ -51,21 +51,23 @@ def parse_arguments():
         action="store_true",
         help="Plot head-to-head analytical PDFs of regional averages (Bayesian vs WMB).",
     )
-
     parser.add_argument(
         "--plot-deg1",
         action="store_true",
         help="Plot Degree 1 coefficient corner plots.",
     )
+    parser.add_argument(
+        "--prior-sensitivity", action="store_true", help="Estimate prior sensitivity"
+    )
 
     # --- Resolution & Physics Settings ---
     parser.add_argument(
-        "--lmax", type=int, default=256, help="Exact model max SH degree."
+        "--lmax", type=int, default=64, help="Exact model max SH degree."
     )
     parser.add_argument(
         "--obs-degree",
         type=int,
-        default=100,
+        default=32,
         help="Max SH degree of GRACE observations.",
     )
     parser.add_argument(
@@ -115,7 +117,7 @@ def parse_arguments():
 def main():
     args = parse_arguments()
     if args.all:
-        args.plot_maps = args.plot_pdfs = args.plot_deg1 = True
+        args.plot_maps = args.plot_pdfs = args.plot_deg1 = args.prior_sensitivity = True
 
     if args.smoothing_scale_km is None:
         args.smoothing_scale_km = args.load_scale_km
@@ -183,15 +185,15 @@ def main():
     )
     print(f"\nSolution reached in {solver.iterations} iterations.")
 
+    # Set up the averaging operators
+    tot_avg_op = ewt_mm_scale * avg_op @ total_load_op
+    wmb_op = wmb_method.potential_coefficient_to_load_operator(load_space)
+    wmb_avg_op = ewt_mm_scale * avg_op @ wmb_op
+
+    metrics_file = os.path.join(output_dir, "grace_metrics.txt")
+
     if args.plot_pdfs or args.plot_deg1:
         print("Forming load average estimates")
-
-        metrics_file = os.path.join(output_dir, "grace_metrics.txt")
-
-        tot_avg_op = ewt_mm_scale * avg_op @ total_load_op
-
-        wmb_op = wmb_method.potential_coefficient_to_load_operator(load_space)
-        wmb_avg_op = ewt_mm_scale * avg_op @ wmb_op
 
         wmb_avg_measure = data_measure.affine_mapping(
             operator=wmb_avg_op
@@ -310,6 +312,151 @@ def main():
                 title="",
             )
             figures_to_save["grace_degree_1_corner"] = plt.gcf()
+
+    # ------------------- Prior sensitivity analysis ---------------
+    if args.prior_sensitivity:
+        print("Generating Prior & Estimator Sensitivity Plots and Metrics...")
+        metrics_file = os.path.join(output_dir, "grace_metrics.txt")
+
+        # 1. Bayesian Resolution Operators
+        kalman_operator = inverse_problem.kalman_operator(
+            solver, preconditioner=preconditioner
+        )
+        exact_fwd_op = inverse_problem.forward_problem.forward_operator
+
+        model_resolution_operator = (
+            kalman_operator @ exact_fwd_op
+        ) - load_space.identity_operator()
+
+        property_resolution_operator = tot_avg_op @ model_resolution_operator
+
+        # 2. WMB Resolution Operator (CA - B)
+        # C = wmb_avg_op, A = exact_fwd_op, B = tot_avg_op
+        wmb_property_resolution_operator = (wmb_avg_op @ exact_fwd_op) - tot_avg_op
+
+        with open(metrics_file, "a") as f_metrics:
+            f_metrics.write("\n" + "=" * 115 + "\n")
+            f_metrics.write("ESTIMATOR KERNEL METRICS (PRIOR-FREE COMPARISON)\n")
+            f_metrics.write("-" * 115 + "\n")
+            f_metrics.write(
+                f"{'Region':<16} | {'Target Norm':<15} | {'Bayes Err Norm':<15} | {'Bayes Ratio':<15} | {'WMB Err Norm':<15} | {'WMB Ratio':<15}\n"
+            )
+            f_metrics.write("-" * 115 + "\n")
+
+            for i, region in enumerate(region_names):
+                # e_i (Basis vector)
+                basis_vec = property_resolution_operator.codomain.basis_vector(i)
+
+                # Target kernel: b_i = B* e_i
+                target_vector = tot_avg_op.adjoint(basis_vec)
+
+                # Bayesian Kernel error: (KA - I)* b_i
+                bayes_res_vector = property_resolution_operator.adjoint(basis_vec)
+
+                # WMB Kernel error: (CA - B)* e_i
+                wmb_res_vector = wmb_property_resolution_operator.adjoint(basis_vec)
+
+                # Calculate norms
+                target_norm = load_space.norm(target_vector)
+                bayes_error_norm = load_space.norm(bayes_res_vector)
+                wmb_error_norm = load_space.norm(wmb_res_vector)
+
+                bayes_ratio = bayes_error_norm / target_norm
+                wmb_ratio = wmb_error_norm / target_norm
+
+                f_metrics.write(
+                    f"{region:<16} | {target_norm:<15.4e} | {bayes_error_norm:<15.4e} | {bayes_ratio:<15.4f} | {wmb_error_norm:<15.4e} | {wmb_ratio:<15.4f}\n"
+                )
+
+                # Normalize relative to pointwise max of the target
+                max_abs_val = np.max(np.abs(target_vector.data))
+                target_normed = target_vector / max_abs_val
+
+                # Errors as percentages
+                bayes_error_pct = (bayes_res_vector / max_abs_val) * 100
+                wmb_error_pct = (wmb_res_vector / max_abs_val) * 100
+
+                # 1x3 Figure setup
+                fig_sens, axes = sl.subplots(
+                    1, 3, figsize=(22, 5), gridspec_kw={"wspace": 0.15}
+                )
+
+                gl_kwargs = {"xlabel_style": {"size": 12}, "ylabel_style": {"size": 12}}
+
+                # --- Plot 1: Target Kernel ---
+                _, im_target = sl.plot(
+                    target_normed,
+                    ax=axes[0],
+                    cmap="seismic",
+                    colorbar=True,
+                    symmetric=True,
+                    vmin=-1.0,
+                    vmax=1.0,
+                    colorbar_kwargs={
+                        "shrink": 0.8,
+                        "pad": 0.05,
+                        "orientation": "horizontal",
+                    },
+                    gridlines_kwargs=gl_kwargs,
+                )
+                axes[0].set_title("Target Kernel", fontsize=16)
+                im_target.colorbar.set_label("Relative Amplitude", fontsize=14)
+                utils.draw_region_boundaries(state, axes[0], regions_dict)
+
+                # --- Find shared max for the error plots ---
+                # This ensures the visual comparison of error magnitudes is direct
+                vmax_error = max(
+                    np.max(np.abs(bayes_error_pct.data)),
+                    np.max(np.abs(wmb_error_pct.data)),
+                )
+
+                # --- Plot 2: Bayesian Kernel Error ---
+                _, im_bayes = sl.plot(
+                    bayes_error_pct,
+                    ax=axes[1],
+                    cmap="seismic",
+                    colorbar=True,
+                    symmetric=True,
+                    vmin=-vmax_error,
+                    vmax=vmax_error,
+                    colorbar_kwargs={
+                        "shrink": 0.8,
+                        "pad": 0.05,
+                        "orientation": "horizontal",
+                    },
+                    gridlines_kwargs=gl_kwargs,
+                )
+                axes[1].set_title("Bayesian Kernel Error", fontsize=16)
+                im_bayes.colorbar.set_label("Relative Error (%)", fontsize=14)
+                utils.draw_region_boundaries(state, axes[1], regions_dict)
+
+                # --- Plot 3: WMB Kernel Error ---
+                _, im_wmb = sl.plot(
+                    wmb_error_pct,
+                    ax=axes[2],
+                    cmap="seismic",
+                    colorbar=True,
+                    symmetric=True,
+                    vmin=-vmax_error,
+                    vmax=vmax_error,
+                    colorbar_kwargs={
+                        "shrink": 0.8,
+                        "pad": 0.05,
+                        "orientation": "horizontal",
+                    },
+                    gridlines_kwargs=gl_kwargs,
+                )
+                axes[2].set_title("WMB Kernel Error", fontsize=16)
+                im_wmb.colorbar.set_label("Relative Error (%)", fontsize=14)
+                utils.draw_region_boundaries(state, axes[2], regions_dict)
+
+                # Format filename
+                safe_region_name = (
+                    region.replace(" ", "_").replace("(", "").replace(")", "")
+                )
+                figures_to_save[f"estimator_kernels_{safe_region_name}"] = fig_sens
+
+        print(f"  Estimator metrics appended to: {metrics_file}")
 
     # ------------------ MAPS ------------------
     if args.plot_maps:

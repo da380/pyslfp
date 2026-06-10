@@ -191,7 +191,13 @@ class WMBMethod:
         self,
     ) -> DiagonalSparseMatrixLinearOperator:
         """Applies the inverse Love number scaling (1 / k_l)."""
-        return self.load_coefficient_to_potential_coefficient_operator().inverse
+        domain = EuclideanSpace(self._observation_dim)
+        values = (
+            self.load_coefficient_to_potential_coefficient_operator().extract_diagonal()
+        )
+        return DiagonalSparseMatrixLinearOperator.from_diagonal_values(
+            domain, domain, np.reciprocal(values)
+        )
 
     # ---------------------------------------------------------#
     #               Bridge Spatial/Coefficient Operators       #
@@ -286,8 +292,8 @@ class WMBMethod:
         r_diag = data_error_measure.covariance.extract_diagonal()
 
         normal_diag = aqa_diag + r_diag
-        approx_normal_op = DiagonalSparseMatrixLinearOperator.from_diagonal_values(
-            data_error_measure.domain, data_error_measure.domain, normal_diag
+        return DiagonalSparseMatrixLinearOperator.from_diagonal_values(
+            data_error_measure.domain,
+            data_error_measure.domain,
+            np.reciprocal(normal_diag),
         )
-
-        return approx_normal_op.inverse

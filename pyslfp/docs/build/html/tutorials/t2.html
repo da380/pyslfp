@@ -1,0 +1,774 @@
+<!doctype html>
+<html class="no-js" lang="en" data-content_root="../">
+  <head><meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="index" title="Index" href="../genindex.html" /><link rel="search" title="Search" href="../search.html" /><link rel="next" title="Tutorial 3 - Sensitivity kernels for sea level point measurements." href="t3.html" /><link rel="prev" title="Tutorial 1 - Computing a sea level fingerprint" href="t1.html" />
+
+    <!-- Generated with Sphinx 8.1.3 and Furo 2025.07.19 -->
+        <title>Tutorial 2 - Exploring some options in the FingerPrint Class - pyslfp documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d111a655" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=25af2a20" />
+    <link rel="stylesheet" type="text/css" href="../_static/nbsphinx-code-cells.css?v=2aa19091" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=8dab3a3b" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f2f2f2;
+  --color-code-foreground: #1e1e1e;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #2b2b2b;
+  --color-code-foreground: #f8f8f2;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #2b2b2b;
+  --color-code-foreground: #f8f8f2;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-with-moon" viewBox="0 0 24 24">
+    <title>Auto light/dark, in light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path style="opacity: 50%" d="M 5.411 14.504 C 5.471 14.504 5.532 14.504 5.591 14.504 C 3.639 16.319 4.383 19.569 6.931 20.352 C 7.693 20.586 8.512 20.551 9.25 20.252 C 8.023 23.207 4.056 23.725 2.11 21.184 C 0.166 18.642 1.702 14.949 4.874 14.536 C 5.051 14.512 5.231 14.5 5.411 14.5 L 5.411 14.504 Z"/>
+      <line x1="14.5" y1="3.25" x2="14.5" y2="1.25"/>
+      <line x1="14.5" y1="15.85" x2="14.5" y2="17.85"/>
+      <line x1="10.044" y1="5.094" x2="8.63" y2="3.68"/>
+      <line x1="19" y1="14.05" x2="20.414" y2="15.464"/>
+      <line x1="8.2" y1="9.55" x2="6.2" y2="9.55"/>
+      <line x1="20.8" y1="9.55" x2="22.8" y2="9.55"/>
+      <line x1="10.044" y1="14.006" x2="8.63" y2="15.42"/>
+      <line x1="19" y1="5.05" x2="20.414" y2="3.636"/>
+      <circle cx="14.5" cy="9.55" r="3.6"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon-with-sun" viewBox="0 0 24 24">
+    <title>Auto light/dark, in dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path d="M 8.282 7.007 C 8.385 7.007 8.494 7.007 8.595 7.007 C 5.18 10.184 6.481 15.869 10.942 17.24 C 12.275 17.648 13.706 17.589 15 17.066 C 12.851 22.236 5.91 23.143 2.505 18.696 C -0.897 14.249 1.791 7.786 7.342 7.063 C 7.652 7.021 7.965 7 8.282 7 L 8.282 7.007 Z"/>
+      <line style="opacity: 50%" x1="18" y1="3.705" x2="18" y2="2.5"/>
+      <line style="opacity: 50%" x1="18" y1="11.295" x2="18" y2="12.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="4.816" x2="14.464" y2="3.964"/>
+      <line style="opacity: 50%" x1="20.711" y1="10.212" x2="21.563" y2="11.063"/>
+      <line style="opacity: 50%" x1="14.205" y1="7.5" x2="13.001" y2="7.5"/>
+      <line style="opacity: 50%" x1="21.795" y1="7.5" x2="23" y2="7.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="10.184" x2="14.464" y2="11.036"/>
+      <line style="opacity: 50%" x1="20.711" y1="4.789" x2="21.563" y2="3.937"/>
+      <circle style="opacity: 50%" cx="18" cy="7.5" r="2.169"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-pencil" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-pencil-code">
+      <path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" />
+      <path d="M13.5 6.5l4 4" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+  <symbol id="svg-eye" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-eye-code">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
+      <path
+        d="M11.11 17.958c-3.209 -.307 -5.91 -2.293 -8.11 -5.958c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.21 .352 -.427 .688 -.647 1.008" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc">
+<label class="overlay sidebar-overlay" for="__navigation">
+  <div class="visually-hidden">Hide navigation sidebar</div>
+</label>
+<label class="overlay toc-overlay" for="__toc">
+  <div class="visually-hidden">Hide table of contents sidebar</div>
+</label>
+
+<a class="skip-to-content muted-link" href="#furo-main-content">Skip to content</a>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <div class="visually-hidden">Toggle site navigation sidebar</div>
+        <i class="icon"><svg><use href="#svg-menu"></use></svg></i>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="../index.html"><div class="brand">pyslfp  documentation</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle">
+          <div class="visually-hidden">Toggle Light / Dark / Auto color theme</div>
+          <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+          <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
+        <div class="visually-hidden">Toggle table of contents sidebar</div>
+        <i class="icon"><svg><use href="#svg-toc"></use></svg></i>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand" href="../index.html">
+  
+  <span class="sidebar-brand-text">pyslfp  documentation</span>
+  
+</a><form class="sidebar-search-container" method="get" action="../search.html" role="search">
+  <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="t1.html">Tutorial 1 - Computing a sea level fingerprint</a></li>
+<li class="toctree-l1 current current-page"><a class="current reference internal" href="#">Tutorial 2 - Exploring some options in the FingerPrint Class</a></li>
+<li class="toctree-l1"><a class="reference internal" href="t3.html">Tutorial 3 - Sensitivity kernels for sea level point measurements.</a></li>
+<li class="toctree-l1"><a class="reference internal" href="t4.html">Tutorial 4 - Sensitivity kernels for displacement point measurements.</a></li>
+<li class="toctree-l1"><a class="reference internal" href="t5.html">Tutorial 5 - Sensitivity kernels for gravitational potential coefficients.</a></li>
+<li class="toctree-l1"><a class="reference internal" href="t6.html">Tutorial 6 - Inversion of tide gauge data</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../api/physical_parameters.html">pyslfp.physical_parameters</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/ice_ng.html">pyslfp.ice_ng</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/finger_print.html">pyslfp.finger_print</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/plotting.html">pyslfp.plotting</a></li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="view-this-page">
+  <a class="muted-link" href="../_sources/tutorials/t2.ipynb.txt" title="View this page">
+    <svg><use href="#svg-eye"></use></svg>
+    <span class="visually-hidden">View this page</span>
+  </a>
+</div>
+<div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle">
+              <div class="visually-hidden">Toggle Light / Dark / Auto color theme</div>
+              <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+              <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
+            <div class="visually-hidden">Toggle table of contents sidebar</div>
+            <i class="icon"><svg><use href="#svg-toc"></use></svg></i>
+          </label>
+        </div>
+        <article role="main" id="furo-main-content">
+          <section id="Tutorial-2---Exploring-some-options-in-the-FingerPrint-Class">
+<h1>Tutorial 2 - Exploring some options in the FingerPrint Class<a class="headerlink" href="#Tutorial-2---Exploring-some-options-in-the-FingerPrint-Class" title="Link to this heading">¶</a></h1>
+<p>In this tutorial we perform a similar calculation to that in Tutorial 1, but now discuss the methods used in further detail.</p>
+<section id="Step-1---Setting-up-the-FingerPrint-class">
+<h2>Step 1 - Setting up the FingerPrint class<a class="headerlink" href="#Step-1---Setting-up-the-FingerPrint-class" title="Link to this heading">¶</a></h2>
+<p>When setting up an instance of the <code class="docutils literal notranslate"><span class="pre">FingerPrint</span></code> class the following keyword arguments can be set:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">lmax</span></code>: The truncation degree for spherical harmonics used within the calculations. The default value is 256.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">earth_model_parameters</span></code>: An instance of the class <code class="docutils literal notranslate"><span class="pre">EarthModelParameter</span></code> that sets units for non-dimensionalisation along with values for various parameters for the earth model. The default is SI base units and values for Earth.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">rotational_feedbacks</span></code>: If <code class="docutils literal notranslate"><span class="pre">True</span></code>, rotational feedbacks are included within the calculations. Default is <code class="docutils literal notranslate"><span class="pre">True</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">grid</span></code>: The form of the spatial grid chosen from the options for the <code class="docutils literal notranslate"><span class="pre">pyshtools</span></code> library. The default is <code class="docutils literal notranslate"><span class="pre">&quot;DH&quot;</span></code> which corresponds to the standard Driscoll-Healy grid.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">extend</span></code>: If <code class="docutils literal notranslate"><span class="pre">True</span></code> the spatial grid is extended to include longitude 360 as well as 0. Default is <code class="docutils literal notranslate"><span class="pre">True</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">love_number_file</span></code>: The path to the Love number file. The default is to a file precalculated for PREM (Dziewonski &amp; Anderson, 1981) with values up to degree 4096.</p></li>
+</ul>
+<p>For most users <code class="docutils literal notranslate"><span class="pre">lmax</span></code> will be the parameter of most interest, with this value controlling the spatial resolution of the calculations.</p>
+<p>In the example below we set up a <code class="docutils literal notranslate"><span class="pre">FingerPrint</span></code> instance using some non-default values. In particular, we set up a sensible non-dimensionalisation scheme for geophysical applications, we choose to work with a Gauss-Legendre grid instead of the default Driscoll-Healy one, and we set <code class="docutils literal notranslate"><span class="pre">extend</span></code> equal to false.</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[1]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Import necessary modules for this notebook.</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pyshtools</span><span class="w"> </span><span class="kn">import</span> <span class="n">SHGrid</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pyslfp</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">sl</span>
+
+
+<span class="c1"># Set up fingerprint based on a Gauss-Legendre quadrature grid. For non-dimensionalisation we</span>
+<span class="c1"># use a standard scheme based on the Earth&#39;s mean radius, and density of ice, and the length</span>
+<span class="c1"># of one year.</span>
+<span class="n">fingerprint</span> <span class="o">=</span> <span class="n">sl</span><span class="o">.</span><span class="n">FingerPrint</span><span class="p">(</span><span class="n">lmax</span> <span class="o">=</span> <span class="mi">128</span><span class="p">,</span>
+                          <span class="n">earth_model_parameters</span><span class="o">=</span><span class="n">sl</span><span class="o">.</span><span class="n">EarthModelParameters</span><span class="o">.</span><span class="n">from_standard_non_dimensionalisation</span><span class="p">(),</span>
+                          <span class="n">grid</span><span class="o">=</span><span class="s2">&quot;GLQ&quot;</span><span class="p">,</span>
+                          <span class="n">extend</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<p>Having constructed the class instance, we have access to a range of physical properties in non-dimensional form. For example:</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[2]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Density scale </span><span class="si">{</span><span class="n">fingerprint</span><span class="o">.</span><span class="n">density_scale</span><span class="si">}</span><span class="s1"> in kg/m^3&#39;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Radius of the Earth </span><span class="si">{</span><span class="n">fingerprint</span><span class="o">.</span><span class="n">mean_radius</span><span class="si">}</span><span class="s1"> in non-dimensional units&#39;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Polar moment of inertia </span><span class="si">{</span><span class="n">fingerprint</span><span class="o">.</span><span class="n">polar_moment_of_inertia</span><span class="si">}</span><span class="s1"> in non-dimensional units&#39;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;density of ice </span><span class="si">{</span><span class="n">fingerprint</span><span class="o">.</span><span class="n">ice_density</span><span class="si">}</span><span class="s1"> in non-dimensional units&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+Density scale 1000.0 in kg/m^3
+Radius of the Earth 1.0 in non-dimensional units
+Polar moment of inertia 7.655904339084687 in non-dimensional units
+density of ice 0.917 in non-dimensional units
+</pre></div></div>
+</div>
+<p>Once constructed, the instance of the class <code class="docutils literal notranslate"><span class="pre">FingerPrint</span></code> sets up the spatial and spectral discretisations that will be used within the fingerprint calculations. Spatial fields are instances of the <code class="docutils literal notranslate"><span class="pre">pyshtools</span></code> class <code class="docutils literal notranslate"><span class="pre">SHGrid</span></code>. In the code below we generate such a field that equals zero everywhere and print a summary of its properties.</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[3]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Generate a zero-field</span>
+<span class="n">zero</span> <span class="o">=</span> <span class="n">fingerprint</span><span class="o">.</span><span class="n">zero_grid</span><span class="p">()</span>
+
+<span class="c1"># Print out its parameters.</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">zero</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+  name = None
+  kind = &#39;real&#39;
+  grid = &#39;GLQ&#39;
+  extend = False
+  nlat = 129
+  nlon = 257
+  lmax = 128
+  units = None
+</pre></div></div>
+</div>
+<p>The fingerprint calculations depend on certain <code class="docutils literal notranslate"><span class="pre">pyshtools</span></code> options for spherical harmonics transformations (e.g., the normalisation convention). These choices are detailed within the classes <code class="docutils literal notranslate"><span class="pre">__init__</span></code> method, only affect internal calculaions, and <strong>should not be changed</strong>.</p>
+<p>The latitudes and longitudes present in the spatial grid can be accessed as follows:</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[4]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">lats</span> <span class="o">=</span> <span class="n">fingerprint</span><span class="o">.</span><span class="n">lats</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;First five latitudes:</span><span class="se">\n\n</span><span class="si">{</span><span class="n">lats</span><span class="p">[:</span><span class="mi">5</span><span class="p">]</span><span class="si">}</span><span class="se">\n</span><span class="s1"> &#39;</span><span class="p">)</span>
+
+<span class="n">lons</span> <span class="o">=</span> <span class="n">fingerprint</span><span class="o">.</span><span class="n">lons</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;First five longitudes:</span><span class="se">\n\n</span><span class="si">{</span><span class="n">lons</span><span class="p">[:</span><span class="mi">5</span><span class="p">]</span><span class="si">}</span><span class="s1"> &#39;</span><span class="p">)</span>
+<br/></pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+First five latitudes:
+
+[88.93601535 87.55771126 86.17126754 84.78298473 83.39400431]
+
+First five longitudes:
+
+[0.         1.40077821 2.80155642 4.20233463 5.60311284]
+</pre></div></div>
+</div>
+</section>
+<section id="Step-2---Selecting-the-background-sea-level-and-ice-models">
+<h2>Step 2 - Selecting the background sea level and ice models<a class="headerlink" href="#Step-2---Selecting-the-background-sea-level-and-ice-models" title="Link to this heading">¶</a></h2>
+<p>Until the initial sea level and ice thickness are set, various methods of the <code class="docutils literal notranslate"><span class="pre">FingerPrint</span></code> class cannot be set. For example, in the code below we try to access the <code class="docutils literal notranslate"><span class="pre">sea_level</span></code> property of the class instance but this raises a <code class="docutils literal notranslate"><span class="pre">NotImplementedError</span></code>:</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[5]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">try</span><span class="p">:</span>
+    <span class="n">sea_level</span> <span class="o">=</span> <span class="n">fingerprint</span><span class="o">.</span><span class="n">sea_level</span>
+<span class="k">except</span> <span class="ne">NotImplementedError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+Sea level not set.
+</pre></div></div>
+</div>
+<p>In Tutorial 1, we used the method <code class="docutils literal notranslate"><span class="pre">set_state_from_ice_ng</span></code> to set the intial sea level and ice thickness. There are two keyword arguments for this method:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">version</span></code>: Selects which of the ice-ng models to use. The choices are <code class="docutils literal notranslate"><span class="pre">5</span></code>, <code class="docutils literal notranslate"><span class="pre">6</span></code> and <code class="docutils literal notranslate"><span class="pre">7</span></code> inputed as an <code class="docutils literal notranslate"><span class="pre">int</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">date</span></code>: The date in ka measured backwards from the present-day. This value is input as a <code class="docutils literal notranslate"><span class="pre">float</span></code>. Linear interpolation is used when the date lies within the range for the model (e.g., 0 to 26ka for ice-7g), while outside this range constant interpolation is applied.</p></li>
+</ul>
+<p>In the example below we set values from the last glacial maximum at 21ka from the ice-5g model and plot the fields along with the ocean function. Note that when plotting the ice thickness we multiply the field by <code class="docutils literal notranslate"><span class="pre">fingerprint.ice_projection()</span></code>. This result of this method is a field that is equal to one where ice is present and equal to <code class="docutils literal notranslate"><span class="pre">numpy.nan</span></code> elsewhere. There are similar methods <code class="docutils literal notranslate"><span class="pre">ocean_projection</span></code> and <code class="docutils literal notranslate"><span class="pre">land_projection</span></code>. In each case we can set through an optional argument <code class="docutils literal notranslate"><span class="pre">value</span></code>
+the value asigned to the field outside of the desired area.</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[6]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">fingerprint</span><span class="o">.</span><span class="n">set_state_from_ice_ng</span><span class="p">(</span><span class="n">version</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">date</span><span class="o">=</span><span class="mi">21</span><span class="p">)</span>
+
+<span class="n">fig</span><span class="p">,</span> <span class="n">ax</span><span class="p">,</span> <span class="n">im</span> <span class="o">=</span> <span class="n">sl</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">fingerprint</span><span class="o">.</span><span class="n">sea_level</span><span class="p">)</span>
+<span class="n">fig</span><span class="o">.</span><span class="n">colorbar</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">ax</span><span class="o">=</span><span class="n">ax</span><span class="p">,</span> <span class="n">orientation</span><span class="o">=</span><span class="s2">&quot;horizontal&quot;</span><span class="p">,</span> <span class="n">shrink</span> <span class="o">=</span> <span class="mf">0.7</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span> <span class="s2">&quot;sea level at LGM&quot;</span><span class="p">)</span>
+
+<span class="n">fig</span><span class="p">,</span> <span class="n">ax</span><span class="p">,</span> <span class="n">im</span> <span class="o">=</span> <span class="n">sl</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">fingerprint</span><span class="o">.</span><span class="n">ice_thickness</span> <span class="o">*</span> <span class="n">fingerprint</span><span class="o">.</span><span class="n">ice_projection</span><span class="p">())</span>
+<span class="n">fig</span><span class="o">.</span><span class="n">colorbar</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">ax</span><span class="o">=</span><span class="n">ax</span><span class="p">,</span> <span class="n">orientation</span><span class="o">=</span><span class="s2">&quot;horizontal&quot;</span><span class="p">,</span> <span class="n">shrink</span> <span class="o">=</span> <span class="mf">0.7</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span> <span class="s2">&quot;ice thickness at LGM&quot;</span><span class="p">)</span>
+
+<span class="n">fig</span><span class="p">,</span> <span class="n">ax</span><span class="p">,</span> <span class="n">im</span> <span class="o">=</span> <span class="n">sl</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">fingerprint</span><span class="o">.</span><span class="n">ocean_function</span><span class="p">)</span>
+<span class="n">fig</span><span class="o">.</span><span class="n">colorbar</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">ax</span><span class="o">=</span><span class="n">ax</span><span class="p">,</span> <span class="n">orientation</span><span class="o">=</span><span class="s2">&quot;horizontal&quot;</span><span class="p">,</span> <span class="n">shrink</span> <span class="o">=</span> <span class="mf">0.7</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span> <span class="s2">&quot;ocean function at LGM&quot;</span><span class="p">)</span>
+
+
+<span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/tutorials_t2_11_0.png" src="../_images/tutorials_t2_11_0.png" />
+</div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/tutorials_t2_11_1.png" src="../_images/tutorials_t2_11_1.png" />
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/tutorials_t2_11_2.png" src="../_images/tutorials_t2_11_2.png" />
+</div>
+</div>
+<p>The values of <code class="docutils literal notranslate"><span class="pre">sea_level</span></code> and <code class="docutils literal notranslate"><span class="pre">ice_thickness</span></code> can also be set directly using suitable <code class="docutils literal notranslate"><span class="pre">SHGrid</span></code> objects. In the example below we illustrate this idea using a simple one continent world in which the northern hemisphere is all land and the sourthern all ocean. Note that these values need to be set using the chosen non-dimensionalisation scheme.</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[7]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><br/><span></span><span class="c1"># Generate a numpy array of all latitudes</span>
+<span class="n">lats</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">meshgrid</span><span class="p">(</span>
+            <span class="n">fingerprint</span><span class="o">.</span><span class="n">lats</span><span class="p">(),</span>
+            <span class="n">fingerprint</span><span class="o">.</span><span class="n">lons</span><span class="p">(),</span>
+            <span class="n">indexing</span><span class="o">=</span><span class="s2">&quot;ij&quot;</span><span class="p">,</span>
+        <span class="p">)</span>
+
+<span class="c1"># Construct the sea level values</span>
+<span class="n">sea_level_amplitude</span> <span class="o">=</span> <span class="mi">3000</span><span class="o">/</span> <span class="n">fingerprint</span><span class="o">.</span><span class="n">length_scale</span>
+<span class="n">sea_level</span> <span class="o">=</span> <span class="n">SHGrid</span><span class="o">.</span><span class="n">from_array</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">lats</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">,</span> <span class="n">sea_level_amplitude</span><span class="p">,</span> <span class="o">-</span><span class="n">sea_level_amplitude</span><span class="p">),</span> <span class="n">grid</span><span class="o">=</span><span class="n">fingerprint</span><span class="o">.</span><span class="n">grid</span><span class="p">)</span>
+
+
+<span class="c1"># Now set the ice sheet thickness using a disk geometry.</span>
+<span class="n">disk_angular_radius</span> <span class="o">=</span> <span class="mi">20</span>
+<span class="n">disk_centre_lat</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="n">disk_centre_lon</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="n">ice_thickness_amplitude</span> <span class="o">=</span> <span class="mi">2000</span> <span class="o">/</span> <span class="n">fingerprint</span><span class="o">.</span><span class="n">length_scale</span>
+<span class="n">ice_thickness</span> <span class="o">=</span> <span class="n">fingerprint</span><span class="o">.</span><span class="n">disk_load</span><span class="p">(</span><span class="n">disk_angular_radius</span><span class="p">,</span> <span class="n">disk_centre_lat</span><span class="p">,</span> <span class="n">disk_centre_lon</span><span class="p">,</span> <span class="n">ice_thickness_amplitude</span><span class="p">)</span>
+
+<span class="c1"># Set the values and plot the fields.</span>
+<span class="n">fingerprint</span><span class="o">.</span><span class="n">sea_level</span> <span class="o">=</span> <span class="n">sea_level</span>
+<span class="n">fingerprint</span><span class="o">.</span><span class="n">ice_thickness</span> <span class="o">=</span> <span class="n">ice_thickness</span>
+
+<span class="c1"># Note coasts are not plotted in these cases.</span>
+<span class="n">fig</span><span class="p">,</span> <span class="n">ax</span><span class="p">,</span> <span class="n">im</span> <span class="o">=</span> <span class="n">sl</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">fingerprint</span><span class="o">.</span><span class="n">sea_level</span><span class="p">,</span> <span class="n">coasts</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<span class="n">fig</span><span class="o">.</span><span class="n">colorbar</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">ax</span><span class="o">=</span><span class="n">ax</span><span class="p">,</span> <span class="n">orientation</span><span class="o">=</span><span class="s2">&quot;horizontal&quot;</span><span class="p">,</span> <span class="n">shrink</span> <span class="o">=</span> <span class="mf">0.7</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">&quot;sea level&quot;</span><span class="p">)</span>
+
+<span class="n">fig</span><span class="p">,</span> <span class="n">ax</span><span class="p">,</span> <span class="n">im</span> <span class="o">=</span> <span class="n">sl</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">fingerprint</span><span class="o">.</span><span class="n">ice_thickness</span><span class="p">,</span>  <span class="n">coasts</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<span class="n">fig</span><span class="o">.</span><span class="n">colorbar</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">ax</span><span class="o">=</span><span class="n">ax</span><span class="p">,</span> <span class="n">orientation</span><span class="o">=</span><span class="s2">&quot;horizontal&quot;</span><span class="p">,</span> <span class="n">shrink</span> <span class="o">=</span> <span class="mf">0.7</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">&quot;ice thickness&quot;</span><span class="p">)</span>
+
+<span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/tutorials_t2_13_0.png" src="../_images/tutorials_t2_13_0.png" />
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/tutorials_t2_13_1.png" src="../_images/tutorials_t2_13_1.png" />
+</div>
+</div>
+</section>
+<section id="Step-3---Choosing-the-direct-load.">
+<h2>Step 3 - Choosing the direct load.<a class="headerlink" href="#Step-3---Choosing-the-direct-load." title="Link to this heading">¶</a></h2>
+<p>As previously, within a fingerprint calculation we need to select a direct load. Here we choose to melt 50% of the initial ice sheet. To proceed, we first define the change in ice thickness and then convert this into the associated direct load by setting:</p>
+<div class="math-wrapper docutils container">
+<div class="math notranslate nohighlight">
+\[\zeta = \rho_{i}(1-C) \Delta I,\]</div>
+</div>
+<p>where <span class="math notranslate nohighlight">\(\zeta\)</span> is the direct load, <span class="math notranslate nohighlight">\(\rho_{i}\)</span> the density of ice, and <span class="math notranslate nohighlight">\(C\)</span> the ocean function. The calculation is done using a method of the <code class="docutils literal notranslate"><span class="pre">FingerPrint</span></code> class, but we also show in a comment how it can be done directly.</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[8]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Set the change in ice_thickness.</span>
+<span class="n">ice_thickness_change</span> <span class="o">=</span> <span class="o">-</span><span class="mf">0.5</span> <span class="o">*</span> <span class="n">fingerprint</span><span class="o">.</span><span class="n">ice_thickness</span>
+
+<span class="c1"># Convert to the direct load:</span>
+<span class="n">direct_load</span> <span class="o">=</span> <span class="n">fingerprint</span><span class="o">.</span><span class="n">direct_load_from_ice_thickness_change</span><span class="p">(</span><span class="n">ice_thickness_change</span><span class="p">)</span>
+
+<span class="c1"># Note that the above method is equivalent to setting:</span>
+<span class="c1"># direct_load = fingerprint.ice_density * fingerprint.one_minus_ocean_function * ice_thickness_change</span>
+
+<span class="n">fig</span><span class="p">,</span> <span class="n">ax</span><span class="p">,</span> <span class="n">im</span> <span class="o">=</span> <span class="n">sl</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">direct_load</span><span class="p">,</span> <span class="n">coasts</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<span class="n">fig</span><span class="o">.</span><span class="n">colorbar</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">ax</span><span class="o">=</span><span class="n">ax</span><span class="p">,</span> <span class="n">orientation</span><span class="o">=</span><span class="s2">&quot;horizontal&quot;</span><span class="p">,</span> <span class="n">shrink</span> <span class="o">=</span> <span class="mf">0.7</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">&quot;direct load&quot;</span><span class="p">)</span>
+
+<span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/tutorials_t2_15_0.png" src="../_images/tutorials_t2_15_0.png" />
+</div>
+</div>
+</section>
+<section id="Step-4---Solve-the-sea-level-equation">
+<h2>Step 4 - Solve the sea level equation<a class="headerlink" href="#Step-4---Solve-the-sea-level-equation" title="Link to this heading">¶</a></h2>
+<p>We can now solve the sea level equation to produce the fingerprint. Here we list all keyword arguments for the <code class="docutils literal notranslate"><span class="pre">__call__</span></code> method that are relevant to solving standard fingerprint problems:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">direct_load</span></code>: This is an <code class="docutils literal notranslate"><span class="pre">SHGrid</span></code> object specifying the direct load to be used. The default is <code class="docutils literal notranslate"><span class="pre">None</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">rtol</span></code>: Relative tolerance used in the iterative solution of the sea level equation. Default is <code class="docutils literal notranslate"><span class="pre">1e-6</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">verbose</span></code>: If <code class="docutils literal notranslate"><span class="pre">True</span></code> relative errors are printed during the iterative solution. Default is <code class="docutils literal notranslate"><span class="pre">False</span></code>.</p></li>
+</ul>
+<p>Four outputs are returned in the following order:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">sea_level_change</span></code>: An <code class="docutils literal notranslate"><span class="pre">SHGrid</span></code> of the change in sea level.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">displacement</span></code>: An <code class="docutils literal notranslate"><span class="pre">SHGrid</span></code> of the vertical displacement.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">gravity_potential_change</span></code>: An <code class="docutils literal notranslate"><span class="pre">SHGrid</span></code> of the change in gravity potential.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">angular_velocity_change</span></code>: A <code class="docutils literal notranslate"><span class="pre">numpy</span></code> vector for the change in the angular velocity. Note that only x and y components are returned.</p></li>
+</ul>
+<p>Currently, horizontal displacement cannot be returned by the code, but they are accounted for in the modelling. The component of the angular velocity change along the equilibrium rotation axis is also neglected, and hence only the two horizontal components are returned. This latter approximation is reasonable because the horizontal components are larger by around two orders of magnitude.</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[9]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="p">(</span><span class="n">sea_level_change</span><span class="p">,</span> <span class="n">displacement</span><span class="p">,</span> <span class="n">gravity_potential_change</span><span class="p">,</span> <span class="n">angular_velocity_change</span><span class="p">)</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="n">fingerprint</span><span class="p">(</span><span class="n">direct_load</span><span class="o">=</span><span class="n">direct_load</span><span class="p">,</span> <span class="n">rtol</span><span class="o">=</span><span class="mf">1.0e-9</span><span class="p">)</span>
+<span class="p">)</span>
+
+
+<span class="c1"># Note that the results are dimensionalised before plotting.</span>
+<span class="n">fig</span><span class="p">,</span> <span class="n">ax</span><span class="p">,</span> <span class="n">im</span> <span class="o">=</span> <span class="n">sl</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span>
+    <span class="n">sea_level_change</span> <span class="o">*</span> <span class="n">fingerprint</span><span class="o">.</span><span class="n">length_scale</span><span class="p">,</span> <span class="n">coasts</span><span class="o">=</span><span class="kc">False</span>
+<span class="p">)</span>
+<span class="n">fig</span><span class="o">.</span><span class="n">colorbar</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">ax</span><span class="o">=</span><span class="n">ax</span><span class="p">,</span> <span class="n">orientation</span><span class="o">=</span><span class="s2">&quot;horizontal&quot;</span><span class="p">,</span> <span class="n">shrink</span><span class="o">=</span><span class="mf">0.7</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">&quot;sea level change&quot;</span><span class="p">)</span>
+
+<span class="n">fig</span><span class="p">,</span> <span class="n">ax</span><span class="p">,</span> <span class="n">im</span> <span class="o">=</span> <span class="n">sl</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">displacement</span> <span class="o">*</span> <span class="n">fingerprint</span><span class="o">.</span><span class="n">length_scale</span><span class="p">,</span> <span class="n">coasts</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<span class="n">fig</span><span class="o">.</span><span class="n">colorbar</span><span class="p">(</span>
+    <span class="n">im</span><span class="p">,</span> <span class="n">ax</span><span class="o">=</span><span class="n">ax</span><span class="p">,</span> <span class="n">orientation</span><span class="o">=</span><span class="s2">&quot;horizontal&quot;</span><span class="p">,</span> <span class="n">shrink</span><span class="o">=</span><span class="mf">0.7</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">&quot;vertical displacement&quot;</span>
+<span class="p">)</span>
+
+<span class="n">fig</span><span class="p">,</span> <span class="n">ax</span><span class="p">,</span> <span class="n">im</span> <span class="o">=</span> <span class="n">sl</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span>
+    <span class="n">gravity_potential_change</span> <span class="o">*</span> <span class="n">fingerprint</span><span class="o">.</span><span class="n">gravitational_potential_scale</span><span class="p">,</span> <span class="n">coasts</span><span class="o">=</span><span class="kc">False</span>
+<span class="p">)</span>
+<span class="n">fig</span><span class="o">.</span><span class="n">colorbar</span><span class="p">(</span>
+    <span class="n">im</span><span class="p">,</span> <span class="n">ax</span><span class="o">=</span><span class="n">ax</span><span class="p">,</span> <span class="n">orientation</span><span class="o">=</span><span class="s2">&quot;horizontal&quot;</span><span class="p">,</span> <span class="n">shrink</span><span class="o">=</span><span class="mf">0.7</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">&quot;gravity potential change&quot;</span>
+<span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span>
+    <span class="sa">f</span><span class="s2">&quot;relative angular velocity change </span><span class="si">{</span><span class="n">angular_velocity_change</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">fingerprint</span><span class="o">.</span><span class="n">rotation_frequency</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="p">)</span>
+
+<span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+relative angular velocity change [0.00014076 0.        ]
+</pre></div></div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/tutorials_t2_17_1.png" src="../_images/tutorials_t2_17_1.png" />
+</div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/tutorials_t2_17_2.png" src="../_images/tutorials_t2_17_2.png" />
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/tutorials_t2_17_3.png" src="../_images/tutorials_t2_17_3.png" />
+</div>
+</div>
+<div class="line-block">
+<div class="line">The gravity potential change, <span class="math notranslate nohighlight">\(\gamma\)</span> takes the form</div>
+</div>
+<blockquote>
+<div><div class="math-wrapper docutils container">
+<div class="math notranslate nohighlight">
+\[\gamma = \phi + \psi,\]</div>
+</div>
+</div></blockquote>
+<div class="line-block">
+<div class="line">where <span class="math notranslate nohighlight">\(\phi\)</span> is the gravitational potential change and <span class="math notranslate nohighlight">\(\psi\)</span> the centrifugal potential change. The latter can be expressed in terms of the angular velocity change, <span class="math notranslate nohighlight">\({\omega}\)</span> through</div>
+</div>
+<blockquote>
+<div><div class="math-wrapper docutils container">
+<div class="math notranslate nohighlight">
+\[\psi = -({\Omega} \times \mathbf{x}) \cdot ({\omega} \times \mathbf{x}),\]</div>
+</div>
+<p>where <span class="math notranslate nohighlight">\({\Omega}\)</span> is the equilibrium angular velocity. The gravitational potential change can be recovered from the solution as follows:</p>
+</div></blockquote>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[10]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># We can recover the gravitational potential change by subtracting centrifugal contribution.</span>
+<span class="n">gravitational_potential_change</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="n">fingerprint</span><span class="o">.</span><span class="n">gravity_potential_change_to_gravitational_potential_change</span><span class="p">(</span>
+        <span class="n">gravity_potential_change</span><span class="p">,</span> <span class="n">angular_velocity_change</span>
+    <span class="p">)</span>
+<span class="p">)</span>
+
+
+<span class="n">fig</span><span class="p">,</span> <span class="n">ax</span><span class="p">,</span> <span class="n">im</span> <span class="o">=</span> <span class="n">sl</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span>
+    <span class="n">gravitational_potential_change</span> <span class="o">*</span> <span class="n">fingerprint</span><span class="o">.</span><span class="n">gravitational_potential_scale</span><span class="p">,</span>
+    <span class="n">coasts</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="n">fig</span><span class="o">.</span><span class="n">colorbar</span><span class="p">(</span>
+    <span class="n">im</span><span class="p">,</span>
+    <span class="n">ax</span><span class="o">=</span><span class="n">ax</span><span class="p">,</span>
+    <span class="n">orientation</span><span class="o">=</span><span class="s2">&quot;horizontal&quot;</span><span class="p">,</span>
+    <span class="n">shrink</span><span class="o">=</span><span class="mf">0.7</span><span class="p">,</span>
+    <span class="n">label</span><span class="o">=</span><span class="s2">&quot;gravitational potential change&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="c1"># Get the centrifigual potential change</span>
+<span class="n">centrifugal_potential_change</span> <span class="o">=</span> <span class="n">gravity_potential_change</span> <span class="o">-</span> <span class="n">gravitational_potential_change</span>
+
+<span class="c1"># The above calculation can also be done directly by</span>
+<span class="c1"># centrifugal_potential_change = fingerprint.centrifugal_potential_change(angular_velocity_change)</span>
+
+<span class="n">fig</span><span class="p">,</span> <span class="n">ax</span><span class="p">,</span> <span class="n">im</span> <span class="o">=</span> <span class="n">sl</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span>
+    <span class="n">centrifugal_potential_change</span> <span class="o">*</span> <span class="n">fingerprint</span><span class="o">.</span><span class="n">gravitational_potential_scale</span><span class="p">,</span>
+    <span class="n">coasts</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="n">fig</span><span class="o">.</span><span class="n">colorbar</span><span class="p">(</span>
+    <span class="n">im</span><span class="p">,</span>
+    <span class="n">ax</span><span class="o">=</span><span class="n">ax</span><span class="p">,</span>
+    <span class="n">orientation</span><span class="o">=</span><span class="s2">&quot;horizontal&quot;</span><span class="p">,</span>
+    <span class="n">shrink</span><span class="o">=</span><span class="mf">0.7</span><span class="p">,</span>
+    <span class="n">label</span><span class="o">=</span><span class="s2">&quot;centrifugal potential change&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+<br/></pre></div>
+</div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/tutorials_t2_19_0.png" src="../_images/tutorials_t2_19_0.png" />
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/tutorials_t2_19_1.png" src="../_images/tutorials_t2_19_1.png" />
+</div>
+</div>
+</section>
+</section>
+
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          <a class="next-page" href="t3.html">
+              <div class="page-info">
+                <div class="context">
+                  <span>Next</span>
+                </div>
+                <div class="title">Tutorial 3 - Sensitivity kernels for sea level point measurements.</div>
+              </div>
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+            </a>
+          <a class="prev-page" href="t1.html">
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+              <div class="page-info">
+                <div class="context">
+                  <span>Previous</span>
+                </div>
+                
+                <div class="title">Tutorial 1 - Computing a sea level fingerprint</div>
+                
+              </div>
+            </a>
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                Copyright &#169; 2025, David Al-Attar, Dan Heathcote
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            
+          </div>
+          <div class="right-details">
+            
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer">
+      
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            On this page
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">Tutorial 2 - Exploring some options in the FingerPrint Class</a><ul>
+<li><a class="reference internal" href="#Step-1---Setting-up-the-FingerPrint-class">Step 1 - Setting up the FingerPrint class</a></li>
+<li><a class="reference internal" href="#Step-2---Selecting-the-background-sea-level-and-ice-models">Step 2 - Selecting the background sea level and ice models</a></li>
+<li><a class="reference internal" href="#Step-3---Choosing-the-direct-load.">Step 3 - Choosing the direct load.</a></li>
+<li><a class="reference internal" href="#Step-4---Solve-the-sea-level-equation">Step 4 - Solve the sea level equation</a></li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
+      
+      
+    </aside>
+  </div>
+</div><script src="../_static/documentation_options.js?v=5929fcd5"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/scripts/furo.js?v=46bd48cc"></script>
+    <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+    <script>window.MathJax = {"tex": {"inlineMath": [["$", "$"], ["\\(", "\\)"]], "processEscapes": true}, "options": {"ignoreHtmlClass": "tex2jax_ignore|mathjax_ignore|document", "processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+    <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    </body>
+</html>

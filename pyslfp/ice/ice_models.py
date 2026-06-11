@@ -11,7 +11,7 @@ from typing import Tuple
 from pathlib import Path
 
 import numpy as np
-from pyshtools import SHGrid
+from pyshtools import SHGrid, SHCoeffs
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import cartopy.crs as ccrs
@@ -280,3 +280,57 @@ class BaseIceModel(ABC):
         ani.save(output_file, writer="ffmpeg", fps=fps, dpi=180)
         print("Done!")
         plt.close(fig)
+
+def apply_cosine_taper(
+    grid: SHGrid,
+    target_lmax: int,
+    l_start: int,
+    /,
+    *,
+    grid_format: str = "DH",
+    extend: bool = True,
+) -> SHGrid:
+    """
+    Applies a cosine taper (Tukey window) in the spherical harmonic domain 
+    to smoothly truncate a high-resolution grid down to a target lmax.
+    This prevents the Gibbs phenomenon (spatial ringing) caused by hard truncation.
+
+    Args:
+        grid (SHGrid): The high-resolution input spatial grid.
+        target_lmax (int): The final, lower maximum degree to truncate to.
+        l_start (int): The spherical harmonic degree where the taper begins.
+        grid_format (str): The output pyshtools grid format (e.g., "DH", "GLQ").
+        extend (bool): Whether to extend the output grid to include the poles.
+
+    Returns:
+        SHGrid: A new, smoothed spatial grid evaluated at the target_lmax.
+    """
+    # 1. Transform the spatial grid to the spherical harmonic domain
+    coeffs = grid.expand()
+    current_lmax = coeffs.lmax
+
+    # If the grid is already at or below the target, just pad/truncate and return
+    if current_lmax <= target_lmax:
+        return coeffs.expand(grid=grid_format, extend=extend, lmax=target_lmax)
+
+    # 2. Extract the raw spherical harmonic coefficients (shape: [2, lmax+1, lmax+1])
+    coeff_array = coeffs.to_array().copy()
+
+    # 3. Apply the cosine taper weights
+    if target_lmax > l_start:
+        for l in range(l_start, target_lmax + 1):
+            weight = 0.5 * (1.0 + np.cos(np.pi * (l - l_start) / (target_lmax - l_start)))
+            coeff_array[:, l, :] *= weight
+
+    # 4. Truncate the coefficient array exactly at target_lmax
+    truncated_array = coeff_array[:, :target_lmax + 1, :target_lmax + 1]
+
+    # 5. Reconstruct the spatial grid at the new, lower lmax
+    new_coeffs = SHCoeffs.from_array(
+        truncated_array, 
+        normalization=coeffs.normalization, 
+        csphase=coeffs.csphase
+    )
+    
+    # Setting lmax explicitly during expand ensures the spatial grid matches target_lmax
+    return new_coeffs.expand(grid=grid_format, extend=extend, lmax=target_lmax)

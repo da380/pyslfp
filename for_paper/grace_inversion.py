@@ -62,12 +62,12 @@ def parse_arguments():
 
     # --- Resolution & Physics Settings ---
     parser.add_argument(
-        "--lmax", type=int, default=64, help="Exact model max SH degree."
+        "--lmax", type=int, default=256, help="Exact model max SH degree."
     )
     parser.add_argument(
         "--obs-degree",
         type=int,
-        default=32,
+        default=100,
         help="Max SH degree of GRACE observations.",
     )
     parser.add_argument(
@@ -280,11 +280,7 @@ def main():
         # ------------------ DEGREE ONE ------------------
         if args.plot_deg1:
             print("Generating Degree-1 Corner Plot...")
-            deg1_op = (
-                load_space.to_coefficient_operator(1, lmin=1)
-                * ewt_mm_scale
-                @ total_load_op
-            )
+            deg1_op = load_space.to_coefficient_operator(1, lmin=1) * ewt_mm_scale
 
             deg1_prior = model_prior.affine_mapping(
                 operator=deg1_op

@@ -65,6 +65,12 @@ def parse_arguments():
         action="store_true",
         help="Plot regional 3-way signal decomposition.",
     )
+    parser.add_argument(
+        "--std-samples",
+        type=int,
+        default=0,
+        help="Number of samples for pointwise std estimates (Joint only).",
+    )
 
     # --- Resolution Settings ---
     parser.add_argument(
@@ -160,6 +166,8 @@ def main():
     args = parse_arguments()
     if args.all:
         args.plot_pdfs = args.plot_maps = args.plot_regions = True
+        # if args.std_samples == 0:
+        #    args.std_samples = 100
 
     output_dir = "output_plots_joint_inversion"
     os.makedirs(output_dir, exist_ok=True)
@@ -370,7 +378,7 @@ def main():
             measures,
             true_value=true_gmsl_val_mm,
             ax=ax_pdf,
-            title="Global Mean Sea Level Change",
+            title="",
             posterior_labels=labels,
         )
         figures_to_save["gmsl_pdf"] = fig_pdf
@@ -393,6 +401,52 @@ def main():
         true_ice, true_dyn, true_rho = true_model
         post_ice, post_dyn, post_rho = post_joint.expectation
 
+        plot_std = args.std_samples > 0
+        ncols = 3 if plot_std else 2
+        fig_width = 22 if plot_std else 14
+        cmap_std = "Blues"
+
+        # --- PRE-COMPUTE STD IF REQUESTED ---
+        if plot_std:
+            print(
+                f"  Computing pointwise standard deviation from {args.std_samples} joint posterior samples..."
+            )
+            samples = post_joint.samples(args.std_samples, parallel=True, n_jobs=10)
+
+            v_ice = load_space.zero
+            v_dyn = load_space.zero
+            v_rho = load_space.zero
+
+            for s_ice, s_dyn, s_rho in samples:
+                diff_ice = load_space.subtract(s_ice, post_ice)
+                load_space.axpy(
+                    1.0 / args.std_samples,
+                    load_space.vector_multiply(diff_ice, diff_ice),
+                    v_ice,
+                )
+
+                diff_dyn = load_space.subtract(s_dyn, post_dyn)
+                load_space.axpy(
+                    1.0 / args.std_samples,
+                    load_space.vector_multiply(diff_dyn, diff_dyn),
+                    v_dyn,
+                )
+
+                diff_rho = load_space.subtract(s_rho, post_rho)
+                load_space.axpy(
+                    1.0 / args.std_samples,
+                    load_space.vector_multiply(diff_rho, diff_rho),
+                    v_rho,
+                )
+
+            std_ice = load_space.vector_sqrt(v_ice)
+            std_dyn = load_space.vector_sqrt(v_dyn)
+            std_rho = load_space.vector_sqrt(v_rho)
+
+            vmax_std_ice = np.max(std_ice.data * scale_mm)
+            vmax_std_dyn = np.max(std_dyn.data * scale_mm)
+            vmax_std_rho = np.max(std_rho.data * steric_scale * scale_mm)
+
         vmax_ice = max(
             np.max(np.abs(true_ice.data * scale_mm)),
             np.max(np.abs(post_ice.data * scale_mm)),
@@ -407,7 +461,7 @@ def main():
         )
 
         fig_maps, axes = sl.subplots(
-            3, 2, figsize=(14, 15), gridspec_kw={"hspace": 0.15}
+            3, ncols, figsize=(fig_width, 15), gridspec_kw={"hspace": 0.15}
         )
 
         # --- ROW 1: ICE ---
@@ -431,6 +485,17 @@ def main():
             colorbar_kwargs={**cb_kwargs, "label": "Ice Thickness (mm)"},
             gridlines_kwargs=gl_kwargs,
         )
+        if plot_std:
+            sl.plot(
+                std_ice * ice_mask_mm,
+                ax=axes[0, 2],
+                colorbar=True,
+                cmap=cmap_std,
+                vmin=0,
+                vmax=vmax_std_ice,
+                colorbar_kwargs={**cb_kwargs, "label": "Ice STD (mm)"},
+                gridlines_kwargs=gl_kwargs,
+            )
 
         # --- ROW 2: DYN ---
         sl.plot(
@@ -453,6 +518,17 @@ def main():
             colorbar_kwargs={**cb_kwargs, "label": "Dynamic Topography (mm)"},
             gridlines_kwargs=gl_kwargs,
         )
+        if plot_std:
+            sl.plot(
+                std_dyn * ocean_mask_mm,
+                ax=axes[1, 2],
+                colorbar=True,
+                cmap=cmap_std,
+                vmin=0,
+                vmax=vmax_std_dyn,
+                colorbar_kwargs={**cb_kwargs, "label": "Dynamic STD (mm)"},
+                gridlines_kwargs=gl_kwargs,
+            )
 
         # --- ROW 3: STERIC ---
         sl.plot(
@@ -475,14 +551,29 @@ def main():
             colorbar_kwargs={**cb_kwargs, "label": r"Steric SL (mm)"},
             gridlines_kwargs=gl_kwargs,
         )
+        if plot_std:
+            sl.plot(
+                std_rho * steric_scale * ocean_mask_mm,
+                ax=axes[2, 2],
+                colorbar=True,
+                cmap=cmap_std,
+                vmin=0,
+                vmax=vmax_std_rho,
+                colorbar_kwargs={**cb_kwargs, "label": "Steric STD (mm)"},
+                gridlines_kwargs=gl_kwargs,
+            )
 
         if args.plot_regions:
             for ax in axes.flatten():
                 state.plot_boundaries(ax, regions_to_analyze)
 
         # Labels
-        axes[0, 0].set_title("True State", fontsize=16, fontweight="bold", pad=20)
-        axes[0, 1].set_title("Joint Posterior", fontsize=16, fontweight="bold", pad=20)
+        col_labels = ["True State", "Joint Posterior"]
+        if plot_std:
+            col_labels.append("Pointwise Std. Deviation")
+
+        for j in range(ncols):
+            axes[0, j].set_title(col_labels[j], fontsize=16, fontweight="bold", pad=20)
 
         row_titles = ["Ice thickness", "Dynamic topography", "Steric sea level"]
         for i, row_title in enumerate(row_titles):
@@ -520,8 +611,8 @@ def main():
                 cmap="seismic",
                 colorbar=True,
                 symmetric=True,
-                # vmin=-vmax,
-                # vmax=vmax,
+                vmin=-vmax,
+                vmax=vmax,
                 colorbar_kwargs={**cb_kwargs, "label": label},
                 gridlines_kwargs=gl_kwargs,
             )
@@ -533,8 +624,8 @@ def main():
                 cmap="seismic",
                 colorbar=True,
                 symmetric=True,
-                # vmin=-vmax,
-                # vmax=vmax,
+                vmin=-vmax,
+                vmax=vmax,
                 colorbar_kwargs={**cb_kwargs, "label": label},
                 gridlines_kwargs=gl_kwargs,
             )
@@ -601,7 +692,7 @@ def main():
 
             axes_cov[0, 0].set_title("Prior", fontsize=16, fontweight="bold", pad=20)
             axes_cov[0, 1].set_title(
-                "Joint Posterior", fontsize=16, fontweight="bold", pad=20
+                "Posterior", fontsize=16, fontweight="bold", pad=20
             )
 
             for i, row_title in enumerate(row_titles):
@@ -671,31 +762,47 @@ def main():
         alt_cov_mat = post_alt_meas.covariance.matrix(dense=True)
         joint_cov_mat = post_joint_meas.covariance.matrix(dense=True)
 
+        pr_trace = np.trace(prior_cov_mat)
+        alt_trace = np.trace(alt_cov_mat)
+        joint_trace = np.trace(joint_cov_mat)
+
+        alt_trace_red = 100.0 * (1.0 - (alt_trace / pr_trace)) if pr_trace > 0 else 0.0
+        joint_trace_red = (
+            100.0 * (1.0 - (joint_trace / pr_trace)) if pr_trace > 0 else 0.0
+        )
+
+        pr_det = np.linalg.det(prior_cov_mat)
+        alt_det = np.linalg.det(alt_cov_mat)
+        joint_det = np.linalg.det(joint_cov_mat)
+
+        alt_det_red = 100.0 * (1.0 - (alt_det / pr_det)) if pr_det > 0 else 0.0
+        joint_det_red = 100.0 * (1.0 - (joint_det / pr_det)) if pr_det > 0 else 0.0
+
         with open(metrics_file, "a") as f_metrics:
             f_metrics.write(
                 f"\n\nRegional Signal Separation ({regions_to_analyze[0]})\n"
             )
-            f_metrics.write("=" * 115 + "\n")
+            f_metrics.write("=" * 105 + "\n")
 
             f_metrics.write(
-                f"{'Metric':<25} | {'Prior':<15} | {'Alt-Only':<15} | {'Joint':<15}\n"
+                f"{'Metric':<22} | {'Prior':<12} | {'Alt-Only':<12} | {'Alt Red%':<10} | {'Joint':<12} | {'Joint Red%'}\n"
             )
-            f_metrics.write("-" * 115 + "\n")
+            f_metrics.write("-" * 105 + "\n")
             f_metrics.write(
-                f"{'Joint KL Divergence':<25} | {'-':<15} | {post_alt_meas.kl_divergence(prior_meas):<15.4f} | {post_joint_meas.kl_divergence(prior_meas):<15.4f}\n"
-            )
-            f_metrics.write(
-                f"{'Total Var (Trace) mm²':<25} | {np.trace(prior_cov_mat):<15.4f} | {np.trace(alt_cov_mat):<15.4f} | {np.trace(joint_cov_mat):<15.4f}\n"
+                f"{'Joint KL Div (nats)':<22} | {'-':<12} | {post_alt_meas.kl_divergence(prior_meas):<12.4f} | {'-':<10} | {post_joint_meas.kl_divergence(prior_meas):<12.4f} | {'-'}\n"
             )
             f_metrics.write(
-                f"{'Generalized Var (Det)':<25} | {np.linalg.det(prior_cov_mat):<15.4e} | {np.linalg.det(alt_cov_mat):<15.4e} | {np.linalg.det(joint_cov_mat):<15.4e}\n"
+                f"{'Total Var (Trace) mm²':<22} | {pr_trace:<12.4f} | {alt_trace:<12.4f} | {alt_trace_red:>9.2f}% | {joint_trace:<12.4f} | {joint_trace_red:>9.2f}%\n"
             )
-            f_metrics.write("-" * 115 + "\n")
+            f_metrics.write(
+                f"{'Generalized Var (Det)':<22} | {pr_det:<12.4e} | {alt_det:<12.4e} | {alt_det_red:>9.2f}% | {joint_det:<12.4e} | {joint_det_red:>9.2f}%\n"
+            )
+            f_metrics.write("-" * 105 + "\n")
 
             f_metrics.write(
-                f"{'Component':<18} | {'Prior Var':<12} | {'Alt Var':<12} | {'Alt Red%':<10} | {'Joint Var':<12} | {'Joint Red%'}\n"
+                f"{'Component':<22} | {'Prior Var':<12} | {'Alt Var':<12} | {'Alt Red%':<10} | {'Joint Var':<12} | {'Joint Red%'}\n"
             )
-            f_metrics.write("-" * 115 + "\n")
+            f_metrics.write("-" * 105 + "\n")
 
             comp_names = ["Dynamic SL", "Steric SL", "Barystatic"]
             for i, name in enumerate(comp_names):
@@ -707,9 +814,9 @@ def main():
                 j_red = 100.0 * (1.0 - (j_v / pr_v)) if pr_v > 0 else 0.0
 
                 f_metrics.write(
-                    f"{name:<18} | {pr_v:<12.4f} | {a_v:<12.4f} | {a_red:>9.2f}% | {j_v:<12.4f} | {j_red:>9.2f}%\n"
+                    f"{name:<22} | {pr_v:<12.4f} | {a_v:<12.4f} | {a_red:>9.2f}% | {j_v:<12.4f} | {j_red:>9.2f}%\n"
                 )
-            f_metrics.write("-" * 115 + "\n")
+            f_metrics.write("-" * 105 + "\n")
 
         # Plots
         inf.plot_corner_distributions(
@@ -717,7 +824,7 @@ def main():
             prior_measure=prior_meas,
             true_values=true_vals_mm,
             labels=labels,
-            title="Altimetry-Only Signal Separation",
+            title="",
             fill_density=False,
         )
         figures_to_save["regional_corner_altimetry"] = plt.gcf()
@@ -727,7 +834,7 @@ def main():
             prior_measure=prior_meas,
             true_values=true_vals_mm,
             labels=labels,
-            title="Joint Bayes Signal Separation",
+            title="",
             fill_density=False,
         )
         figures_to_save["regional_corner_joint"] = plt.gcf()

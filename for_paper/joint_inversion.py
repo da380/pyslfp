@@ -6,8 +6,8 @@ This script performs a joint Bayesian inversion of synthetic GRACE gravimetry
 and satellite altimetry data to estimate ice sheet mass loss, ocean dynamic
 topography, and ocean density changes (steric expansion).
 
-Use the `--compare` flag to run Head-to-Head Altimetry-only, GRACE-only,
-and Joint inversions on the exact same physical scenario.
+It runs Head-to-Head Altimetry-only and Joint (Alt + GRACE) inversions
+on the exact same physical scenario to demonstrate the added value of gravimetry.
 """
 
 import argparse
@@ -17,26 +17,34 @@ import numpy as np
 import matplotlib
 
 # Force headless backend to avoid Wayland/Qt display errors
-
 import matplotlib.pyplot as plt
 from cartopy import crs as ccrs
 import pygeoinf as inf
 
-
 import joint_utils as utils
-from plot_utils import plot_normalized_mc_errors
 
 import pyslfp as sl
 from pyslfp.state import EarthState
 from pyslfp.linear_operators import ocean_altimetry_points
 
-
 matplotlib.use("Agg")
+
+# Set publication-quality font sizes globally
+plt.rcParams.update(
+    {
+        "font.size": 14,
+        "axes.titlesize": 16,
+        "axes.labelsize": 14,
+        "xtick.labelsize": 12,
+        "ytick.labelsize": 12,
+        "figure.titlesize": 18,
+    }
+)
 
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
-        description="Joint Bayesian Inversion (Ice, Dyn, Rho) with Optional Comparison Mode."
+        description="Joint Bayesian Inversion (Ice, Dyn, Rho) vs Altimetry-Only."
     )
     # --- Output Options ---
     parser.add_argument(
@@ -50,29 +58,12 @@ def parse_arguments():
     parser.add_argument(
         "--plot-maps",
         action="store_true",
-        help="Plot spatial maps of true loads and posterior expectations.",
+        help="Plot spatial maps (True vs Joint Posterior) & Covariances.",
     )
     parser.add_argument(
         "--plot-regions",
         action="store_true",
         help="Plot regional 3-way signal decomposition.",
-    )
-    parser.add_argument(
-        "--mc-trials",
-        type=int,
-        default=0,
-        help="Number of MC trials for error validation.",
-    )
-    parser.add_argument(
-        "--std-samples",
-        type=int,
-        default=0,
-        help="Number samples for pointwise std estimates.",
-    )
-    parser.add_argument(
-        "--compare",
-        action="store_true",
-        help="Run Alt-only and GRACE-only alongside the Joint inversion.",
     )
 
     # --- Resolution Settings ---
@@ -169,15 +160,15 @@ def main():
     args = parse_arguments()
     if args.all:
         args.plot_pdfs = args.plot_maps = args.plot_regions = True
-        args.compare = True
-        if args.mc_trials <= 0:
-            args.mc_trials = -1
-        if args.std_samples == 0:
-            args.std_samples = 100
 
     output_dir = "output_plots_joint_inversion"
     os.makedirs(output_dir, exist_ok=True)
     figures_to_save = {}
+
+    metrics_file = os.path.join(output_dir, "joint_metrics.txt")
+    with open(metrics_file, "w") as f_metrics:
+        f_metrics.write("Joint Inversion (Alt + GRACE) Metrics\n")
+        f_metrics.write("======================================\n\n")
 
     print("Generating altimetry points...")
     state_dummy = EarthState.from_defaults(lmax=args.lmax)
@@ -228,6 +219,10 @@ def main():
     ocean_mask_mm = scale_mm * exact_phys["state"].ocean_projection(value=0.0)
     ice_mask_mm = scale_mm * exact_phys["state"].ice_projection(value=0.0)
 
+    # Unitless masks for covariance plotting
+    ocean_mask = exact_phys["state"].ocean_projection(value=0.0)
+    ice_mask = exact_phys["state"].ice_projection(value=0.0)
+
     print("\nDrawing MASTER synthetic model and dataset...")
     master_forward = inf.LinearForwardProblem(
         exact_phys["joint_forward"], data_error_measure=exact_meas["joint_noise"]
@@ -235,24 +230,17 @@ def main():
     true_model, joint_data = master_forward.synthetic_model_and_data(
         exact_meas["model_prior"]
     )
-    alt_data, grace_data = joint_data[0], joint_data[1]
+    alt_data = joint_data[0]
 
     # ------------------ 2. SETUP INVERSE PROBLEMS ------------------
     joint_inv = inf.LinearBayesianInversion(master_forward, exact_meas["model_prior"])
 
-    if args.compare:
-        alt_fwd = inf.LinearForwardProblem(
-            exact_phys["alt_track"], data_error_measure=exact_meas["alt_noise"]
-        )
-        alt_inv = inf.LinearBayesianInversion(alt_fwd, exact_meas["model_prior"])
-
-        grace_fwd = inf.LinearForwardProblem(
-            exact_phys["grace_track"], data_error_measure=exact_meas["grace_noise"]
-        )
-        grace_inv = inf.LinearBayesianInversion(grace_fwd, exact_meas["model_prior"])
+    alt_fwd = inf.LinearForwardProblem(
+        exact_phys["alt_track"], data_error_measure=exact_meas["alt_noise"]
+    )
+    alt_inv = inf.LinearBayesianInversion(alt_fwd, exact_meas["model_prior"])
 
     # ------------------ 3. PRECONDITIONER SETUP ------------------
-
     print(
         f"\nBuilding SURROGATE operators (lmax={args.surrogate_degree}) for preconditioning..."
     )
@@ -295,26 +283,15 @@ def main():
         alternate_data_error_measure=exact_meas["joint_noise"],
     ) + alpha * exact_meas["joint_noise"].inverse_covariance
 
-    if args.compare:
-        surr_alt_fwd = inf.LinearForwardProblem(
-            surr_phys["alt_track"], data_error_measure=exact_meas["alt_noise"]
-        )
-        surr_alt_inv = inf.LinearBayesianInversion(
-            surr_alt_fwd, surr_meas["unmasked_prior"]
-        )
-        P_alt = (1 - alpha) * surr_alt_inv.woodbury_data_preconditioner(
-            woodbury_solver
-        ) + alpha * exact_meas["alt_noise"].inverse_covariance
-
-        surr_grace_fwd = inf.LinearForwardProblem(
-            surr_phys["grace_track"], data_error_measure=exact_meas["grace_noise"]
-        )
-        surr_grace_inv = inf.LinearBayesianInversion(
-            surr_grace_fwd, surr_meas["unmasked_prior"]
-        )
-        P_grace = (1 - alpha) * surr_grace_inv.woodbury_data_preconditioner(
-            woodbury_solver
-        ) + alpha * exact_meas["grace_noise"].inverse_covariance
+    surr_alt_fwd = inf.LinearForwardProblem(
+        surr_phys["alt_track"], data_error_measure=exact_meas["alt_noise"]
+    )
+    surr_alt_inv = inf.LinearBayesianInversion(
+        surr_alt_fwd, surr_meas["unmasked_prior"]
+    )
+    P_alt = (1 - alpha) * surr_alt_inv.woodbury_data_preconditioner(
+        woodbury_solver
+    ) + alpha * exact_meas["alt_noise"].inverse_covariance
 
     # ------------------ 4. SOLVING POSTERIORS ------------------
     print("\nSolving for Posteriors...")
@@ -322,24 +299,17 @@ def main():
     tolerance = 0.01 * min(args.alt_noise_std_factor, args.grace_noise_std_factor)
     solver = inf.CGSolver(callback=callback, rtol=tolerance)
 
-    if args.compare:
-        print(" -> Solving Altimetry-only...")
-        post_alt = alt_inv.model_posterior_measure(
-            alt_data, solver, preconditioner=P_alt
-        )
-        print(" -> Solving GRACE-only...")
-        post_grace = grace_inv.model_posterior_measure(
-            grace_data, solver, preconditioner=P_grace
-        )
+    print(" -> Solving Altimetry-only...")
+    post_alt = alt_inv.model_posterior_measure(alt_data, solver, preconditioner=P_alt)
 
     print(" -> Solving Joint Inversion...")
     post_joint = joint_inv.model_posterior_measure(
         joint_data, solver, preconditioner=P_joint
     )
 
-    # ------------------ 5. GMSL & MC SETUP ------------------
-    if args.plot_pdfs or (args.mc_trials != 0 and not args.compare):
-
+    # ------------------ 5. GMSL ------------------
+    if args.plot_pdfs:
+        print("\nPlotting GMSL PDFs...")
         true_gmsl_op = (
             utils.true_gmsl_operator(
                 exact_phys["state"],
@@ -362,143 +332,56 @@ def main():
             operator=alt_avg_op
         ).with_dense_covariance()
 
+        post_gmsl_alt = post_alt.affine_mapping(
+            operator=true_gmsl_op
+        ).with_dense_covariance()
+
         post_gmsl_joint = post_joint.affine_mapping(
             operator=true_gmsl_op
         ).with_dense_covariance()
 
-        if args.compare:
-            post_gmsl_alt = post_alt.affine_mapping(
-                operator=true_gmsl_op
-            ).with_dense_covariance()
-            post_gmsl_grace = post_grace.affine_mapping(
-                operator=true_gmsl_op
-            ).with_dense_covariance()
-
         true_gmsl_val_mm = true_gmsl_op(true_model)[0]
 
-        if args.plot_pdfs:
-            print("Plotting GMSL PDFs...")
-            measures = [alt_gmsl_measure]
-            labels = ["Simple averaging"]
+        # Log GMSL metrics
+        prior_var = prior_gmsl_measure.covariance.matrix(dense=True)[0, 0]
+        alt_var = post_gmsl_alt.covariance.matrix(dense=True)[0, 0]
+        joint_var = post_gmsl_joint.covariance.matrix(dense=True)[0, 0]
 
-            if args.compare:
-                measures.extend([post_gmsl_alt, post_gmsl_grace, post_gmsl_joint])
-                labels.extend(
-                    [
-                        f"Alt-Only ({post_gmsl_alt.kl_divergence(prior_gmsl_measure):.2f} nats)",
-                        f"GRACE-Only ({post_gmsl_grace.kl_divergence(prior_gmsl_measure):.2f} nats)",
-                        f"Joint Bayes ({post_gmsl_joint.kl_divergence(prior_gmsl_measure):.2f} nats)",
-                    ]
-                )
-            else:
-                measures.append(post_gmsl_joint)
-                labels.append(
-                    f"Joint Bayes ({post_gmsl_joint.kl_divergence(prior_gmsl_measure):.2f} nats)"
-                )
+        alt_red = 100.0 * (1.0 - (alt_var / prior_var))
+        joint_red = 100.0 * (1.0 - (joint_var / prior_var))
 
-            fig_pdf, ax_pdf = plt.subplots(
-                figsize=(10, 6) if args.compare else (8, 5), layout="constrained"
+        with open(metrics_file, "a") as f_metrics:
+            f_metrics.write(
+                f"{'Target':<12} | {'Estimator':<12} | {'KL Div':<10} | {'Prior Var':<12} | {'Post Var':<12} | {'Reduction'}\n"
             )
-            inf.plot_1d_distributions(
-                measures,
-                true_value=true_gmsl_val_mm,
-                ax=ax_pdf,
-                title="",
-                posterior_labels=labels,
+            f_metrics.write("-" * 80 + "\n")
+            f_metrics.write(
+                f"{'GMSL':<12} | {'Alt-Only':<12} | {post_gmsl_alt.kl_divergence(prior_gmsl_measure):<10.4f} | {prior_var:<12.4f} | {alt_var:<12.4f} | {alt_red:>6.2f}%\n"
             )
-            figures_to_save["gmsl_pdf"] = fig_pdf
-
-        if args.mc_trials != 0 and not args.compare:
-            print(
-                f"\nExtracting analytical distributions for MC validation (trials={'skipped' if args.mc_trials == -1 else args.mc_trials})..."
+            f_metrics.write(
+                f"{'GMSL':<12} | {'Joint':<12} | {post_gmsl_joint.kl_divergence(prior_gmsl_measure):<10.4f} | {prior_var:<12.4f} | {joint_var:<12.4f} | {joint_red:>6.2f}%\n"
             )
 
-            post_exp_op = joint_inv.posterior_expectation_operator(
-                solver, preconditioner=P_joint
-            )
+        measures = [alt_gmsl_measure, post_gmsl_alt, post_gmsl_joint]
+        labels = ["Simple averaging", "Altimetry-Only", "Joint Bayes"]
 
-            if isinstance(post_exp_op, inf.AffineOperator):
-                bayes_linear = post_exp_op.linear_part
-                bayes_translation = true_gmsl_op(post_exp_op.translation_part)
-            else:
-                bayes_linear = post_exp_op
-                bayes_translation = None
+        fig_pdf, ax_pdf = plt.subplots(figsize=(10, 6), layout="constrained")
+        inf.plot_1d_distributions(
+            measures,
+            true_value=true_gmsl_val_mm,
+            ax=ax_pdf,
+            title="Global Mean Sea Level Change",
+            posterior_labels=labels,
+        )
+        figures_to_save["gmsl_pdf"] = fig_pdf
 
-            # Route standard altimetry averaging solely through the altimetry subspace
-            grace_space = exact_meas["grace_noise"].domain
-            joint_alt_avg_op = inf.RowLinearOperator(
-                [
-                    alt_avg_op,
-                    grace_space.zero_operator(codomain=alt_avg_op.codomain),
-                ]
-            )
-
-            std_err_op = inf.RowLinearOperator([-1.0 * true_gmsl_op, joint_alt_avg_op])
-            bayes_err_op = inf.RowLinearOperator(
-                [-1.0 * true_gmsl_op, true_gmsl_op @ bayes_linear]
-            )
-            joint_err_op = inf.ColumnLinearOperator([std_err_op, bayes_err_op])
-
-            translation = (
-                [true_gmsl_op.codomain.zero, bayes_translation]
-                if bayes_translation is not None
-                else None
-            )
-
-            joint_err_meas = joint_inv.joint_prior_measure.affine_mapping(
-                operator=joint_err_op, translation=translation
-            )
-
-            joint_err_dense = joint_err_meas.with_dense_covariance(
-                parallel=True, n_jobs=4
-            )
-
-            if args.mc_trials > 0:
-                samples = joint_err_dense.samples(args.mc_trials)
-                raw_errs_x = np.zeros(args.mc_trials)
-                raw_errs_y = np.zeros(args.mc_trials)
-                for i, (s_err, b_err) in enumerate(samples):
-                    raw_errs_x[i] = s_err[0]
-                    raw_errs_y[i] = b_err[0]
-            else:
-                raw_errs_x, raw_errs_y = None, None
-
-            std_noise_std_mm = np.sqrt(
-                alt_gmsl_measure.covariance.matrix(dense=True)[0, 0]
-            )
-            post_gmsl_std_mm = np.sqrt(
-                post_gmsl_joint.covariance.matrix(dense=True)[0, 0]
-            )
-
-            raw_cov = joint_err_dense.covariance.matrix(dense=True)
-            raw_mean = joint_err_dense.expectation
-            raw_mean_2d = [raw_mean[0][0], raw_mean[1][0]]
-
-            fig_mc, ax_mc = plt.subplots(figsize=(7, 7), layout="constrained")
-
-            plot_normalized_mc_errors(
-                ax_mc,
-                raw_errs_x,
-                raw_errs_y,
-                raw_mean_2d,
-                raw_cov,
-                std_noise_std_mm,
-                post_gmsl_std_mm,
-                title="",
-                xlabel=r"Standard Estimator Normalized Error",
-                ylabel=r"Joint Bayesian Normalized Error",
-                label_x="Standard",
-                label_y="Joint Bayes",
-                show_legend=True,
-            )
-            figures_to_save["joint_mc_validation"] = fig_mc
-
-    # ------------------ 6. MAPPING ------------------
+    # ------------------ 6. MAPPING & COVARIANCE ------------------
     if args.plot_maps:
-        print("Generating 3-component spatial maps...")
+        print("\nGenerating 3-component spatial maps (True vs Joint)...")
         cmap = "seismic"
+        gl_kwargs = {"xlabel_style": {"size": 12}, "ylabel_style": {"size": 12}}
+        cb_kwargs = {"orientation": "horizontal", "shrink": 0.8, "pad": 0.05}
 
-        # 1. Unpack variables specific to the joint_inversion.py namespace
         state = exact_phys["state"]
         load_space = exact_phys["load_space"]
         scale_mm = exact_phys["scale_mm"]
@@ -507,233 +390,239 @@ def main():
         water_density = state.model.parameters.water_density
         steric_scale = mean_ocean_depth / water_density
 
-        # Use true_model instead of model for the joint script
         true_ice, true_dyn, true_rho = true_model
+        post_ice, post_dyn, post_rho = post_joint.expectation
 
-        # Determine dimensions dynamically
-        plot_std = args.std_samples > 0
-        ncols = 3 if plot_std else 2
-        fig_width = 20 if plot_std else 14
-        cmap_std = "Blues"
+        vmax_ice = max(
+            np.max(np.abs(true_ice.data * scale_mm)),
+            np.max(np.abs(post_ice.data * scale_mm)),
+        )
+        vmax_dyn = max(
+            np.max(np.abs(true_dyn.data * scale_mm)),
+            np.max(np.abs(post_dyn.data * scale_mm)),
+        )
+        vmax_rho = max(
+            np.max(np.abs(true_rho.data * steric_scale * scale_mm)),
+            np.max(np.abs(post_rho.data * steric_scale * scale_mm)),
+        )
 
-        # Group runs to plot dynamically
-        runs_to_plot = {}
-        if args.compare:
-            runs_to_plot["altimetry"] = ("Altimetry-Only", post_alt)
-            runs_to_plot["grace"] = ("GRACE-Only", post_grace)
-            runs_to_plot["joint"] = ("Joint", post_joint)
-        else:
-            runs_to_plot["joint"] = ("Joint Bayes", post_joint)
+        fig_maps, axes = sl.subplots(
+            3, 2, figsize=(14, 15), gridspec_kw={"hspace": 0.15}
+        )
 
-        all_std_results = {}  # Dictionary to store std vectors for uniform scaling
+        # --- ROW 1: ICE ---
+        sl.plot(
+            true_ice * scale_mm,
+            ax=axes[0, 0],
+            colorbar=True,
+            vmin=-vmax_ice,
+            vmax=vmax_ice,
+            cmap=cmap,
+            colorbar_kwargs={**cb_kwargs, "label": "Ice Thickness (mm)"},
+            gridlines_kwargs=gl_kwargs,
+        )
+        sl.plot(
+            post_ice * scale_mm,
+            ax=axes[0, 1],
+            colorbar=True,
+            vmin=-vmax_ice,
+            vmax=vmax_ice,
+            cmap=cmap,
+            colorbar_kwargs={**cb_kwargs, "label": "Ice Thickness (mm)"},
+            gridlines_kwargs=gl_kwargs,
+        )
 
-        # --- STEP 1: PRE-CALCULATE ALL UNCERTAINTIES ---
-        if plot_std:
-            for key, (title_prefix, posterior) in runs_to_plot.items():
-                print(f"Sampling {title_prefix} for uniform scaling...")
-                samples = posterior.samples(args.std_samples, parallel=True, n_jobs=10)
-                post_exp = posterior.expectation
+        # --- ROW 2: DYN ---
+        sl.plot(
+            true_dyn * ocean_mask_mm,
+            ax=axes[1, 0],
+            colorbar=True,
+            vmin=-vmax_dyn,
+            vmax=vmax_dyn,
+            cmap=cmap,
+            colorbar_kwargs={**cb_kwargs, "label": "Dynamic Topography (mm)"},
+            gridlines_kwargs=gl_kwargs,
+        )
+        sl.plot(
+            post_dyn * ocean_mask_mm,
+            ax=axes[1, 1],
+            colorbar=True,
+            vmin=-vmax_dyn,
+            vmax=vmax_dyn,
+            cmap=cmap,
+            colorbar_kwargs={**cb_kwargs, "label": "Dynamic Topography (mm)"},
+            gridlines_kwargs=gl_kwargs,
+        )
 
-                # Initialize variances
-                v_ice = load_space.zero
-                v_dyn = load_space.zero
-                v_rho = load_space.zero
+        # --- ROW 3: STERIC ---
+        sl.plot(
+            true_rho * steric_scale * ocean_mask_mm,
+            ax=axes[2, 0],
+            colorbar=True,
+            vmin=-vmax_rho,
+            vmax=vmax_rho,
+            cmap=cmap,
+            colorbar_kwargs={**cb_kwargs, "label": r"Steric SL (mm)"},
+            gridlines_kwargs=gl_kwargs,
+        )
+        sl.plot(
+            post_rho * steric_scale * ocean_mask_mm,
+            ax=axes[2, 1],
+            colorbar=True,
+            vmin=-vmax_rho,
+            vmax=vmax_rho,
+            cmap=cmap,
+            colorbar_kwargs={**cb_kwargs, "label": r"Steric SL (mm)"},
+            gridlines_kwargs=gl_kwargs,
+        )
 
-                # Compute the sample pointwise variance iteratively
-                for s_ice, s_dyn, s_rho in samples:
-                    diff_ice = load_space.subtract(s_ice, post_exp[0])
-                    prod_ice = load_space.vector_multiply(diff_ice, diff_ice)
-                    load_space.axpy(1.0 / args.std_samples, prod_ice, v_ice)
+        if args.plot_regions:
+            for ax in axes.flatten():
+                state.plot_boundaries(ax, regions_to_analyze)
 
-                    diff_dyn = load_space.subtract(s_dyn, post_exp[1])
-                    prod_dyn = load_space.vector_multiply(diff_dyn, diff_dyn)
-                    load_space.axpy(1.0 / args.std_samples, prod_dyn, v_dyn)
+        # Labels
+        axes[0, 0].set_title("True State", fontsize=16, fontweight="bold", pad=20)
+        axes[0, 1].set_title("Joint Posterior", fontsize=16, fontweight="bold", pad=20)
 
-                    diff_rho = load_space.subtract(s_rho, post_exp[2])
-                    prod_rho = load_space.vector_multiply(diff_rho, diff_rho)
-                    load_space.axpy(1.0 / args.std_samples, prod_rho, v_rho)
-
-                # Convert to Std Dev and store
-                all_std_results[key] = (
-                    load_space.vector_sqrt(v_ice),
-                    load_space.vector_sqrt(v_dyn),
-                    load_space.vector_sqrt(v_rho),
-                )
-
-            # --- STEP 2: FIND GLOBAL MAXIMA ---
-            # We scale by mm and steric factors here to find true plotting maximums
-            vmax_std_ice = max(
-                [np.max(res[0].data * scale_mm) for res in all_std_results.values()]
+        row_titles = ["Ice thickness", "Dynamic topography", "Steric sea level"]
+        for i, row_title in enumerate(row_titles):
+            axes[i, 0].annotate(
+                row_title,
+                xy=(-0.1, 0.5),
+                xycoords="axes fraction",
+                fontsize=16,
+                fontweight="bold",
+                va="center",
+                ha="center",
+                rotation=90,
             )
-            vmax_std_dyn = max(
-                [np.max(res[1].data * scale_mm) for res in all_std_results.values()]
-            )
-            vmax_std_rho = max(
-                [
-                    np.max(res[2].data * steric_scale * scale_mm)
-                    for res in all_std_results.values()
-                ]
-            )
 
-        # --- STEP 3: PLOTTING LOOP ---
-        for key, (title_prefix, posterior) in runs_to_plot.items():
-            post_ice, post_dyn, post_rho = posterior.expectation
+        figures_to_save["posterior_maps_joint"] = fig_maps
 
-            # Set consistent colorbar limits across True and Expected
-            vmax_ice = max(
-                np.max(np.abs(true_ice.data * scale_mm)),
-                np.max(np.abs(post_ice.data * scale_mm)),
-            )
-            vmax_dyn = max(
-                np.max(np.abs(true_dyn.data * scale_mm)),
-                np.max(np.abs(post_dyn.data * scale_mm)),
-            )
-            vmax_rho = max(
-                np.max(np.abs(true_rho.data * steric_scale * scale_mm)),
-                np.max(np.abs(post_rho.data * steric_scale * scale_mm)),
-            )
+        # =================================================================
+        # Point-wise Covariance Maps (Joint Posterior)
+        # =================================================================
+        print("\nGenerating Point-wise Covariance Maps (Joint)...")
 
-            # Build the dynamically sized figure
-            fig_maps, axes = plt.subplots(
-                3,
-                ncols,
-                figsize=(fig_width, 15),
-                subplot_kw={"projection": ccrs.Robinson()},
-                layout="constrained",
-            )
+        scenarios = [
+            ("Ice", 0, (-78.0, -110.0), "WAIS"),
+            ("Ocean Dyn", 1, (30.0, -45.0), "North_Atlantic"),
+        ]
 
-            # --- ROW 1: ICE ---
-            sl.plot(
-                true_ice * scale_mm,
-                ax=axes[0, 0],
+        def plot_cov_row(ax_pr, ax_po, pr_field, po_field, pt, label):
+            vmax = max(np.max(np.abs(pr_field.data)), np.max(np.abs(po_field.data)))
+            if vmax == 0:
+                vmax = 1.0
+
+            _, im_pr = sl.plot(
+                pr_field,
+                ax=ax_pr,
+                cmap="seismic",
                 colorbar=True,
-                vmin=-vmax_ice,
-                vmax=vmax_ice,
-                cmap=cmap,
+                symmetric=True,
+                # vmin=-vmax,
+                # vmax=vmax,
+                colorbar_kwargs={**cb_kwargs, "label": label},
+                gridlines_kwargs=gl_kwargs,
             )
+            sl.plot_points([pt], ax=ax_pr, color="black", zorder=10, gridlines=False)
 
-            # Posterior Expectation
-            sl.plot(
-                post_ice * scale_mm,
-                ax=axes[0, 1],
+            _, im_po = sl.plot(
+                po_field,
+                ax=ax_po,
+                cmap="seismic",
                 colorbar=True,
-                vmin=-vmax_ice,
-                vmax=vmax_ice,
-                cmap=cmap,
-                colorbar_kwargs={"label": "Ice Thickness (mm)"},
+                symmetric=True,
+                # vmin=-vmax,
+                # vmax=vmax,
+                colorbar_kwargs={**cb_kwargs, "label": label},
+                gridlines_kwargs=gl_kwargs,
+            )
+            sl.plot_points([pt], ax=ax_po, color="black", zorder=10, gridlines=False)
+
+        for comp_name, comp_idx, pt, pt_name in scenarios:
+            print(f"  Evaluating joint perturbation in {comp_name} at {pt}...")
+
+            dirac_rep = load_space.dirac_representation(pt)
+            test_vec = [load_space.zero, load_space.zero, load_space.zero]
+            test_vec[comp_idx] = dirac_rep
+
+            prior_cov = exact_meas["model_prior"].covariance(test_vec)
+            post_cov = post_joint.covariance(test_vec)
+
+            pr_ice, pr_dyn, pr_rho = prior_cov
+            po_ice, po_dyn, po_rho = post_cov
+
+            perturb_scale = (
+                scale_mm if comp_idx in [0, 1] else (steric_scale * scale_mm)
             )
 
-            if plot_std:
-                std_ice, std_dyn, std_rho = all_std_results[key]
-                sl.plot(
-                    std_ice * ice_mask_mm,
-                    ax=axes[0, 2],
-                    colorbar=True,
-                    cmap=cmap_std,
-                    vmin=0,
-                    vmax=vmax_std_ice,
-                    colorbar_kwargs={"label": "Std Dev (mm)"},
-                )
+            pr_ice_plot = pr_ice * (perturb_scale * scale_mm) * ice_mask
+            po_ice_plot = po_ice * (perturb_scale * scale_mm) * ice_mask
 
-            # --- ROW 2: DYNAMIC TOPOGRAPHY ---
-            sl.plot(
-                true_dyn * ocean_mask_mm,
-                ax=axes[1, 0],
-                colorbar=True,
-                vmin=-vmax_dyn,
-                vmax=vmax_dyn,
-                cmap=cmap,
+            pr_dyn_plot = pr_dyn * (perturb_scale * scale_mm) * ocean_mask
+            po_dyn_plot = po_dyn * (perturb_scale * scale_mm) * ocean_mask
+
+            pr_rho_plot = (
+                pr_rho * (perturb_scale * steric_scale * scale_mm) * ocean_mask
+            )
+            po_rho_plot = (
+                po_rho * (perturb_scale * steric_scale * scale_mm) * ocean_mask
             )
 
-            sl.plot(
-                post_dyn * ocean_mask_mm,
-                ax=axes[1, 1],
-                colorbar=True,
-                vmin=-vmax_dyn,
-                vmax=vmax_dyn,
-                cmap=cmap,
-                colorbar_kwargs={"label": "Dynamic Topography (mm)"},
+            fig_cov, axes_cov = sl.subplots(
+                3, 2, figsize=(16, 16), gridspec_kw={"hspace": 0.15}
             )
 
-            if plot_std:
-                sl.plot(
-                    std_dyn * ocean_mask_mm,
-                    ax=axes[1, 2],
-                    colorbar=True,
-                    cmap=cmap_std,
-                    vmin=0,
-                    vmax=vmax_std_dyn,
-                    colorbar_kwargs={"label": "Std Dev (mm)"},
-                )
-
-            # --- ROW 3: STERIC SEA LEVEL ---
-            sl.plot(
-                true_rho * steric_scale * ocean_mask_mm,
-                ax=axes[2, 0],
-                colorbar=True,
-                vmin=-vmax_rho,
-                vmax=vmax_rho,
-                cmap=cmap,
+            plot_cov_row(
+                axes_cov[0, 0],
+                axes_cov[0, 1],
+                pr_ice_plot,
+                po_ice_plot,
+                pt,
+                "Covariance (mm²)",
+            )
+            plot_cov_row(
+                axes_cov[1, 0],
+                axes_cov[1, 1],
+                pr_dyn_plot,
+                po_dyn_plot,
+                pt,
+                "Covariance (mm²)",
+            )
+            plot_cov_row(
+                axes_cov[2, 0],
+                axes_cov[2, 1],
+                pr_rho_plot,
+                po_rho_plot,
+                pt,
+                "Covariance (mm²)",
             )
 
-            sl.plot(
-                post_rho * steric_scale * ocean_mask_mm,
-                ax=axes[2, 1],
-                colorbar=True,
-                vmin=-vmax_rho,
-                vmax=vmax_rho,
-                cmap=cmap,
-                colorbar_kwargs={"label": r"Steric SL (mm)"},
+            axes_cov[0, 0].set_title("Prior", fontsize=16, fontweight="bold", pad=20)
+            axes_cov[0, 1].set_title(
+                "Joint Posterior", fontsize=16, fontweight="bold", pad=20
             )
 
-            if plot_std:
-                sl.plot(
-                    std_rho * steric_scale * ocean_mask_mm,
-                    ax=axes[2, 2],
-                    colorbar=True,
-                    cmap=cmap_std,
-                    vmin=0,
-                    vmax=vmax_std_rho,
-                    colorbar_kwargs={"label": "Std Dev (mm)"},
-                )
-
-            if args.plot_regions:
-                for ax in axes.flatten():
-                    state.plot_boundaries(ax, regions_to_analyze)
-
-            # ---------------------------------------------------------
-            # --- PUBLICATION FORMATTING: Column and Row Headers ---
-            # ---------------------------------------------------------
-
-            # 1. Column Headers (Applied only to the top row)
-            col_labels = [
-                "True State",
-                "Posterior Expectation",
-                "Pointwise Std. Deviation",
-            ]
-            for j in range(ncols):
-                # pad=25 pushes the text up, separating it from the top plot
-                axes[0, j].set_title(
-                    col_labels[j], fontsize=16, fontweight="bold", pad=25
-                )
-
-            # 2. Row Labels (Applied to the far left column)
-            row_labels = ["Ice Thickness", "Dynamic\nTopography", "Steric\nSea Level"]
-            for i in range(3):
-                # xy=(-0.12, 0.5) pushes the text to the left of the axes
-                axes[i, 0].annotate(
-                    row_labels[i],
-                    xy=(-0.12, 0.5),
+            for i, row_title in enumerate(row_titles):
+                axes_cov[i, 0].annotate(
+                    row_title,
+                    xy=(-0.1, 0.5),
                     xycoords="axes fraction",
                     fontsize=16,
                     fontweight="bold",
-                    ha="center",
                     va="center",
+                    ha="center",
                     rotation=90,
-                    annotation_clip=False,  # Ensures text isn't cut off by the map boundary
                 )
 
-            figures_to_save[f"posterior_maps_{key}"] = fig_maps
+            if args.plot_regions:
+                for ax in axes_cov.flatten():
+                    state.plot_boundaries(ax, regions_to_analyze)
+
+            figures_to_save[f"covariance_{comp_name.replace(' ', '_')}_{pt_name}"] = (
+                fig_cov
+            )
 
     # ------------------ 7. REGIONAL DECOMPOSITION ------------------
     if args.plot_regions:
@@ -759,59 +648,89 @@ def main():
         final_op = combined_op.codomain.coordinate_projection @ combined_op
 
         true_vals_mm = final_op(true_model)
-        prior_meas = exact_meas["model_prior"].affine_mapping(operator=final_op)
+        prior_meas = (
+            exact_meas["model_prior"]
+            .affine_mapping(operator=final_op)
+            .with_dense_covariance(parallel=True, n_jobs=3)
+        )
+        post_alt_meas = post_alt.affine_mapping(
+            operator=final_op
+        ).with_dense_covariance(parallel=True, n_jobs=3)
+        post_joint_meas = post_joint.affine_mapping(
+            operator=final_op
+        ).with_dense_covariance(parallel=True, n_jobs=3)
+
         labels = [
-            f"{regions_to_analyze[0]}: Dynamic SL (mm)",
-            f"{regions_to_analyze[0]}: Steric SL (mm)",
-            f"{regions_to_analyze[0]}: Barystatic (mm)",
+            "Dynamic SL (mm)",
+            "Steric SL (mm)",
+            "Barystatic (mm)",
         ]
 
-        if args.compare:
-            posteriors = {
-                "altimetry": (
-                    "Altimetry-Only",
-                    post_alt.affine_mapping(operator=final_op).with_dense_covariance(
-                        parallel=True, n_jobs=3
-                    ),
-                ),
-                "grace": (
-                    "GRACE-Only",
-                    post_grace.affine_mapping(operator=final_op).with_dense_covariance(
-                        parallel=True, n_jobs=3
-                    ),
-                ),
-                "joint": (
-                    "Joint Inversion",
-                    post_joint.affine_mapping(operator=final_op).with_dense_covariance(
-                        parallel=True, n_jobs=3
-                    ),
-                ),
-            }
-            for key, (title_prefix, meas) in posteriors.items():
-                kl_div = meas.kl_divergence(prior_meas)
-                inf.plot_corner_distributions(
-                    meas,
-                    prior_measure=prior_meas,
-                    true_values=true_vals_mm,
-                    labels=labels,
-                    title=f"{title_prefix} 3-Component Signal Separation ({kl_div:.2f} nats)",
-                    fill_density=False,
-                )
-                figures_to_save[f"regional_corner_{key}"] = plt.gcf()
-        else:
-            post_meas = post_joint.affine_mapping(
-                operator=final_op
-            ).with_dense_covariance(parallel=True, n_jobs=3)
-            kl_div = post_meas.kl_divergence(prior_meas)
-            inf.plot_corner_distributions(
-                post_meas,
-                prior_measure=prior_meas,
-                true_values=true_vals_mm,
-                labels=labels,
-                title=f"Joint Bayes 3-Component Signal Separation ({kl_div:.2f} nats)",
-                fill_density=False,
+        # Log Regional metrics
+        prior_cov_mat = prior_meas.covariance.matrix(dense=True)
+        alt_cov_mat = post_alt_meas.covariance.matrix(dense=True)
+        joint_cov_mat = post_joint_meas.covariance.matrix(dense=True)
+
+        with open(metrics_file, "a") as f_metrics:
+            f_metrics.write(
+                f"\n\nRegional Signal Separation ({regions_to_analyze[0]})\n"
             )
-            figures_to_save["regional_corner"] = plt.gcf()
+            f_metrics.write("=" * 115 + "\n")
+
+            f_metrics.write(
+                f"{'Metric':<25} | {'Prior':<15} | {'Alt-Only':<15} | {'Joint':<15}\n"
+            )
+            f_metrics.write("-" * 115 + "\n")
+            f_metrics.write(
+                f"{'Joint KL Divergence':<25} | {'-':<15} | {post_alt_meas.kl_divergence(prior_meas):<15.4f} | {post_joint_meas.kl_divergence(prior_meas):<15.4f}\n"
+            )
+            f_metrics.write(
+                f"{'Total Var (Trace) mm²':<25} | {np.trace(prior_cov_mat):<15.4f} | {np.trace(alt_cov_mat):<15.4f} | {np.trace(joint_cov_mat):<15.4f}\n"
+            )
+            f_metrics.write(
+                f"{'Generalized Var (Det)':<25} | {np.linalg.det(prior_cov_mat):<15.4e} | {np.linalg.det(alt_cov_mat):<15.4e} | {np.linalg.det(joint_cov_mat):<15.4e}\n"
+            )
+            f_metrics.write("-" * 115 + "\n")
+
+            f_metrics.write(
+                f"{'Component':<18} | {'Prior Var':<12} | {'Alt Var':<12} | {'Alt Red%':<10} | {'Joint Var':<12} | {'Joint Red%'}\n"
+            )
+            f_metrics.write("-" * 115 + "\n")
+
+            comp_names = ["Dynamic SL", "Steric SL", "Barystatic"]
+            for i, name in enumerate(comp_names):
+                pr_v = prior_cov_mat[i, i]
+                a_v = alt_cov_mat[i, i]
+                j_v = joint_cov_mat[i, i]
+
+                a_red = 100.0 * (1.0 - (a_v / pr_v)) if pr_v > 0 else 0.0
+                j_red = 100.0 * (1.0 - (j_v / pr_v)) if pr_v > 0 else 0.0
+
+                f_metrics.write(
+                    f"{name:<18} | {pr_v:<12.4f} | {a_v:<12.4f} | {a_red:>9.2f}% | {j_v:<12.4f} | {j_red:>9.2f}%\n"
+                )
+            f_metrics.write("-" * 115 + "\n")
+
+        # Plots
+        inf.plot_corner_distributions(
+            post_alt_meas,
+            prior_measure=prior_meas,
+            true_values=true_vals_mm,
+            labels=labels,
+            title="Altimetry-Only Signal Separation",
+            fill_density=False,
+        )
+        figures_to_save["regional_corner_altimetry"] = plt.gcf()
+
+        inf.plot_corner_distributions(
+            post_joint_meas,
+            prior_measure=prior_meas,
+            true_values=true_vals_mm,
+            labels=labels,
+            title="Joint Bayes Signal Separation",
+            fill_density=False,
+        )
+        figures_to_save["regional_corner_joint"] = plt.gcf()
 
     # ------------------ SAVE ALL FIGURES ------------------
     if figures_to_save:

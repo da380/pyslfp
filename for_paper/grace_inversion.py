@@ -292,9 +292,41 @@ def main():
 
             kl_div = deg1_post.kl_divergence(deg1_prior)
 
+            # --- Extract Dense Covariance Matrices ---
+            prior_cov_mat = deg1_prior.covariance.matrix(dense=True)
+            post_cov_mat = deg1_post.covariance.matrix(dense=True)
+
+            prior_trace = np.trace(prior_cov_mat)
+            post_trace = np.trace(post_cov_mat)
+            trace_reduction = 100.0 * (1.0 - (post_trace / prior_trace))
+
+            prior_det = np.linalg.det(prior_cov_mat)
+            post_det = np.linalg.det(post_cov_mat)
+
             with open(metrics_file, "a") as f_metrics:
-                f_metrics.write("\n" + "=" * 92 + "\n")
-                f_metrics.write(f"Degree-1 KL Divergence: {kl_div:.4f} nats\n")
+                f_metrics.write(f"\n\nDegree-1 Spherical Harmonic Coefficients\n")
+                f_metrics.write("=" * 65 + "\n")
+                f_metrics.write(f"Joint KL Divergence:      {kl_div:.4f} nats\n")
+                f_metrics.write(f"Prior Total Var (Trace):  {prior_trace:.4f} mm²\n")
+                f_metrics.write(f"Post Total Var (Trace):   {post_trace:.4f} mm²\n")
+                f_metrics.write(f"Overall Trace Reduction:  {trace_reduction:.2f}%\n")
+                f_metrics.write(f"Prior Generalized Var:    {prior_det:.4e}\n")
+                f_metrics.write(f"Post Generalized Var:     {post_det:.4e}\n")
+                f_metrics.write("-" * 65 + "\n")
+                f_metrics.write(
+                    f"{'Component':<18} | {'Prior Var':<12} | {'Post Var':<12} | {'Reduction'}\n"
+                )
+                f_metrics.write("-" * 65 + "\n")
+
+                comp_names = ["Zeta(1,-1)", "Zeta(1,0)", "Zeta(1,1)"]
+                for i, name in enumerate(comp_names):
+                    pr_v = prior_cov_mat[i, i]
+                    po_v = post_cov_mat[i, i]
+                    red = 100.0 * (1.0 - (po_v / pr_v)) if pr_v > 0 else 0.0
+                    f_metrics.write(
+                        f"{name:<18} | {pr_v:<12.4f} | {po_v:<12.4f} | {red:>8.2f}%\n"
+                    )
+                f_metrics.write("-" * 65 + "\n")
 
             inf.plot_corner_distributions(
                 deg1_post,
@@ -331,8 +363,10 @@ def main():
         wmb_property_resolution_operator = (wmb_avg_op @ exact_fwd_op) - tot_avg_op
 
         with open(metrics_file, "a") as f_metrics:
-            f_metrics.write("\n" + "=" * 115 + "\n")
-            f_metrics.write("ESTIMATOR KERNEL METRICS (PRIOR-FREE COMPARISON)\n")
+            f_metrics.write("\n\n" + "=" * 115 + "\n")
+            f_metrics.write(
+                "REGIONAL ESTIMATOR KERNEL METRICS (PRIOR-FREE COMPARISON)\n"
+            )
             f_metrics.write("-" * 115 + "\n")
             f_metrics.write(
                 f"{'Region':<16} | {'Target Norm':<15} | {'Bayes Err Norm':<15} | {'Bayes Ratio':<15} | {'WMB Err Norm':<15} | {'WMB Ratio':<15}\n"
@@ -357,8 +391,8 @@ def main():
                 bayes_error_norm = load_space.norm(bayes_res_vector)
                 wmb_error_norm = load_space.norm(wmb_res_vector)
 
-                bayes_ratio = bayes_error_norm / target_norm
-                wmb_ratio = wmb_error_norm / target_norm
+                bayes_ratio = bayes_error_norm / target_norm if target_norm > 0 else 0.0
+                wmb_ratio = wmb_error_norm / target_norm if target_norm > 0 else 0.0
 
                 f_metrics.write(
                     f"{region:<16} | {target_norm:<15.4e} | {bayes_error_norm:<15.4e} | {bayes_ratio:<15.4f} | {wmb_error_norm:<15.4e} | {wmb_ratio:<15.4f}\n"
@@ -366,11 +400,14 @@ def main():
 
                 # Normalize relative to pointwise max of the target
                 max_abs_val = np.max(np.abs(target_vector.data))
-                target_normed = target_vector / max_abs_val
-
-                # Errors as percentages
-                bayes_error_pct = (bayes_res_vector / max_abs_val) * 100
-                wmb_error_pct = (wmb_res_vector / max_abs_val) * 100
+                if max_abs_val > 0:
+                    target_normed = target_vector / max_abs_val
+                    bayes_error_pct = (bayes_res_vector / max_abs_val) * 100
+                    wmb_error_pct = (wmb_res_vector / max_abs_val) * 100
+                else:
+                    target_normed = load_space.zero
+                    bayes_error_pct = load_space.zero
+                    wmb_error_pct = load_space.zero
 
                 # 1x3 Figure setup
                 fig_sens, axes = sl.subplots(
@@ -400,11 +437,12 @@ def main():
                 utils.draw_region_boundaries(state, axes[0], regions_dict)
 
                 # --- Find shared max for the error plots ---
-                # This ensures the visual comparison of error magnitudes is direct
                 vmax_error = max(
                     np.max(np.abs(bayes_error_pct.data)),
                     np.max(np.abs(wmb_error_pct.data)),
                 )
+                if vmax_error == 0:
+                    vmax_error = 1.0
 
                 # --- Plot 2: Bayesian Kernel Error ---
                 _, im_bayes = sl.plot(
@@ -451,6 +489,105 @@ def main():
                     region.replace(" ", "_").replace("(", "").replace(")", "")
                 )
                 figures_to_save[f"estimator_kernels_{safe_region_name}"] = fig_sens
+
+        # ------------------ DEGREE ONE KERNEL ERROR ------------------
+        print("  Evaluating Degree-1 Estimator Kernels...")
+        deg1_op = load_space.to_coefficient_operator(1, lmin=1) * ewt_mm_scale
+        deg1_resolution_operator = deg1_op @ model_resolution_operator
+
+        deg1_names = ["Zeta(1,-1)", "Zeta(1,0)", "Zeta(1,1)"]
+
+        with open(metrics_file, "a") as f_metrics:
+            f_metrics.write("\n\n" + "=" * 80 + "\n")
+            f_metrics.write("DEGREE-1 ESTIMATOR KERNEL METRICS (BAYESIAN ONLY)\n")
+            f_metrics.write("-" * 80 + "\n")
+            f_metrics.write(
+                f"{'Component':<16} | {'Target Norm':<15} | {'Bayes Err Norm':<15} | {'Bayes Ratio':<15}\n"
+            )
+            f_metrics.write("-" * 80 + "\n")
+
+            for i, comp_name in enumerate(deg1_names):
+                # e_i (Basis vector)
+                basis_vec = deg1_resolution_operator.codomain.basis_vector(i)
+
+                # Extract Target and Bayes Error spatial vectors
+                target_vector = deg1_op.adjoint(basis_vec)
+                bayes_res_vector = deg1_resolution_operator.adjoint(basis_vec)
+
+                target_norm = load_space.norm(target_vector)
+                bayes_error_norm = load_space.norm(bayes_res_vector)
+
+                bayes_ratio = bayes_error_norm / target_norm if target_norm > 0 else 0.0
+
+                f_metrics.write(
+                    f"{comp_name:<16} | {target_norm:<15.4e} | {bayes_error_norm:<15.4e} | {bayes_ratio:<15.4f}\n"
+                )
+
+                # Normalize relative to pointwise max of the target for plotting
+                max_abs_val = np.max(np.abs(target_vector.data))
+                if max_abs_val > 0:
+                    target_normed = target_vector / max_abs_val
+                    bayes_error_pct = (bayes_res_vector / max_abs_val) * 100
+                else:
+                    target_normed = load_space.zero
+                    bayes_error_pct = load_space.zero
+
+                fig_sens, axes = sl.subplots(
+                    1, 2, figsize=(15, 5), gridspec_kw={"wspace": 0.15}
+                )
+
+                gl_kwargs = {"xlabel_style": {"size": 12}, "ylabel_style": {"size": 12}}
+
+                # --- Plot 1: Target Kernel (Degree 1 Spherical Harmonic) ---
+                _, im_target = sl.plot(
+                    target_normed,
+                    ax=axes[0],
+                    cmap="seismic",
+                    colorbar=True,
+                    symmetric=True,
+                    vmin=-1.0,
+                    vmax=1.0,
+                    colorbar_kwargs={
+                        "shrink": 0.8,
+                        "pad": 0.05,
+                        "orientation": "horizontal",
+                    },
+                    gridlines_kwargs=gl_kwargs,
+                )
+                axes[0].set_title(f"Target Kernel: {comp_name}", fontsize=16)
+                im_target.colorbar.set_label("Relative Amplitude", fontsize=14)
+                utils.draw_region_boundaries(state, axes[0], regions_dict)
+
+                # --- Find Max Error Bound ---
+                vmax_error = np.max(np.abs(bayes_error_pct.data))
+                if vmax_error == 0:
+                    vmax_error = 1.0
+
+                # --- Plot 2: Bayesian Kernel Error ---
+                _, im_bayes = sl.plot(
+                    bayes_error_pct,
+                    ax=axes[1],
+                    cmap="seismic",
+                    colorbar=True,
+                    symmetric=True,
+                    vmin=-vmax_error,
+                    vmax=vmax_error,
+                    colorbar_kwargs={
+                        "shrink": 0.8,
+                        "pad": 0.05,
+                        "orientation": "horizontal",
+                    },
+                    gridlines_kwargs=gl_kwargs,
+                )
+                axes[1].set_title("Bayesian Kernel Error", fontsize=16)
+                im_bayes.colorbar.set_label("Relative Error (%)", fontsize=14)
+                utils.draw_region_boundaries(state, axes[1], regions_dict)
+
+                # Format filename uniquely for degree 1
+                safe_comp_name = (
+                    comp_name.replace("(", "").replace(")", "").replace(",", "_")
+                )
+                figures_to_save[f"estimator_kernels_deg1_{safe_comp_name}"] = fig_sens
 
         print(f"  Estimator metrics appended to: {metrics_file}")
 

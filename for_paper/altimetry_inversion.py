@@ -16,7 +16,7 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 
-# Set publication-quality font sizes globally
+
 plt.rcParams.update(
     {
         "font.size": 14,
@@ -288,7 +288,7 @@ def main():
             )
             f_metrics.write("-" * 92 + "\n")
             f_metrics.write(
-                f"{'GMSL':<16} | {kl_div:<15.2f} | {prior_var:<17.2f} | {post_var:<16.2f} | {var_reduction:>16.2f}%\n"
+                f"{'GMSL':<16} | {kl_div:<15.4f} | {prior_var:<17.4f} | {post_var:<16.4f} | {var_reduction:>16.4f}%\n"
             )
 
         fig_pdf, ax_pdf = plt.subplots(figsize=(8, 5), layout="constrained")
@@ -298,7 +298,7 @@ def main():
             ax=ax_pdf,
             title="GMSL Estimates",
             xlabel="Global Mean Sea Level Change (mm)",
-            posterior_labels=[f"Bayesian ({kl_div:.2f} nats)", "Simple averaging"],
+            posterior_labels=[f"Bayesian", "Simple averaging"],
         )
         figures_to_save["gmsl_pdf"] = fig_pdf
 
@@ -340,7 +340,7 @@ def main():
                 f"\nComputing pointwise standard deviation from {args.std_samples} posterior samples..."
             )
             samples = model_posterior.samples(
-                args.std_samples, parallel=True, n_jobs=10
+                args.std_samples, parallel=True, n_jobs=14
             )
             var_ice, var_dyn, var_rho = (
                 load_space.zero,
@@ -507,7 +507,6 @@ def main():
             colorbar_kwargs={**cb_kwargs, "label": "SSH Change (mm)"},
             gridlines_kwargs=gl_kwargs,
         )
-        axes_ssh[0].set_title("True Continuous SSH Change", fontsize=16)
 
         axes_ssh[1].set_global()
         axes_ssh[1].coastlines(linewidth=0.5, alpha=0.5, zorder=10)
@@ -524,7 +523,6 @@ def main():
             colorbar_kwargs={**cb_kwargs, "label": "Observed SSH Data (mm)"},
             zorder=5,
         )
-        axes_ssh[1].set_title("Altimetry Observations", fontsize=16)
 
         if args.plot_regions:
             for ax in axes_ssh.flatten():
@@ -544,7 +542,7 @@ def main():
             ("Ocean Dyn", 1, (30.0, -45.0), "North_Atlantic"),
         ]
 
-        def plot_cov_row(ax_pr, ax_po, pr_field, po_field, pt, title_base, label):
+        def plot_cov_row(ax_pr, ax_po, pr_field, po_field, pt, label):
             """Helper to plot side-by-side prior/posterior covariance on shared scales."""
             vmax = max(np.max(np.abs(pr_field.data)), np.max(np.abs(po_field.data)))
             if vmax == 0:
@@ -561,13 +559,10 @@ def main():
                 colorbar_kwargs={**cb_kwargs, "label": label},
                 gridlines_kwargs=gl_kwargs,
             )
-            ax_pr.set_title(f"Prior {title_base}", fontsize=16)
             sl.plot_points(
                 [pt],
                 ax=ax_pr,
                 color="black",
-                marker=".",
-                s=150,
                 zorder=10,
                 gridlines=False,
             )
@@ -578,18 +573,13 @@ def main():
                 cmap="seismic",
                 colorbar=True,
                 symmetric=True,
-                # vmin=-vmax,
-                # vmax=vmax,
                 colorbar_kwargs={**cb_kwargs, "label": label},
                 gridlines_kwargs=gl_kwargs,
             )
-            ax_po.set_title(f"Posterior {title_base}", fontsize=16)
             sl.plot_points(
                 [pt],
                 ax=ax_po,
                 color="black",
-                marker=".",
-                s=150,
                 zorder=10,
                 gridlines=False,
             )
@@ -641,7 +631,6 @@ def main():
                 pr_ice_plot,
                 po_ice_plot,
                 pt,
-                f"Covariance: Ice thickness",
                 "Covariance (mm²)",
             )
 
@@ -651,7 +640,6 @@ def main():
                 pr_dyn_plot,
                 po_dyn_plot,
                 pt,
-                f"Covariance: Dynamic topography",
                 "Covariance (mm²)",
             )
 
@@ -661,9 +649,29 @@ def main():
                 pr_rho_plot,
                 po_rho_plot,
                 pt,
-                f"Covariance: Steric sea level",
                 "Covariance (mm²)",
             )
+
+            # --- Apply Custom Titles to Grid Layout ---
+            # Column Titles
+            axes_cov[0, 0].set_title("Prior", fontsize=16, fontweight="bold", pad=20)
+            axes_cov[0, 1].set_title(
+                "Posterior", fontsize=16, fontweight="bold", pad=20
+            )
+
+            # Row Titles
+            row_titles = ["Ice thickness", "Dynamic topography", "Steric sea level"]
+            for i, row_title in enumerate(row_titles):
+                axes_cov[i, 0].annotate(
+                    row_title,
+                    xy=(-0.1, 0.5),
+                    xycoords="axes fraction",
+                    fontsize=16,
+                    fontweight="bold",
+                    va="center",
+                    ha="center",
+                    rotation=90,
+                )
 
             if args.plot_regions:
                 for ax in axes_cov.flatten():
@@ -673,7 +681,6 @@ def main():
                 fig_cov
             )
 
-    # ------------------ 6. REGIONAL PDFs ------------------
     if args.plot_regions:
         print("\nDecomposing Regional Sea Level Signals (3-way)...")
         masks = [state.get_projection(r, value=0.0) for r in regions_to_analyze]
@@ -710,10 +717,48 @@ def main():
 
         kl_div = post_meas.kl_divergence(prior_meas)
 
+        # --- Extract Dense Covariance Matrices ---
+        prior_cov_mat = prior_meas.covariance.matrix(dense=True)
+        post_cov_mat = post_meas.covariance.matrix(dense=True)
+
+        prior_trace = np.trace(prior_cov_mat)
+        post_trace = np.trace(post_cov_mat)
+        trace_reduction = 100.0 * (1.0 - (post_trace / prior_trace))
+
+        prior_det = np.linalg.det(prior_cov_mat)
+        post_det = np.linalg.det(post_cov_mat)
+
+        # Log KL divergence and detailed covariance metrics to file
+        with open(metrics_file, "a") as f_metrics:
+            f_metrics.write(f"\nRegional Signal Separation ({regions_to_analyze[0]})\n")
+            f_metrics.write("=" * 65 + "\n")
+            f_metrics.write(f"Joint KL Divergence:      {kl_div:.4f} nats\n")
+            f_metrics.write(f"Prior Total Var (Trace):  {prior_trace:.4f} mm²\n")
+            f_metrics.write(f"Post Total Var (Trace):   {post_trace:.4f} mm²\n")
+            f_metrics.write(f"Overall Trace Reduction:  {trace_reduction:.2f}%\n")
+            f_metrics.write(f"Prior Generalized Var:    {prior_det:.4e}\n")
+            f_metrics.write(f"Post Generalized Var:     {post_det:.4e}\n")
+            f_metrics.write("-" * 65 + "\n")
+            f_metrics.write(
+                f"{'Component':<18} | {'Prior Var':<12} | {'Post Var':<12} | {'Reduction'}\n"
+            )
+            f_metrics.write("-" * 65 + "\n")
+
+            comp_names = ["Dynamic SL", "Steric SL", "Barystatic"]
+            for i, name in enumerate(comp_names):
+                pr_v = prior_cov_mat[i, i]
+                po_v = post_cov_mat[i, i]
+                red = 100.0 * (1.0 - (po_v / pr_v)) if pr_v > 0 else 0.0
+                f_metrics.write(
+                    f"{name:<18} | {pr_v:<12.4f} | {po_v:<12.4f} | {red:>8.2f}%\n"
+                )
+            f_metrics.write("-" * 65 + "\n")
+
+        # Strip region name from labels to prepare for caption
         labels = [
-            f"{regions_to_analyze[0]}: Dynamic SL (mm)",
-            f"{regions_to_analyze[0]}: Steric SL (mm)",
-            f"{regions_to_analyze[0]}: Barystatic (mm)",
+            "Dynamic SL (mm)",
+            "Steric SL (mm)",
+            "Barystatic (mm)",
         ]
 
         inf.plot_corner_distributions(
@@ -721,7 +766,7 @@ def main():
             prior_measure=prior_meas,
             true_values=true_vals,
             labels=labels,
-            title=f"Signal Separation ({kl_div:.2f} nats)",
+            title="Signal Separation",
             fill_density=False,
         )
         figures_to_save["regional_corner"] = plt.gcf()

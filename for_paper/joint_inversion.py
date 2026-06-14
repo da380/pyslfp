@@ -166,8 +166,6 @@ def main():
     args = parse_arguments()
     if args.all:
         args.plot_pdfs = args.plot_maps = args.plot_regions = True
-        # if args.std_samples == 0:
-        #    args.std_samples = 100
 
     output_dir = "output_plots_joint_inversion"
     os.makedirs(output_dir, exist_ok=True)

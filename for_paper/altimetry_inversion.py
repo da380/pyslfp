@@ -58,12 +58,6 @@ def parse_arguments():
         help="Plot 3-way regional signal decomposition.",
     )
     parser.add_argument(
-        "--mc-trials",
-        type=int,
-        default=0,
-        help="[Deprecated] Maintained for pipeline compatibility.",
-    )
-    parser.add_argument(
         "--std-samples",
         type=int,
         default=0,
@@ -141,8 +135,8 @@ def main():
     args = parse_arguments()
     if args.all:
         args.plot_pdfs = args.plot_maps = args.plot_regions = True
-        if args.std_samples == 0:
-            args.std_samples = 100
+        # if args.std_samples == 0:
+        #    args.std_samples = 100
 
     output_dir = "output_plots_altimetry_inversion"
     os.makedirs(output_dir, exist_ok=True)
@@ -573,6 +567,8 @@ def main():
                 cmap="seismic",
                 colorbar=True,
                 symmetric=True,
+                vmin=-vmax,
+                vmax=vmax,
                 colorbar_kwargs={**cb_kwargs, "label": label},
                 gridlines_kwargs=gl_kwargs,
             )
@@ -754,7 +750,6 @@ def main():
                 )
             f_metrics.write("-" * 65 + "\n")
 
-        # Strip region name from labels to prepare for caption
         labels = [
             "Dynamic SL (mm)",
             "Steric SL (mm)",
@@ -766,7 +761,7 @@ def main():
             prior_measure=prior_meas,
             true_values=true_vals,
             labels=labels,
-            title="Signal Separation",
+            title="",
             fill_density=False,
         )
         figures_to_save["regional_corner"] = plt.gcf()

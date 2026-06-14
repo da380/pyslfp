@@ -330,7 +330,7 @@ def main():
 
             inf.plot_corner_distributions(
                 deg1_post,
-                prior_measure=deg1_prior,
+                # prior_measure=deg1_prior,
                 true_values=deg1_op(model),
                 labels=[
                     r"$\zeta_{1-1}$ (mm)",
@@ -617,7 +617,7 @@ def main():
         )
 
         fig_maps, axes = sl.subplots(
-            2, 2, figsize=(18, 10), gridspec_kw={"hspace": 0.1}
+            2, 2, figsize=(18, 10), gridspec_kw={"hspace": 0.10}
         )
 
         gl_kwargs = {

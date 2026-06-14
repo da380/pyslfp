@@ -16,7 +16,6 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 
-
 plt.rcParams.update(
     {
         "font.size": 14,
@@ -135,8 +134,6 @@ def main():
     args = parse_arguments()
     if args.all:
         args.plot_pdfs = args.plot_maps = args.plot_regions = True
-        # if args.std_samples == 0:
-        #    args.std_samples = 100
 
     output_dir = "output_plots_altimetry_inversion"
     os.makedirs(output_dir, exist_ok=True)
@@ -529,18 +526,23 @@ def main():
         # =================================================================
         print("\nGenerating Point-wise Covariance Maps...")
 
-        # Define scenarios mapping to specific components in the joint space
-        # Component 0 = Ice, 1 = Ocean Dyn, 2 = Ocean Rho
         scenarios = [
             ("Ice", 0, (-78.0, -110.0), "WAIS"),
             ("Ocean Dyn", 1, (30.0, -45.0), "North_Atlantic"),
         ]
 
         def plot_cov_row(ax_pr, ax_po, pr_field, po_field, pt, label):
-            """Helper to plot side-by-side prior/posterior covariance on shared scales."""
-            vmax = max(np.max(np.abs(pr_field.data)), np.max(np.abs(po_field.data)))
-            if vmax == 0:
-                vmax = 1.0
+            """Helper to plot side-by-side prior/posterior covariance."""
+            vmax_pr = np.max(np.abs(pr_field.data))
+            vmax_po = np.max(np.abs(po_field.data))
+
+            # Fallback if one or both fields vanish completely
+            if vmax_pr == 0 and vmax_po == 0:
+                vmax_pr = vmax_po = 1.0
+            elif vmax_pr == 0:
+                vmax_pr = vmax_po
+            elif vmax_po == 0:
+                vmax_po = vmax_pr
 
             _, im_pr = sl.plot(
                 pr_field,
@@ -548,8 +550,8 @@ def main():
                 cmap="seismic",
                 colorbar=True,
                 symmetric=True,
-                vmin=-vmax,
-                vmax=vmax,
+                vmin=-vmax_pr,
+                vmax=vmax_pr,
                 colorbar_kwargs={**cb_kwargs, "label": label},
                 gridlines_kwargs=gl_kwargs,
             )
@@ -567,8 +569,8 @@ def main():
                 cmap="seismic",
                 colorbar=True,
                 symmetric=True,
-                vmin=-vmax,
-                vmax=vmax,
+                vmin=-vmax_po,
+                vmax=vmax_po,
                 colorbar_kwargs={**cb_kwargs, "label": label},
                 gridlines_kwargs=gl_kwargs,
             )
@@ -583,27 +585,20 @@ def main():
         for comp_name, comp_idx, pt, pt_name in scenarios:
             print(f"  Evaluating perturbation in {comp_name} at {pt}...")
 
-            # 1. Create dirac representation in the underlying spatial load space
             dirac_rep = load_space.dirac_representation(pt)
-
-            # 2. Build the combined test vector (direct sum structure)
             test_vec = [load_space.zero, load_space.zero, load_space.zero]
             test_vec[comp_idx] = dirac_rep
 
-            # 3. Apply the covariance operators (inherently captures the mass constraint)
             prior_cov = model_prior.covariance(test_vec)
             post_cov = model_posterior.covariance(test_vec)
 
-            # 4. Unpack the resulting component fields
             pr_ice, pr_dyn, pr_rho = prior_cov
             po_ice, po_dyn, po_rho = post_cov
 
-            # Determine perturbation scaling base
             perturb_scale = (
                 mm_scale if comp_idx in [0, 1] else (steric_scale * mm_scale)
             )
 
-            # Apply appropriate cross-scaling and masking to physical units (mm²)
             pr_ice_plot = pr_ice * (perturb_scale * mm_scale) * ice_mask
             po_ice_plot = po_ice * (perturb_scale * mm_scale) * ice_mask
 
@@ -649,13 +644,11 @@ def main():
             )
 
             # --- Apply Custom Titles to Grid Layout ---
-            # Column Titles
             axes_cov[0, 0].set_title("Prior", fontsize=16, fontweight="bold", pad=20)
             axes_cov[0, 1].set_title(
                 "Posterior", fontsize=16, fontweight="bold", pad=20
             )
 
-            # Row Titles
             row_titles = ["Ice thickness", "Dynamic topography", "Steric sea level"]
             for i, row_title in enumerate(row_titles):
                 axes_cov[i, 0].annotate(

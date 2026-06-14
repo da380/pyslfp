@@ -3,11 +3,11 @@ Altimetry Inversion Metrics
 
 Target           | KL Divergence   | Prior Var (mm²)   | Post Var (mm²)   | Variance Reduction
 --------------------------------------------------------------------------------------------
-GMSL             | 1.3808          | 0.0511            | 0.0025           |          95.1649%
+GMSL             | 1.4815          | 0.0511            | 0.0025           |          95.1649%
 
 Regional Signal Separation (Tasman Sea)
 =================================================================
-Joint KL Divergence:      3.0422 nats
+Joint KL Divergence:      3.2973 nats
 Prior Total Var (Trace):  5.9040 mm²
 Post Total Var (Trace):   0.5722 mm²
 Overall Trace Reduction:  90.31%

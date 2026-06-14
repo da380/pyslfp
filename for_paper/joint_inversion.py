@@ -599,9 +599,17 @@ def main():
         ]
 
         def plot_cov_row(ax_pr, ax_po, pr_field, po_field, pt, label):
-            vmax = max(np.max(np.abs(pr_field.data)), np.max(np.abs(po_field.data)))
-            if vmax == 0:
-                vmax = 1.0
+            """Helper to plot side-by-side prior/posterior covariance."""
+            vmax_pr = np.max(np.abs(pr_field.data))
+            vmax_po = np.max(np.abs(po_field.data))
+
+            # Fallback if one or both fields vanish completely
+            if vmax_pr == 0 and vmax_po == 0:
+                vmax_pr = vmax_po = 1.0
+            elif vmax_pr == 0:
+                vmax_pr = vmax_po
+            elif vmax_po == 0:
+                vmax_po = vmax_pr
 
             _, im_pr = sl.plot(
                 pr_field,
@@ -609,12 +617,18 @@ def main():
                 cmap="seismic",
                 colorbar=True,
                 symmetric=True,
-                vmin=-vmax,
-                vmax=vmax,
+                vmin=-vmax_pr,
+                vmax=vmax_pr,
                 colorbar_kwargs={**cb_kwargs, "label": label},
                 gridlines_kwargs=gl_kwargs,
             )
-            sl.plot_points([pt], ax=ax_pr, color="black", zorder=10, gridlines=False)
+            sl.plot_points(
+                [pt],
+                ax=ax_pr,
+                color="black",
+                zorder=10,
+                gridlines=False,
+            )
 
             _, im_po = sl.plot(
                 po_field,
@@ -622,12 +636,18 @@ def main():
                 cmap="seismic",
                 colorbar=True,
                 symmetric=True,
-                vmin=-vmax,
-                vmax=vmax,
+                vmin=-vmax_po,
+                vmax=vmax_po,
                 colorbar_kwargs={**cb_kwargs, "label": label},
                 gridlines_kwargs=gl_kwargs,
             )
-            sl.plot_points([pt], ax=ax_po, color="black", zorder=10, gridlines=False)
+            sl.plot_points(
+                [pt],
+                ax=ax_po,
+                color="black",
+                zorder=10,
+                gridlines=False,
+            )
 
         for comp_name, comp_idx, pt, pt_name in scenarios:
             print(f"  Evaluating joint perturbation in {comp_name} at {pt}...")
@@ -690,7 +710,7 @@ def main():
 
             axes_cov[0, 0].set_title("Prior", fontsize=16, fontweight="bold", pad=20)
             axes_cov[0, 1].set_title(
-                "Posterior", fontsize=16, fontweight="bold", pad=20
+                "Joint Posterior", fontsize=16, fontweight="bold", pad=20
             )
 
             for i, row_title in enumerate(row_titles):

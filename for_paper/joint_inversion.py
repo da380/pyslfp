@@ -16,9 +16,8 @@ import numpy as np
 
 import matplotlib
 
-# Force headless backend to avoid Wayland/Qt display errors
+
 import matplotlib.pyplot as plt
-from cartopy import crs as ccrs
 import pygeoinf as inf
 
 import joint_utils as utils
@@ -29,7 +28,7 @@ from pyslfp.linear_operators import ocean_altimetry_points
 
 matplotlib.use("Agg")
 
-# Set publication-quality font sizes globally
+
 plt.rcParams.update(
     {
         "font.size": 14,

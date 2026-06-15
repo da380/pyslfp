@@ -16,6 +16,15 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 
+
+import pygeoinf as inf
+
+import altimetry_utils as utils
+import pyslfp as sl
+from pyslfp.state import EarthState
+from pyslfp.linear_operators import ocean_altimetry_points
+
+
 plt.rcParams.update(
     {
         "font.size": 14,
@@ -26,13 +35,6 @@ plt.rcParams.update(
         "figure.titlesize": 18,
     }
 )
-
-import pygeoinf as inf
-
-import altimetry_utils as utils
-import pyslfp as sl
-from pyslfp.state import EarthState
-from pyslfp.linear_operators import ocean_altimetry_points
 
 matplotlib.use("Agg")
 
@@ -289,7 +291,7 @@ def main():
             ax=ax_pdf,
             title="GMSL Estimates",
             xlabel="Global Mean Sea Level Change (mm)",
-            posterior_labels=[f"Bayesian", "Simple averaging"],
+            posterior_labels=["Bayesian", "Simple averaging"],
         )
         figures_to_save["gmsl_pdf"] = fig_pdf
 

@@ -16,7 +16,13 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 
-# Set publication-quality font sizes globally
+
+import pygeoinf as inf
+import grace_utils as utils
+import pyslfp as sl
+from pygeoinf.symmetric_space.sphere import plot_points
+
+
 plt.rcParams.update(
     {
         "font.size": 14,
@@ -27,12 +33,6 @@ plt.rcParams.update(
         "figure.titlesize": 18,
     }
 )
-
-import pygeoinf as inf
-import grace_utils as utils
-import pyslfp as sl
-from pygeoinf.symmetric_space.sphere import plot_points
-
 
 matplotlib.use("Agg")
 
@@ -304,7 +304,7 @@ def main():
             post_det = np.linalg.det(post_cov_mat)
 
             with open(metrics_file, "a") as f_metrics:
-                f_metrics.write(f"\n\nDegree-1 Spherical Harmonic Coefficients\n")
+                f_metrics.write("\n\nDegree-1 Spherical Harmonic Coefficients\n")
                 f_metrics.write("=" * 65 + "\n")
                 f_metrics.write(f"Joint KL Divergence:      {kl_div:.4f} nats\n")
                 f_metrics.write(f"Prior Total Var (Trace):  {prior_trace:.4f} mm²\n")

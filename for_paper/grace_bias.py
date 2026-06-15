@@ -149,10 +149,8 @@ def main():
 
     wmb = WMBMethod(model, args.obs_degree)
 
-    region_names, avg_op, weighting_functions, regions_dict = (
-        utils.get_regional_averaging(
-            state, load_space, smoothing_scale_km=args.smoothing_scale_km
-        )
+    region_names, avg_op, _, regions_dict = utils.get_regional_averaging(
+        state, load_space, smoothing_scale_km=args.smoothing_scale_km
     )
 
     wmb_avg_op = avg_op @ wmb.potential_coefficient_to_load_operator(load_space)
@@ -173,40 +171,38 @@ def main():
         sample_direct = cond_prior.sample()
         sample_induced = (sle_to_load @ sea_level_proj @ fp_op)(sample_direct)
 
-        fig1, ax1 = create_map_figure(figsize=(14, 8))
-        plot(
+        fig1, ax1 = create_map_figure(figsize=(12, 6))
+        _, im1 = plot(
             sample_direct * scale_mm,
             ax=ax1,
-            colorbar_kwargs={"label": "EWT (mm)"},
+            cmap="seismic",
             symmetric=True,
         )
+
+        im1.colorbar.set_label("EWT (mm)", fontsize=16)
+        im1.colorbar.ax.tick_params(labelsize=14)
+
+        ax1.gridliner.xlabel_style = {"size": 12, "color": "black"}
+        ax1.gridliner.ylabel_style = {"size": 12, "color": "black"}
 
         utils.draw_region_boundaries(state, ax1, regions_dict)
         figures_to_save["grace_bias_direct_load"] = fig1
 
-        fig2, ax2 = create_map_figure(figsize=(14, 8))
-        plot(
+        fig2, ax2 = create_map_figure(figsize=(12, 6))
+        _, im2 = plot(
             sample_induced * scale_mm,
             ax=ax2,
-            colorbar_kwargs={"label": "EWT (mm)"},
+            cmap="seismic",
             symmetric=True,
         )
         utils.draw_region_boundaries(state, ax2, regions_dict)
         figures_to_save["grace_bias_induced_load"] = fig2
 
-        summed_weights = model.zero_grid()
-        for weight in weighting_functions:
-            summed_weights.data += weight.data
+        im2.colorbar.set_label("EWT (mm)", fontsize=16)
+        im2.colorbar.ax.tick_params(labelsize=14)
 
-        fig3, ax3 = create_map_figure(figsize=(14, 8))
-        plot(
-            summed_weights,
-            ax=ax3,
-            colorbar_kwargs={"label": "Weighting functions"},
-            cmap="Blues",
-        )
-        utils.draw_region_boundaries(state, ax3, regions_dict)
-        figures_to_save["grace_bias_weighting_functions"] = fig3
+        ax2.gridliner.xlabel_style = {"size": 12, "color": "black"}
+        ax2.gridliner.ylabel_style = {"size": 12, "color": "black"}
 
     # ------------------ CORE BIAS EVALUATION ------------------
     op1 = inf.BlockLinearOperator(

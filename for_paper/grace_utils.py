@@ -66,12 +66,15 @@ def build_measures(
         )
     )
 
-    constraint_lmax = 1 if remove_degree_1 else 0
-    constraint_operator = load_space.to_coefficient_operator(constraint_lmax)
-    constraint_subspace = inf.LinearSubspace.from_kernel(constraint_operator)
-    direct_load_prior = constraint_subspace.condition_gaussian_measure(
-        initial_direct_load_prior
-    )
+    if remove_degree_1:
+        constraint_lmax = 1
+        constraint_operator = load_space.to_coefficient_operator(constraint_lmax)
+        constraint_subspace = inf.LinearSubspace.from_kernel(constraint_operator)
+        direct_load_prior = constraint_subspace.condition_gaussian_measure(
+            initial_direct_load_prior
+        )
+    else:
+        direct_load_prior = initial_direct_load_prior
 
     if prior_shift != 0.0:
         offset_shape = direct_load_prior.sample()

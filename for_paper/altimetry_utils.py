@@ -44,7 +44,9 @@ def build_physics_components(
     load_space = finger_print_operator.domain
 
     # 1. Operators to convert each component to a surface mass load
-    ice_to_load = ice_thickness_change_to_load_operator(state, load_space, load_space)
+    ice_to_load = ice_thickness_change_to_load_operator(
+        state, load_space, load_space
+    ) @ ice_projection_operator(state, load_space)
 
     if is_surrogate:
         ocean_dyn_to_load = load_space.zero_operator(load_space)
@@ -100,7 +102,7 @@ def build_physics_components(
         load_space,
         finger_print_operator,
         continuous_ssh_operator,
-        continuous_sl_operator,  # New return!
+        continuous_sl_operator,
         forward_operator,
         scale_mm,
     )

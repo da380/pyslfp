@@ -1,5 +1,4 @@
-"""
-Bayesian GRACE Inversion
+"""Bayesian GRACE Inversion
 ========================
 
 This script performs a Bayesian inversion of synthetic GRACE gravimetry data
@@ -318,7 +317,7 @@ def main():
                 )
                 f_metrics.write("-" * 65 + "\n")
 
-                comp_names = ["Zeta(1,-1)", "Zeta(1,0)", "Zeta(1,1)"]
+                comp_names = ["(1,0)", "(1,-1)", "(1,1)"]
                 for i, name in enumerate(comp_names):
                     pr_v = prior_cov_mat[i, i]
                     po_v = post_cov_mat[i, i]
@@ -333,8 +332,8 @@ def main():
                 # prior_measure=deg1_prior,
                 true_values=deg1_op(model),
                 labels=[
-                    r"$\zeta_{1-1}$ (mm)",
                     r"$\zeta_{10}$ (mm)",
+                    r"$\zeta_{1-1}$ (mm)",
                     r"$\zeta_{11}$ (mm)",
                 ],
                 title="",
@@ -495,7 +494,7 @@ def main():
         deg1_op = load_space.to_coefficient_operator(1, lmin=1) * ewt_mm_scale
         deg1_resolution_operator = deg1_op @ model_resolution_operator
 
-        deg1_names = ["Zeta(1,-1)", "Zeta(1,0)", "Zeta(1,1)"]
+        deg1_names = ["(1,0)", "(1,-1)", "(1,1)"]
 
         with open(metrics_file, "a") as f_metrics:
             f_metrics.write("\n\n" + "=" * 80 + "\n")

@@ -588,127 +588,114 @@ def main():
         figures_to_save["posterior_maps_joint"] = fig_maps
 
         # =================================================================
-        # Point-wise Covariance Maps (Joint Posterior)
+        # Point-wise Covariance Maps (Prior vs Alt-Only vs Joint)
         # =================================================================
-        print("\nGenerating Point-wise Covariance Maps (Joint)...")
+        print("\nGenerating Point-wise Covariance Maps (Prior vs Alt-Only vs Joint)...")
 
         scenarios = [
             ("Ice", 0, (-78.0, -110.0), "WAIS"),
             ("Ocean Dyn", 1, (30.0, -45.0), "North_Atlantic"),
         ]
 
-        def plot_cov_row(ax_pr, ax_po, pr_field, po_field, pt, label):
-            """Helper to plot side-by-side prior/posterior covariance."""
-            vmax_pr = np.max(np.abs(pr_field.data))
-            vmax_po = np.max(np.abs(po_field.data))
+        def plot_cov_row(axes, fields, pt, label):
+            """Helper to plot 3-way prior/alt-only/joint covariance side-by-side."""
+            vmaxs = [np.max(np.abs(f.data)) for f in fields]
 
-            # Fallback if one or both fields vanish completely
-            if vmax_pr == 0 and vmax_po == 0:
-                vmax_pr = vmax_po = 1.0
-            elif vmax_pr == 0:
-                vmax_pr = vmax_po
-            elif vmax_po == 0:
-                vmax_po = vmax_pr
+            # Fallback if one or more fields vanish completely
+            for i in range(len(vmaxs)):
+                if vmaxs[i] == 0:
+                    vmaxs[i] = max(vmaxs) if max(vmaxs) > 0 else 1.0
 
-            _, im_pr = sl.plot(
-                pr_field,
-                ax=ax_pr,
-                cmap="seismic",
-                colorbar=True,
-                symmetric=True,
-                vmin=-vmax_pr,
-                vmax=vmax_pr,
-                colorbar_kwargs={**cb_kwargs, "label": label},
-                gridlines_kwargs=gl_kwargs,
-            )
-            sl.plot_points(
-                [pt],
-                ax=ax_pr,
-                color="black",
-                zorder=10,
-                gridlines=False,
-            )
-
-            _, im_po = sl.plot(
-                po_field,
-                ax=ax_po,
-                cmap="seismic",
-                colorbar=True,
-                symmetric=True,
-                vmin=-vmax_po,
-                vmax=vmax_po,
-                colorbar_kwargs={**cb_kwargs, "label": label},
-                gridlines_kwargs=gl_kwargs,
-            )
-            sl.plot_points(
-                [pt],
-                ax=ax_po,
-                color="black",
-                zorder=10,
-                gridlines=False,
-            )
+            for ax, field, vmax in zip(axes, fields, vmaxs):
+                sl.plot(
+                    field,
+                    ax=ax,
+                    cmap="seismic",
+                    colorbar=True,
+                    symmetric=True,
+                    vmin=-vmax,
+                    vmax=vmax,
+                    colorbar_kwargs={**cb_kwargs, "label": label},
+                    gridlines_kwargs=gl_kwargs,
+                )
+                sl.plot_points(
+                    [pt],
+                    ax=ax,
+                    color="black",
+                    zorder=10,
+                    gridlines=False,
+                )
 
         for comp_name, comp_idx, pt, pt_name in scenarios:
-            print(f"  Evaluating joint perturbation in {comp_name} at {pt}...")
+            print(f"  Evaluating perturbation in {comp_name} at {pt}...")
 
             dirac_rep = load_space.dirac_representation(pt)
             test_vec = [load_space.zero, load_space.zero, load_space.zero]
             test_vec[comp_idx] = dirac_rep
 
+            # Extract covariances for Prior, Alt-Only, and Joint
             prior_cov = exact_meas["model_prior"].covariance(test_vec)
-            post_cov = post_joint.covariance(test_vec)
+            post_alt_cov = post_alt.covariance(test_vec)
+            post_joint_cov = post_joint.covariance(test_vec)
 
             pr_ice, pr_dyn, pr_rho = prior_cov
-            po_ice, po_dyn, po_rho = post_cov
+            po_alt_ice, po_alt_dyn, po_alt_rho = post_alt_cov
+            po_joint_ice, po_joint_dyn, po_joint_rho = post_joint_cov
 
             perturb_scale = (
                 scale_mm if comp_idx in [0, 1] else (steric_scale * scale_mm)
             )
 
+            # Apply scaling and spatial masks
             pr_ice_plot = pr_ice * (perturb_scale * scale_mm) * ice_mask
-            po_ice_plot = po_ice * (perturb_scale * scale_mm) * ice_mask
+            po_alt_ice_plot = po_alt_ice * (perturb_scale * scale_mm) * ice_mask
+            po_joint_ice_plot = po_joint_ice * (perturb_scale * scale_mm) * ice_mask
 
             pr_dyn_plot = pr_dyn * (perturb_scale * scale_mm) * ocean_mask
-            po_dyn_plot = po_dyn * (perturb_scale * scale_mm) * ocean_mask
+            po_alt_dyn_plot = po_alt_dyn * (perturb_scale * scale_mm) * ocean_mask
+            po_joint_dyn_plot = po_joint_dyn * (perturb_scale * scale_mm) * ocean_mask
 
             pr_rho_plot = (
                 pr_rho * (perturb_scale * steric_scale * scale_mm) * ocean_mask
             )
-            po_rho_plot = (
-                po_rho * (perturb_scale * steric_scale * scale_mm) * ocean_mask
+            po_alt_rho_plot = (
+                po_alt_rho * (perturb_scale * steric_scale * scale_mm) * ocean_mask
+            )
+            po_joint_rho_plot = (
+                po_joint_rho * (perturb_scale * steric_scale * scale_mm) * ocean_mask
             )
 
+            # Setup 3x3 grid
             fig_cov, axes_cov = sl.subplots(
-                3, 2, figsize=(16, 16), gridspec_kw={"hspace": 0.15}
+                3, 3, figsize=(24, 16), gridspec_kw={"hspace": 0.15, "wspace": 0.1}
             )
 
+            # Plot each row
             plot_cov_row(
-                axes_cov[0, 0],
-                axes_cov[0, 1],
-                pr_ice_plot,
-                po_ice_plot,
+                axes_cov[0],
+                [pr_ice_plot, po_alt_ice_plot, po_joint_ice_plot],
                 pt,
                 "Covariance (mm²)",
             )
             plot_cov_row(
-                axes_cov[1, 0],
-                axes_cov[1, 1],
-                pr_dyn_plot,
-                po_dyn_plot,
+                axes_cov[1],
+                [pr_dyn_plot, po_alt_dyn_plot, po_joint_dyn_plot],
                 pt,
                 "Covariance (mm²)",
             )
             plot_cov_row(
-                axes_cov[2, 0],
-                axes_cov[2, 1],
-                pr_rho_plot,
-                po_rho_plot,
+                axes_cov[2],
+                [pr_rho_plot, po_alt_rho_plot, po_joint_rho_plot],
                 pt,
                 "Covariance (mm²)",
             )
 
+            # Apply Custom Titles to Grid Layout
             axes_cov[0, 0].set_title("Prior", fontsize=16, fontweight="bold", pad=20)
             axes_cov[0, 1].set_title(
+                "Altimetry-Only Posterior", fontsize=16, fontweight="bold", pad=20
+            )
+            axes_cov[0, 2].set_title(
                 "Joint Posterior", fontsize=16, fontweight="bold", pad=20
             )
 
@@ -728,9 +715,9 @@ def main():
                 for ax in axes_cov.flatten():
                     state.plot_boundaries(ax, regions_to_analyze)
 
-            figures_to_save[f"covariance_{comp_name.replace(' ', '_')}_{pt_name}"] = (
-                fig_cov
-            )
+            figures_to_save[
+                f"covariance_comparison_{comp_name.replace(' ', '_')}_{pt_name}"
+            ] = fig_cov
 
     # ------------------ 7. REGIONAL DECOMPOSITION ------------------
     if args.plot_regions:

@@ -333,14 +333,14 @@ def main():
         gaussian_pdf(x_vals, err_mean, err_std),
         "r-",
         linewidth=2.5,
-        label=rf"Actual error ($\mu$={err_mean:.3f}, $\sigma$={err_std:.3f})",
+        label=rf"Actual error",
     )
     ax.plot(
         x_vals,
         gaussian_pdf(x_vals, 0, alt_noise_std),
         "b",
         linewidth=2,
-        label=rf"Theoretical error ($\mu$=0.000, $\sigma$={alt_noise_std:.3f})",
+        label=rf"Standard error",
     )
 
     ax.set_xlabel("Error in GMSL estimate (mm)", fontsize=14)

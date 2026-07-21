@@ -385,6 +385,7 @@ def main():
             true_value=true_gmsl_val_mm,
             ax=ax_pdf,
             title="",
+            xlabel="Global Mean Sea Level Change (mm)",
             posterior_labels=labels,
         )
         figures_to_save["gmsl_pdf"] = fig_pdf

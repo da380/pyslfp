@@ -297,7 +297,7 @@ def main():
             [post_gmsl_measure, alt_gmsl_measure],
             true_value=true_gmsl,
             ax=ax_pdf,
-            title="GMSL Estimates",
+            title="",
             xlabel="Global Mean Sea Level Change (mm)",
             posterior_labels=["Bayesian", "Simple averaging"],
         )

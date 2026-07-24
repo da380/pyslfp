@@ -139,6 +139,32 @@ def parse_arguments():
     return parser.parse_args()
 
 
+def fix_corner_legend(axes, fig):
+    """Quick fix: Moves the floating figure legend into the empty top-right subplot."""
+    # 1. Remove the floating figure-level legend
+    if fig.legends:
+        fig.legends[0].remove()
+
+    n_dims = axes.shape[0]
+    if n_dims < 2:
+        return
+
+    # 2. Extract handles and labels exactly as pygeoinf does
+    handles, labels_leg = axes[0, 0].get_legend_handles_labels()
+    handles2, labels2 = axes[1, 0].get_legend_handles_labels()
+    handles.extend(handles2)
+    labels_leg.extend(labels2)
+
+    cleaned_labels = [label.split(":")[0] for label in labels_leg]
+    unique_legend = dict(zip(cleaned_labels, handles))
+
+    # 3. Place the legend securely inside the empty top-right subplot
+    leg_ax = axes[0, n_dims - 1]
+    leg_ax.set_visible(True)
+    leg_ax.axis("off")
+    leg_ax.legend(unique_legend.values(), unique_legend.keys(), loc="center")
+
+
 def main():
     args = parse_arguments()
     if args.all:
@@ -365,7 +391,7 @@ def main():
                 )
             f_metrics.write("-" * 70 + "\n")
 
-        inf.plot_corner_distributions(
+        axes = inf.plot_corner_distributions(
             post_split,
             prior_measure=prior_split,
             true_values=true_split,
@@ -373,7 +399,9 @@ def main():
             title="",
             fill_density=False,
         )
-        figures_to_save["gmsl_split_corner"] = plt.gcf()
+        fig = plt.gcf()
+        fix_corner_legend(axes, fig)
+        figures_to_save["gmsl_split_corner"] = fig
 
     # ------------------ 5. SPATIAL & COVARIANCE MAPS ------------------
     if args.plot_maps:

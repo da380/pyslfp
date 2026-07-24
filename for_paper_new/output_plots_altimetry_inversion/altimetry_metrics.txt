@@ -3,32 +3,32 @@ Altimetry Inversion Metrics
 
 Target           | KL Divergence   | Prior Var (mm²)   | Post Var (mm²)   | Variance Reduction
 --------------------------------------------------------------------------------------------
-GMSL             | 1.6306          | 0.0511            | 0.0049           |          90.4297%
+GMSL             | 0.0232          | 0.0508            | 0.0371           |          27.0383%
 
 GMSL Split: Barystatic vs Ocean-Dynamic (dyn. topography + steric)
 ======================================================================
-Joint KL Divergence:     1.6391 nats
-Bary-Dyn correlation:    prior -0.9818 | posterior -0.9845
-Mass-conservation check: dyn residual = 0.760282 mm | direct avg = 0.452332 mm | diff = 3.080e-01 mm
+Joint KL Divergence:     0.0222 nats
+Bary-Dyn correlation:    prior -0.9806 | posterior -0.9784
+Mass-conservation check: dyn residual = -0.988735 mm | direct avg = -0.301022 mm | diff = -6.877e-01 mm
 ----------------------------------------------------------------------
 Component          | Prior Var    | Post Var     | Reduction
 ----------------------------------------------------------------------
-Barystatic         | 0.2499       | 0.1004       |    59.81%
-Ocean-dynamic      | 0.4854       | 0.1249       |    74.28%
+Barystatic         | 0.2509       | 0.2067       |    17.64%
+Ocean-dynamic      | 0.4856       | 0.3784       |    22.07%
 ----------------------------------------------------------------------
 
 Regional Signal Separation (Tasman Sea)
 =================================================================
-Joint KL Divergence:      2.1011 nats
-Prior Total Var (Trace):  5.8215 mm²
-Post Total Var (Trace):   0.6867 mm²
-Overall Trace Reduction:  88.20%
-Prior Generalized Var:    8.4870e-02
-Post Generalized Var:     8.7789e-04
+Joint KL Divergence:      0.1247 nats
+Prior Total Var (Trace):  5.5713 mm²
+Post Total Var (Trace):   3.5696 mm²
+Overall Trace Reduction:  35.93%
+Prior Generalized Var:    7.5904e-02
+Post Generalized Var:     3.7909e-02
 -----------------------------------------------------------------
 Component          | Prior Var    | Post Var     | Reduction
 -----------------------------------------------------------------
-Dynamic SL         | 5.2563       | 0.1424       |    97.29%
-Steric SL          | 0.5349       | 0.5316       |     0.63%
-Barystatic         | 0.0302       | 0.0128       |    57.68%
+Dynamic SL         | 5.0325       | 3.0368       |    39.66%
+Steric SL          | 0.5092       | 0.5082       |     0.19%
+Barystatic         | 0.0296       | 0.0246       |    16.99%
 -----------------------------------------------------------------

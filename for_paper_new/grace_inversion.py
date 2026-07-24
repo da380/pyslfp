@@ -505,6 +505,13 @@ def main():
             )
             f_metrics.write("-" * 80 + "\n")
 
+            # --- 1. Set up a 3x3 figure outside the loop ---
+            fig_sens, axes = sl.subplots(
+                3, 3, figsize=(20, 10), gridspec_kw={"wspace": 0.05, "hspace": 0.05}
+            )
+
+            gl_kwargs = {"xlabel_style": {"size": 12}, "ylabel_style": {"size": 12}}
+
             for i, comp_name in enumerate(deg1_names):
                 # e_i (Basis vector)
                 basis_vec = deg1_resolution_operator.codomain.basis_vector(i)
@@ -512,6 +519,9 @@ def main():
                 # Extract Target and Bayes Error spatial vectors
                 target_vector = deg1_op.adjoint(basis_vec)
                 bayes_res_vector = deg1_resolution_operator.adjoint(basis_vec)
+
+                # --- 2. Calculate the Bayesian Kernel directly ---
+                bayes_kernel_vector = target_vector + bayes_res_vector
 
                 target_norm = load_space.norm(target_vector)
                 bayes_error_norm = load_space.norm(bayes_res_vector)
@@ -526,21 +536,17 @@ def main():
                 max_abs_val = np.max(np.abs(target_vector.data))
                 if max_abs_val > 0:
                     target_normed = target_vector / max_abs_val
+                    bayes_kernel_normed = bayes_kernel_vector / max_abs_val
                     bayes_error_pct = (bayes_res_vector / max_abs_val) * 100
                 else:
                     target_normed = load_space.zero
+                    bayes_kernel_normed = load_space.zero
                     bayes_error_pct = load_space.zero
 
-                fig_sens, axes = sl.subplots(
-                    1, 2, figsize=(15, 5), gridspec_kw={"wspace": 0.15}
-                )
-
-                gl_kwargs = {"xlabel_style": {"size": 12}, "ylabel_style": {"size": 12}}
-
-                # --- Plot 1: Target Kernel (Degree 1 Spherical Harmonic) ---
+                # --- Plot 1: Target Kernel (Left Column) ---
                 _, im_target = sl.plot(
                     target_normed,
-                    ax=axes[0],
+                    ax=axes[i, 0],
                     cmap="seismic",
                     colorbar=True,
                     symmetric=True,
@@ -553,19 +559,38 @@ def main():
                     },
                     gridlines_kwargs=gl_kwargs,
                 )
-                axes[0].set_title(f"Target Kernel: {comp_name}", fontsize=16)
+                axes[i, 0].set_title(f"Target Kernel: {comp_name}", fontsize=16)
                 im_target.colorbar.set_label("Relative Amplitude", fontsize=14)
-                utils.draw_region_boundaries(state, axes[0], regions_dict)
+                utils.draw_region_boundaries(state, axes[i, 0], regions_dict)
 
-                # --- Find Max Error Bound ---
+                # --- Plot 2: Bayesian Kernel (Middle Column) ---
+                _, im_bayes_k = sl.plot(
+                    bayes_kernel_normed,
+                    ax=axes[i, 1],
+                    cmap="seismic",
+                    colorbar=True,
+                    symmetric=True,
+                    vmin=-1.0,
+                    vmax=1.0,
+                    colorbar_kwargs={
+                        "shrink": 0.8,
+                        "pad": 0.05,
+                        "orientation": "horizontal",
+                    },
+                    gridlines_kwargs=gl_kwargs,
+                )
+                axes[i, 1].set_title(f"Bayesian Kernel: {comp_name}", fontsize=16)
+                im_bayes_k.colorbar.set_label("Relative Amplitude", fontsize=14)
+                utils.draw_region_boundaries(state, axes[i, 1], regions_dict)
+
+                # --- Plot 3: Bayesian Kernel Error (Right Column) ---
                 vmax_error = np.max(np.abs(bayes_error_pct.data))
                 if vmax_error == 0:
                     vmax_error = 1.0
 
-                # --- Plot 2: Bayesian Kernel Error ---
-                _, im_bayes = sl.plot(
+                _, im_bayes_err = sl.plot(
                     bayes_error_pct,
-                    ax=axes[1],
+                    ax=axes[i, 2],
                     cmap="seismic",
                     colorbar=True,
                     symmetric=True,
@@ -578,15 +603,12 @@ def main():
                     },
                     gridlines_kwargs=gl_kwargs,
                 )
-                axes[1].set_title("Bayesian Kernel Error", fontsize=16)
-                im_bayes.colorbar.set_label("Relative Error (%)", fontsize=14)
-                utils.draw_region_boundaries(state, axes[1], regions_dict)
+                axes[i, 2].set_title(f"Kernel Error: {comp_name}", fontsize=16)
+                im_bayes_err.colorbar.set_label("Relative Error (%)", fontsize=14)
+                utils.draw_region_boundaries(state, axes[i, 2], regions_dict)
 
-                # Format filename uniquely for degree 1
-                safe_comp_name = (
-                    comp_name.replace("(", "").replace(")", "").replace(",", "_")
-                )
-                figures_to_save[f"estimator_kernels_deg1_{safe_comp_name}"] = fig_sens
+            # Save the composite 3x3 figure
+            figures_to_save["estimator_kernels_deg1_all"] = fig_sens
 
         print(f"  Estimator metrics appended to: {metrics_file}")
 

@@ -507,10 +507,10 @@ def main():
 
             # --- 1. Set up a 3x3 figure outside the loop ---
             fig_sens, axes = sl.subplots(
-                3, 3, figsize=(20, 10), gridspec_kw={"wspace": 0.05, "hspace": 0.05}
+                3, 3, figsize=(24, 16), gridspec_kw={"hspace": 0.15, "wspace": 0.1}
             )
-
             gl_kwargs = {"xlabel_style": {"size": 12}, "ylabel_style": {"size": 12}}
+            cb_kwargs = {"shrink": 0.8, "pad": 0.05, "orientation": "horizontal"}
 
             for i, comp_name in enumerate(deg1_names):
                 # e_i (Basis vector)
@@ -520,7 +520,7 @@ def main():
                 target_vector = deg1_op.adjoint(basis_vec)
                 bayes_res_vector = deg1_resolution_operator.adjoint(basis_vec)
 
-                # --- 2. Calculate the Bayesian Kernel directly ---
+                # Calculate the Bayesian Kernel directly
                 bayes_kernel_vector = target_vector + bayes_res_vector
 
                 target_norm = load_space.norm(target_vector)
@@ -552,14 +552,9 @@ def main():
                     symmetric=True,
                     vmin=-1.0,
                     vmax=1.0,
-                    colorbar_kwargs={
-                        "shrink": 0.8,
-                        "pad": 0.05,
-                        "orientation": "horizontal",
-                    },
+                    colorbar_kwargs=cb_kwargs,
                     gridlines_kwargs=gl_kwargs,
                 )
-                axes[i, 0].set_title(f"Target Kernel: {comp_name}", fontsize=16)
                 im_target.colorbar.set_label("Relative Amplitude", fontsize=14)
                 utils.draw_region_boundaries(state, axes[i, 0], regions_dict)
 
@@ -572,14 +567,9 @@ def main():
                     symmetric=True,
                     vmin=-1.0,
                     vmax=1.0,
-                    colorbar_kwargs={
-                        "shrink": 0.8,
-                        "pad": 0.05,
-                        "orientation": "horizontal",
-                    },
+                    colorbar_kwargs=cb_kwargs,
                     gridlines_kwargs=gl_kwargs,
                 )
-                axes[i, 1].set_title(f"Bayesian Kernel: {comp_name}", fontsize=16)
                 im_bayes_k.colorbar.set_label("Relative Amplitude", fontsize=14)
                 utils.draw_region_boundaries(state, axes[i, 1], regions_dict)
 
@@ -596,21 +586,31 @@ def main():
                     symmetric=True,
                     vmin=-vmax_error,
                     vmax=vmax_error,
-                    colorbar_kwargs={
-                        "shrink": 0.8,
-                        "pad": 0.05,
-                        "orientation": "horizontal",
-                    },
+                    colorbar_kwargs=cb_kwargs,
                     gridlines_kwargs=gl_kwargs,
                 )
-                axes[i, 2].set_title(f"Kernel Error: {comp_name}", fontsize=16)
                 im_bayes_err.colorbar.set_label("Relative Error (%)", fontsize=14)
                 utils.draw_region_boundaries(state, axes[i, 2], regions_dict)
 
+            # --- 2. Apply Grid Layout Titles and Row Annotations ---
+            col_labels = ["Target Kernel", "Bayesian Kernel", "Kernel Error"]
+            for j, label in enumerate(col_labels):
+                axes[0, j].set_title(label, fontsize=16, fontweight="bold", pad=20)
+
+            for i, comp_name in enumerate(deg1_names):
+                axes[i, 0].annotate(
+                    f"Component {comp_name}",
+                    xy=(-0.1, 0.5),
+                    xycoords="axes fraction",
+                    fontsize=16,
+                    fontweight="bold",
+                    va="center",
+                    ha="center",
+                    rotation=90,
+                )
+
             # Save the composite 3x3 figure
             figures_to_save["estimator_kernels_deg1_all"] = fig_sens
-
-        print(f"  Estimator metrics appended to: {metrics_file}")
 
     # ------------------ MAPS ------------------
     if args.plot_maps:

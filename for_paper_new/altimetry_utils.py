@@ -19,6 +19,7 @@ from pyslfp.linear_operators import (
     ocean_projection_operator,
     ocean_average_operator,
     averaging_operator,
+    l2_products_operator,
 )
 
 
@@ -127,7 +128,7 @@ def barystatic_gmsl_weighting(state):
     )
 
 
-def effective_steric_scale(state, /, *, masked=False):
+def effective_steric_scale(state):
     """
     Conversion factor from vertically averaged density change to effective
     steric sea level:
@@ -138,16 +139,8 @@ def effective_steric_scale(state, /, *, masked=False):
     This is a fixed linear relabelling used (i) to specify the density prior
     std in height units and (ii) to express density fields in mm for plots
     and regional averages. The model parameter itself remains delta_rho_w.
-
-    With masked=False (the default) the mean depth uses the unmasked integral
-    of state.sea_level, exactly as in earlier versions of these scripts. If
-    state.sea_level is nonzero over land (e.g. equals negative topography),
-    that integral is biased low; set masked=True to restrict the integrand
-    to the oceans. If the two values agree, the default is safe.
     """
-    eta0 = state.sea_level
-    if masked:
-        eta0 = eta0 * state.ocean_projection(value=0.0)
+    eta0 = state.sea_level * state.ocean_projection(value=0.0)
     mean_ocean_depth = state.model.integrate(eta0) / state.ocean_area
     return mean_ocean_depth / state.model.parameters.water_density
 
@@ -176,9 +169,7 @@ def gmsl_split_operators(state, load_space, continuous_sl_operator):
     """
     joint_space = continuous_sl_operator.domain
 
-    bary_avg_op = averaging_operator(
-        state, load_space, [barystatic_gmsl_weighting(state)]
-    )
+    bary_avg_op = l2_products_operator(load_space, [barystatic_gmsl_weighting(state)])
     bary_op = bary_avg_op @ joint_space.subspace_projection(0)
 
     total_op = true_gmsl_operator(state, load_space, continuous_sl_operator)

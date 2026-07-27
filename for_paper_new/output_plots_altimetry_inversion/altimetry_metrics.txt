@@ -1,18 +1,3 @@
 Altimetry Inversion Metrics
 ===========================
 
-Target           | KL Divergence   | Prior Var (mm²)   | Post Var (mm²)   | Variance Reduction
---------------------------------------------------------------------------------------------
-GMSL             | 0.4619          | 0.0493            | 0.0152           |          69.1285%
-
-GMSL Split: Barystatic vs Ocean-Dynamic (dyn. topography + steric)
-======================================================================
-Joint KL Divergence:     0.4754 nats
-Bary-Dyn correlation:    prior -0.0050 | posterior -0.5027
-Mass-conservation check: dyn residual = -0.022562 mm | direct avg = -0.010956 mm | diff = -1.161e-02 mm
-----------------------------------------------------------------------
-Component          | Prior Var    | Post Var     | Reduction
-----------------------------------------------------------------------
-Barystatic         | 0.0341       | 0.0181       |    46.90%
-Ocean-dynamic      | 0.0153       | 0.0118       |    22.81%
-----------------------------------------------------------------------

@@ -112,7 +112,7 @@ def build_physics_components(
 def true_gmsl_operator(state, load_space, continuous_sl_operator):
     """Returns the true spatial integration of continuous Sea Level."""
     true_avg_weight = state.ocean_projection(value=0.0) / state.ocean_area
-    true_avg_op = averaging_operator(state, load_space, [true_avg_weight])
+    true_avg_op = l2_products_operator(load_space, [true_avg_weight])
     return true_avg_op @ continuous_sl_operator
 
 
@@ -176,7 +176,7 @@ def gmsl_split_operators(state, load_space, continuous_sl_operator):
     dyn_op = total_op - bary_op
 
     ocean_weight = state.ocean_projection(value=0.0) / state.ocean_area
-    ocean_avg_op = averaging_operator(state, load_space, [ocean_weight])
+    ocean_avg_op = l2_products_operator(load_space, [ocean_weight])
     dyn_direct_op = ocean_avg_op @ joint_space.subspace_projection(1)
 
     return bary_op, dyn_op, dyn_direct_op

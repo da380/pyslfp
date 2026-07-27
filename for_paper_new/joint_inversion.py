@@ -420,10 +420,6 @@ def main():
         def correlation(cov):
             return cov[0, 1] / np.sqrt(cov[0, 0] * cov[1, 1])
 
-        # Consistency check: the residual ocean-dynamic GMSL (total minus
-        # barystatic) should equal the direct ocean average of the dynamic
-        # topography under exact mass conservation. The difference measures
-        # how well the SLE solve and the prior mass constraint are satisfied.
         dyn_resid_mm = dyn_op(true_model)[0] * scale_mm
         dyn_direct_mm = dyn_direct_op(true_model)[0] * scale_mm
 

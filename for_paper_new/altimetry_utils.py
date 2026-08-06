@@ -142,7 +142,7 @@ def effective_steric_scale(state):
     """
     eta0 = state.sea_level * state.ocean_projection(value=0.0)
     mean_ocean_depth = state.model.integrate(eta0) / state.ocean_area
-    return mean_ocean_depth / state.model.parameters.water_density
+    return -mean_ocean_depth / state.model.parameters.water_density
 
 
 def gmsl_split_operators(state, load_space, continuous_sl_operator):

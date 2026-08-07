@@ -3,13 +3,14 @@ Extended Bayesian Altimetry Inversion (3-Component Model)
 =========================================================
 
 This script performs a Bayesian inversion of synthetic satellite altimetry data.
-It estimates the underlying ice thickness changes, the ocean dynamic sea level
-(the mass part of the ocean signal, equivalent to a bottom pressure change),
-and the vertically averaged ocean density changes (the volume part, reported as
-the associated steric sea level), while strictly enforcing ocean mass
-conservation on the dynamic component. Features spatial covariance mapping to
-visualize the physical constraints, and an optional push-forward onto the 2D
-split of GMSL change into barystatic and steric contributions.
+It estimates the underlying ice thickness changes, the total ocean dynamic
+sea surface height change, and vertically averaged ocean density changes,
+while strictly enforcing ocean mass conservation. Quantities of interest are
+post-processed into the standard barystatic / steric / ocean-dynamic split
+(see altimetry_utils). Features spatial covariance mapping to visualize the
+physical constraints, an optional push-forward onto the 2D split of GMSL
+change into barystatic and steric contributions, and an optionally
+anti-correlated (Dyn, Rho) prior.
 """
 
 import argparse
@@ -91,46 +92,41 @@ def parse_arguments():
     )
 
     # --- Prior Settings ---
-    # Defaults are loosely representative of present-day changes accumulated
-    # over about a year; see the accompanying notes for the reasoning.
     parser.add_argument(
         "--ice-scale-factor", type=float, default=1.0, help="Ice correlation scale."
     )
     parser.add_argument(
-        "--ice-std-mm",
-        type=float,
-        default=150.0,
-        help="Pointwise ice thickness change std (mm).",
+        "--ice-std-mm", type=float, default=10.0, help="Ice std dev (mm)."
     )
     parser.add_argument(
         "--ocean-dyn-scale-factor",
         type=float,
-        default=2.0,
-        help="Ocean dynamic sea level correlation scale.",
+        default=0.2,
+        help="Ocean dynamic correlation scale.",
     )
     parser.add_argument(
-        "--ocean-dyn-std-mm",
+        "--ocean-dyn-std-factor",
         type=float,
-        default=15.0,
-        help="Pointwise ocean dynamic sea level std (mm).",
+        default=2.0,
+        help="Ocean dynamic std as factor of GMSL std.",
     )
     parser.add_argument(
         "--ocean-rho-scale-factor",
         type=float,
         default=1.0,
-        help="Ocean density (steric) correlation scale.",
+        help="Ocean density correlation scale.",
     )
     parser.add_argument(
-        "--steric-std-mm",
+        "--ocean-rho-std-factor",
         type=float,
-        default=40.0,
-        help="Pointwise effective steric sea level std at the mean ocean depth (mm).",
+        default=0.25,
+        help="Effective steric SL std as a fraction of the dynamic SSH std.",
     )
     parser.add_argument(
-        "--noise-std-mm",
+        "--noise-std-factor",
         type=float,
-        default=10.0,
-        help="Altimetry per-point noise std (mm).",
+        default=1.0,
+        help="Instrument noise std as factor of GMSL std.",
     )
     parser.add_argument(
         "--noise-scale-factor",
@@ -139,13 +135,26 @@ def parse_arguments():
         help="Instrument noise correlation scale.",
     )
     parser.add_argument(
-        "--prior-shift", type=float, default=1.0, help="Prior mean shift factor."
+        "--ocean-corr",
+        type=float,
+        default=0.9,
+        help=(
+            "Magnitude of the long-wavelength anti-correlation between the "
+            "ocean dynamic and density fields (0 disables; must lie in "
+            "[0, 1); the sign is applied internally."
+        ),
     )
     parser.add_argument(
-        "--rtol",
+        "--ocean-corr-scale-factor",
         type=float,
-        default=1.0e-2,
-        help="Relative tolerance for the conjugate gradient solver.",
+        default=0.4,
+        help=(
+            "Decay scale of the (Dyn, Rho) spectral correlation with "
+            "wavenumber, as a factor of the load scale."
+        ),
+    )
+    parser.add_argument(
+        "--prior-shift", type=float, default=1.0, help="Prior mean shift factor."
     )
 
     return parser.parse_args()
@@ -215,46 +224,31 @@ def main():
     ocean_mask = state.ocean_projection(value=0.0)
     ice_mask = state.ice_projection(value=0.0)
 
-    # Steric relabelling fields: eta_s[mm] = steric_map_mm * drho, with the
-    # (positive) steric_std_map_mm used for std fields.
-    steric_map_mm = -mm_scale * utils.steric_depth_field(state)
-    steric_std_map_mm = mm_scale * utils.steric_depth_field(state)
-
     model_prior, noise_measure, GMSL_prior_std = utils.build_measures(
         state,
         load_space,
         args.ice_scale_factor,
         args.ice_std_mm,
         args.ocean_dyn_scale_factor,
-        args.ocean_dyn_std_mm,
+        args.ocean_dyn_std_factor,
         args.ocean_rho_scale_factor,
-        args.steric_std_mm,
+        args.ocean_rho_std_factor,
         args.noise_scale_factor,
-        args.noise_std_mm,
+        args.noise_std_factor,
         points,
         mm_scale,
         prior_shift=args.prior_shift,
         is_surrogate=False,
+        ocean_corr=args.ocean_corr,
+        ocean_corr_scale_factor=args.ocean_corr_scale_factor,
     )
 
-    # GMSL split operators (also used below for the corner plot / diagnostics)
-    bary_op, steric_op, steric_direct_op, dyn_avg_op = utils.gmsl_split_operators(
-        state, load_space, continuous_sl
-    )
-
-    steric_gmsl_prior_std = np.sqrt(
-        model_prior.affine_mapping(operator=steric_direct_op).covariance.matrix(
-            dense=True
-        )[0, 0]
-    )
-    print(
-        f"Implied barystatic GMSL prior standard deviation: "
-        f"{GMSL_prior_std * mm_scale:.3f} mm"
-    )
-    print(
-        f"Implied steric GMSL prior standard deviation:     "
-        f"{steric_gmsl_prior_std * mm_scale:.3f} mm"
-    )
+    print(f"Implied GMSL prior standard deviation: {GMSL_prior_std * mm_scale:.3f} mm")
+    if args.ocean_corr > 0.0:
+        print(
+            f"Correlated (Dyn, Rho) prior enabled: r0 = {args.ocean_corr:.2f}, "
+            f"correlation scale factor = {args.ocean_corr_scale_factor:.2f}"
+        )
 
     print("Setting up Bayesian Inversion...")
     forward_problem = inf.LinearForwardProblem(
@@ -284,19 +278,20 @@ def main():
         args.ice_scale_factor,
         args.ice_std_mm,
         args.ocean_dyn_scale_factor,
-        args.ocean_dyn_std_mm,
+        args.ocean_dyn_std_factor,
         args.ocean_rho_scale_factor,
-        args.steric_std_mm,
+        args.ocean_rho_std_factor,
         args.noise_scale_factor,
-        args.noise_std_mm,
+        args.noise_std_factor,
         points,
         mm_scale,
         prior_shift=args.prior_shift,
         is_surrogate=True,
+        ocean_corr=args.ocean_corr,
+        ocean_corr_scale_factor=args.ocean_corr_scale_factor,
     )
 
     print("Constructing Woodbury preconditioner from unconstrained surrogate model...")
-
     woodbury_solver = inf.LUSolver(galerkin=True, parallel=True, n_jobs=8)
     woodbury_preconditioner = inverse_problem.surrogate_woodbury_data_preconditioner(
         woodbury_solver,
@@ -305,18 +300,14 @@ def main():
         alternate_data_error_measure=surr_noise_measure,
     )
 
-    exit()
-
-    # alpha = 0.1
-    # preconditioner = (
-    #    1 - alpha
-    # ) * woodbury_preconditioner + alpha * surr_noise_measure.inverse_covariance
-
-    preconditioner = None
+    alpha = 0.1
+    preconditioner = (
+        1 - alpha
+    ) * woodbury_preconditioner + alpha * surr_noise_measure.inverse_covariance
 
     # ------------------ 3. POSTERIOR SOLVE ------------------
     callback = inf.ProgressCallback()
-    solver = inf.CGSolver(callback=callback, rtol=args.rtol)
+    solver = inf.CGSolver(callback=callback, rtol=0.01 * args.noise_std_factor)
 
     print("\nSolving for 3-component posterior expectation...")
     model_posterior = inverse_problem.model_posterior_measure(
@@ -371,7 +362,10 @@ def main():
     # ---------- 4b. GMSL SPLIT: BARYSTATIC vs STERIC ----------
     if args.plot_gmsl_split:
         print("\nPushing forward onto the 2D GMSL split (barystatic, steric)...")
-        split_op = inf.ColumnLinearOperator([bary_op, steric_op]) * mm_scale
+        bary_op, steric_gmsl_op, steric_direct_op, dyn_direct_op = (
+            utils.gmsl_split_operators(state, load_space, continuous_sl)
+        )
+        split_op = inf.ColumnLinearOperator([bary_op, steric_gmsl_op]) * mm_scale
         final_split_op = split_op.codomain.coordinate_projection @ split_op
 
         true_split = final_split_op(model)
@@ -391,15 +385,17 @@ def main():
         def correlation(cov):
             return cov[0, 1] / np.sqrt(cov[0, 0] * cov[1, 1])
 
-        # Consistency checks. The load of the dynamic sea level cancels its
-        # direct ocean-mean SSH term identically, so the residual steric GMSL
-        # (total minus barystatic) should equal the direct ocean average of
-        # the steric sea level up to SLE solver convergence. Separately, the
-        # ocean average of the dynamic sea level should vanish under the
-        # prior mass constraint.
-        steric_resid_mm = steric_op(model)[0] * mm_scale
+        # Consistency checks. The residual steric GMSL (total minus
+        # barystatic) should equal the direct ocean average of the steric
+        # sea level: their difference diagnoses the SLE mass balance
+        # (solver convergence), independently of the prior constraint.
+        # Separately, under the prior mass constraint the ocean average of
+        # the dynamic SSH equals the direct steric average, so their
+        # difference (the ocean mean of the manometric part, <zeta>_O)
+        # diagnoses the constraint.
+        steric_resid_mm = steric_gmsl_op(model)[0] * mm_scale
         steric_direct_mm = steric_direct_op(model)[0] * mm_scale
-        dyn_avg_mm = dyn_avg_op(model)[0] * mm_scale
+        dyn_direct_mm = dyn_direct_op(model)[0] * mm_scale
 
         with open(metrics_file, "a") as f_metrics:
             f_metrics.write("\nGMSL Split: Barystatic vs Steric\n")
@@ -411,11 +407,12 @@ def main():
             )
             f_metrics.write(
                 f"SLE mass-balance check:  steric residual = {steric_resid_mm:.6f} mm | "
-                f"direct avg = {steric_direct_mm:.6f} mm | "
+                f"steric direct = {steric_direct_mm:.6f} mm | "
                 f"diff = {steric_resid_mm - steric_direct_mm:.3e} mm\n"
             )
             f_metrics.write(
-                f"Constraint check:        <dyn SL>_ocean = {dyn_avg_mm:.3e} mm "
+                f"Constraint check:        <dyn SSH>_O = {dyn_direct_mm:.6f} mm | "
+                f"<zeta>_O = {dyn_direct_mm - steric_direct_mm:.3e} mm "
                 f"(should be ~0)\n"
             )
             f_metrics.write("-" * 70 + "\n")
@@ -451,8 +448,10 @@ def main():
         gl_kwargs = {"xlabel_style": {"size": 12}, "ylabel_style": {"size": 12}}
         cb_kwargs = {"orientation": "horizontal", "shrink": 0.8, "pad": 0.05}
 
-        # Fixed scalar relabelling (mean depth) used for the covariance maps
-        steric_relabel = utils.effective_steric_scale(state)
+        # Physical density units for the raw density maps (nondimensional
+        # density x density_scale = kg/m^3; x1000 -> g/m^3).
+        rho_scale_gm3 = 1.0e3 * state.model.parameters.density_scale
+        ocean_mask_gm3 = rho_scale_gm3 * ocean_mask
 
         # =================================================================
         # A. Posterior Spatial Maps & STD
@@ -468,9 +467,9 @@ def main():
             np.max(np.abs(true_dyn.data * mm_scale)),
             np.max(np.abs(post_dyn.data * mm_scale)),
         )
-        vmax_steric = max(
-            np.max(np.abs((true_rho * steric_map_mm).data)),
-            np.max(np.abs((post_rho * steric_map_mm).data)),
+        vmax_rho = max(
+            np.max(np.abs(true_rho.data * rho_scale_gm3)),
+            np.max(np.abs(post_rho.data * rho_scale_gm3)),
         )
 
         plot_std = args.std_samples > 0
@@ -552,7 +551,7 @@ def main():
                 gridlines_kwargs=gl_kwargs,
             )
 
-        # --- ROW 2: OCEAN DYNAMIC SEA LEVEL ---
+        # --- ROW 2: DYNAMIC TOPOGRAPHY ---
         sl.plot(
             true_dyn * ocean_mask_mm,
             ax=axes[1, 0],
@@ -560,7 +559,7 @@ def main():
             vmin=-vmax_dyn,
             vmax=vmax_dyn,
             cmap=cmap,
-            colorbar_kwargs={**cb_kwargs, "label": "Ocean Dynamic SL (mm)"},
+            colorbar_kwargs={**cb_kwargs, "label": "Dynamic SSH (mm)"},
             gridlines_kwargs=gl_kwargs,
         )
         sl.plot(
@@ -570,7 +569,7 @@ def main():
             vmin=-vmax_dyn,
             vmax=vmax_dyn,
             cmap=cmap,
-            colorbar_kwargs={**cb_kwargs, "label": "Ocean Dynamic SL (mm)"},
+            colorbar_kwargs={**cb_kwargs, "label": "Dynamic SSH (mm)"},
             gridlines_kwargs=gl_kwargs,
         )
         if plot_std:
@@ -579,38 +578,38 @@ def main():
                 ax=axes[1, 2],
                 colorbar=True,
                 cmap=cmap_std,
-                colorbar_kwargs={**cb_kwargs, "label": "Ocean Dynamic SL STD (mm)"},
+                colorbar_kwargs={**cb_kwargs, "label": "Dynamic SSH STD (mm)"},
                 gridlines_kwargs=gl_kwargs,
             )
 
-        # --- ROW 3: STERIC SEA LEVEL ---
+        # --- ROW 3: VERTICALLY AVERAGED DENSITY ---
         sl.plot(
-            true_rho * steric_map_mm,
+            true_rho * ocean_mask_gm3,
             ax=axes[2, 0],
             colorbar=True,
-            vmin=-vmax_steric,
-            vmax=vmax_steric,
+            vmin=-vmax_rho,
+            vmax=vmax_rho,
             cmap=cmap,
-            colorbar_kwargs={**cb_kwargs, "label": r"Steric SL (mm)"},
+            colorbar_kwargs={**cb_kwargs, "label": r"Density Change (g m$^{-3}$)"},
             gridlines_kwargs=gl_kwargs,
         )
         sl.plot(
-            post_rho * steric_map_mm,
+            post_rho * ocean_mask_gm3,
             ax=axes[2, 1],
             colorbar=True,
-            vmin=-vmax_steric,
-            vmax=vmax_steric,
+            vmin=-vmax_rho,
+            vmax=vmax_rho,
             cmap=cmap,
-            colorbar_kwargs={**cb_kwargs, "label": r"Steric SL (mm)"},
+            colorbar_kwargs={**cb_kwargs, "label": r"Density Change (g m$^{-3}$)"},
             gridlines_kwargs=gl_kwargs,
         )
         if plot_std:
             sl.plot(
-                std_rho * steric_std_map_mm,
+                std_rho * ocean_mask_gm3,
                 ax=axes[2, 2],
                 colorbar=True,
                 cmap=cmap_std,
-                colorbar_kwargs={**cb_kwargs, "label": "Steric SL STD (mm)"},
+                colorbar_kwargs={**cb_kwargs, "label": r"Density STD (g m$^{-3}$)"},
                 gridlines_kwargs=gl_kwargs,
             )
 
@@ -675,6 +674,20 @@ def main():
         # C. Point-wise Covariance Maps
         # =================================================================
         print("\nGenerating Point-wise Covariance Maps...")
+
+        # Covariance maps show the raw model parameters, matching the
+        # posterior maps: ice and dynamic SSH in mm, density in g/m^3.
+        # Rows mixing a height component with the density component
+        # therefore carry mixed units.
+        comp_scales = [mm_scale, mm_scale, rho_scale_gm3]
+
+        def cov_label(row_idx, pt_idx):
+            mm_components = {0, 1}
+            if row_idx in mm_components and pt_idx in mm_components:
+                return "Covariance (mm\u00b2)"
+            if row_idx not in mm_components and pt_idx not in mm_components:
+                return r"Covariance ((g m$^{-3}$)$^{2}$)"
+            return r"Covariance (mm $\cdot$ g m$^{-3}$)"
 
         scenarios = [
             ("Ice", 0, (-78.0, -110.0), "WAIS"),
@@ -745,13 +758,7 @@ def main():
             pr_ice, pr_dyn, pr_rho = prior_cov
             po_ice, po_dyn, po_rho = post_cov
 
-            # For a perturbation in the density component the input is
-            # relabelled to an effective steric sea level perturbation at
-            # the mean ocean depth (fixed scalar; the spatial maps above use
-            # the local depth-weighted relabelling instead).
-            perturb_scale = (
-                mm_scale if comp_idx in [0, 1] else (steric_relabel * mm_scale)
-            )
+            perturb_scale = comp_scales[comp_idx]
 
             pr_ice_plot = pr_ice * (perturb_scale * mm_scale) * ice_mask
             po_ice_plot = po_ice * (perturb_scale * mm_scale) * ice_mask
@@ -759,12 +766,8 @@ def main():
             pr_dyn_plot = pr_dyn * (perturb_scale * mm_scale) * ocean_mask
             po_dyn_plot = po_dyn * (perturb_scale * mm_scale) * ocean_mask
 
-            pr_rho_plot = (
-                pr_rho * (perturb_scale * steric_relabel * mm_scale) * ocean_mask
-            )
-            po_rho_plot = (
-                po_rho * (perturb_scale * steric_relabel * mm_scale) * ocean_mask
-            )
+            pr_rho_plot = pr_rho * (perturb_scale * rho_scale_gm3) * ocean_mask
+            po_rho_plot = po_rho * (perturb_scale * rho_scale_gm3) * ocean_mask
 
             fig_cov, axes_cov = sl.subplots(
                 3, 2, figsize=(16, 16), gridspec_kw={"hspace": 0.15}
@@ -776,7 +779,7 @@ def main():
                 pr_ice_plot,
                 po_ice_plot,
                 pt,
-                "Covariance (mm²)",
+                cov_label(0, comp_idx),
             )
 
             plot_cov_row(
@@ -785,7 +788,7 @@ def main():
                 pr_dyn_plot,
                 po_dyn_plot,
                 pt,
-                "Covariance (mm²)",
+                cov_label(1, comp_idx),
             )
 
             plot_cov_row(
@@ -794,7 +797,7 @@ def main():
                 pr_rho_plot,
                 po_rho_plot,
                 pt,
-                "Covariance (mm²)",
+                cov_label(2, comp_idx),
             )
 
             # --- Apply Custom Titles to Grid Layout ---
@@ -803,11 +806,7 @@ def main():
                 "Posterior", fontsize=16, fontweight="bold", pad=20
             )
 
-            row_titles = [
-                "Ice thickness",
-                "Ocean dynamic sea level",
-                "Steric sea level",
-            ]
+            row_titles = ["Ice thickness", "Dynamic SSH", "Density"]
             for i, row_title in enumerate(row_titles):
                 axes_cov[i, 0].annotate(
                     row_title,
@@ -833,17 +832,35 @@ def main():
         masks = [state.get_projection(r, value=0.0) for r in regions_to_analyze]
         avg_op = sl.linear_operators.averaging_operator(state, load_space, masks)
 
-        op_dyn = avg_op @ joint_space.subspace_projection(1)
-        op_steric = (
-            avg_op
-            @ utils.steric_sea_level_operator(state, load_space)
-            @ joint_space.subspace_projection(2)
+        # Ocean dynamic SL = manometric part (zeta = eta - eta_s) PLUS the
+        # regional GRD response to the total ocean load (which is exactly
+        # the load of zeta, the steric part being column-mass neutral).
+        # Steric SL loads nothing and so has no induced response. Together
+        # with the barystatic GRD term, the three coordinates sum exactly to
+        # the regional average of the true sea level change.
+        steric_op_field = utils.steric_sea_level_operator(
+            state, load_space
+        ) @ joint_space.subspace_projection(2)
+        op_steric = avg_op @ steric_op_field
+
+        barystatic_sl_op = fp_op.codomain.subspace_projection(0) @ fp_op
+
+        dyn_to_load = sl.linear_operators.sea_level_change_to_load_operator(
+            state, load_space, load_space
         )
+        rho_to_load = sl.linear_operators.ocean_density_change_to_load_operator(
+            state, load_space, load_space
+        )
+        ocean_load_op = dyn_to_load @ joint_space.subspace_projection(
+            1
+        ) + rho_to_load @ joint_space.subspace_projection(2)
+
+        zeta_field_op = joint_space.subspace_projection(1) - steric_op_field
+        op_dyn = avg_op @ (zeta_field_op + barystatic_sl_op @ ocean_load_op)
 
         ice_to_load = sl.linear_operators.ice_thickness_change_to_load_operator(
             state, load_space, load_space
         ) @ sl.linear_operators.ice_projection_operator(state, load_space)
-        barystatic_sl_op = fp_op.codomain.subspace_projection(0) @ fp_op
         op_ice_fp = (
             avg_op @ barystatic_sl_op @ ice_to_load @ joint_space.subspace_projection(0)
         )
@@ -877,6 +894,10 @@ def main():
         # Log KL divergence and detailed covariance metrics to file
         with open(metrics_file, "a") as f_metrics:
             f_metrics.write(f"\nRegional Signal Separation ({regions_to_analyze[0]})\n")
+            f_metrics.write(
+                "(Components sum to the regional mean sea level change; the\n"
+                " dynamic component includes its GRD response.)\n"
+            )
             f_metrics.write("=" * 65 + "\n")
             f_metrics.write(f"Joint KL Divergence:      {kl_div:.4f} nats\n")
             f_metrics.write(f"Prior Total Var (Trace):  {prior_trace:.4f} mm²\n")

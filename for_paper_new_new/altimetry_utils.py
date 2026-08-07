@@ -2,44 +2,37 @@
 altimetry_utils.py
 ===========================
 Shared utilities, physics initializations, and Bayesian measures for
-satellite altimetry inversions using a mass / volume split of the ocean
-state.
+satellite altimetry inversions with separated ocean dynamic and steric
+components.
 
 Model space (three fields on the sphere):
 
-    m = [ Dh, zeta, drho ]
+    m = [ Dh, eta, drho ]
 
-    Dh   : ice thickness change, supported on the (grounded) ice sheets.
-    zeta : ocean dynamic sea level -- vertical motion of the sea surface
-           associated with currents alone. It integrates to zero over the
-           oceans (pure redistribution of ocean mass) but locally applies
-           a load, equivalent to an ocean bottom pressure change
-           rho_w * g * zeta.
-    drho : vertically averaged ocean density change. It is paired with the
-           steric sea level
+      Dh   : ice thickness change (grounded ice),
+      eta  : ocean dynamic sea surface height change (the TOTAL dynamic
+             perturbation to the sea surface), applying the load rho_w*C*eta,
+      drho : vertically averaged ocean density change, applying the load
+             D*C*drho (the column mass change at fixed column thickness).
 
-               eta_s = -(D / rho_w) * C * drho,
+The prior enforces <rho_w*C*eta + D*C*drho>_O = 0, so the combined ocean
+load is a pure redistribution of ocean mass.
 
-           with D the local ocean depth and C the ocean function, chosen so
-           that the mass per vertical column is pointwise unchanged
-           (rho_w * eta_s + D * drho = 0). The steric component therefore
-           applies no load and is invisible to gravimetry.
+For reporting, the ocean state is post-processed into the standard split:
 
-Forward physics:
+    eta_s = -(D / rho_w) * C * drho     (steric sea level; loads nothing)
+    zeta  = eta - eta_s                 (ocean dynamic sea level, the mass /
+                                         manometric part; its load equals
+                                         the total ocean load)
 
-    sigma = rho_i * (1 - C) * X_ice * Dh + rho_w * C * zeta   (direct load)
-    (SLC, u, phi, omega) = F(sigma)                           (sea level equation)
-    SSH = SLC + u + psi(omega)/g + zeta + eta_s               (altimetry)
-    SL  = SLC + zeta + eta_s                                  (relative sea level)
+so that quantities of interest can be expressed as barystatic, steric and
+ocean-dynamic contributions while the model itself retains the simple
+(eta, drho) parameterisation.
 
-Because the load of zeta removes exactly the ocean-mean sea level that its
-direct term adds, the GMSL budget closes identically as
-
-    <SL>_O = barystatic + <eta_s>_O,
-
-up to SLE solver convergence, independently of the prior constraint
-<zeta>_O = 0 (which is still imposed so that zeta is interpretable as a
-mass redistribution / bottom pressure change).
+Optionally, the (eta, drho) pair can be given a scale-dependent
+anti-correlation in the prior (see build_measures; requires pygeoinf >=
+1.8.4), reflecting that at long wavelengths dynamic sea surface height
+changes are predominantly steric in origin.
 """
 
 import numpy as np
@@ -55,36 +48,9 @@ from pyslfp.linear_operators import (
     ice_projection_operator,
     ocean_projection_operator,
     ocean_average_operator,
+    averaging_operator,
     l2_products_operator,
 )
-
-
-def steric_sea_level_operator(state, load_space):
-    """
-    Maps the vertically averaged density change to the associated steric
-    sea level change:
-
-        eta_s = -(D / rho_w) * C * drho,
-
-    where D = state.sea_level is the local ocean depth and C the ocean
-    function. The scaling is such that the mass per vertical column is
-    pointwise unchanged (rho_w * eta_s + D * drho = 0): the steric
-    component changes sea level without applying any load.
-    """
-    return (
-        -1.0 / state.model.parameters.water_density
-    ) * ocean_density_change_to_load_operator(state, load_space, load_space)
-
-
-def steric_depth_field(state):
-    """
-    Returns (D / rho_w) * C as an SHGrid: the pointwise magnitude
-    |d eta_s / d drho| of the steric relabelling. Useful for converting
-    (positive) density standard deviation fields into steric sea level
-    units; note the local steric std therefore scales with depth, being
-    muted in shallow seas relative to the mean-depth value.
-    """
-    return state.sea_level * state.ocean_function / state.model.parameters.water_density
 
 
 def build_physics_components(
@@ -92,18 +58,7 @@ def build_physics_components(
 ):
     """
     Constructs the 3-component physical operators.
-    Model Space: [Ice Thickness Change, Ocean Dynamic Sea Level, Ocean Density Change]
-
-    Only the ice and dynamic sea level components apply a load; the density
-    component is column-mass neutral and enters the observables through the
-    steric sea level alone. The ice component is projected onto the ice
-    sheets before loading, consistently with the prior masking.
-
-    In surrogate mode the dynamic sea level load is switched off (one-way
-    physics for preconditioning) and no steric term is added, so the density
-    component is invisible to the surrogate forward: the surrogate operator
-    tree is exactly the pre-steric construction, as required for the
-    Woodbury preconditioner setup.
+    Model Space: [Ice Thickness Change, Ocean Dynamic SSH Change, Ocean Density Change]
     """
     state = EarthState.from_defaults(lmax=lmax)
     scale_mm = 1000.0 * state.model.parameters.length_scale
@@ -119,81 +74,55 @@ def build_physics_components(
     )
     load_space = finger_print_operator.domain
 
-    # 1. Operators to convert the loading components to a surface mass load
+    # 1. Operators to convert each component to a surface mass load
     ice_to_load = ice_thickness_change_to_load_operator(
         state, load_space, load_space
     ) @ ice_projection_operator(state, load_space)
 
-    # if is_surrogate:
-    #    ocean_dyn_to_load = load_space.zero_operator(load_space)
-    # else:
-    ocean_dyn_to_load = sea_level_change_to_load_operator(state, load_space, load_space)
-
-    # The density component applies no load by construction.
-    ocean_rho_to_load = load_space.zero_operator(load_space)
+    if is_surrogate:
+        ocean_dyn_to_load = load_space.zero_operator(load_space)
+        ocean_rho_to_load = load_space.zero_operator(load_space)
+    else:
+        ocean_dyn_to_load = sea_level_change_to_load_operator(
+            state, load_space, load_space
+        )
+        ocean_rho_to_load = ocean_density_change_to_load_operator(
+            state, load_space, load_space
+        )
 
     joint_to_load = inf.RowLinearOperator(
         [ice_to_load, ocean_dyn_to_load, ocean_rho_to_load]
     )
     joint_space = joint_to_load.domain
 
-    # --- A/B. Resolve the SSH (altimetry) and true sea level (GMSL) tracks ---
+    # Map [Ice, Dyn, Rho] -> [Total Load, OceanDyn]
+    op1 = inf.ColumnLinearOperator([joint_to_load, joint_space.subspace_projection(1)])
+
+    # --- A. Resolve the Sea Surface Height Components (For Altimetry) ---
     static_ssh_op = sea_surface_height_operator(state, finger_print_operator.codomain)
     barystatic_ssh_op = static_ssh_op @ finger_print_operator
 
+    op2_ssh = inf.BlockDiagonalLinearOperator(
+        [barystatic_ssh_op, load_space.identity_operator()]
+    )
+
+    op3 = inf.RowLinearOperator(
+        [load_space.identity_operator(), load_space.identity_operator()]
+    )
+
+    continuous_ssh_operator = op3 @ op2_ssh @ op1
+
+    # --- B. Resolve the True Sea Level Components (For GMSL Integration) ---
     # Sea Level Change is strictly subspace 0 of the SLE response!
     barystatic_sl_op = (
         finger_print_operator.codomain.subspace_projection(0) @ finger_print_operator
     )
 
-    # if is_surrogate:
-    # The surrogate reproduces the pre-steric operator tree exactly: the
-    # density component is invisible to the surrogate forward (its load
-    # is zero and no steric term is added). This keeps the operator tree
-    # used by the Woodbury preconditioner identical to the previously
-    # validated construction. Note the domain is still the full
-    # 3-component joint space, so the preconditioner pairs correctly
-    # with the 3-component surrogate prior.
-    #    op1 = inf.ColumnLinearOperator(
-    #        [joint_to_load, joint_space.subspace_projection(1)]
-    #    )
-    #    op2_ssh = inf.BlockDiagonalLinearOperator(
-    #        [barystatic_ssh_op, load_space.identity_operator()]
-    #    )
-    #    op3 = inf.RowLinearOperator(
-    #        [load_space.identity_operator(), load_space.identity_operator()]
-    #    )
-    #    continuous_ssh_operator = op3 @ op2_ssh @ op1
-
-    #    op2_sl = inf.BlockDiagonalLinearOperator(
-    #        [barystatic_sl_op, load_space.identity_operator()]
-    #    )
-    #    continuous_sl_operator = op3 @ op2_sl @ op1
-    # else:
-
-    # Steric relabelling of the density component (no load, direct SSH term)
-    steric_op = steric_sea_level_operator(state, load_space)
-
-    # Map [Ice, Dyn, Rho] -> [Total Load, Dyn, Rho]
-    op1 = inf.ColumnLinearOperator(
-        [
-            joint_to_load,
-            joint_space.subspace_projection(1),
-            joint_space.subspace_projection(2),
-        ]
+    op2_sl = inf.BlockDiagonalLinearOperator(
+        [barystatic_sl_op, load_space.identity_operator()]
     )
 
-    op2_ssh = inf.RowLinearOperator(
-        [barystatic_ssh_op, load_space.identity_operator(), steric_op]
-    )
-
-    continuous_ssh_operator = op2_ssh @ op1
-
-    op2_sl = inf.RowLinearOperator(
-        [barystatic_sl_op, load_space.identity_operator(), steric_op]
-    )
-
-    continuous_sl_operator = op2_sl @ op1
+    continuous_sl_operator = op3 @ op2_sl @ op1
 
     # --- Extract discrete altimetry points from SSH ---
     point_eval = load_space.point_evaluation_operator(points)
@@ -219,18 +148,33 @@ def true_gmsl_operator(state, load_space, continuous_sl_operator):
 
 def barystatic_gmsl_weighting(state):
     """
-    Weighting function whose L2 product with an ice thickness change field
+    Weighting function whose average against an ice thickness change field
     returns the implied barystatic GMSL change (global mass conservation).
-    The weighting is restricted to grounded ice, consistently with the
-    forward operator, which projects the ice component onto the ice sheets
-    before loading.
     """
     return (
         -state.model.parameters.ice_density
         * state.one_minus_ocean_function
-        * state.ice_projection(value=0.0)
         / (state.model.parameters.water_density * state.ocean_area)
     )
+
+
+def steric_sea_level_operator(state, load_space):
+    """
+    Maps the vertically averaged density change to the associated steric
+    sea level change:
+
+        eta_s = -(D / rho_w) * C * drho,
+
+    where D = state.sea_level is the local ocean depth and C the ocean
+    function. The scaling is such that the mass per vertical column is
+    pointwise unchanged (rho_w * eta_s + D * drho = 0): the steric part of
+    the sea surface height change loads nothing and so has no induced GRD
+    response. Used for post-processing the (eta, drho) model state into
+    the standard steric / ocean-dynamic split.
+    """
+    return (
+        -1.0 / state.model.parameters.water_density
+    ) * ocean_density_change_to_load_operator(state, load_space, load_space)
 
 
 def effective_steric_scale(state):
@@ -241,10 +185,9 @@ def effective_steric_scale(state):
 
     so that a density prior std specified through an effective steric sea
     level std converts as drho_std = steric_std / effective_steric_scale.
-    This is a positive, magnitude-only conversion used to set the density
-    prior; the physical (negative) sign of the steric response lives in
-    steric_sea_level_operator. The actual pointwise steric std scales with
-    the local depth, D(x) / mean_ocean_depth (see steric_depth_field).
+    This is a positive, magnitude-only conversion; the physical (negative)
+    sign of the steric response lives in steric_sea_level_operator, and any
+    signed scalar relabelling should apply the minus sign explicitly.
     """
     eta0 = state.sea_level * state.ocean_projection(value=0.0)
     mean_ocean_depth = state.model.integrate(eta0) / state.ocean_area
@@ -256,24 +199,32 @@ def gmsl_split_operators(state, load_space, continuous_sl_operator):
     Operators for the 2D push-forward of the model onto GMSL change split
     into barystatic and steric parts.
 
-    Returns (bary_op, steric_op, steric_direct_op, dyn_avg_op), each mapping
-    the joint model space [Ice, Dyn, Rho] to a scalar:
+    Returns (bary_op, steric_op, steric_direct_op, dyn_direct_op), each
+    mapping the joint model space [Ice, Dyn, Rho] to a scalar:
 
       bary_op         : barystatic GMSL change, evaluated directly from
-                        global mass conservation as (minus) the grounded ice
-                        mass change spread uniformly over the oceans.
-      steric_op       : the steric GMSL contribution, defined as the residual
-                        true GMSL - barystatic, so that the two coordinates
-                        sum to the true GMSL by construction. The load of the
-                        dynamic sea level cancels its direct ocean-mean term
-                        identically, so this residual equals the ocean mean
-                        of the steric sea level up to SLE solver convergence.
-      steric_direct_op: the ocean average of the steric sea level alone. The
-                        difference steric_op - steric_direct_op applied to a
-                        given model diagnoses the SLE mass balance.
-      dyn_avg_op      : the ocean average of the dynamic sea level, which is
-                        zero under the prior constraint; its value on a given
-                        model diagnoses how well the constraint is satisfied.
+                        global mass conservation as (minus) the grounded
+                        ice mass change spread uniformly over the oceans.
+      steric_op       : the steric GMSL contribution, defined as the
+                        residual true GMSL - barystatic, so that the two
+                        coordinates sum to the true GMSL by construction.
+                        Because the ocean load's SLE response removes
+                        exactly the ocean-mean sea level that the direct
+                        dynamic term adds back through its mass part, this
+                        residual equals the ocean mean of the steric sea
+                        level, -<(D/rho_w)*C*drho>_O, up to SLE solver
+                        convergence and independently of the prior mass
+                        constraint.
+      steric_direct_op: the ocean average of the steric sea level alone,
+                        evaluated directly from the density component. The
+                        difference steric_op - steric_direct_op applied to
+                        a given model diagnoses the SLE mass balance.
+      dyn_direct_op   : the ocean average of the dynamic sea surface height
+                        alone. Under the prior mass constraint this equals
+                        the direct steric average (their difference is the
+                        ocean mean of the manometric part, <zeta>_O), so
+                        dyn_direct_op - steric_direct_op diagnoses how well
+                        the constraint is satisfied.
     """
     joint_space = continuous_sl_operator.domain
 
@@ -290,9 +241,9 @@ def gmsl_split_operators(state, load_space, continuous_sl_operator):
         @ steric_sea_level_operator(state, load_space)
         @ joint_space.subspace_projection(2)
     )
-    dyn_avg_op = ocean_avg_op @ joint_space.subspace_projection(1)
+    dyn_direct_op = ocean_avg_op @ joint_space.subspace_projection(1)
 
-    return bary_op, steric_op, steric_direct_op, dyn_avg_op
+    return bary_op, steric_op, steric_direct_op, dyn_direct_op
 
 
 def build_measures(
@@ -301,38 +252,50 @@ def build_measures(
     ice_scale_factor,
     ice_std_mm,
     ocean_dyn_scale_factor,
-    ocean_dyn_std_mm,
+    ocean_dyn_std_factor,
     ocean_rho_scale_factor,
-    steric_std_mm,
+    ocean_rho_std_factor,
     noise_scale_factor,
-    noise_std_mm,
+    noise_std_factor,
     points,
     scale_mm,
     /,
     *,
     prior_shift=0.0,
     is_surrogate=False,
+    ocean_corr=0.0,
+    ocean_corr_scale_factor=0.4,
 ):
     """
     Constructs the 3-component joint prior and observation noise measures.
-    Skips the spatial projection and mass conservation conditioning if
-    is_surrogate=True.
+    Skips the spatial projection and mass conservation conditioning if is_surrogate=True.
 
-    All amplitudes are specified pointwise in mm:
+    Note: ocean_rho_std_factor sets the effective steric sea level std as a
+    fraction of the OCEAN DYNAMIC SSH std (not, as previously, of the
+    GMSL std). ocean_dyn_std_factor remains referenced to the GMSL std.
 
-      ice_std_mm       : ice thickness change std (over the ice sheets).
-      ocean_dyn_std_mm : ocean dynamic sea level std.
-      steric_std_mm    : effective steric sea level std at the mean ocean
-                         depth, converted to a density std via the mean-depth
-                         relabelling (see effective_steric_scale); the actual
-                         steric std varies with the local depth.
-      noise_std_mm     : altimetry per-point noise std.
+    If ocean_corr > 0 (exact model only; requires pygeoinf >= 1.8.4), the
+    (Dyn, Rho) marginals are combined into a correlated invariant measure
+    with the scale-dependent spectral correlation
 
-    The mass conservation constraint is <zeta>_O = 0 on the dynamic sea
-    level alone; the density component is column-mass neutral by
-    construction and is left unconstrained (its ocean mean carries the
-    steric GMSL signal).
+        r(k) = -ocean_corr * exp(-(corr_scale**2) * k),
+
+    with corr_scale = load_space.scale * ocean_corr_scale_factor and k the
+    Laplacian eigenvalue: a strong anti-correlation at long wavelengths
+    (dynamic SSH changes there are predominantly steric) that decays towards
+    independence at short wavelengths (mesoscale dynamic perturbations).
+    The marginal distributions of each component are unchanged, so the std
+    settings above retain their meaning, and the anti-correlation acts in
+    concert with the mass constraint, which the conditioning then enforces
+    exactly. The surrogate prior is always uncorrelated so that the Woodbury
+    preconditioner construction is unaffected.
     """
+
+    if not 0.0 <= ocean_corr < 1.0:
+        raise ValueError(
+            "ocean_corr must lie in [0, 1); the anti-correlation sign is "
+            "applied internally."
+        )
 
     # --- 1. ICE PRIOR ---
     ice_scale = load_space.scale * ice_scale_factor
@@ -341,35 +304,65 @@ def build_measures(
         ice_scale, std=ice_std
     )
 
-    # Implied barystatic GMSL prior std, for reporting and reference. Using
-    # the grounded-ice weighting makes this equal to the barystatic std of
-    # the masked prior (the mask is idempotent under the weighting).
-    B = l2_products_operator(load_space, [barystatic_gmsl_weighting(state)])
+    # Calculate GMSL variance to scale ocean and noise priors appropriately
+    B = averaging_operator(state, load_space, [barystatic_gmsl_weighting(state)])
     GMSL_prior_measure = ice_prior.affine_mapping(operator=B)
     GMSL_prior_std = np.sqrt(GMSL_prior_measure.covariance.matrix(dense=True)[0, 0])
 
-    # --- 2. OCEAN DYNAMIC SEA LEVEL PRIOR ---
+    # --- 2. OCEAN DYNAMIC PRIOR ---
     ocean_dyn_scale = load_space.scale * ocean_dyn_scale_factor
-    ocean_dyn_std = ocean_dyn_std_mm / scale_mm
+    ocean_dyn_std = ocean_dyn_std_factor * GMSL_prior_std
     ocean_dyn_prior = load_space.point_value_scaled_heat_kernel_gaussian_measure(
         ocean_dyn_scale, std=ocean_dyn_std
     )
 
-    # --- 3. OCEAN DENSITY (STERIC) PRIOR ---
-    # The model parameter is the vertically averaged density change, drho,
-    # with a constant pointwise std within the oceans. That std is specified
-    # through the effective steric sea level at the mean ocean depth (a
-    # fixed, magnitude-only relabelling; see effective_steric_scale).
+    # --- 3. OCEAN DENSITY PRIOR ---
+    # The model parameter is the vertically averaged density change,
+    # delta_rho_w, with a constant pointwise std within the oceans. That std
+    # is specified through the effective steric sea level (a fixed linear
+    # relabelling; see effective_steric_scale) as a FRACTION OF THE OCEAN
+    # DYNAMIC SSH STD, so the steric/dynamic ratio is a statement
+    # about the two ocean-interior processes. Previously this fraction was
+    # referenced to the GMSL std: with the default dyn factor of 2.0, the
+    # new default of 0.25 reproduces the old default of 0.5 exactly.
     ocean_rho_scale = load_space.scale * ocean_rho_scale_factor
-    ocean_rho_std = (steric_std_mm / scale_mm) / effective_steric_scale(state)
+
+    effective_steric_std = ocean_rho_std_factor * ocean_dyn_std
+    ocean_rho_std = effective_steric_std / effective_steric_scale(state)
+
     ocean_rho_prior = load_space.point_value_scaled_heat_kernel_gaussian_measure(
         ocean_rho_scale, std=ocean_rho_std
     )
 
     # --- JOINT MEASURE ---
-    model_prior = inf.GaussianMeasure.from_direct_sum(
-        [ice_prior, ocean_dyn_prior, ocean_rho_prior]
-    )
+    if ocean_corr > 0.0 and not is_surrogate:
+        # Correlated (Dyn, Rho) pair with unchanged marginals: block-diagonal
+        # spectral correlation matrix with the ice component independent.
+        # Imported lazily so the scripts continue to run on older pygeoinf
+        # when the correlation is disabled.
+        from pygeoinf.symmetric_space.symmetric_space import (
+            CorrelatedInvariantGaussianMeasure,
+        )
+
+        corr_scale = load_space.scale * ocean_corr_scale_factor
+
+        def spectral_correlation(k):
+            r = -ocean_corr * np.exp(-(corr_scale**2) * k)
+            return np.array(
+                [
+                    [1.0, 0.0, 0.0],
+                    [0.0, 1.0, r],
+                    [0.0, r, 1.0],
+                ]
+            )
+
+        model_prior = CorrelatedInvariantGaussianMeasure.from_invariant_measures(
+            [ice_prior, ocean_dyn_prior, ocean_rho_prior], spectral_correlation
+        )
+    else:
+        model_prior = inf.GaussianMeasure.from_direct_sum(
+            [ice_prior, ocean_dyn_prior, ocean_rho_prior]
+        )
 
     # --- PHYSICAL CONDITIONING (EXACT ONLY) ---
     if not is_surrogate:
@@ -381,22 +374,25 @@ def build_measures(
         model_prior = model_prior.affine_mapping(operator=proj_op)
 
         # B. Strict Mass Conservation via Affine Subspace
-        # The dynamic sea level is a pure redistribution of ocean mass:
-        # B([Ice, Dyn, Rho]) = <Dyn>_O = 0. The density component applies
-        # no load, so no further constraint is required.
         avg_op = ocean_average_operator(state, load_space)
 
-        mass_constraint_op = inf.RowLinearOperator(
-            [
-                load_space.zero_operator(codomain=avg_op.codomain),
-                avg_op,
-                load_space.zero_operator(codomain=avg_op.codomain),
-            ]
+        dyn_to_load = sea_level_change_to_load_operator(state, load_space, load_space)
+        rho_to_load = ocean_density_change_to_load_operator(
+            state, load_space, load_space
         )
 
+        # B([Ice, Dyn, Rho]) = 0*Ice + Avg(Load(Dyn)) + Avg(Load(Rho))
+        zero_op = load_space.zero_operator(codomain=avg_op.codomain)
+        mass_constraint_op = inf.RowLinearOperator(
+            [zero_op, avg_op @ dyn_to_load, avg_op @ rho_to_load]
+        )
+
+        zero_val = avg_op.codomain.zero
+
+        # Build the physical manifold constraint
         mass_subspace = inf.AffineSubspace.from_linear_equation(
             operator=mass_constraint_op,
-            value=avg_op.codomain.zero,
+            value=zero_val,
             solver=inf.CholeskySolver(galerkin=True),
         )
 
@@ -404,7 +400,7 @@ def build_measures(
         model_prior = mass_subspace.condition_gaussian_measure(model_prior)
 
     # --- NOISE MODEL ---
-    noise_std = noise_std_mm / scale_mm
+    noise_std = noise_std_factor * GMSL_prior_std
     if noise_scale_factor == 0.0 or is_surrogate:
         n_points = len(points)
         data_space = inf.EuclideanSpace(n_points)

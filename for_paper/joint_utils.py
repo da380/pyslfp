@@ -273,7 +273,7 @@ def build_measures(
     ocean_dyn_std_factor,
     ocean_rho_scale_factor,
     ocean_rho_std_factor,
-    alt_noise_scale_factor,
+    alt_noise_corr_scale_factor,
     alt_noise_std_factor,
     grace_noise_scale_km,
     grace_noise_std_factor,
@@ -286,6 +286,7 @@ def build_measures(
     ocean_corr_scale_factor=0.4,
     prior_kernel="heat",
     prior_order=1.0,
+    alt_noise_corr_std_factor=0.0,
 ):
     """
     Constructs the 3-component joint prior and dual-sensor noise measures.
@@ -326,6 +327,18 @@ def build_measures(
     white-noise settings are unchanged), keeping the spectral
     signal-to-noise comparison within one family, and the surrogate prior
     uses the same kernel family so the preconditioner stays matched.
+
+    The altimetry noise is the sum of a local (uncorrelated) component on
+    the track points, with std alt_noise_std_factor x the GMSL prior std,
+    and an optional large-scale correlated error component with std
+    alt_noise_corr_std_factor x the GMSL prior std (0 disables) at
+    correlation scale load_space.scale x alt_noise_corr_scale_factor,
+    representing long-wavelength systematics such as orbit and
+    reference-frame errors. The correlated component barely averages down
+    and so sets an irreducible error floor on large-scale functionals such
+    as GMSL. The returned alt_precond_noise and joint_precond_noise
+    measures contain the local component alone (with the GRACE noise
+    unchanged) for use in the preconditioner constructions.
     """
 
     if not 0.0 <= ocean_corr < 1.0:
@@ -342,6 +355,8 @@ def build_measures(
             "is well defined for any positive value on the (order > 1) "
             "spaces used here."
         )
+    if alt_noise_corr_std_factor < 0.0:
+        raise ValueError("alt_noise_corr_std_factor must be non-negative.")
 
     # Common covariance family for the three model priors AND the
     # spatially correlated noise measures (white-noise settings are
@@ -452,16 +467,25 @@ def build_measures(
         return {"model_prior": model_prior, "unmasked_prior": unmasked_prior}
 
     # --- 2. NOISE MEASURES ---
-    # Altimetry Noise
+    # Altimetry noise: a local (uncorrelated) part on the track points,
+    # plus an optional large-scale correlated error representing
+    # long-wavelength systematics (orbit, reference-frame and large-scale
+    # correction residuals). The correlated part barely averages down, so
+    # it sets an irreducible error floor on large-scale functionals such
+    # as GMSL. The preconditioners are built from the local part alone
+    # (alt_precond_noise / joint_precond_noise below); the low-rank
+    # discrepancy this leaves is absorbed by a few extra CG iterations.
     alt_noise_std = alt_noise_std_factor * GMSL_prior_std
-    if alt_noise_scale_factor == 0.0:
-        alt_noise_meas = inf.GaussianMeasure.from_standard_deviation(
-            inf.EuclideanSpace(len(points)), alt_noise_std
-        )
-    else:
-        alt_noise_meas = load_measure(
-            load_space.scale * alt_noise_scale_factor, alt_noise_std
+    alt_precond_noise_meas = inf.GaussianMeasure.from_standard_deviation(
+        inf.EuclideanSpace(len(points)), alt_noise_std
+    )
+    alt_noise_meas = alt_precond_noise_meas
+    if alt_noise_corr_std_factor > 0.0:
+        alt_corr_noise_meas = load_measure(
+            load_space.scale * alt_noise_corr_scale_factor,
+            alt_noise_corr_std_factor * GMSL_prior_std,
         ).affine_mapping(operator=load_space.point_evaluation_operator(points))
+        alt_noise_meas = alt_noise_meas + alt_corr_noise_meas
 
     # GRACE Noise
     grace_spatial_scale = (
@@ -476,6 +500,9 @@ def build_measures(
     joint_noise_meas = inf.GaussianMeasure.from_direct_sum(
         [alt_noise_meas, grace_noise_meas]
     )
+    joint_precond_noise_meas = inf.GaussianMeasure.from_direct_sum(
+        [alt_precond_noise_meas, grace_noise_meas]
+    )
 
     return {
         "model_prior": model_prior,
@@ -483,6 +510,8 @@ def build_measures(
         "alt_noise": alt_noise_meas,
         "grace_noise": grace_noise_meas,
         "joint_noise": joint_noise_meas,
+        "alt_precond_noise": alt_precond_noise_meas,
+        "joint_precond_noise": joint_precond_noise_meas,
         "wmb": wmb,
         "gmsl_std": GMSL_prior_std,
         "ice_std": ice_std,

@@ -261,7 +261,7 @@ def build_measures(
     ocean_dyn_std_factor,
     ocean_rho_scale_factor,
     ocean_rho_std_factor,
-    noise_scale_factor,
+    noise_corr_scale_factor,
     noise_std_factor,
     points,
     scale_mm,
@@ -273,6 +273,7 @@ def build_measures(
     ocean_corr_scale_factor=0.4,
     prior_kernel="heat",
     prior_order=1.0,
+    noise_corr_std_factor=0.0,
 ):
     """
     Constructs the 3-component joint prior and observation noise measures.
@@ -313,6 +314,17 @@ def build_measures(
     white-noise settings are unchanged), keeping the spectral
     signal-to-noise comparison within one family, and the surrogate prior
     uses the same kernel family so the preconditioner stays matched.
+
+    The altimetry noise is the sum of a local (uncorrelated) component on
+    the track points, with std noise_std_factor x the GMSL prior std, and
+    an optional large-scale correlated error component with std
+    noise_corr_std_factor x the GMSL prior std (0 disables) at correlation
+    scale load_space.scale x noise_corr_scale_factor, representing
+    long-wavelength systematics such as orbit and reference-frame errors.
+    The correlated component barely averages down and so sets an
+    irreducible error floor on large-scale functionals such as GMSL. The
+    surrogate always uses the local component alone, so the Woodbury
+    preconditioner is built from the uncorrelated noise.
     """
 
     if not 0.0 <= ocean_corr < 1.0:
@@ -329,6 +341,8 @@ def build_measures(
             "is well defined for any positive value on the (order > 1) "
             "spaces used here."
         )
+    if noise_corr_std_factor < 0.0:
+        raise ValueError("noise_corr_std_factor must be non-negative.")
 
     # Common covariance family for the three model priors AND the
     # spatially correlated noise measures (white-noise settings are
@@ -446,18 +460,25 @@ def build_measures(
         model_prior = mass_subspace.condition_gaussian_measure(model_prior)
 
     # --- NOISE MODEL ---
+    # Two-component altimetry noise: a local (uncorrelated) part on the
+    # track points, plus an optional large-scale correlated error
+    # representing long-wavelength systematics (orbit, reference-frame and
+    # large-scale correction residuals). The correlated part barely
+    # averages down, so it sets an irreducible error floor on large-scale
+    # functionals such as GMSL. The surrogate always uses the local part
+    # alone, so the Woodbury preconditioner is built from the uncorrelated
+    # noise; the low-rank discrepancy this leaves is absorbed by a few
+    # extra CG iterations.
     noise_std = noise_std_factor * GMSL_prior_std
-    if noise_scale_factor == 0.0 or is_surrogate:
-        n_points = len(points)
-        data_space = inf.EuclideanSpace(n_points)
-        noise_meas = inf.GaussianMeasure.from_standard_deviation(data_space, noise_std)
-    else:
-        continuous_noise_meas = load_measure(
-            load_space.scale * noise_scale_factor, noise_std
-        )
-        noise_meas = continuous_noise_meas.affine_mapping(
-            operator=load_space.point_evaluation_operator(points)
-        )
+    n_points = len(points)
+    data_space = inf.EuclideanSpace(n_points)
+    noise_meas = inf.GaussianMeasure.from_standard_deviation(data_space, noise_std)
+    if noise_corr_std_factor > 0.0 and not is_surrogate:
+        corr_noise_meas = load_measure(
+            load_space.scale * noise_corr_scale_factor,
+            noise_corr_std_factor * GMSL_prior_std,
+        ).affine_mapping(operator=load_space.point_evaluation_operator(points))
+        noise_meas = noise_meas + corr_noise_meas
 
     # Prior shift
     if prior_shift != 0.0:

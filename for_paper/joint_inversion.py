@@ -139,16 +139,33 @@ def parse_arguments():
     )
 
     parser.add_argument(
-        "--alt-noise-scale-factor",
-        type=float,
-        default=0.0,
-        help="Alt instrument noise correlation scale.",
-    )
-    parser.add_argument(
         "--alt-noise-std-factor",
         type=float,
         default=1.0,
-        help="Alt instrument noise std as factor of GMSL std.",
+        help="Local (uncorrelated) altimetry noise std as factor of GMSL std.",
+    )
+    parser.add_argument(
+        "--alt-noise-corr-std-factor",
+        type=float,
+        default=0.0,
+        help=(
+            "Std of the optional large-scale correlated altimetry error "
+            "component, as a factor of the GMSL prior std (0 disables). "
+            "Represents long-wavelength systematics such as orbit and "
+            "reference-frame errors; because it barely averages down, even "
+            "small values (e.g. 0.02-0.05) set the error floor for "
+            "large-scale averages."
+        ),
+    )
+    parser.add_argument(
+        "--alt-noise-corr-scale-factor",
+        type=float,
+        default=4.0,
+        help=(
+            "Correlation scale of the correlated altimetry error "
+            "component, as a factor of the load scale (default 4.0 = "
+            "2000 km at the default load scale). Follows --prior-kernel."
+        ),
     )
 
     parser.add_argument(
@@ -425,7 +442,7 @@ def main():
         args.ocean_dyn_std_factor,
         args.ocean_rho_scale_factor,
         args.ocean_rho_std_factor,
-        args.alt_noise_scale_factor,
+        args.alt_noise_corr_scale_factor,
         args.alt_noise_std_factor,
         args.grace_noise_scale_km,
         args.grace_noise_std_factor,
@@ -438,6 +455,7 @@ def main():
         ocean_corr_scale_factor=args.ocean_corr_scale_factor,
         prior_kernel=args.prior_kernel,
         prior_order=args.prior_order,
+        alt_noise_corr_std_factor=args.alt_noise_corr_std_factor,
     )
 
     scale_mm = exact_phys["scale_mm"]
@@ -453,6 +471,12 @@ def main():
         print(
             f"Sobolev-kernel (Matern) priors enabled: common order = "
             f"{args.prior_order:.2f}"
+        )
+    if args.alt_noise_corr_std_factor > 0.0:
+        print(
+            f"Correlated altimetry error component enabled: std factor = "
+            f"{args.alt_noise_corr_std_factor:.3f}, scale factor = "
+            f"{args.alt_noise_corr_scale_factor:.1f}"
         )
 
     ocean_mask_mm = scale_mm * exact_phys["state"].ocean_projection(value=0.0)
@@ -507,7 +531,7 @@ def main():
         args.ocean_dyn_std_factor,
         args.ocean_rho_scale_factor,
         args.ocean_rho_std_factor,
-        args.alt_noise_scale_factor,
+        args.alt_noise_corr_scale_factor,
         args.alt_noise_std_factor,
         args.grace_noise_scale_km,
         args.grace_noise_std_factor,
@@ -520,27 +544,31 @@ def main():
         ocean_corr_scale_factor=args.ocean_corr_scale_factor,
         prior_kernel=args.prior_kernel,
         prior_order=args.prior_order,
+        alt_noise_corr_std_factor=args.alt_noise_corr_std_factor,
     )
 
     woodbury_solver = inf.LUSolver(galerkin=True, parallel=True, n_jobs=8)
     alpha = 0.1
 
+    # The preconditioners use the local (uncorrelated) altimetry noise
+    # component only; the optional correlated error enters the exact
+    # inversions but not the preconditioning.
     P_joint = (1 - alpha) * joint_inv.surrogate_woodbury_data_preconditioner(
         woodbury_solver,
         alternate_forward_operator=surr_phys["joint_forward"],
         alternate_prior_measure=surr_meas["unmasked_prior"],
-        alternate_data_error_measure=exact_meas["joint_noise"],
-    ) + alpha * exact_meas["joint_noise"].inverse_covariance
+        alternate_data_error_measure=exact_meas["joint_precond_noise"],
+    ) + alpha * exact_meas["joint_precond_noise"].inverse_covariance
 
     surr_alt_fwd = inf.LinearForwardProblem(
-        surr_phys["alt_track"], data_error_measure=exact_meas["alt_noise"]
+        surr_phys["alt_track"], data_error_measure=exact_meas["alt_precond_noise"]
     )
     surr_alt_inv = inf.LinearBayesianInversion(
         surr_alt_fwd, surr_meas["unmasked_prior"]
     )
     P_alt = (1 - alpha) * surr_alt_inv.woodbury_data_preconditioner(
         woodbury_solver
-    ) + alpha * exact_meas["alt_noise"].inverse_covariance
+    ) + alpha * exact_meas["alt_precond_noise"].inverse_covariance
 
     surr_grace_fwd = inf.LinearForwardProblem(
         surr_phys["grace_track"], data_error_measure=exact_meas["grace_noise"]

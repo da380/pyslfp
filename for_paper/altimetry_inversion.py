@@ -126,13 +126,30 @@ def parse_arguments():
         "--noise-std-factor",
         type=float,
         default=1.0,
-        help="Instrument noise std as factor of GMSL std.",
+        help="Local (uncorrelated) altimetry noise std as factor of GMSL std.",
     )
     parser.add_argument(
-        "--noise-scale-factor",
+        "--noise-corr-std-factor",
         type=float,
         default=0.0,
-        help="Instrument noise correlation scale.",
+        help=(
+            "Std of the optional large-scale correlated altimetry error "
+            "component, as a factor of the GMSL prior std (0 disables). "
+            "Represents long-wavelength systematics such as orbit and "
+            "reference-frame errors; because it barely averages down, even "
+            "small values (e.g. 0.02-0.05) set the error floor for "
+            "large-scale averages."
+        ),
+    )
+    parser.add_argument(
+        "--noise-corr-scale-factor",
+        type=float,
+        default=4.0,
+        help=(
+            "Correlation scale of the correlated altimetry error "
+            "component, as a factor of the load scale (default 4.0 = "
+            "2000 km at the default load scale). Follows --prior-kernel."
+        ),
     )
     parser.add_argument(
         "--ocean-corr",
@@ -258,7 +275,7 @@ def main():
         args.ocean_dyn_std_factor,
         args.ocean_rho_scale_factor,
         args.ocean_rho_std_factor,
-        args.noise_scale_factor,
+        args.noise_corr_scale_factor,
         args.noise_std_factor,
         points,
         mm_scale,
@@ -268,6 +285,7 @@ def main():
         ocean_corr_scale_factor=args.ocean_corr_scale_factor,
         prior_kernel=args.prior_kernel,
         prior_order=args.prior_order,
+        noise_corr_std_factor=args.noise_corr_std_factor,
     )
 
     print(f"Implied GMSL prior standard deviation: {GMSL_prior_std * mm_scale:.3f} mm")
@@ -280,6 +298,12 @@ def main():
         print(
             f"Sobolev-kernel (Matern) priors enabled: common order = "
             f"{args.prior_order:.2f}"
+        )
+    if args.noise_corr_std_factor > 0.0:
+        print(
+            f"Correlated altimetry error component enabled: std factor = "
+            f"{args.noise_corr_std_factor:.3f}, scale factor = "
+            f"{args.noise_corr_scale_factor:.1f}"
         )
 
     print("Setting up Bayesian Inversion...")
@@ -313,7 +337,7 @@ def main():
         args.ocean_dyn_std_factor,
         args.ocean_rho_scale_factor,
         args.ocean_rho_std_factor,
-        args.noise_scale_factor,
+        args.noise_corr_scale_factor,
         args.noise_std_factor,
         points,
         mm_scale,
@@ -323,6 +347,7 @@ def main():
         ocean_corr_scale_factor=args.ocean_corr_scale_factor,
         prior_kernel=args.prior_kernel,
         prior_order=args.prior_order,
+        noise_corr_std_factor=args.noise_corr_std_factor,
     )
 
     print("Constructing Woodbury preconditioner from unconstrained surrogate model...")

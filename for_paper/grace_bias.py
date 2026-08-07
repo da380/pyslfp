@@ -93,6 +93,30 @@ def parse_arguments():
         help="Pointwise standard deviation (in m EWT) for the prior.",
     )
     parser.add_argument(
+        "--prior-kernel",
+        choices=["heat", "sobolev"],
+        default="heat",
+        help=(
+            "Covariance family for the direct load prior AND the spatial "
+            "noise model (applied consistently, so the spectral "
+            "signal-to-noise crossover stays well defined): 'heat' "
+            "(default) or 'sobolev' (Matern-type, spectral variance "
+            "(1 + scale^2 k)^-order)."
+        ),
+    )
+    parser.add_argument(
+        "--prior-order",
+        type=float,
+        default=1.0,
+        help=(
+            "Spectral order for --prior-kernel sobolev (must be positive). "
+            "Sample roughness combines this order with the load space "
+            "order (--load-order): with the default order-2 spaces, 1.0 "
+            "gives degree-variance tails ~ l^-5. Ignored for the heat "
+            "kernel."
+        ),
+    )
+    parser.add_argument(
         "--prior-shift",
         type=float,
         default=1.0,
@@ -145,6 +169,8 @@ def main():
         args.noise_std_factor,
         remove_degree_1=args.remove_degree_1,
         prior_shift=args.prior_shift,
+        prior_kernel=args.prior_kernel,
+        prior_order=args.prior_order,
     )
 
     wmb = WMBMethod(model, args.obs_degree)
@@ -296,7 +322,7 @@ def main():
             gaussian_pdf(x_vals, mu, std),
             "r-",
             linewidth=2,
-            label=rf"Actual error ($\mu$={mu:.3f}, $\sigma$={std:.3f})",
+            label=r"Actual error",
         )
 
         ax.plot(
@@ -304,7 +330,7 @@ def main():
             gaussian_pdf(x_vals, 0, wmb_stds[i]),
             "b-",
             linewidth=2,
-            label=rf"Theoretical error ($\mu$={0:.3f}, $\sigma$={wmb_stds[i]:.3f})",
+            label=r"Standard error",
         )
 
         ax.set_title(region, fontsize=14)

@@ -2,6 +2,11 @@
 grace_utils.py
 ==============
 Shared utilities, physics initializations, and plotting for Bayesian GRACE inversions.
+
+The direct load prior and the spatial noise measure can optionally use
+Sobolev (Matern-type) covariances in place of the default heat kernels,
+giving rougher, power-law-tailed fields while keeping the correlation scale
+and pointwise std settings (see build_measures).
 """
 
 import pygeoinf as inf
@@ -52,18 +57,65 @@ def build_measures(
     *,
     remove_degree_1=False,
     prior_shift=0.0,
+    prior_kernel="heat",
+    prior_order=1.0,
 ):
-    """Constructs the prior and noise Gaussian measures."""
+    """
+    Constructs the prior and noise Gaussian measures.
+
+    The direct load prior uses a point-value-scaled heat-kernel covariance
+    by default. With prior_kernel="sobolev" it instead uses a Sobolev
+    (Matern-type) covariance proportional to
+    (1 + scale**2 * Laplacian)**(-prior_order) with respect to the load
+    space inner product. Note that sample spectra therefore decay with the
+    COMBINED exponent prior_order + (load space order): with the default
+    order-2 spaces, prior_order = 1 gives degree-variance tails ~ l**(-5),
+    and any positive order yields a finite pointwise variance. The
+    correlation scale and pointwise std settings retain their meaning under
+    either family. The spatial noise measure uses the SAME covariance
+    family (with its own scale and std factors), keeping the spectral
+    signal-to-noise crossover well defined: within a common family the
+    noise-to-signal spectral ratio is monotone in degree, whereas mixed
+    families (a power-law signal against an exponentially decaying noise)
+    would make it non-monotone. Both measures remain invariant with
+    analytic spectral structure under either family, so the WMB
+    preconditioner construction is unchanged.
+    """
+    if prior_kernel not in ("heat", "sobolev"):
+        raise ValueError("prior_kernel must be 'heat' or 'sobolev'.")
+    if prior_kernel == "sobolev" and prior_order <= 0.0:
+        raise ValueError(
+            "prior_order must be positive. Sample spectra combine this "
+            "order with the load space order, so the pointwise variance "
+            "is well defined for any positive value on the (order > 1) "
+            "spaces used here."
+        )
+
     length_scale = state.model.parameters.length_scale
     water_density = state.model.parameters.water_density
 
     direct_load_measure_scale = direct_scale_km * 1000 / length_scale
     direct_load_measure_std = water_density * direct_std_m / length_scale
 
-    initial_direct_load_prior = (
-        load_space.point_value_scaled_heat_kernel_gaussian_measure(
-            direct_load_measure_scale, std=direct_load_measure_std
-        )
+    # Common covariance family for the direct load prior AND the spatial
+    # noise measure, so the spectral signal-to-noise crossover is well
+    # defined under either family.
+    if prior_kernel == "sobolev":
+
+        def load_measure(scale, std):
+            return load_space.point_value_scaled_sobolev_kernel_gaussian_measure(
+                prior_order, scale, std=std
+            )
+
+    else:
+
+        def load_measure(scale, std):
+            return load_space.point_value_scaled_heat_kernel_gaussian_measure(
+                scale, std=std
+            )
+
+    initial_direct_load_prior = load_measure(
+        direct_load_measure_scale, direct_load_measure_std
     )
 
     if remove_degree_1:
@@ -84,9 +136,7 @@ def build_measures(
 
     noise_load_measure_scale = noise_scale_factor * direct_load_measure_scale
     noise_load_measure_std = noise_std_factor * direct_load_measure_std
-    noise_load_measure = load_space.point_value_scaled_heat_kernel_gaussian_measure(
-        noise_load_measure_scale, std=noise_load_measure_std
-    )
+    noise_load_measure = load_measure(noise_load_measure_scale, noise_load_measure_std)
 
     return (
         initial_direct_load_prior,

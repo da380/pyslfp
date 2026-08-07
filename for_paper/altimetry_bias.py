@@ -4,7 +4,7 @@ Extended Altimetry Bias Evaluation (3-Component Model)
 
 This script calculates the analytical method bias and error distribution for
 satellite altimetry using a 3-component physical model (Ice Thickness, Ocean
-Dynamic Topography, and Ocean Density). It strictly evaluates the difference
+Dynamic SSH, and Ocean Density). It strictly evaluates the difference
 between true Global Mean Sea Level (water column thickness change) and the
 standard SSH-based area-averaging estimator.
 """
@@ -87,21 +87,81 @@ def parse_arguments():
     parser.add_argument(
         "--ocean-rho-std-factor",
         type=float,
-        default=0.5,
-        help="Effective steric SL std as factor of GMSL std.",
+        default=0.25,
+        help="Effective steric SL std as a fraction of the dynamic topography std.",
     )
 
     parser.add_argument(
         "--noise-std-factor",
         type=float,
         default=1.0,
-        help="Instrument noise std as factor of GMSL std.",
+        help="Local (uncorrelated) altimetry noise std as factor of GMSL std.",
     )
     parser.add_argument(
-        "--noise-scale-factor",
+        "--noise-corr-std-factor",
         type=float,
-        default=0.0,
-        help="Instrument noise correlation scale.",
+        default=0.05,
+        help=(
+            "Std of the optional large-scale correlated altimetry error "
+            "component, as a factor of the GMSL prior std (0 disables). "
+            "Represents long-wavelength systematics such as orbit and "
+            "reference-frame errors; because it barely averages down, even "
+            "small values (e.g. 0.02-0.05) set the error floor for "
+            "large-scale averages."
+        ),
+    )
+    parser.add_argument(
+        "--noise-corr-scale-factor",
+        type=float,
+        default=4.0,
+        help=(
+            "Correlation scale of the correlated altimetry error "
+            "component, as a factor of the load scale (default 4.0 = "
+            "2000 km at the default load scale). Follows --prior-kernel."
+        ),
+    )
+    parser.add_argument(
+        "--ocean-corr",
+        type=float,
+        default=0.9,
+        help=(
+            "Magnitude of the long-wavelength anti-correlation between the "
+            "ocean dynamic and density fields (0 disables; must lie in "
+            "[0, 1); the sign is applied internally."
+        ),
+    )
+    parser.add_argument(
+        "--ocean-corr-scale-factor",
+        type=float,
+        default=0.4,
+        help=(
+            "Decay scale of the (Dyn, Rho) spectral correlation with "
+            "wavenumber, as a factor of the load scale."
+        ),
+    )
+    parser.add_argument(
+        "--prior-kernel",
+        choices=["heat", "sobolev"],
+        default="sobolev",
+        help=(
+            "Covariance family for the three model priors and any "
+            "spatially correlated noise models (applied consistently; "
+            "white-noise settings unaffected): 'heat' or "
+            "'sobolev' (default)."
+        ),
+    )
+    parser.add_argument(
+        "--prior-order",
+        type=float,
+        default=1.0,
+        help=(
+            "Common spectral order for --prior-kernel sobolev (must be "
+            "positive). Sample roughness combines this order with the "
+            "model space order (--load-order): with the default order-2 "
+            "spaces, 1.0 gives degree-variance tails ~ l^-5, comparable "
+            "to observed mesoscale SSH spectra. Ignored for the heat "
+            "kernel."
+        ),
     )
     parser.add_argument(
         "--prior-shift", type=float, default=1.0, help="Prior mean shift factor."
@@ -144,18 +204,21 @@ def main():
         args.ocean_dyn_std_factor,
         args.ocean_rho_scale_factor,
         args.ocean_rho_std_factor,
-        args.noise_scale_factor,
+        args.noise_corr_scale_factor,
         args.noise_std_factor,
         points,
         scale_mm,
         prior_shift=args.prior_shift,
         is_surrogate=False,
+        ocean_corr=args.ocean_corr,
+        ocean_corr_scale_factor=args.ocean_corr_scale_factor,
+        prior_kernel=args.prior_kernel,
+        prior_order=args.prior_order,
+        noise_corr_std_factor=args.noise_corr_std_factor,
     )
 
     joint_meas = inf.GaussianMeasure.from_direct_sum([model_prior, noise_meas])
     data_space = noise_meas.domain
-
-    print(data_space.dim)
 
     # The TRUE GMSL uses the Sea Level Operator (SLC)
     true_gmsl_op = utils.true_gmsl_operator(state, load_space, continuous_sl_op)
@@ -196,10 +259,10 @@ def main():
         ocean_mask_mm = scale_mm * ocean_mask_raw
         ice_mask = scale_mm * state.ice_projection(value=0.0)
 
-        # Calculate scaling factor to convert density anomalies to steric sea level change
-        mean_ocean_depth = state.model.integrate(state.sea_level) / state.ocean_area
-        water_density = state.model.parameters.water_density
-        steric_scale = mean_ocean_depth / water_density
+        # Physical density units for the raw density map (nondimensional
+        # density x density_scale = kg/m^3; x1000 -> g/m^3).
+        rho_scale_gm3 = 1.0e3 * state.model.parameters.density_scale
+        ocean_mask_gm3 = rho_scale_gm3 * ocean_mask_raw
 
         fig1, ax1 = sl.create_map_figure(figsize=(12, 6))
         _, im1 = sl.plot(
@@ -225,7 +288,7 @@ def main():
             symmetric=True,
         )
 
-        im2.colorbar.set_label("Dynamic Topography (mm)", fontsize=16)
+        im2.colorbar.set_label("Dynamic SSH (mm)", fontsize=16)
         im2.colorbar.ax.tick_params(labelsize=14)
 
         ax2.gridliner.xlabel_style = {"size": 12, "color": "black"}
@@ -235,20 +298,19 @@ def main():
 
         fig3, ax3 = sl.create_map_figure(figsize=(12, 6))
         _, im3 = sl.plot(
-            ocean_rho * steric_scale * ocean_mask_mm,
+            ocean_rho * ocean_mask_gm3,
             ax=ax3,
             cmap="seismic",
-            colorbar_kwargs={"label": "Steric SL (mm)"},
             symmetric=True,
         )
 
-        im3.colorbar.set_label("Steric Sea level (mm)", fontsize=16)
+        im3.colorbar.set_label(r"Density Change (g m$^{-3}$)", fontsize=16)
         im3.colorbar.ax.tick_params(labelsize=14)
 
         ax3.gridliner.xlabel_style = {"size": 12, "color": "black"}
         ax3.gridliner.ylabel_style = {"size": 12, "color": "black"}
 
-        figures_to_save["bias_steric_sl"] = fig3
+        figures_to_save["bias_density"] = fig3
 
         ssh_grid_mm = ssh_sample * ocean_mask_mm
         observed_data_mm = (forward_op(model_sample) + noise_meas.sample()) * scale_mm
@@ -333,14 +395,14 @@ def main():
         gaussian_pdf(x_vals, err_mean, err_std),
         "r-",
         linewidth=2.5,
-        label=rf"Actual error ($\mu$={err_mean:.3f}, $\sigma$={err_std:.3f})",
+        label=r"Actual error",
     )
     ax.plot(
         x_vals,
         gaussian_pdf(x_vals, 0, alt_noise_std),
         "b",
         linewidth=2,
-        label=rf"Theoretical error ($\mu$=0.000, $\sigma$={alt_noise_std:.3f})",
+        label=r"Standard error",
     )
 
     ax.set_xlabel("Error in GMSL estimate (mm)", fontsize=14)

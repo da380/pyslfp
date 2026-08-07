@@ -1,6 +1,3 @@
 Altimetry Inversion Metrics
 ===========================
 
-Target           | KL Divergence   | Prior Var (mm²)   | Post Var (mm²)   | Variance Reduction
---------------------------------------------------------------------------------------------
-GMSL             | 1.0411          | 0.0511            | 0.0025           |          95.1649%

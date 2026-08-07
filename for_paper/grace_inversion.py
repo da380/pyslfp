@@ -51,9 +51,15 @@ def parse_arguments():
         help="Plot head-to-head analytical PDFs of regional averages (Bayesian vs WMB).",
     )
     parser.add_argument(
-        "--plot-deg1",
+        "--plot-target-degree",
         action="store_true",
-        help="Plot Degree 1 coefficient corner plots.",
+        help="Plot corner plots and metrics for a specific spherical harmonic degree.",
+    )
+    parser.add_argument(
+        "--target-degree",
+        type=int,
+        default=1,
+        help="Spherical harmonic degree to analyze (default: 1).",
     )
     parser.add_argument(
         "--prior-sensitivity", action="store_true", help="Estimate prior sensitivity"
@@ -93,6 +99,30 @@ def parse_arguments():
         "--direct-std-m", type=float, default=0.01, help="Prior std dev (m EWT)."
     )
     parser.add_argument(
+        "--prior-kernel",
+        choices=["heat", "sobolev"],
+        default="heat",
+        help=(
+            "Covariance family for the direct load prior AND the spatial "
+            "noise model (applied consistently, so the spectral "
+            "signal-to-noise crossover stays well defined): 'heat' "
+            "(default) or 'sobolev' (Matern-type, spectral variance "
+            "(1 + scale^2 k)^-order)."
+        ),
+    )
+    parser.add_argument(
+        "--prior-order",
+        type=float,
+        default=1.0,
+        help=(
+            "Spectral order for --prior-kernel sobolev (must be positive). "
+            "Sample roughness combines this order with the load space "
+            "order (--load-order): with the default order-2 spaces, 1.0 "
+            "gives degree-variance tails ~ l^-5. Ignored for the heat "
+            "kernel."
+        ),
+    )
+    parser.add_argument(
         "--prior-shift", type=float, default=1.0, help="Prior mean shift factor."
     )
     parser.add_argument(
@@ -116,7 +146,9 @@ def parse_arguments():
 def main():
     args = parse_arguments()
     if args.all:
-        args.plot_maps = args.plot_pdfs = args.plot_deg1 = args.prior_sensitivity = True
+        args.plot_maps = args.plot_pdfs = args.plot_target_degree = (
+            args.prior_sensitivity
+        ) = True
 
     if args.smoothing_scale_km is None:
         args.smoothing_scale_km = args.load_scale_km
@@ -142,7 +174,13 @@ def main():
         args.noise_std_factor,
         remove_degree_1=args.remove_degree_1,
         prior_shift=args.prior_shift,
+        prior_kernel=args.prior_kernel,
+        prior_order=args.prior_order,
     )
+    if args.prior_kernel == "sobolev":
+        print(
+            f"Sobolev-kernel (Matern) prior enabled: order = " f"{args.prior_order:.2f}"
+        )
 
     region_names, avg_op, _, regions_dict = utils.get_regional_averaging(
         state, load_space, smoothing_scale_km=args.smoothing_scale_km
@@ -191,7 +229,7 @@ def main():
 
     metrics_file = os.path.join(output_dir, "grace_metrics.txt")
 
-    if args.plot_pdfs or args.plot_deg1:
+    if args.plot_pdfs or args.plot_target_degree:
         print("Forming load average estimates")
 
         wmb_avg_measure = data_measure.affine_mapping(
@@ -276,34 +314,46 @@ def main():
                 figures_to_save["grace_regional_pdfs"] = plt.gcf()
                 print(f"  Regional metrics logged to: {metrics_file}")
 
-        # ------------------ DEGREE ONE ------------------
-        if args.plot_deg1:
-            print("Generating Degree-1 Corner Plot...")
-            deg1_op = load_space.to_coefficient_operator(1, lmin=1) * ewt_mm_scale
+        # ------------------ TARGET DEGREE ANALYSIS ------------------
+        if args.plot_target_degree:
+            l = args.target_degree
+            print(f"Generating Degree-{l} Corner Plot...")
+            target_deg_op = load_space.to_coefficient_operator(l, lmin=l) * ewt_mm_scale
 
-            deg1_prior = model_prior.affine_mapping(
-                operator=deg1_op
-            ).with_dense_covariance(parallel=True, n_jobs=3)
+            target_deg_prior = model_prior.affine_mapping(
+                operator=target_deg_op
+            ).with_dense_covariance(parallel=True, n_jobs=min(2 * l + 1, 10))
 
-            deg1_post = model_posterior.affine_mapping(
-                operator=deg1_op
-            ).with_dense_covariance(parallel=True, n_jobs=3)
+            target_deg_post = model_posterior.affine_mapping(
+                operator=target_deg_op
+            ).with_dense_covariance(parallel=True, n_jobs=min(2 * l + 1, 10))
 
-            kl_div = deg1_post.kl_divergence(deg1_prior)
+            kl_div = target_deg_post.kl_divergence(target_deg_prior)
 
             # --- Extract Dense Covariance Matrices ---
-            prior_cov_mat = deg1_prior.covariance.matrix(dense=True)
-            post_cov_mat = deg1_post.covariance.matrix(dense=True)
+            prior_cov_mat = target_deg_prior.covariance.matrix(dense=True)
+            post_cov_mat = target_deg_post.covariance.matrix(dense=True)
 
             prior_trace = np.trace(prior_cov_mat)
             post_trace = np.trace(post_cov_mat)
-            trace_reduction = 100.0 * (1.0 - (post_trace / prior_trace))
+            trace_reduction = (
+                100.0 * (1.0 - (post_trace / prior_trace)) if prior_trace > 0 else 0.0
+            )
 
             prior_det = np.linalg.det(prior_cov_mat)
             post_det = np.linalg.det(post_cov_mat)
 
+            # Dynamically generate component names and LaTeX labels (order: m=0, m=-1, m=1, etc.)
+            comp_names = [f"({l},0)"]
+            labels = [rf"$\zeta_{{{l},0}}$ (mm)"]
+            for m in range(1, l + 1):
+                comp_names.extend([f"({l},{-m})", f"({l},{m})"])
+                labels.extend(
+                    [rf"$\zeta_{{{l},{-m}}}$ (mm)", rf"$\zeta_{{{l},{m}}}$ (mm)"]
+                )
+
             with open(metrics_file, "a") as f_metrics:
-                f_metrics.write("\n\nDegree-1 Spherical Harmonic Coefficients\n")
+                f_metrics.write(f"\n\nDegree-{l} Spherical Harmonic Coefficients\n")
                 f_metrics.write("=" * 65 + "\n")
                 f_metrics.write(f"Joint KL Divergence:      {kl_div:.4f} nats\n")
                 f_metrics.write(f"Prior Total Var (Trace):  {prior_trace:.4f} mm²\n")
@@ -317,7 +367,6 @@ def main():
                 )
                 f_metrics.write("-" * 65 + "\n")
 
-                comp_names = ["(1,0)", "(1,-1)", "(1,1)"]
                 for i, name in enumerate(comp_names):
                     pr_v = prior_cov_mat[i, i]
                     po_v = post_cov_mat[i, i]
@@ -328,17 +377,12 @@ def main():
                 f_metrics.write("-" * 65 + "\n")
 
             inf.plot_corner_distributions(
-                deg1_post,
-                # prior_measure=deg1_prior,
-                true_values=deg1_op(model),
-                labels=[
-                    r"$\zeta_{10}$ (mm)",
-                    r"$\zeta_{1-1}$ (mm)",
-                    r"$\zeta_{11}$ (mm)",
-                ],
+                target_deg_post,
+                true_values=target_deg_op(model),
+                labels=labels,
                 title="",
             )
-            figures_to_save["grace_degree_1_corner"] = plt.gcf()
+            figures_to_save[f"grace_degree_{l}_corner"] = plt.gcf()
 
     # ------------------- Prior sensitivity analysis ---------------
     if args.prior_sensitivity:
@@ -489,29 +533,52 @@ def main():
                 )
                 figures_to_save[f"estimator_kernels_{safe_region_name}"] = fig_sens
 
-        # ------------------ DEGREE ONE KERNEL ERROR ------------------
-        print("  Evaluating Degree-1 Estimator Kernels...")
-        deg1_op = load_space.to_coefficient_operator(1, lmin=1) * ewt_mm_scale
-        deg1_resolution_operator = deg1_op @ model_resolution_operator
+        # ------------------ TARGET DEGREE KERNEL ERROR ------------------
+        l = args.target_degree
+        print(f"  Evaluating Degree-{l} Estimator Kernels...")
+        target_deg_op = load_space.to_coefficient_operator(l, lmin=l) * ewt_mm_scale
+        target_deg_resolution_operator = target_deg_op @ model_resolution_operator
 
-        deg1_names = ["(1,0)", "(1,-1)", "(1,1)"]
+        # Dynamically generate component names
+        comp_names = [f"({l},0)"]
+        for m in range(1, l + 1):
+            comp_names.extend([f"({l},{-m})", f"({l},{m})"])
 
         with open(metrics_file, "a") as f_metrics:
             f_metrics.write("\n\n" + "=" * 80 + "\n")
-            f_metrics.write("DEGREE-1 ESTIMATOR KERNEL METRICS (BAYESIAN ONLY)\n")
+            f_metrics.write(f"DEGREE-{l} ESTIMATOR KERNEL METRICS (BAYESIAN ONLY)\n")
             f_metrics.write("-" * 80 + "\n")
             f_metrics.write(
                 f"{'Component':<16} | {'Target Norm':<15} | {'Bayes Err Norm':<15} | {'Bayes Ratio':<15}\n"
             )
             f_metrics.write("-" * 80 + "\n")
 
-            for i, comp_name in enumerate(deg1_names):
+            # --- 1. Set up a dynamic grid figure outside the loop ---
+            nrows = len(comp_names)
+            fig_sens, axes = sl.subplots(
+                nrows,
+                3,
+                figsize=(24, 5.5 * nrows),
+                gridspec_kw={"hspace": 0.15, "wspace": 0.1},
+            )
+
+            # Ensure numpy slicing works even if there is only 1 row
+            if nrows == 1:
+                axes = np.array([axes])
+
+            gl_kwargs = {"xlabel_style": {"size": 12}, "ylabel_style": {"size": 12}}
+            cb_kwargs = {"shrink": 0.8, "pad": 0.05, "orientation": "horizontal"}
+
+            for i, comp_name in enumerate(comp_names):
                 # e_i (Basis vector)
-                basis_vec = deg1_resolution_operator.codomain.basis_vector(i)
+                basis_vec = target_deg_resolution_operator.codomain.basis_vector(i)
 
                 # Extract Target and Bayes Error spatial vectors
-                target_vector = deg1_op.adjoint(basis_vec)
-                bayes_res_vector = deg1_resolution_operator.adjoint(basis_vec)
+                target_vector = target_deg_op.adjoint(basis_vec)
+                bayes_res_vector = target_deg_resolution_operator.adjoint(basis_vec)
+
+                # Calculate the Bayesian Kernel directly
+                bayes_kernel_vector = target_vector + bayes_res_vector
 
                 target_norm = load_space.norm(target_vector)
                 bayes_error_norm = load_space.norm(bayes_res_vector)
@@ -526,69 +593,81 @@ def main():
                 max_abs_val = np.max(np.abs(target_vector.data))
                 if max_abs_val > 0:
                     target_normed = target_vector / max_abs_val
+                    bayes_kernel_normed = bayes_kernel_vector / max_abs_val
                     bayes_error_pct = (bayes_res_vector / max_abs_val) * 100
                 else:
                     target_normed = load_space.zero
+                    bayes_kernel_normed = load_space.zero
                     bayes_error_pct = load_space.zero
 
-                fig_sens, axes = sl.subplots(
-                    1, 2, figsize=(15, 5), gridspec_kw={"wspace": 0.15}
-                )
-
-                gl_kwargs = {"xlabel_style": {"size": 12}, "ylabel_style": {"size": 12}}
-
-                # --- Plot 1: Target Kernel (Degree 1 Spherical Harmonic) ---
+                # --- Plot 1: Target Kernel (Left Column) ---
                 _, im_target = sl.plot(
                     target_normed,
-                    ax=axes[0],
+                    ax=axes[i, 0],
                     cmap="seismic",
                     colorbar=True,
                     symmetric=True,
                     vmin=-1.0,
                     vmax=1.0,
-                    colorbar_kwargs={
-                        "shrink": 0.8,
-                        "pad": 0.05,
-                        "orientation": "horizontal",
-                    },
+                    colorbar_kwargs=cb_kwargs,
                     gridlines_kwargs=gl_kwargs,
                 )
-                axes[0].set_title(f"Target Kernel: {comp_name}", fontsize=16)
                 im_target.colorbar.set_label("Relative Amplitude", fontsize=14)
-                utils.draw_region_boundaries(state, axes[0], regions_dict)
+                utils.draw_region_boundaries(state, axes[i, 0], regions_dict)
 
-                # --- Find Max Error Bound ---
+                # --- Plot 2: Bayesian Kernel (Middle Column) ---
+                _, im_bayes_k = sl.plot(
+                    bayes_kernel_normed,
+                    ax=axes[i, 1],
+                    cmap="seismic",
+                    colorbar=True,
+                    symmetric=True,
+                    vmin=-1.0,
+                    vmax=1.0,
+                    colorbar_kwargs=cb_kwargs,
+                    gridlines_kwargs=gl_kwargs,
+                )
+                im_bayes_k.colorbar.set_label("Relative Amplitude", fontsize=14)
+                utils.draw_region_boundaries(state, axes[i, 1], regions_dict)
+
+                # --- Plot 3: Bayesian Kernel Error (Right Column) ---
                 vmax_error = np.max(np.abs(bayes_error_pct.data))
                 if vmax_error == 0:
                     vmax_error = 1.0
 
-                # --- Plot 2: Bayesian Kernel Error ---
-                _, im_bayes = sl.plot(
+                _, im_bayes_err = sl.plot(
                     bayes_error_pct,
-                    ax=axes[1],
+                    ax=axes[i, 2],
                     cmap="seismic",
                     colorbar=True,
                     symmetric=True,
                     vmin=-vmax_error,
                     vmax=vmax_error,
-                    colorbar_kwargs={
-                        "shrink": 0.8,
-                        "pad": 0.05,
-                        "orientation": "horizontal",
-                    },
+                    colorbar_kwargs=cb_kwargs,
                     gridlines_kwargs=gl_kwargs,
                 )
-                axes[1].set_title("Bayesian Kernel Error", fontsize=16)
-                im_bayes.colorbar.set_label("Relative Error (%)", fontsize=14)
-                utils.draw_region_boundaries(state, axes[1], regions_dict)
+                im_bayes_err.colorbar.set_label("Relative Error (%)", fontsize=14)
+                utils.draw_region_boundaries(state, axes[i, 2], regions_dict)
 
-                # Format filename uniquely for degree 1
-                safe_comp_name = (
-                    comp_name.replace("(", "").replace(")", "").replace(",", "_")
+            # --- 2. Apply Grid Layout Titles and Row Annotations ---
+            col_labels = ["Target Kernel", "Bayesian Kernel", "Kernel Error"]
+            for j, label in enumerate(col_labels):
+                axes[0, j].set_title(label, fontsize=16, fontweight="bold", pad=20)
+
+            for i, comp_name in enumerate(comp_names):
+                axes[i, 0].annotate(
+                    f"Component {comp_name}",
+                    xy=(-0.1, 0.5),
+                    xycoords="axes fraction",
+                    fontsize=16,
+                    fontweight="bold",
+                    va="center",
+                    ha="center",
+                    rotation=90,
                 )
-                figures_to_save[f"estimator_kernels_deg1_{safe_comp_name}"] = fig_sens
 
-        print(f"  Estimator metrics appended to: {metrics_file}")
+            # Save the composite dynamically scaled figure
+            figures_to_save[f"estimator_kernels_deg{l}_all"] = fig_sens
 
     # ------------------ MAPS ------------------
     if args.plot_maps:

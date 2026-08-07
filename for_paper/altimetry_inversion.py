@@ -76,7 +76,7 @@ def parse_arguments():
 
     # --- Resolution Settings ---
     parser.add_argument(
-        "--lmax", type=int, default=128, help="Exact model max SH degree."
+        "--lmax", type=int, default=256, help="Exact model max SH degree."
     )
     parser.add_argument(
         "--surrogate-degree", type=int, default=32, help="Preconditioner max SH degree."
@@ -88,7 +88,7 @@ def parse_arguments():
         "--load-scale-km", type=float, default=500.0, help="Sobolev length scale."
     )
     parser.add_argument(
-        "--spacing", type=float, default=4.0, help="Altimetry observation spacing."
+        "--spacing", type=float, default=1.0, help="Altimetry observation spacing."
     )
 
     # --- Prior Settings ---
@@ -131,7 +131,7 @@ def parse_arguments():
     parser.add_argument(
         "--noise-corr-std-factor",
         type=float,
-        default=0.0,
+        default=0.05,
         help=(
             "Std of the optional large-scale correlated altimetry error "
             "component, as a factor of the GMSL prior std (0 disables). "
@@ -173,13 +173,12 @@ def parse_arguments():
     parser.add_argument(
         "--prior-kernel",
         choices=["heat", "sobolev"],
-        default="heat",
+        default="sobolev",
         help=(
             "Covariance family for the three model priors and any "
             "spatially correlated noise models (applied consistently; "
-            "white-noise settings unaffected): 'heat' (default) or "
-            "'sobolev' (Matern-type, spectral variance "
-            "(1 + scale^2 k)^-order)."
+            "white-noise settings unaffected): 'heat' or "
+            "'sobolev' (default)."
         ),
     )
     parser.add_argument(

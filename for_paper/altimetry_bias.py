@@ -100,7 +100,7 @@ def parse_arguments():
     parser.add_argument(
         "--noise-corr-std-factor",
         type=float,
-        default=0.0,
+        default=0.05,
         help=(
             "Std of the optional large-scale correlated altimetry error "
             "component, as a factor of the GMSL prior std (0 disables). "
@@ -142,13 +142,12 @@ def parse_arguments():
     parser.add_argument(
         "--prior-kernel",
         choices=["heat", "sobolev"],
-        default="heat",
+        default="sobolev",
         help=(
             "Covariance family for the three model priors and any "
             "spatially correlated noise models (applied consistently; "
-            "white-noise settings unaffected): 'heat' (default) or "
-            "'sobolev' (Matern-type, spectral variance "
-            "(1 + scale^2 k)^-order)."
+            "white-noise settings unaffected): 'heat' or "
+            "'sobolev' (default)."
         ),
     )
     parser.add_argument(
@@ -396,14 +395,14 @@ def main():
         gaussian_pdf(x_vals, err_mean, err_std),
         "r-",
         linewidth=2.5,
-        label=rf"Actual error",
+        label=r"Actual error",
     )
     ax.plot(
         x_vals,
         gaussian_pdf(x_vals, 0, alt_noise_std),
         "b",
         linewidth=2,
-        label=rf"Standard error",
+        label=r"Standard error",
     )
 
     ax.set_xlabel("Error in GMSL estimate (mm)", fontsize=14)

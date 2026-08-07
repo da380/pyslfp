@@ -30,9 +30,8 @@ ocean-dynamic contributions while the model itself retains the simple
 (eta, drho) parameterisation.
 
 Optionally, the (eta, drho) pair can be given a scale-dependent
-anti-correlation in the prior (see build_measures; requires pygeoinf >=
-1.8.4), reflecting that at long wavelengths dynamic sea surface height
-changes are predominantly steric in origin.
+anti-correlation in the prior, reflecting that at long wavelengths
+dynamic sea surface height changes are predominantly steric in origin.
 
 The three prior marginals can also be switched from heat-kernel to Sobolev
 (Matern-type) covariances with a single common spectral order, giving

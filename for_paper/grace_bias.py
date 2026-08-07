@@ -322,7 +322,7 @@ def main():
             gaussian_pdf(x_vals, mu, std),
             "r-",
             linewidth=2,
-            label=rf"Actual error",
+            label=r"Actual error",
         )
 
         ax.plot(
@@ -330,7 +330,7 @@ def main():
             gaussian_pdf(x_vals, 0, wmb_stds[i]),
             "b-",
             linewidth=2,
-            label=rf"Standard error",
+            label=r"Standard error",
         )
 
         ax.set_title(region, fontsize=14)

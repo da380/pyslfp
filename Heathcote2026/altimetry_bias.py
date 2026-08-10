@@ -3,8 +3,8 @@ Extended Altimetry Bias Evaluation (3-Component Model)
 ======================================================
 
 This script calculates the analytical method bias and error distribution for
-satellite altimetry using a 3-component physical model (Ice Thickness, Ocean
-Dynamic SSH, and Ocean Density). It strictly evaluates the difference
+satellite altimetry using a 3-component physical model (Ice Thickness,
+Sterodynamic SSH, and Ocean Density). It strictly evaluates the difference
 between true Global Mean Sea Level (water column thickness change) and the
 standard SSH-based area-averaging estimator.
 """
@@ -88,7 +88,7 @@ def parse_arguments():
         "--ocean-rho-std-factor",
         type=float,
         default=0.25,
-        help="Effective steric SL std as a fraction of the dynamic topography std.",
+        help="Effective steric SL std as a fraction of the Sterodynamic SL change std.",
     )
 
     parser.add_argument(
@@ -272,11 +272,24 @@ def main():
             symmetric=True,
         )
 
-        im1.colorbar.set_label("Ice Thickness (mm)", fontsize=16)
+        im1.colorbar.set_label("Ice Thickness Change (mm)", fontsize=16)
         im1.colorbar.ax.tick_params(labelsize=14)
 
         ax1.gridliner.xlabel_style = {"size": 12, "color": "black"}
         ax1.gridliner.ylabel_style = {"size": 12, "color": "black"}
+
+        ax1.text(
+            0.02,
+            0.98,
+            "(c)",
+            transform=ax1.transAxes,
+            fontsize=16,
+            fontweight="bold",
+            va="top",
+            ha="left",
+            bbox=dict(facecolor="white", alpha=0.8, edgecolor="none", pad=3.0),
+            zorder=10,
+        )
 
         figures_to_save["bias_ice_thickness"] = fig1
 
@@ -288,11 +301,24 @@ def main():
             symmetric=True,
         )
 
-        im2.colorbar.set_label("Dynamic SSH (mm)", fontsize=16)
+        im2.colorbar.set_label("Sterodynamic SL Change (mm)", fontsize=16)
         im2.colorbar.ax.tick_params(labelsize=14)
 
         ax2.gridliner.xlabel_style = {"size": 12, "color": "black"}
         ax2.gridliner.ylabel_style = {"size": 12, "color": "black"}
+
+        ax2.text(
+            0.02,
+            0.98,
+            "(a)",
+            transform=ax2.transAxes,
+            fontsize=16,
+            fontweight="bold",
+            va="top",
+            ha="left",
+            bbox=dict(facecolor="white", alpha=0.8, edgecolor="none", pad=3.0),
+            zorder=10,
+        )
 
         figures_to_save["bias_ocean_dynamic"] = fig2
 
@@ -304,11 +330,24 @@ def main():
             symmetric=True,
         )
 
-        im3.colorbar.set_label(r"Density Change (g m$^{-3}$)", fontsize=16)
+        im3.colorbar.set_label(r"Averaged Density Change (g m$^{-3}$)", fontsize=16)
         im3.colorbar.ax.tick_params(labelsize=14)
 
         ax3.gridliner.xlabel_style = {"size": 12, "color": "black"}
         ax3.gridliner.ylabel_style = {"size": 12, "color": "black"}
+
+        ax3.text(
+            0.02,
+            0.98,
+            "(b)",
+            transform=ax3.transAxes,
+            fontsize=16,
+            fontweight="bold",
+            va="top",
+            ha="left",
+            bbox=dict(facecolor="white", alpha=0.8, edgecolor="none", pad=3.0),
+            zorder=10,
+        )
 
         figures_to_save["bias_density"] = fig3
 
@@ -325,10 +364,10 @@ def main():
             cmap="seismic",
             vmin=-shared_vmax,
             vmax=shared_vmax,
-            colorbar_kwargs={"label": "Continuous SSH (mm)"},
+            colorbar_kwargs={"label": "Continuous SSH Change (mm)"},
         )
 
-        im4.colorbar.set_label("Continuous SSH (mm)", fontsize=16)
+        im4.colorbar.set_label("Continuous SSH Change (mm)", fontsize=16)
         im4.colorbar.ax.tick_params(labelsize=14)
 
         ax4.gridliner.xlabel_style = {"size": 12, "color": "black"}
@@ -348,12 +387,25 @@ def main():
             s=4,
             edgecolors="none",
             colorbar=True,
-            colorbar_kwargs={"label": "Observed SSH (mm)"},
+            colorbar_kwargs={"label": "Observed SSH Change (mm)"},
             zorder=5,
         )
 
-        im5.colorbar.set_label("Observed SSH (mm)", fontsize=16)
+        im5.colorbar.set_label("Observed SSH Change (mm)", fontsize=16)
         im5.colorbar.ax.tick_params(labelsize=14)
+
+        ax5.text(
+            0.02,
+            0.98,
+            "(d)",
+            transform=ax5.transAxes,
+            fontsize=16,
+            fontweight="bold",
+            va="top",
+            ha="left",
+            bbox=dict(facecolor="white", alpha=0.8, edgecolor="none", pad=3.0),
+            zorder=10,
+        )
 
         ax5.gridliner.xlabel_style = {"size": 12, "color": "black"}
         ax5.gridliner.ylabel_style = {"size": 12, "color": "black"}
@@ -402,7 +454,7 @@ def main():
         gaussian_pdf(x_vals, 0, alt_noise_std),
         "b",
         linewidth=2,
-        label=r"Standard error",
+        label=r"Nominal error (noise only)",
     )
 
     ax.set_xlabel("Error in GMSL estimate (mm)", fontsize=14)
@@ -415,7 +467,7 @@ def main():
         "top", functions=(lambda x: x / true_std, lambda x: x * true_std)
     )
     sec_ax.set_xlabel(
-        r"Error Standardized by True Signal $\sigma$", fontsize=12, color="darkgreen"
+        r"Error Standardised by True Signal $\sigma$", fontsize=12, color="darkgreen"
     )
     sec_ax.tick_params(axis="x", colors="darkgreen")
 

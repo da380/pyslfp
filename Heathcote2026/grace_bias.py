@@ -329,7 +329,7 @@ def main():
             gaussian_pdf(x_vals, 0, wmb_stds[i]),
             "b-",
             linewidth=2,
-            label=r"WMB error",
+            label=r"Nominal error (noise only)",
         )
 
         ax.set_title(region, fontsize=14)

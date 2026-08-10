@@ -1,3 +1,37 @@
 Altimetry Inversion Metrics
 ===========================
 
+Target           | KL Divergence   | Prior Var (mm²)   | Post Var (mm²)   | Variance Reduction
+--------------------------------------------------------------------------------------------
+GMSL             | 0.2647          | 0.0333            | 0.0114           |          65.8787%
+
+GMSL Split: Barystatic vs Steric
+======================================================================
+Joint KL Divergence:     0.2925 nats
+Bary-Steric correlation: prior -0.0199 | posterior -0.4047
+SLE mass-balance check:  steric residual = 0.207770 mm | steric direct = 0.205797 mm | diff = 1.973e-03 mm
+Constraint check:        <dyn SSH>_O = 0.205797 mm | <zeta>_O = 1.388e-16 mm (should be ~0)
+----------------------------------------------------------------------
+Component          | Prior Var    | Post Var     | Reduction
+----------------------------------------------------------------------
+Barystatic         | 0.0280       | 0.0131       |    53.14%
+Steric             | 0.0055       | 0.0043       |    23.14%
+----------------------------------------------------------------------
+
+Regional Signal Separation (Tasman Sea)
+(Components sum to the regional mean sea level change; the
+ dynamic component includes its GRD response.)
+=================================================================
+Joint KL Divergence:      0.8696 nats
+Prior Total Var (Trace):  3.3972 mm²
+Post Total Var (Trace):   0.8679 mm²
+Overall Trace Reduction:  74.45%
+Prior Generalized Var:    1.2114e-02
+Post Generalized Var:     1.1614e-03
+-----------------------------------------------------------------
+Component          | Prior Var    | Post Var     | Reduction
+-----------------------------------------------------------------
+Dynamic Manometric SL | 3.0438       | 0.7106       |    76.65%
+Steric SL          | 0.3292       | 0.1454       |    55.82%
+Barystatic-GRD SL  | 0.0243       | 0.0118       |    51.15%
+-----------------------------------------------------------------

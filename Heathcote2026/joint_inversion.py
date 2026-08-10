@@ -6,7 +6,7 @@ This script performs a joint Bayesian inversion of synthetic GRACE gravimetry
 and satellite altimetry data to estimate ice sheet mass loss, the total ocean
 dynamic sea surface height change, and vertically averaged ocean density
 changes. Quantities of interest are post-processed into the standard
-barystatic / steric / ocean-dynamic split (see joint_utils).
+barystatic-GRD / steric / dynamic-manometric split (see joint_utils).
 
 It runs head-to-head Altimetry-only, GRACE-only, and Joint (Alt + GRACE)
 inversions on the exact same physical scenario to demonstrate the added value
@@ -101,7 +101,7 @@ def parse_arguments():
         "--load-scale-km", type=float, default=500.0, help="Sobolev length scale."
     )
     parser.add_argument(
-        "--spacing", type=float, default=4.0, help="Altimetry observation spacing."
+        "--spacing", type=float, default=1.0, help="Altimetry observation spacing."
     )
 
     # --- Prior Settings ---
@@ -135,7 +135,7 @@ def parse_arguments():
         "--ocean-rho-std-factor",
         type=float,
         default=0.25,
-        help="Effective steric SL std as a fraction of the dynamic SSH std.",
+        help="Effective steric SL std as a fraction of the Sterodynamic SL change std.",
     )
 
     parser.add_argument(
@@ -314,19 +314,19 @@ def plot_state_maps(
         (
             true_ice * scale_mm,
             post_ice * scale_mm,
-            "Ice Thickness (mm)",
+            "Ice Thickness Change (mm)",
             vmax_ice,
         ),
         (
             true_dyn * ocean_mask_mm,
             post_dyn * ocean_mask_mm,
-            "Dynamic SSH (mm)",
+            "Sterodynamic SL Change (mm)",
             vmax_dyn,
         ),
         (
             true_rho * ocean_mask_gm3,
             post_rho * ocean_mask_gm3,
-            r"Density Change (g m$^{-3}$)",
+            r"Averaged Density Change (g m$^{-3}$)",
             vmax_rho,
         ),
     ]
@@ -348,11 +348,11 @@ def plot_state_maps(
         std_ice, std_dyn, std_rho = std_fields
         vmax_std_ice, vmax_std_dyn, vmax_std_rho = std_vmaxes
         std_specs = [
-            (std_ice * ice_mask_mm, "Ice STD (mm)", vmax_std_ice),
-            (std_dyn * ocean_mask_mm, "Dynamic SSH STD (mm)", vmax_std_dyn),
+            (std_ice * ice_mask_mm, "Ice thickness change STD (mm)", vmax_std_ice),
+            (std_dyn * ocean_mask_mm, "Sterodynamic SL Change STD (mm)", vmax_std_dyn),
             (
                 std_rho * ocean_mask_gm3,
-                r"Density STD (g m$^{-3}$)",
+                r"Averaged Density STD (g m$^{-3}$)",
                 vmax_std_rho,
             ),
         ]
@@ -380,7 +380,11 @@ def plot_state_maps(
     for j in range(ncols):
         axes[0, j].set_title(col_labels[j], fontsize=16, fontweight="bold", pad=20)
 
-    row_titles = ["Ice thickness", "Dynamic SSH", "Density"]
+    row_titles = [
+        "Ice thickness Change",
+        "Sterodynamic SL Change",
+        "Averaged Density Change",
+    ]
     for i, row_title in enumerate(row_titles):
         axes[i, 0].annotate(
             row_title,
@@ -719,7 +723,7 @@ def main():
         # sea level: their difference diagnoses the SLE mass balance
         # (solver convergence), independently of the prior constraint.
         # Separately, under the prior mass constraint the ocean average of
-        # the dynamic SSH equals the direct steric average, so their
+        # the Sterodynamic SL Change equals the direct steric average, so their
         # difference (the ocean mean of the manometric part, <zeta>_O)
         # diagnoses the constraint.
         steric_resid_mm = steric_gmsl_op(true_model)[0] * scale_mm
@@ -906,7 +910,11 @@ def main():
                 return r"Covariance ((g m$^{-3}$)$^{2}$)"
             return r"Covariance (mm $\cdot$ g m$^{-3}$)"
 
-        row_titles = ["Ice thickness", "Dynamic SSH", "Density"]
+        row_titles = [
+            "Ice thickness Change",
+            "Sterodynamic SL Change",
+            "Averaged Density Change",
+        ]
 
         scenarios = [
             ("Ice", 0, (-78.0, -110.0), "WAIS"),
@@ -1032,8 +1040,10 @@ def main():
     # ------------------ 7. REGIONAL DECOMPOSITION ------------------
     if args.plot_regions:
         print("\nDecomposing Regional Sea Level Signals (3-way)...")
-        # Ocean dynamic SL includes the regional GRD response to the ocean
-        # load; steric SL loads nothing; the three coordinates sum exactly
+        # Dynamic manometric SL = the manometric part (zeta = eta - eta_s)
+        # plus the regional GRD response to the ocean load (which is exactly
+        # the load of zeta, the steric part being column-mass neutral);
+        # steric SL loads nothing; the three coordinates sum exactly
         # to the regional mean sea level change (see joint_utils).
         op_dyn, op_steric, op_ice_fp = utils.regional_decomposition_operators(
             exact_phys["state"],
@@ -1064,9 +1074,9 @@ def main():
         ).with_dense_covariance(parallel=True, n_jobs=3)
 
         labels = [
-            "Ocean dynamic SL (mm)",
+            "Dynamic Manometric SL (mm)",
             "Steric SL (mm)",
-            "Barystatic GRD SL (mm)",
+            "Barystatic-GRD SL (mm)",
         ]
 
         # Log Regional metrics
@@ -1127,7 +1137,7 @@ def main():
             )
             f_metrics.write("-" * 135 + "\n")
 
-            comp_names = ["Ocean dynamic SL", "Steric SL", "Barystatic GRD"]
+            comp_names = ["Dynamic Manometric SL", "Steric SL", "Barystatic-GRD SL"]
             for i, name in enumerate(comp_names):
                 pr_v = prior_cov_mat[i, i]
                 a_v = alt_cov_mat[i, i]

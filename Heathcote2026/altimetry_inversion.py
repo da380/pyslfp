@@ -6,8 +6,8 @@ This script performs a Bayesian inversion of synthetic satellite altimetry data.
 It estimates the underlying ice thickness changes, the total ocean dynamic
 sea surface height change, and vertically averaged ocean density changes,
 while strictly enforcing ocean mass conservation. Quantities of interest are
-post-processed into the standard barystatic / steric / ocean-dynamic split
-(see altimetry_utils). Features spatial covariance mapping to visualize the
+post-processed into the standard barystatic-GRD / steric / dynamic-manometric
+split (see altimetry_utils). Features spatial covariance mapping to visualize the
 physical constraints, an optional push-forward onto the 2D split of GMSL
 change into barystatic and steric contributions, and an optionally
 anti-correlated (Dyn, Rho) prior.
@@ -27,7 +27,6 @@ import altimetry_utils as utils
 import pyslfp as sl
 from pyslfp.state import EarthState
 from pyslfp.linear_operators import ocean_altimetry_points
-
 
 plt.rcParams.update(
     {
@@ -120,7 +119,7 @@ def parse_arguments():
         "--ocean-rho-std-factor",
         type=float,
         default=0.25,
-        help="Effective steric SL std as a fraction of the dynamic SSH std.",
+        help="Effective steric SL std as a fraction of the Sterodynamic SL change std.",
     )
     parser.add_argument(
         "--noise-std-factor",
@@ -201,32 +200,6 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def fix_corner_legend(axes, fig):
-    """Quick fix: Moves the floating figure legend into the empty top-right subplot."""
-    # 1. Remove the floating figure-level legend
-    if fig.legends:
-        fig.legends[0].remove()
-
-    n_dims = axes.shape[0]
-    if n_dims < 2:
-        return
-
-    # 2. Extract handles and labels exactly as pygeoinf does
-    handles, labels_leg = axes[0, 0].get_legend_handles_labels()
-    handles2, labels2 = axes[1, 0].get_legend_handles_labels()
-    handles.extend(handles2)
-    labels_leg.extend(labels2)
-
-    cleaned_labels = [label.split(":")[0] for label in labels_leg]
-    unique_legend = dict(zip(cleaned_labels, handles))
-
-    # 3. Place the legend securely inside the empty top-right subplot
-    leg_ax = axes[0, n_dims - 1]
-    leg_ax.set_visible(True)
-    leg_ax.axis("off")
-    leg_ax.legend(unique_legend.values(), unique_legend.keys(), loc="center")
-
-
 def main():
     args = parse_arguments()
     if args.all:
@@ -252,7 +225,7 @@ def main():
 
     # ------------------ 1. EXACT MODEL SETUP ------------------
     print(f"\nBuilding EXACT 3-Component physical operators (lmax={args.lmax})...")
-    (state, load_space, fp_op, continuous_ssh, continuous_sl, forward_op, mm_scale) = (
+    state, load_space, fp_op, continuous_ssh, continuous_sl, forward_op, mm_scale = (
         utils.build_physics_components(
             args.lmax, args.load_order, args.load_scale_km, points, is_surrogate=False
         )
@@ -317,7 +290,7 @@ def main():
     print(
         f"\nBuilding SURROGATE operators (lmax={args.surrogate_degree}) for preconditioning..."
     )
-    (surr_state, surr_load_space, _, _, _, surr_forward_op, _) = (
+    surr_state, surr_load_space, _, _, _, surr_forward_op, _ = (
         utils.build_physics_components(
             args.surrogate_degree,
             args.load_order,
@@ -448,7 +421,7 @@ def main():
         # sea level: their difference diagnoses the SLE mass balance
         # (solver convergence), independently of the prior constraint.
         # Separately, under the prior mass constraint the ocean average of
-        # the dynamic SSH equals the direct steric average, so their
+        # the Sterodynamic SL Change equals the direct steric average, so their
         # difference (the ocean mean of the manometric part, <zeta>_O)
         # diagnoses the constraint.
         steric_resid_mm = steric_gmsl_op(model)[0] * mm_scale
@@ -496,7 +469,6 @@ def main():
             fill_density=False,
         )
         fig = plt.gcf()
-        fix_corner_legend(axes, fig)
         figures_to_save["gmsl_split_corner"] = fig
 
     # ------------------ 5. SPATIAL & COVARIANCE MAPS ------------------
@@ -586,7 +558,7 @@ def main():
             vmin=-vmax_ice,
             vmax=vmax_ice,
             cmap=cmap,
-            colorbar_kwargs={**cb_kwargs, "label": "Ice Thickness (mm)"},
+            colorbar_kwargs={**cb_kwargs, "label": "Ice Thickness Change (mm)"},
             gridlines_kwargs=gl_kwargs,
         )
         _, im2 = sl.plot(
@@ -596,7 +568,7 @@ def main():
             vmin=-vmax_ice,
             vmax=vmax_ice,
             cmap=cmap,
-            colorbar_kwargs={**cb_kwargs, "label": "Ice Thickness (mm)"},
+            colorbar_kwargs={**cb_kwargs, "label": "Ice Thickness Change (mm)"},
             gridlines_kwargs=gl_kwargs,
         )
         if plot_std:
@@ -605,7 +577,7 @@ def main():
                 ax=axes[0, 2],
                 colorbar=True,
                 cmap=cmap_std,
-                colorbar_kwargs={**cb_kwargs, "label": "Ice STD (mm)"},
+                colorbar_kwargs={**cb_kwargs, "label": "Ice thickness change STD (mm)"},
                 gridlines_kwargs=gl_kwargs,
             )
 
@@ -617,7 +589,7 @@ def main():
             vmin=-vmax_dyn,
             vmax=vmax_dyn,
             cmap=cmap,
-            colorbar_kwargs={**cb_kwargs, "label": "Dynamic SSH (mm)"},
+            colorbar_kwargs={**cb_kwargs, "label": "Sterodynamic SL Change (mm)"},
             gridlines_kwargs=gl_kwargs,
         )
         sl.plot(
@@ -627,7 +599,7 @@ def main():
             vmin=-vmax_dyn,
             vmax=vmax_dyn,
             cmap=cmap,
-            colorbar_kwargs={**cb_kwargs, "label": "Dynamic SSH (mm)"},
+            colorbar_kwargs={**cb_kwargs, "label": "Sterodynamic SL Change (mm)"},
             gridlines_kwargs=gl_kwargs,
         )
         if plot_std:
@@ -636,7 +608,10 @@ def main():
                 ax=axes[1, 2],
                 colorbar=True,
                 cmap=cmap_std,
-                colorbar_kwargs={**cb_kwargs, "label": "Dynamic SSH STD (mm)"},
+                colorbar_kwargs={
+                    **cb_kwargs,
+                    "label": "Sterodynamic SL Change STD (mm)",
+                },
                 gridlines_kwargs=gl_kwargs,
             )
 
@@ -648,7 +623,10 @@ def main():
             vmin=-vmax_rho,
             vmax=vmax_rho,
             cmap=cmap,
-            colorbar_kwargs={**cb_kwargs, "label": r"Density Change (g m$^{-3}$)"},
+            colorbar_kwargs={
+                **cb_kwargs,
+                "label": r"Averaged Density Change (g m$^{-3}$)",
+            },
             gridlines_kwargs=gl_kwargs,
         )
         sl.plot(
@@ -658,7 +636,10 @@ def main():
             vmin=-vmax_rho,
             vmax=vmax_rho,
             cmap=cmap,
-            colorbar_kwargs={**cb_kwargs, "label": r"Density Change (g m$^{-3}$)"},
+            colorbar_kwargs={
+                **cb_kwargs,
+                "label": r"Averaged Density Change (g m$^{-3}$)",
+            },
             gridlines_kwargs=gl_kwargs,
         )
         if plot_std:
@@ -667,7 +648,10 @@ def main():
                 ax=axes[2, 2],
                 colorbar=True,
                 cmap=cmap_std,
-                colorbar_kwargs={**cb_kwargs, "label": r"Density STD (g m$^{-3}$)"},
+                colorbar_kwargs={
+                    **cb_kwargs,
+                    "label": r"Averaged Density STD (g m$^{-3}$)",
+                },
                 gridlines_kwargs=gl_kwargs,
             )
 
@@ -734,7 +718,7 @@ def main():
         print("\nGenerating Point-wise Covariance Maps...")
 
         # Covariance maps show the raw model parameters, matching the
-        # posterior maps: ice and dynamic SSH in mm, density in g/m^3.
+        # posterior maps: ice and Sterodynamic SL Change in mm, density in g/m^3.
         # Rows mixing a height component with the density component
         # therefore carry mixed units.
         comp_scales = [mm_scale, mm_scale, rho_scale_gm3]
@@ -864,7 +848,11 @@ def main():
                 "Posterior", fontsize=16, fontweight="bold", pad=20
             )
 
-            row_titles = ["Ice thickness", "Dynamic SSH", "Density"]
+            row_titles = [
+                "Ice thickness Change",
+                "Sterodynamic SL Change",
+                "Averaged Density Change",
+            ]
             for i, row_title in enumerate(row_titles):
                 axes_cov[i, 0].annotate(
                     row_title,
@@ -890,11 +878,11 @@ def main():
         masks = [state.get_projection(r, value=0.0) for r in regions_to_analyze]
         avg_op = sl.linear_operators.averaging_operator(state, load_space, masks)
 
-        # Ocean dynamic SL = manometric part (zeta = eta - eta_s) PLUS the
-        # regional GRD response to the total ocean load (which is exactly
+        # Dynamic manometric SL = the manometric part (zeta = eta - eta_s) PLUS
+        # the regional GRD response to the total ocean load (which is exactly
         # the load of zeta, the steric part being column-mass neutral).
         # Steric SL loads nothing and so has no induced response. Together
-        # with the barystatic GRD term, the three coordinates sum exactly to
+        # with the barystatic-GRD term, the three coordinates sum exactly to
         # the regional average of the true sea level change.
         steric_op_field = utils.steric_sea_level_operator(
             state, load_space
@@ -969,7 +957,7 @@ def main():
             )
             f_metrics.write("-" * 65 + "\n")
 
-            comp_names = ["Ocean dynamic SL", "Steric SL", "Barystatic GRD"]
+            comp_names = ["Dynamic Manometric SL", "Steric SL", "Barystatic-GRD SL"]
             for i, name in enumerate(comp_names):
                 pr_v = prior_cov_mat[i, i]
                 po_v = post_cov_mat[i, i]
@@ -980,9 +968,9 @@ def main():
             f_metrics.write("-" * 65 + "\n")
 
         labels = [
-            "Ocean dynamic SL (mm)",
+            "Dynamic Manometric SL (mm)",
             "Steric SL (mm)",
-            "Barystatic GRD SL (mm)",
+            "Barystatic-GRD SL (mm)",
         ]
 
         inf.plot_corner_distributions(

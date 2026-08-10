@@ -650,7 +650,7 @@ def main():
                 cmap=cmap_std,
                 colorbar_kwargs={
                     **cb_kwargs,
-                    "label": r"Averaged Density STD (g m$^{-3}$)",
+                    "label": r"Averaged Density Change STD (g m$^{-3}$)",
                 },
                 gridlines_kwargs=gl_kwargs,
             )

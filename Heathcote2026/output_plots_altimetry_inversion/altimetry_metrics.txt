@@ -3,35 +3,35 @@ Altimetry Inversion Metrics
 
 Target           | KL Divergence   | Prior Var (mm²)   | Post Var (mm²)   | Variance Reduction
 --------------------------------------------------------------------------------------------
-GMSL             | 0.2647          | 0.0333            | 0.0114           |          65.8787%
+GMSL             | 0.8681          | 0.0333            | 0.0083           |          75.1145%
 
 GMSL Split: Barystatic vs Steric
 ======================================================================
-Joint KL Divergence:     0.2925 nats
-Bary-Steric correlation: prior -0.0199 | posterior -0.4047
-SLE mass-balance check:  steric residual = 0.207770 mm | steric direct = 0.205797 mm | diff = 1.973e-03 mm
-Constraint check:        <dyn SSH>_O = 0.205797 mm | <zeta>_O = 1.388e-16 mm (should be ~0)
+Joint KL Divergence:     1.1753 nats
+Bary-Steric correlation: prior -0.0199 | posterior -0.5046
+SLE mass-balance check:  steric residual = -0.098095 mm | steric direct = -0.097475 mm | diff = -6.198e-04 mm
+Constraint check:        <dyn SSH>_O = -0.097475 mm | <zeta>_O = 5.829e-16 mm (should be ~0)
 ----------------------------------------------------------------------
 Component          | Prior Var    | Post Var     | Reduction
 ----------------------------------------------------------------------
-Barystatic         | 0.0280       | 0.0131       |    53.14%
-Steric             | 0.0055       | 0.0043       |    23.14%
+Barystatic         | 0.0280       | 0.0109       |    60.91%
+Steric             | 0.0055       | 0.0041       |    25.65%
 ----------------------------------------------------------------------
 
 Regional Signal Separation (Tasman Sea)
 (Components sum to the regional mean sea level change; the
  dynamic component includes its GRD response.)
 =================================================================
-Joint KL Divergence:      0.8696 nats
+Joint KL Divergence:      3.6642 nats
 Prior Total Var (Trace):  3.3972 mm²
-Post Total Var (Trace):   0.8679 mm²
-Overall Trace Reduction:  74.45%
+Post Total Var (Trace):   0.5550 mm²
+Overall Trace Reduction:  83.66%
 Prior Generalized Var:    1.2114e-02
-Post Generalized Var:     1.1614e-03
+Post Generalized Var:     4.9128e-04
 -----------------------------------------------------------------
 Component          | Prior Var    | Post Var     | Reduction
 -----------------------------------------------------------------
-Dynamic Manometric SL | 3.0438       | 0.7106       |    76.65%
-Steric SL          | 0.3292       | 0.1454       |    55.82%
-Barystatic-GRD SL  | 0.0243       | 0.0118       |    51.15%
+Dynamic Manometric SL | 3.0438       | 0.4284       |    85.93%
+Steric SL          | 0.3292       | 0.1166       |    64.58%
+Barystatic-GRD SL  | 0.0243       | 0.0100       |    58.65%
 -----------------------------------------------------------------

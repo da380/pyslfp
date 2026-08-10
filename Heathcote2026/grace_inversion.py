@@ -101,13 +101,12 @@ def parse_arguments():
     parser.add_argument(
         "--prior-kernel",
         choices=["heat", "sobolev"],
-        default="heat",
+        default="sobolev",
         help=(
             "Covariance family for the direct load prior AND the spatial "
             "noise model (applied consistently, so the spectral "
             "signal-to-noise crossover stays well defined): 'heat' "
-            "(default) or 'sobolev' (Matern-type, spectral variance "
-            "(1 + scale^2 k)^-order)."
+            "or 'sobolev' (default)."
         ),
     )
     parser.add_argument(
@@ -137,7 +136,7 @@ def parse_arguments():
         help="Noise correlation scale factor.",
     )
     parser.add_argument(
-        "--noise-std-factor", type=float, default=0.1, help="Noise std factor."
+        "--noise-std-factor", type=float, default=0.1414, help="Noise std factor."
     )
 
     return parser.parse_args()
@@ -305,7 +304,7 @@ def main():
                         posterior_labels=["Bayesian", "WMB"],
                     )
 
-                    if ax.get_legend() is not None:
+                    if ax.get_legend() is not None and i != 1:
                         ax.get_legend().remove()
 
                 for j in range(i + 1, len(axes_flat)):

@@ -89,7 +89,7 @@ def parse_arguments():
     parser.add_argument(
         "--direct-std-m",
         type=float,
-        default=0.02,
+        default=0.01,
         help="Pointwise standard deviation (in m EWT) for the prior.",
     )
     parser.add_argument(
@@ -130,7 +130,7 @@ def parse_arguments():
     parser.add_argument(
         "--noise-std-factor",
         type=float,
-        default=0.1,
+        default=0.1414,
         help="Factor scaling the noise standard deviation.",
     )
     parser.add_argument(
@@ -336,7 +336,10 @@ def main():
         ax.set_xlabel("Error (mm)", fontsize=12)
         ax.axvline(0, color="black", linestyle="--", linewidth=1.5)
         ax.grid(True, linestyle=":", alpha=0.6)
-        ax.legend(loc="best", fontsize=9)
+        # ax.legend(loc="best", fontsize=9)
+
+        if i == 1:
+            ax.legend(loc="best", fontsize=9)
 
         sec_ax = ax.secondary_xaxis(
             "top", functions=(make_forward(norm_std), make_inverse(norm_std))

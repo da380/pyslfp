@@ -89,19 +89,18 @@ def parse_arguments():
     parser.add_argument(
         "--direct-std-m",
         type=float,
-        default=0.01,
+        default=0.02,
         help="Pointwise standard deviation (in m EWT) for the prior.",
     )
     parser.add_argument(
         "--prior-kernel",
         choices=["heat", "sobolev"],
-        default="heat",
+        default="sobolev",
         help=(
             "Covariance family for the direct load prior AND the spatial "
             "noise model (applied consistently, so the spectral "
             "signal-to-noise crossover stays well defined): 'heat' "
-            "(default) or 'sobolev' (Matern-type, spectral variance "
-            "(1 + scale^2 k)^-order)."
+            "or 'sobolev' (default)."
         ),
     )
     parser.add_argument(
@@ -330,7 +329,7 @@ def main():
             gaussian_pdf(x_vals, 0, wmb_stds[i]),
             "b-",
             linewidth=2,
-            label=r"Standard error",
+            label=r"WMB error",
         )
 
         ax.set_title(region, fontsize=14)

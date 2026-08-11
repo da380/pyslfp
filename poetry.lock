@@ -1099,6 +1099,27 @@ files = [
 ]
 
 [[package]]
+name = "finufft"
+version = "2.5.1"
+description = "Python interface to FINUFFT"
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "finufft-2.5.1-py3-none-macosx_14_0_arm64.whl", hash = "sha256:3f57c3ab02a050980ba578d9f322305e77f538009ebf8cb70df77c95443f031e"},
+    {file = "finufft-2.5.1-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:3b20990fa7cfad54f63118b2e95a908c91dbcbb01e4c544755985ccbe6216aa6"},
+    {file = "finufft-2.5.1-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:2cec94f1dfe45f77d92b9a4cd523445f4d51c10d0a74d3eaf3c90f17293693f0"},
+    {file = "finufft-2.5.1-py3-none-musllinux_1_1_x86_64.whl", hash = "sha256:e3881a331360eba3f76b7f1c69d9b641e02ba05584da76cc221191c95c7be8da"},
+    {file = "finufft-2.5.1-py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:8bb04c741b79e5de66010e6be17fd01eb2cf06c0557d58d89de4514d5a68cb37"},
+    {file = "finufft-2.5.1-py3-none-win_amd64.whl", hash = "sha256:496ad48706e77f54078e31777bd4a30f33e788ae313ef30d8b1e7d41c7539788"},
+    {file = "finufft-2.5.1.tar.gz", hash = "sha256:b0c630717442cb3519948e5f73b5dee68871c0f0e3b8c2eafbec0fcccf89f6b9"},
+]
+
+[package.dependencies]
+numpy = ">=1.12.0"
+packaging = "*"
+
+[[package]]
 name = "fonttools"
 version = "4.62.1"
 description = "Tools to manipulate font files"
@@ -3022,17 +3043,18 @@ test = ["pytest", "pytest-doctestplus (>=0.7)"]
 
 [[package]]
 name = "pygeoinf"
-version = "1.8.4"
+version = "1.8.5"
 description = "A package for solving geophysical inference and inverse problems"
 optional = false
 python-versions = ">=3.12"
 groups = ["main"]
 files = [
-    {file = "pygeoinf-1.8.4-py3-none-any.whl", hash = "sha256:071878e8610e7324b94dd6a31e00ba23559a391ca52253e6180851b2b56141fb"},
-    {file = "pygeoinf-1.8.4.tar.gz", hash = "sha256:1e5731635699c37b1f6d32f28edfdc1f2fd6dbeadb82134ba8207c94df2be021"},
+    {file = "pygeoinf-1.8.5-py3-none-any.whl", hash = "sha256:993cb118bba965d3498243db4f199722c72dffc7f430ef71868726ababa0fb82"},
+    {file = "pygeoinf-1.8.5.tar.gz", hash = "sha256:47221424fb76b2ddff5c890933f13eddafb13a3e1a5dbc0566cfd1ddd897b936"},
 ]
 
 [package.dependencies]
+finufft = ">=2.5.1,<3.0.0"
 ipympl = ">=0.10.0,<0.11.0"
 joblib = ">=1.5.3,<2.0.0"
 matplotlib = ">=3.9.0"
@@ -4658,4 +4680,4 @@ viz = ["cartopy (>=0.24)", "matplotlib (>=3.10)", "nc-time-axis", "seaborn"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12"
-content-hash = "89c85dc26e53eb47e05212656cc88bc10d82635c4bc3f7d4fadf7255d99476df"
+content-hash = "f56d06cec87984944edee9622cdf9dfd5f234e4d3caa2faf47e3d20df6b7500a"

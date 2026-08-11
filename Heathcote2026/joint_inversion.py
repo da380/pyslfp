@@ -13,6 +13,11 @@ inversions on the exact same physical scenario to demonstrate the added value
 of each sensor, including a push-forward onto the 2D split of GMSL change
 into barystatic and steric contributions, and an optionally anti-correlated
 (Dyn, Rho) prior.
+
+All quantity-of-interest outputs (GMSL PDFs, GMSL split, regional
+decomposition) always compare all three cases. Spatial maps (posterior
+expectations, pointwise stds, covariance maps) are rendered for the joint
+inversion only by default; pass --map-all-cases to map all three.
 """
 
 import argparse
@@ -62,7 +67,21 @@ def parse_arguments():
     parser.add_argument(
         "--plot-maps",
         action="store_true",
-        help="Plot spatial maps (True vs Joint / Alt-only / GRACE-only) & Covariances.",
+        help=(
+            "Plot spatial maps & covariances (joint inversion only by "
+            "default; see --map-all-cases)."
+        ),
+    )
+    parser.add_argument(
+        "--map-all-cases",
+        action="store_true",
+        help=(
+            "Render the spatial maps (posterior expectations, pointwise "
+            "stds and covariance-map columns) for all three inversions "
+            "rather than the joint inversion only. Implies --plot-maps; "
+            "not implied by --all. QoI outputs (GMSL, GMSL split, "
+            "regional decomposition) always cover all three cases."
+        ),
     )
     parser.add_argument(
         "--plot-regions",
@@ -78,7 +97,10 @@ def parse_arguments():
         "--std-samples",
         type=int,
         default=0,
-        help="Number of samples for pointwise std estimates (applied to each posterior).",
+        help=(
+            "Number of samples for pointwise std estimates (applied to "
+            "each mapped posterior; see --map-all-cases)."
+        ),
     )
 
     # --- Resolution Settings ---
@@ -364,6 +386,9 @@ def main():
     if args.all:
         args.plot_pdfs = args.plot_maps = args.plot_regions = True
         args.plot_gmsl_split = True
+    if args.map_all_cases:
+        # Asking for all-case maps implies making maps at all.
+        args.plot_maps = True
 
     output_dir = "output_plots_joint_inversion"
     os.makedirs(output_dir, exist_ok=True)
@@ -790,14 +815,15 @@ def main():
 
         plot_std = args.std_samples > 0
 
-        posterior_cases = [
-            ("joint", "Joint Posterior", post_joint),
-            ("altimetry", "Altimetry-Only Posterior", post_alt),
-            ("grace", "GRACE-Only Posterior", post_grace),
-        ]
+        posterior_cases = [("joint", "Joint Posterior", post_joint)]
+        if args.map_all_cases:
+            posterior_cases += [
+                ("altimetry", "Altimetry-Only Posterior", post_alt),
+                ("grace", "GRACE-Only Posterior", post_grace),
+            ]
         expectations = {name: post.expectation for name, _, post in posterior_cases}
 
-        # Shared per-row colour scales so the three posterior figures are
+        # Shared per-row colour scales so the mapped posterior figures are
         # directly comparable.
         true_ice, true_dyn, true_rho = true_model
         vmax_ice = max(
@@ -825,7 +851,7 @@ def main():
                     f"{args.std_samples} {label} samples..."
                 )
                 post_ice, post_dyn, post_rho = expectations[name]
-                samples = post.samples(args.std_samples, parallel=True, n_jobs=14)
+                samples = post.samples(args.std_samples, parallel=True, n_jobs=8)
                 var_ice, var_dyn, var_rho = (
                     load_space.zero,
                     load_space.zero,
@@ -886,15 +912,27 @@ def main():
         print("  Map rendering complete.")
 
         # =================================================================
-        # Point-wise Covariance Maps (Prior vs Alt-Only vs Joint)
+        # Point-wise Covariance Maps
+        # (Prior vs Joint; Prior vs Alt-Only vs Joint with --map-all-cases)
         # =================================================================
-        print("\nGenerating Point-wise Covariance Maps (Prior vs Alt-Only vs Joint)...")
+        cov_cases = [("Prior", exact_meas["model_prior"])]
+        # if args.map_all_cases:
+        cov_cases.append(("Grace-Only Posterior", post_grace))
+        cov_cases.append(("Altimetry-Only Posterior", post_alt))
+        cov_cases.append(("Joint Posterior", post_joint))
+        ncols_cov = len(cov_cases)
+
+        print(
+            "\nGenerating Point-wise Covariance Maps "
+            f"({' vs '.join(label for label, _ in cov_cases)})..."
+        )
 
         # Covariance maps show the raw model parameters, matching the
         # posterior maps: ice and dynamic SSH in mm, density in g/m^3.
         # Rows mixing a height component with the density component
         # therefore carry mixed units.
         comp_scales = [scale_mm, scale_mm, rho_scale_gm3]
+        row_masks = [ice_mask, ocean_mask, ocean_mask]
 
         def cov_label(row_idx, pt_idx):
             mm_components = {0, 1}
@@ -916,15 +954,15 @@ def main():
         ]
 
         def plot_cov_row(axes, fields, pt, label):
-            """Helper to plot 3-way prior/alt-only/joint covariance side-by-side."""
+            """Helper to plot one covariance row across the compared cases."""
             vmaxs = [np.max(np.abs(f.data)) for f in fields]
 
             # Fallback if one or more fields vanish completely
-            for i in range(len(vmaxs)):
-                if vmaxs[i] == 0:
+            for i, v in enumerate(vmaxs):
+                if v == 0:
                     vmaxs[i] = max(vmaxs) if max(vmaxs) > 0 else 1.0
 
-            for ax, field, vmax in zip(axes, fields, vmaxs):
+            for idx, (ax, field, vmax) in enumerate(zip(axes, fields, vmaxs)):
                 sl.plot(
                     field,
                     ax=ax,
@@ -936,13 +974,18 @@ def main():
                     colorbar_kwargs={**cb_kwargs, "label": label},
                     gridlines_kwargs=gl_kwargs,
                 )
-                sl.plot_points(
-                    [pt],
-                    ax=ax,
-                    color="black",
-                    zorder=10,
-                    gridlines=False,
-                )
+
+                # Only plot the point on the first column (the Prior)
+                if idx == 0:
+                    sl.plot_points(
+                        [pt],
+                        ax=ax,
+                        marker="x",
+                        edgecolors="k",
+                        s=40,
+                        zorder=10,
+                        gridlines=False,
+                    )
 
         for comp_name, comp_idx, pt, pt_name in scenarios:
             print(f"  Evaluating perturbation in {comp_name} at {pt}...")
@@ -951,65 +994,36 @@ def main():
             test_vec = [load_space.zero, load_space.zero, load_space.zero]
             test_vec[comp_idx] = dirac_rep
 
-            # Extract covariances for Prior, Alt-Only, and Joint
-            prior_cov = exact_meas["model_prior"].covariance(test_vec)
-            post_alt_cov = post_alt.covariance(test_vec)
-            post_joint_cov = post_joint.covariance(test_vec)
-
-            pr_ice, pr_dyn, pr_rho = prior_cov
-            po_alt_ice, po_alt_dyn, po_alt_rho = post_alt_cov
-            po_joint_ice, po_joint_dyn, po_joint_rho = post_joint_cov
+            # Extract the covariance action for each compared case
+            covs = [measure.covariance(test_vec) for _, measure in cov_cases]
 
             perturb_scale = comp_scales[comp_idx]
 
-            # Apply scaling and spatial masks
-            pr_ice_plot = pr_ice * (perturb_scale * scale_mm) * ice_mask
-            po_alt_ice_plot = po_alt_ice * (perturb_scale * scale_mm) * ice_mask
-            po_joint_ice_plot = po_joint_ice * (perturb_scale * scale_mm) * ice_mask
-
-            pr_dyn_plot = pr_dyn * (perturb_scale * scale_mm) * ocean_mask
-            po_alt_dyn_plot = po_alt_dyn * (perturb_scale * scale_mm) * ocean_mask
-            po_joint_dyn_plot = po_joint_dyn * (perturb_scale * scale_mm) * ocean_mask
-
-            pr_rho_plot = pr_rho * (perturb_scale * rho_scale_gm3) * ocean_mask
-            po_alt_rho_plot = po_alt_rho * (perturb_scale * rho_scale_gm3) * ocean_mask
-            po_joint_rho_plot = (
-                po_joint_rho * (perturb_scale * rho_scale_gm3) * ocean_mask
-            )
-
-            # Setup 3x3 grid
+            # Setup 3 x n_cases grid
             fig_cov, axes_cov = sl.subplots(
-                3, 3, figsize=(24, 16), gridspec_kw={"hspace": 0.15, "wspace": 0.1}
+                3,
+                ncols_cov,
+                figsize=(8 * ncols_cov, 16),
+                gridspec_kw={"hspace": 0.15, "wspace": 0.1},
             )
 
-            # Plot each row
-            plot_cov_row(
-                axes_cov[0],
-                [pr_ice_plot, po_alt_ice_plot, po_joint_ice_plot],
-                pt,
-                cov_label(0, comp_idx),
-            )
-            plot_cov_row(
-                axes_cov[1],
-                [pr_dyn_plot, po_alt_dyn_plot, po_joint_dyn_plot],
-                pt,
-                cov_label(1, comp_idx),
-            )
-            plot_cov_row(
-                axes_cov[2],
-                [pr_rho_plot, po_alt_rho_plot, po_joint_rho_plot],
-                pt,
-                cov_label(2, comp_idx),
-            )
+            # Plot each row, scaled and masked per component
+            for row_idx in range(3):
+                row_fields = [
+                    cov[row_idx]
+                    * (perturb_scale * comp_scales[row_idx])
+                    * row_masks[row_idx]
+                    for cov in covs
+                ]
+                plot_cov_row(
+                    axes_cov[row_idx], row_fields, pt, cov_label(row_idx, comp_idx)
+                )
 
             # Apply Custom Titles to Grid Layout
-            axes_cov[0, 0].set_title("Prior", fontsize=16, fontweight="bold", pad=20)
-            axes_cov[0, 1].set_title(
-                "Altimetry-Only Posterior", fontsize=16, fontweight="bold", pad=20
-            )
-            axes_cov[0, 2].set_title(
-                "Joint Posterior", fontsize=16, fontweight="bold", pad=20
-            )
+            for j, (case_label, _) in enumerate(cov_cases):
+                axes_cov[0, j].set_title(
+                    case_label, fontsize=16, fontweight="bold", pad=20
+                )
 
             for i, row_title in enumerate(row_titles):
                 axes_cov[i, 0].annotate(

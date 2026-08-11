@@ -123,7 +123,7 @@ def plot_points(
     color: str = "red",
     s: float = 20,
     marker: str = "o",
-    edgecolors: str = "none",
+    edgecolors: str = "red",
     zorder: int = 5,
     coasts: bool = True,  # pyslfp default (pygeoinf is False)
     rivers: bool = False,

@@ -980,9 +980,10 @@ def main():
                     sl.plot_points(
                         [pt],
                         ax=ax,
-                        marker="x",
-                        edgecolors="k",
-                        s=40,
+                        marker="*",
+                        color="gold",
+                        edgecolors="black",
+                        s=150,
                         zorder=10,
                         gridlines=False,
                     )

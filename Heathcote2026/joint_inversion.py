@@ -231,47 +231,6 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def compute_pointwise_std(load_space, post_meas, expectation, n_samples, n_jobs=10):
-    """
-    Sample-based pointwise standard deviation of a 3-component posterior
-    measure about its expectation. Returns (std_ice, std_dyn, std_rho).
-    """
-    post_ice, post_dyn, post_rho = expectation
-    samples = post_meas.samples(n_samples, parallel=True, n_jobs=n_jobs)
-
-    v_ice = load_space.zero
-    v_dyn = load_space.zero
-    v_rho = load_space.zero
-
-    for s_ice, s_dyn, s_rho in samples:
-        diff_ice = load_space.subtract(s_ice, post_ice)
-        load_space.axpy(
-            1.0 / n_samples,
-            load_space.vector_multiply(diff_ice, diff_ice),
-            v_ice,
-        )
-
-        diff_dyn = load_space.subtract(s_dyn, post_dyn)
-        load_space.axpy(
-            1.0 / n_samples,
-            load_space.vector_multiply(diff_dyn, diff_dyn),
-            v_dyn,
-        )
-
-        diff_rho = load_space.subtract(s_rho, post_rho)
-        load_space.axpy(
-            1.0 / n_samples,
-            load_space.vector_multiply(diff_rho, diff_rho),
-            v_rho,
-        )
-
-    return (
-        load_space.vector_sqrt(v_ice),
-        load_space.vector_sqrt(v_dyn),
-        load_space.vector_sqrt(v_rho),
-    )
-
-
 def plot_state_maps(
     state,
     true_fields,
@@ -352,7 +311,7 @@ def plot_state_maps(
             (std_dyn * ocean_mask_mm, "Sterodynamic SL Change STD (mm)", vmax_std_dyn),
             (
                 std_rho * ocean_mask_gm3,
-                r"Averaged Density STD (g m$^{-3}$)",
+                r"Averaged Density Change STD (g m$^{-3}$)",
                 vmax_std_rho,
             ),
         ]
@@ -865,9 +824,42 @@ def main():
                     f"  Computing pointwise standard deviation from "
                     f"{args.std_samples} {label} samples..."
                 )
-                stds[name] = compute_pointwise_std(
-                    load_space, post, expectations[name], args.std_samples, n_jobs=10
+                post_ice, post_dyn, post_rho = expectations[name]
+                samples = post.samples(args.std_samples, parallel=True, n_jobs=14)
+                var_ice, var_dyn, var_rho = (
+                    load_space.zero,
+                    load_space.zero,
+                    load_space.zero,
                 )
+
+                for s_ice, s_dyn, s_rho in samples:
+                    diff_ice = load_space.subtract(s_ice, post_ice)
+                    load_space.axpy(
+                        1.0 / args.std_samples,
+                        load_space.vector_multiply(diff_ice, diff_ice),
+                        var_ice,
+                    )
+
+                    diff_dyn = load_space.subtract(s_dyn, post_dyn)
+                    load_space.axpy(
+                        1.0 / args.std_samples,
+                        load_space.vector_multiply(diff_dyn, diff_dyn),
+                        var_dyn,
+                    )
+
+                    diff_rho = load_space.subtract(s_rho, post_rho)
+                    load_space.axpy(
+                        1.0 / args.std_samples,
+                        load_space.vector_multiply(diff_rho, diff_rho),
+                        var_rho,
+                    )
+
+                stds[name] = (
+                    load_space.vector_sqrt(var_ice),
+                    load_space.vector_sqrt(var_dyn),
+                    load_space.vector_sqrt(var_rho),
+                )
+                print(f"    {label}: samples drawn and std computed.")
             std_vmaxes = (
                 max(np.max(sd[0].data * scale_mm) for sd in stds.values()),
                 max(np.max(sd[1].data * scale_mm) for sd in stds.values()),
@@ -875,6 +867,7 @@ def main():
             )
 
         for name, label, _ in posterior_cases:
+            print(f"  Rendering {label} maps...")
             fig_maps = plot_state_maps(
                 state,
                 true_model,
@@ -890,6 +883,7 @@ def main():
                 regions=regions_to_analyze if args.plot_regions else None,
             )
             figures_to_save[f"posterior_maps_{name}"] = fig_maps
+        print("  Map rendering complete.")
 
         # =================================================================
         # Point-wise Covariance Maps (Prior vs Alt-Only vs Joint)
@@ -1040,16 +1034,45 @@ def main():
     # ------------------ 7. REGIONAL DECOMPOSITION ------------------
     if args.plot_regions:
         print("\nDecomposing Regional Sea Level Signals (3-way)...")
-        # Dynamic manometric SL = the manometric part (zeta = eta - eta_s)
-        # plus the regional GRD response to the ocean load (which is exactly
-        # the load of zeta, the steric part being column-mass neutral);
-        # steric SL loads nothing; the three coordinates sum exactly
-        # to the regional mean sea level change (see joint_utils).
-        op_dyn, op_steric, op_ice_fp = utils.regional_decomposition_operators(
-            exact_phys["state"],
-            exact_phys["load_space"],
-            exact_phys["fp_op"],
-            regions_to_analyze,
+        state = exact_phys["state"]
+        load_space = exact_phys["load_space"]
+        fp_op = exact_phys["fp_op"]
+        joint_space = exact_meas["model_prior"].domain
+
+        masks = [state.get_projection(r, value=0.0) for r in regions_to_analyze]
+        avg_op = sl.linear_operators.averaging_operator(state, load_space, masks)
+
+        # Dynamic manometric SL = the manometric part (zeta = eta - eta_s) PLUS
+        # the regional GRD response to the total ocean load (which is exactly
+        # the load of zeta, the steric part being column-mass neutral).
+        # Steric SL loads nothing and so has no induced response. Together
+        # with the barystatic-GRD term, the three coordinates sum exactly to
+        # the regional average of the true sea level change.
+        steric_op_field = utils.steric_sea_level_operator(
+            state, load_space
+        ) @ joint_space.subspace_projection(2)
+        op_steric = avg_op @ steric_op_field
+
+        barystatic_sl_op = fp_op.codomain.subspace_projection(0) @ fp_op
+
+        dyn_to_load = sl.linear_operators.sea_level_change_to_load_operator(
+            state, load_space, load_space
+        )
+        rho_to_load = sl.linear_operators.ocean_density_change_to_load_operator(
+            state, load_space, load_space
+        )
+        ocean_load_op = dyn_to_load @ joint_space.subspace_projection(
+            1
+        ) + rho_to_load @ joint_space.subspace_projection(2)
+
+        zeta_field_op = joint_space.subspace_projection(1) - steric_op_field
+        op_dyn = avg_op @ (zeta_field_op + barystatic_sl_op @ ocean_load_op)
+
+        ice_to_load = sl.linear_operators.ice_thickness_change_to_load_operator(
+            state, load_space, load_space
+        ) @ sl.linear_operators.ice_projection_operator(state, load_space)
+        op_ice_fp = (
+            avg_op @ barystatic_sl_op @ ice_to_load @ joint_space.subspace_projection(0)
         )
 
         combined_op = (
@@ -1058,17 +1081,21 @@ def main():
         final_op = combined_op.codomain.coordinate_projection @ combined_op
 
         true_vals_mm = final_op(true_model)
+        print("  -> Prior push-forward (3 covariance actions)...")
         prior_meas = (
             exact_meas["model_prior"]
             .affine_mapping(operator=final_op)
             .with_dense_covariance(parallel=True, n_jobs=3)
         )
+        print("  -> Altimetry-only push-forward (3 posterior solves)...")
         post_alt_meas = post_alt.affine_mapping(
             operator=final_op
         ).with_dense_covariance(parallel=True, n_jobs=3)
+        print("  -> GRACE-only push-forward (3 posterior solves)...")
         post_grace_meas = post_grace.affine_mapping(
             operator=final_op
         ).with_dense_covariance(parallel=True, n_jobs=3)
+        print("  -> Joint push-forward (3 posterior solves)...")
         post_joint_meas = post_joint.affine_mapping(
             operator=final_op
         ).with_dense_covariance(parallel=True, n_jobs=3)

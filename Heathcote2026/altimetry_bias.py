@@ -40,7 +40,7 @@ def parse_arguments():
     parser.add_argument(
         "--plot-maps",
         action="store_true",
-        help="Plot an example of the sampled fields.",
+        help="Plot an example of the sampled fields, SSH, and altimetry points.",
     )
 
     # --- Resolution Settings ---
@@ -207,6 +207,7 @@ def main():
         continuous_sl_op,
         forward_op,
         scale_mm,
+        point_eval,
     ) = utils.build_physics_components(
         args.lmax, args.load_order, args.load_scale_km, points, is_surrogate=False
     )
@@ -232,6 +233,7 @@ def main():
         prior_kernel=args.prior_kernel,
         prior_order=args.prior_order,
         noise_corr_std_factor=args.noise_corr_std_factor,
+        point_evaluation_operator=point_eval,
     )
 
     joint_meas = inf.GaussianMeasure.from_direct_sum([model_prior, noise_meas])
@@ -381,7 +383,7 @@ def main():
             cmap="seismic",
             vmin=-shared_vmax,
             vmax=shared_vmax,
-            colorbar_kwargs={"label": "Geocentric Sea Level Change(mm)"},
+            colorbar_kwargs={"label": "Geocentric Sea Level Change (mm)"},
         )
 
         im4.colorbar.set_label("Geocentric Sea Level Change (mm)", fontsize=16)

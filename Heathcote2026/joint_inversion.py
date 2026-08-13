@@ -678,7 +678,7 @@ def main():
             true_value=true_gmsl_val_mm,
             ax=ax_pdf,
             title="",
-            xlabel="Global Mean Sea Level Change (mm)",
+            xlabel="Global Mean Sea Level Rise (mm)",
             posterior_labels=labels,
         )
         figures_to_save["gmsl_pdf"] = fig_pdf
@@ -734,7 +734,7 @@ def main():
         dyn_direct_mm = dyn_direct_op(true_model)[0] * scale_mm
 
         with open(metrics_file, "a") as f_metrics:
-            f_metrics.write("\n\nGMSL Split: Barystatic vs Steric\n")
+            f_metrics.write("\n\nGMSLR Split: Barystatic vs Steric\n")
             f_metrics.write("=" * 125 + "\n")
             f_metrics.write(
                 f"{'Metric':<22} | {'Prior':<12} | {'Alt-Only':<12} | "
@@ -785,7 +785,7 @@ def main():
                 )
             f_metrics.write("-" * 125 + "\n")
 
-        split_labels = ["Barystatic GMSL (mm)", "Steric GMSL (mm)"]
+        split_labels = ["Barystatic SLR (mm)", "Steric SLR (mm)"]
 
         inf.plot_corner_distributions(
             alt_split,
@@ -1137,9 +1137,9 @@ def main():
         ).with_dense_covariance(parallel=args.parallel, n_jobs=min(3, args.max_jobs))
 
         labels = [
-            "Dynamic Manometric SL (mm)",
-            "Steric SL (mm)",
-            "Barystatic-GRD SL (mm)",
+            "DMSLC (mm)",
+            "SSLC (mm)",
+            "BMSLC (mm)",
         ]
 
         # Log Regional metrics
@@ -1200,7 +1200,7 @@ def main():
             )
             f_metrics.write("-" * 135 + "\n")
 
-            comp_names = ["Dynamic Manometric SL", "Steric SL", "Barystatic-GRD SL"]
+            comp_names = ["DMSLC", "SSLC", "BMSLC"]
             for i, name in enumerate(comp_names):
                 pr_v = prior_cov_mat[i, i]
                 a_v = alt_cov_mat[i, i]

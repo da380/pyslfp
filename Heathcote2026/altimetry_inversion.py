@@ -411,7 +411,7 @@ def main():
             true_value=true_gmsl,
             ax=ax_pdf,
             title="",
-            xlabel="Global Mean Sea Level Change (mm)",
+            xlabel="Global Mean Sea Level Rise (mm)",
             posterior_labels=["Bayesian", "Simple averaging"],
         )
         figures_to_save["gmsl_pdf"] = fig_pdf
@@ -455,7 +455,7 @@ def main():
         dyn_direct_mm = dyn_direct_op(model)[0] * mm_scale
 
         with open(metrics_file, "a") as f_metrics:
-            f_metrics.write("\nGMSL Split: Barystatic vs Steric\n")
+            f_metrics.write("\nGMSLR Split: Barystatic vs Steric\n")
             f_metrics.write("=" * 70 + "\n")
             f_metrics.write(f"Joint KL Divergence:     {kl_div:.4f} nats\n")
             f_metrics.write(
@@ -490,7 +490,7 @@ def main():
             post_split,
             prior_measure=prior_split,
             true_values=true_split,
-            labels=["Barystatic GMSL (mm)", "Steric GMSL (mm)"],
+            labels=["Barystatic SLR (mm)", "Steric SLR (mm)"],
             title="",
             fill_density=False,
         )
@@ -712,7 +712,7 @@ def main():
             vmin=-vmax_ssh,
             vmax=vmax_ssh,
             cmap=cmap,
-            colorbar_kwargs={**cb_kwargs, "label": "SSH Change (mm)"},
+            colorbar_kwargs={**cb_kwargs, "label": "Geocentric Sea Level Change (mm)"},
             gridlines_kwargs=gl_kwargs,
         )
 
@@ -728,7 +728,7 @@ def main():
             s=6,
             edgecolors="none",
             colorbar=True,
-            colorbar_kwargs={**cb_kwargs, "label": "Observed SSH Data (mm)"},
+            colorbar_kwargs={**cb_kwargs, "label": "Synthetic Altimetry Data (mm)"},
             zorder=5,
         )
 
@@ -983,7 +983,7 @@ def main():
             )
             f_metrics.write("-" * 65 + "\n")
 
-            comp_names = ["Dynamic Manometric SL", "Steric SL", "Barystatic-GRD SL"]
+            comp_names = ["DMSLC", "SSLC", "BMSLC"]
             for i, name in enumerate(comp_names):
                 pr_v = prior_cov_mat[i, i]
                 po_v = post_cov_mat[i, i]
@@ -994,9 +994,9 @@ def main():
             f_metrics.write("-" * 65 + "\n")
 
         labels = [
-            "Dynamic Manometric SL (mm)",
-            "Steric SL (mm)",
-            "Barystatic-GRD SL (mm)",
+            "DMSLC (mm)",
+            "SSLC (mm)",
+            "BMSLC (mm)",
         ]
 
         inf.plot_corner_distributions(

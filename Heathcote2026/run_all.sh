@@ -102,7 +102,7 @@ SURROGATE=(--surrogate-degree 32)
 # Altimetry-side model priors: altimetry_bias, altimetry_inversion,
 # joint_inversion (identical names and defaults in all three).
 ALT_PRIOR=(
-    --spacing 1.0
+    --spacing 4.0
     --ice-scale-factor 1.0
     --ice-std-mm 10.0
     --ocean-dyn-scale-factor 0.2

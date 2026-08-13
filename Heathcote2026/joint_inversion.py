@@ -131,7 +131,10 @@ def parse_arguments():
         "--ice-scale-factor", type=float, default=1.0, help="Ice correlation scale."
     )
     parser.add_argument(
-        "--ice-std-mm", type=float, default=10.0, help="Ice std dev (mm)."
+        "--gmsl-barystatic-std-mm",
+        type=float,
+        default=1.0,
+        help="Prior std of the barystatic GMSL change (mm).",
     )
 
     parser.add_argument(
@@ -141,10 +144,14 @@ def parse_arguments():
         help="Sterodynamic correlation scale factor.",
     )
     parser.add_argument(
-        "--ocean-dyn-std-factor",
+        "--steric-dmslc-ratio",
         type=float,
-        default=2.0,
-        help="Sterodynamic SL std as factor of the barystatic GMSLR std.",
+        default=0.1,
+        help=(
+            "Prior ratio of the ocean-integrated steric variance to the "
+            "dynamic-manometric (zeta = eta - eta_s) variance; sets the "
+            "sterodynamic amplitude."
+        ),
     )
 
     parser.add_argument(
@@ -154,10 +161,10 @@ def parse_arguments():
         help="Ocean density correlation scale.",
     )
     parser.add_argument(
-        "--ocean-rho-std-factor",
+        "--gmsl-steric-std-mm",
         type=float,
-        default=0.25,
-        help="Effective steric SL std as a fraction of the Sterodynamic SL change std.",
+        default=0.5,
+        help="Prior std of the steric GMSL change (mm).",
     )
 
     parser.add_argument(
@@ -197,10 +204,10 @@ def parse_arguments():
         help="GRACE spatial noise correlation scale (km).",
     )
     parser.add_argument(
-        "--grace-noise-std-factor",
+        "--grace-noise-std-mm",
         type=float,
-        default=0.1,
-        help="GRACE spatial noise std as factor of ice std.",
+        default=1.0,
+        help="GRACE spatial noise std (mm; previously 0.1 x the 10 mm ice std).",
     )
 
     parser.add_argument(
@@ -440,15 +447,15 @@ def main():
         exact_phys["state"],
         exact_phys["load_space"],
         args.ice_scale_factor,
-        args.ice_std_mm,
+        args.gmsl_barystatic_std_mm,
         args.ocean_dyn_scale_factor,
-        args.ocean_dyn_std_factor,
+        args.steric_dmslc_ratio,
         args.ocean_rho_scale_factor,
-        args.ocean_rho_std_factor,
+        args.gmsl_steric_std_mm,
         args.alt_noise_corr_scale_factor,
         args.alt_noise_std_factor,
         args.grace_noise_scale_km,
-        args.grace_noise_std_factor,
+        args.grace_noise_std_mm,
         args.obs_degree,
         points,
         exact_phys["scale_mm"],
@@ -463,9 +470,7 @@ def main():
     )
 
     scale_mm = exact_phys["scale_mm"]
-    print(
-        f"Implied barystatic GMSLR prior standard deviation: {exact_meas['gmsl_std'] * scale_mm:.3f} mm"
-    )
+    utils.print_calibration_report(exact_meas["calib"], scale_mm)
     if args.ocean_corr > 0.0:
         print(
             f"Correlated (Dyn, Rho) prior enabled: r0 = {args.ocean_corr:.2f}, "
@@ -530,15 +535,15 @@ def main():
         surr_phys["state"],
         surr_phys["load_space"],
         args.ice_scale_factor,
-        args.ice_std_mm,
+        args.gmsl_barystatic_std_mm,
         args.ocean_dyn_scale_factor,
-        args.ocean_dyn_std_factor,
+        args.steric_dmslc_ratio,
         args.ocean_rho_scale_factor,
-        args.ocean_rho_std_factor,
+        args.gmsl_steric_std_mm,
         args.alt_noise_corr_scale_factor,
         args.alt_noise_std_factor,
         args.grace_noise_scale_km,
-        args.grace_noise_std_factor,
+        args.grace_noise_std_mm,
         args.obs_degree,
         points,
         surr_phys["scale_mm"],
@@ -549,6 +554,7 @@ def main():
         prior_kernel=args.prior_kernel,
         prior_order=args.prior_order,
         alt_noise_corr_std_factor=args.alt_noise_corr_std_factor,
+        derived_stds=exact_meas["calib"]["derived_stds"],
     )
 
     woodbury_solver = inf.LUSolver(
@@ -589,7 +595,10 @@ def main():
     # ------------------ 4. SOLVING POSTERIORS ------------------
     print("\nSolving for Posteriors...")
     callback = inf.ProgressCallback()
-    tolerance = 0.01 * min(args.alt_noise_std_factor, args.grace_noise_std_factor)
+    tolerance = 0.01 * min(
+        args.alt_noise_std_factor,
+        args.grace_noise_std_mm / (exact_meas["ice_std"] * scale_mm),
+    )
     solver = inf.CGSolver(callback=callback, rtol=tolerance)
 
     print(" -> Solving Altimetry-only...")
@@ -934,10 +943,8 @@ def main():
 
         # =================================================================
         # Point-wise Covariance Maps
-        # (Prior vs Joint; Prior vs Alt-Only vs Joint with --map-all-cases)
         # =================================================================
         cov_cases = [("Prior", exact_meas["model_prior"])]
-        # if args.map_all_cases:
         cov_cases.append(("Grace-Only Posterior", post_grace))
         cov_cases.append(("Altimetry-Only Posterior", post_alt))
         cov_cases.append(("Joint Posterior", post_joint))

@@ -85,7 +85,7 @@ PYTHON="${PYTHON:-python}"
 
 # Shared by all five scripts (identical names and defaults everywhere).
 COMMON=(
-    --lmax 256
+    --lmax 64
     --load-order 2.0
     --load-scale-km 500.0
     --prior-kernel sobolev
@@ -94,21 +94,26 @@ COMMON=(
 )
 
 # GRACE observation truncation: grace_bias, grace_inversion, joint_inversion.
-OBS_DEGREE=(--obs-degree 100)
+OBS_DEGREE=(--obs-degree 32)
 
 # Preconditioner truncation: altimetry_inversion, joint_inversion only.
 SURROGATE=(--surrogate-degree 32)
 
 # Altimetry-side model priors: altimetry_bias, altimetry_inversion,
 # joint_inversion (identical names and defaults in all three).
+#
+# The three amplitudes are now set through GMSL-level targets: the
+# barystatic and steric GMSL prior stds (mm) and the ocean-integrated
+# steric to dynamic-manometric variance ratio. The pointwise field stds
+# are derived inside build_measures and reported at run time. 
 ALT_PRIOR=(
-    --spacing 1.0
+    --spacing 8.0
     --ice-scale-factor 1.0
-    --ice-std-mm 10.0
+    --gmsl-barystatic-std-mm 1.0
     --ocean-dyn-scale-factor 0.2
-    --ocean-dyn-std-factor 2.0
+    --steric-dmslc-ratio 0.1
     --ocean-rho-scale-factor 1.0
-    --ocean-rho-std-factor 0.25
+    --gmsl-steric-std-mm 0.5
     --ocean-corr 0.9
     --ocean-corr-scale-factor 0.4
 )
@@ -142,10 +147,11 @@ GRACE_PRIOR=(
 )
 
 # joint_inversion's own GRACE noise parameterisation (deliberately
-# independent of GRACE_PRIOR above).
+# independent of GRACE_PRIOR above). The std is now absolute (mm);
+# 1.0 mm reproduces the previous 0.1 x the 10 mm ice std exactly.
 JOINT_GRACE_NOISE=(
     --grace-noise-scale-km 50.0
-    --grace-noise-std-factor 0.1
+    --grace-noise-std-mm 1.0
 )
 
 # Per-script extras (plot selections, MC sample counts) -- edit to taste.

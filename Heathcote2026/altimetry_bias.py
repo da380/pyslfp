@@ -63,7 +63,10 @@ def parse_arguments():
         "--ice-scale-factor", type=float, default=1.0, help="Ice correlation scale."
     )
     parser.add_argument(
-        "--ice-std-mm", type=float, default=10.0, help="Ice std dev (mm)."
+        "--gmsl-barystatic-std-mm",
+        type=float,
+        default=1.0,
+        help="Prior std of the barystatic GMSL change (mm).",
     )
 
     parser.add_argument(
@@ -73,10 +76,14 @@ def parse_arguments():
         help="Sterodynamic correlation scale factor.",
     )
     parser.add_argument(
-        "--ocean-dyn-std-factor",
+        "--steric-dmslc-ratio",
         type=float,
-        default=2.0,
-        help="Sterodynamic SL std as factor of the barystatic GMSLR std.",
+        default=0.1,
+        help=(
+            "Prior ratio of the ocean-integrated steric variance to the "
+            "dynamic-manometric (zeta = eta - eta_s) variance; sets the "
+            "sterodynamic amplitude."
+        ),
     )
 
     parser.add_argument(
@@ -86,10 +93,10 @@ def parse_arguments():
         help="Ocean density correlation scale.",
     )
     parser.add_argument(
-        "--ocean-rho-std-factor",
+        "--gmsl-steric-std-mm",
         type=float,
-        default=0.25,
-        help="Effective steric SL std as a fraction of the Sterodynamic SL change std.",
+        default=0.5,
+        help="Prior std of the steric GMSL change (mm).",
     )
 
     parser.add_argument(
@@ -214,15 +221,15 @@ def main():
     )
 
     print("Building analytical measures (with strict global mass conservation)...")
-    model_prior, noise_meas, _ = utils.build_measures(
+    model_prior, noise_meas, calib = utils.build_measures(
         state,
         load_space,
         args.ice_scale_factor,
-        args.ice_std_mm,
+        args.gmsl_barystatic_std_mm,
         args.ocean_dyn_scale_factor,
-        args.ocean_dyn_std_factor,
+        args.steric_dmslc_ratio,
         args.ocean_rho_scale_factor,
-        args.ocean_rho_std_factor,
+        args.gmsl_steric_std_mm,
         args.noise_corr_scale_factor,
         args.noise_std_factor,
         points,
@@ -236,6 +243,7 @@ def main():
         noise_corr_std_factor=args.noise_corr_std_factor,
         point_evaluation_operator=point_eval,
     )
+    utils.print_calibration_report(calib, scale_mm)
 
     joint_meas = inf.GaussianMeasure.from_direct_sum([model_prior, noise_meas])
     data_space = noise_meas.domain

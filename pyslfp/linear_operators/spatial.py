@@ -16,7 +16,6 @@ from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 from pyslfp.state import EarthState
 from pyslfp.linear_operators.utils import (
     underlying_space,
-    spatial_multiplication_operator,
     averaging_operator,
     check_load_space,
 )
@@ -39,7 +38,7 @@ def ocean_projection_operator(
     projection_field = state.ocean_projection(
         value=0.0, exclude_ice_shelves=exclude_ice_shelves
     )
-    return spatial_multiplication_operator(space, projection_field)
+    return space.spatial_multiplication_operator(projection_field)
 
 
 def ice_projection_operator(
@@ -54,7 +53,7 @@ def ice_projection_operator(
     projection_field = state.ice_projection(
         value=0.0, exclude_ice_shelves=exclude_ice_shelves
     )
-    return spatial_multiplication_operator(space, projection_field)
+    return space.spatial_multiplication_operator(projection_field)
 
 
 def land_projection_operator(
@@ -67,7 +66,7 @@ def land_projection_operator(
     """Returns a LinearOperator that projects a field onto background land."""
     check_load_space(space)
     projection_field = state.land_projection(value=0.0, exclude_ice=exclude_ice)
-    return spatial_multiplication_operator(space, projection_field)
+    return space.spatial_multiplication_operator(projection_field)
 
 
 # ================================================================ #
@@ -255,4 +254,4 @@ def region_projection_operator(
     # get_projection automatically flattens a List[str] into a single composite mask
     mask = state.get_projection(regions, value=0.0)
 
-    return spatial_multiplication_operator(space, mask)
+    return space.spatial_multiplication_operator(mask)

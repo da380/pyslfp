@@ -1,12 +1,22 @@
 """
 General mathematical utilities for linear operators.
 
-This module provides the core machinery for resolving Hilbert space types,
-validating domain/codomain structures, and performing general spatial or
-spectral manipulations.
+This module provides the core machinery for resolving Hilbert space types
+and validating domain/codomain structures.
+
+The generic operator constructions previously defined here (L2 products
+against weighting functions and spatial multiplication) are now
+implemented directly on the pygeoinf symmetric-space classes as
+``space.l2_products_operator(...)`` and
+``space.spatial_multiplication_operator(...)``. The free functions of the
+same names below are retained as deprecated wrappers that delegate to
+those methods; ``averaging_operator`` remains the supported normalising
+convenience built on top of them.
 """
 
 from __future__ import annotations
+
+import warnings
 from typing import List, Union
 
 from pyshtools import SHGrid
@@ -120,31 +130,24 @@ def l2_products_operator(
     load_space: Union[Lebesgue, Sobolev], weighting_functions: List[SHGrid], /
 ) -> LinearOperator:
     """
-    Creates an operator that computes a vector of L2 inner products.
+    Deprecated: use ``load_space.l2_products_operator(weighting_functions)``.
 
-    The action on function `u` returns a vector `d` where `d_i = <u, w_i>_L2`.
-    The inner product is always the standard L2 integral, explicitly bypassing
-    the Sobolev inner product if a Sobolev space is provided.
-
-    Args:
-        load_space: The input domain space.
-        weighting_functions: SHGrid masks used for integration.
-
-    Returns:
-        LinearOperator: Mapping from load_space to EuclideanSpace(N_weights).
+    The construction now lives on the pygeoinf symmetric-space classes;
+    this wrapper delegates to it and will be removed in a future release.
+    The action on function `u` returns a vector `d` where `d_i = <u, w_i>_L2`,
+    with the standard L2 integral used even on a Sobolev space.
     """
+    warnings.warn(
+        "pyslfp.linear_operators.l2_products_operator is deprecated; use "
+        "the pygeoinf space method load_space.l2_products_operator(...) "
+        "instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     if not isinstance(load_space, (Lebesgue, Sobolev)):
         raise TypeError("load_space must be a Lebesgue or Sobolev space.")
 
-    # 1. Resolve the underlying L2 space to avoid Sobolev gradient penalties
-    l2_space = underlying_space(load_space)
-    codomain = EuclideanSpace(len(weighting_functions))
-
-    # 2. Build the operator natively using pygeoinf's vector factory
-    l2_operator = LinearOperator.from_vectors(l2_space, weighting_functions)
-
-    # 3. Formally lift the operator back to the target domain (handles Sobolev)
-    return LinearOperator.from_formal_adjoint(load_space, codomain, l2_operator)
+    return load_space.l2_products_operator(weighting_functions)
 
 
 def averaging_operator(
@@ -157,7 +160,10 @@ def averaging_operator(
     Creates an operator that computes the true spatial average over given regions.
 
     The action on function `u` returns a vector `d` where `d_i` is the
-    integral of `u * w_i` divided by the integral (area) of `w_i`.
+    integral of `u * w_i` divided by the integral (area) of `w_i`. For a
+    weighting function of unit integral this coincides with the plain L2
+    product, ``load_space.l2_products_operator([w_i])``; the normalisation
+    only matters for weights with non-unit integral.
 
     Args:
         state: The EarthState object used for integration (area calculation).
@@ -176,27 +182,25 @@ def averaging_operator(
     # Normalize the weighting functions so the inner product acts as an average
     normalized_weights = [w_i / area for w_i, area in zip(weighting_functions, areas)]
 
-    # Delegate the heavy lifting to the L2 products operator
-    return l2_products_operator(load_space, normalized_weights)
+    # Delegate to the pygeoinf-native construction
+    return load_space.l2_products_operator(normalized_weights)
 
 
 def spatial_multiplication_operator(
     space: Union[Lebesgue, Sobolev], v: SHGrid, /
 ) -> LinearOperator:
     """
-    Returns a linear operator that multiplies a field by another field.
+    Deprecated: use ``space.spatial_multiplication_operator(v)``.
 
-    Args:
-        v (SHGrid): The scalar field to multiply by.
-        space: The Hilbert space for the field
-
-    Returns:
-        LinearOperator: Mapping from load_space to itself.
+    The construction now lives on the pygeoinf symmetric-space classes;
+    this wrapper delegates to it and will be removed in a future release.
+    Returns the linear operator u -> v * u on the given space.
     """
-
-    def mapping(u: SHGrid) -> SHGrid:
-        return v * u
-
-    l2_space = underlying_space(space)
-    l2_operator = LinearOperator.self_adjoint(l2_space, mapping)
-    return LinearOperator.from_formally_self_adjoint(space, l2_operator)
+    warnings.warn(
+        "pyslfp.linear_operators.spatial_multiplication_operator is "
+        "deprecated; use the pygeoinf space method "
+        "space.spatial_multiplication_operator(...) instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return space.spatial_multiplication_operator(v)

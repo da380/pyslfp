@@ -6,13 +6,18 @@ This script performs a joint Bayesian inversion of synthetic GRACE gravimetry
 and satellite altimetry data to estimate ice sheet mass loss, the total ocean
 dynamic sea surface height change, and vertically averaged ocean density
 changes. Quantities of interest are post-processed into the standard
-barystatic / steric / ocean-dynamic split (see joint_utils).
+barystatic-GRD / steric / dynamic-manometric split (see joint_utils).
 
 It runs head-to-head Altimetry-only, GRACE-only, and Joint (Alt + GRACE)
 inversions on the exact same physical scenario to demonstrate the added value
 of each sensor, including a push-forward onto the 2D split of GMSL change
 into barystatic and steric contributions, and an optionally anti-correlated
 (Dyn, Rho) prior.
+
+All quantity-of-interest outputs (GMSL PDFs, GMSL split, regional
+decomposition) always compare all three cases. Spatial maps (posterior
+expectations, pointwise stds, covariance maps) are rendered for the joint
+inversion only by default; pass --map-all-cases to map all three.
 """
 
 import argparse
@@ -57,12 +62,26 @@ def parse_arguments():
     parser.add_argument(
         "--plot-pdfs",
         action="store_true",
-        help="Plot 1D analytical PDFs of the GMSL estimate.",
+        help="Plot 1D analytical PDFs of the GMSLR estimate.",
     )
     parser.add_argument(
         "--plot-maps",
         action="store_true",
-        help="Plot spatial maps (True vs Joint / Alt-only / GRACE-only) & Covariances.",
+        help=(
+            "Plot spatial maps & covariances (joint inversion only by "
+            "default; see --map-all-cases)."
+        ),
+    )
+    parser.add_argument(
+        "--map-all-cases",
+        action="store_true",
+        help=(
+            "Render the spatial maps (posterior expectations, pointwise "
+            "stds and covariance-map columns) for all three inversions "
+            "rather than the joint inversion only. Implies --plot-maps; "
+            "not implied by --all. QoI outputs (GMSLR, GMSLR split, "
+            "regional decomposition) always cover all three cases."
+        ),
     )
     parser.add_argument(
         "--plot-regions",
@@ -72,13 +91,16 @@ def parse_arguments():
     parser.add_argument(
         "--plot-gmsl-split",
         action="store_true",
-        help="Push forward onto the 2D GMSL split (barystatic vs steric).",
+        help="Push forward onto the 2D GMSLR split (barystatic vs steric).",
     )
     parser.add_argument(
         "--std-samples",
         type=int,
         default=0,
-        help="Number of samples for pointwise std estimates (applied to each posterior).",
+        help=(
+            "Number of samples for pointwise std estimates (applied to "
+            "each mapped posterior; see --map-all-cases)."
+        ),
     )
 
     # --- Resolution Settings ---
@@ -101,7 +123,7 @@ def parse_arguments():
         "--load-scale-km", type=float, default=500.0, help="Sobolev length scale."
     )
     parser.add_argument(
-        "--spacing", type=float, default=4.0, help="Altimetry observation spacing."
+        "--spacing", type=float, default=1.0, help="Altimetry observation spacing."
     )
 
     # --- Prior Settings ---
@@ -116,13 +138,13 @@ def parse_arguments():
         "--ocean-dyn-scale-factor",
         type=float,
         default=0.2,
-        help="Ocean dynamic correlation scale.",
+        help="Sterodynamic correlation scale factor.",
     )
     parser.add_argument(
         "--ocean-dyn-std-factor",
         type=float,
         default=2.0,
-        help="Ocean dynamic std as factor of GMSL std.",
+        help="Sterodynamic SL std as factor of the barystatic GMSLR std.",
     )
 
     parser.add_argument(
@@ -135,14 +157,14 @@ def parse_arguments():
         "--ocean-rho-std-factor",
         type=float,
         default=0.25,
-        help="Effective steric SL std as a fraction of the dynamic SSH std.",
+        help="Effective steric SL std as a fraction of the Sterodynamic SL change std.",
     )
 
     parser.add_argument(
         "--alt-noise-std-factor",
         type=float,
         default=1.0,
-        help="Local (uncorrelated) altimetry noise std as factor of GMSL std.",
+        help="Local (uncorrelated) altimetry noise std as factor of the barystatic GMSLR std.",
     )
     parser.add_argument(
         "--alt-noise-corr-std-factor",
@@ -150,7 +172,7 @@ def parse_arguments():
         default=0.05,
         help=(
             "Std of the optional large-scale correlated altimetry error "
-            "component, as a factor of the GMSL prior std (0 disables). "
+            "component, as a factor of the GMSLR prior std (0 disables). "
             "Represents long-wavelength systematics such as orbit and "
             "reference-frame errors; because it barely averages down, even "
             "small values (e.g. 0.02-0.05) set the error floor for "
@@ -187,7 +209,7 @@ def parse_arguments():
         default=0.9,
         help=(
             "Magnitude of the long-wavelength anti-correlation between the "
-            "ocean dynamic and density fields (0 disables; must lie in "
+            "sterodynamic and density fields (0 disables; must lie in "
             "[0, 1); the sign is applied internally."
         ),
     )
@@ -228,48 +250,24 @@ def parse_arguments():
         "--prior-shift", type=float, default=1.0, help="Prior mean shift factor."
     )
 
-    return parser.parse_args()
-
-
-def compute_pointwise_std(load_space, post_meas, expectation, n_samples, n_jobs=10):
-    """
-    Sample-based pointwise standard deviation of a 3-component posterior
-    measure about its expectation. Returns (std_ice, std_dyn, std_rho).
-    """
-    post_ice, post_dyn, post_rho = expectation
-    samples = post_meas.samples(n_samples, parallel=True, n_jobs=n_jobs)
-
-    v_ice = load_space.zero
-    v_dyn = load_space.zero
-    v_rho = load_space.zero
-
-    for s_ice, s_dyn, s_rho in samples:
-        diff_ice = load_space.subtract(s_ice, post_ice)
-        load_space.axpy(
-            1.0 / n_samples,
-            load_space.vector_multiply(diff_ice, diff_ice),
-            v_ice,
-        )
-
-        diff_dyn = load_space.subtract(s_dyn, post_dyn)
-        load_space.axpy(
-            1.0 / n_samples,
-            load_space.vector_multiply(diff_dyn, diff_dyn),
-            v_dyn,
-        )
-
-        diff_rho = load_space.subtract(s_rho, post_rho)
-        load_space.axpy(
-            1.0 / n_samples,
-            load_space.vector_multiply(diff_rho, diff_rho),
-            v_rho,
-        )
-
-    return (
-        load_space.vector_sqrt(v_ice),
-        load_space.vector_sqrt(v_dyn),
-        load_space.vector_sqrt(v_rho),
+    # --- Parallelisation ---
+    parser.add_argument(
+        "--parallel",
+        action="store_true",
+        help="Enable process-level parallelism at the supported call sites.",
     )
+    parser.add_argument(
+        "--max-jobs",
+        type=int,
+        default=os.cpu_count() or 1,
+        help=(
+            "Cap on the number of worker processes when --parallel is "
+            "set; call sites with fewer independent tasks use fewer. "
+            "Ignored without --parallel."
+        ),
+    )
+
+    return parser.parse_args()
 
 
 def plot_state_maps(
@@ -314,19 +312,19 @@ def plot_state_maps(
         (
             true_ice * scale_mm,
             post_ice * scale_mm,
-            "Ice Thickness (mm)",
+            "Ice Thickness Change (mm)",
             vmax_ice,
         ),
         (
             true_dyn * ocean_mask_mm,
             post_dyn * ocean_mask_mm,
-            "Dynamic SSH (mm)",
+            "Sterodynamic SL Change (mm)",
             vmax_dyn,
         ),
         (
             true_rho * ocean_mask_gm3,
             post_rho * ocean_mask_gm3,
-            r"Density Change (g m$^{-3}$)",
+            r"Averaged Density Change (g m$^{-3}$)",
             vmax_rho,
         ),
     ]
@@ -348,11 +346,11 @@ def plot_state_maps(
         std_ice, std_dyn, std_rho = std_fields
         vmax_std_ice, vmax_std_dyn, vmax_std_rho = std_vmaxes
         std_specs = [
-            (std_ice * ice_mask_mm, "Ice STD (mm)", vmax_std_ice),
-            (std_dyn * ocean_mask_mm, "Dynamic SSH STD (mm)", vmax_std_dyn),
+            (std_ice * ice_mask_mm, "Ice Thickness Change STD (mm)", vmax_std_ice),
+            (std_dyn * ocean_mask_mm, "Sterodynamic SL Change STD (mm)", vmax_std_dyn),
             (
                 std_rho * ocean_mask_gm3,
-                r"Density STD (g m$^{-3}$)",
+                r"Averaged Density Change STD (g m$^{-3}$)",
                 vmax_std_rho,
             ),
         ]
@@ -380,7 +378,11 @@ def plot_state_maps(
     for j in range(ncols):
         axes[0, j].set_title(col_labels[j], fontsize=16, fontweight="bold", pad=20)
 
-    row_titles = ["Ice thickness", "Dynamic SSH", "Density"]
+    row_titles = [
+        "Ice Thickness Change",
+        "Sterodynamic SL Change",
+        "Averaged Density Change",
+    ]
     for i, row_title in enumerate(row_titles):
         axes[i, 0].annotate(
             row_title,
@@ -401,6 +403,9 @@ def main():
     if args.all:
         args.plot_pdfs = args.plot_maps = args.plot_regions = True
         args.plot_gmsl_split = True
+    if args.map_all_cases:
+        # Asking for all-case maps implies making maps at all.
+        args.plot_maps = True
 
     output_dir = "output_plots_joint_inversion"
     os.makedirs(output_dir, exist_ok=True)
@@ -416,7 +421,6 @@ def main():
     points = ocean_altimetry_points(state_dummy, spacing=args.spacing)
     print(f"Generated {len(points)} ocean altimetry observation points.")
 
-    inf.configure_threading(n_threads=1)
     regions_to_analyze = ["Tasman Sea"]
 
     # ------------------ 1. EXACT MODEL SETUP ------------------
@@ -455,11 +459,12 @@ def main():
         prior_kernel=args.prior_kernel,
         prior_order=args.prior_order,
         alt_noise_corr_std_factor=args.alt_noise_corr_std_factor,
+        point_evaluation_operator=exact_phys["point_eval"],
     )
 
     scale_mm = exact_phys["scale_mm"]
     print(
-        f"Implied GMSL prior standard deviation: {exact_meas['gmsl_std'] * scale_mm:.3f} mm"
+        f"Implied barystatic GMSLR prior standard deviation: {exact_meas['gmsl_std'] * scale_mm:.3f} mm"
     )
     if args.ocean_corr > 0.0:
         print(
@@ -546,7 +551,9 @@ def main():
         alt_noise_corr_std_factor=args.alt_noise_corr_std_factor,
     )
 
-    woodbury_solver = inf.LUSolver(galerkin=True, parallel=True, n_jobs=8)
+    woodbury_solver = inf.LUSolver(
+        galerkin=True, parallel=args.parallel, n_jobs=args.max_jobs
+    )
     alpha = 0.1
 
     # The preconditioners use the local (uncorrelated) altimetry noise
@@ -598,9 +605,9 @@ def main():
         joint_data, solver, preconditioner=P_joint
     )
 
-    # ------------------ 5. GMSL ------------------
+    # ------------------ 5. GMSLR ------------------
     if args.plot_pdfs:
-        print("\nPlotting GMSL PDFs...")
+        print("\nPlotting GMSLR PDFs...")
         true_gmsl_op = (
             utils.true_gmsl_operator(
                 exact_phys["state"],
@@ -653,13 +660,13 @@ def main():
             )
             f_metrics.write("-" * 80 + "\n")
             f_metrics.write(
-                f"{'GMSL':<12} | {'Alt-Only':<12} | {post_gmsl_alt.kl_divergence(prior_gmsl_measure):<10.4f} | {prior_var:<12.4f} | {alt_var:<12.4f} | {alt_red:>6.2f}%\n"
+                f"{'GMSLR':<12} | {'Alt-Only':<12} | {post_gmsl_alt.kl_divergence(prior_gmsl_measure):<10.4f} | {prior_var:<12.4f} | {alt_var:<12.4f} | {alt_red:>6.2f}%\n"
             )
             f_metrics.write(
-                f"{'GMSL':<12} | {'GRACE-Only':<12} | {post_gmsl_grace.kl_divergence(prior_gmsl_measure):<10.4f} | {prior_var:<12.4f} | {grace_var:<12.4f} | {grace_red:>6.2f}%\n"
+                f"{'GMSLR':<12} | {'GRACE-Only':<12} | {post_gmsl_grace.kl_divergence(prior_gmsl_measure):<10.4f} | {prior_var:<12.4f} | {grace_var:<12.4f} | {grace_red:>6.2f}%\n"
             )
             f_metrics.write(
-                f"{'GMSL':<12} | {'Joint':<12} | {post_gmsl_joint.kl_divergence(prior_gmsl_measure):<10.4f} | {prior_var:<12.4f} | {joint_var:<12.4f} | {joint_red:>6.2f}%\n"
+                f"{'GMSLR':<12} | {'Joint':<12} | {post_gmsl_joint.kl_divergence(prior_gmsl_measure):<10.4f} | {prior_var:<12.4f} | {joint_var:<12.4f} | {joint_red:>6.2f}%\n"
             )
 
         measures = [alt_gmsl_measure, post_gmsl_alt, post_gmsl_grace, post_gmsl_joint]
@@ -671,14 +678,14 @@ def main():
             true_value=true_gmsl_val_mm,
             ax=ax_pdf,
             title="",
-            xlabel="Global Mean Sea Level Change (mm)",
+            xlabel="Global Mean Sea Level Rise (mm)",
             posterior_labels=labels,
         )
-        figures_to_save["gmsl_pdf"] = fig_pdf
+        figures_to_save["gmslr_pdf"] = fig_pdf
 
-    # ---------- 5b. GMSL SPLIT: BARYSTATIC vs STERIC ----------
+    # ---------- 5b. GMSLR SPLIT: BARYSTATIC vs STERIC ----------
     if args.plot_gmsl_split:
-        print("\nPushing forward onto the 2D GMSL split (barystatic, steric)...")
+        print("\nPushing forward onto the 2D GMSLR split (barystatic, steric)...")
         bary_op, steric_gmsl_op, steric_direct_op, dyn_direct_op = (
             utils.gmsl_split_operators(
                 exact_phys["state"],
@@ -694,17 +701,17 @@ def main():
         prior_split = (
             exact_meas["model_prior"]
             .affine_mapping(operator=final_split_op)
-            .with_dense_covariance(parallel=True, n_jobs=2)
+            .with_dense_covariance(parallel=args.parallel, n_jobs=min(2, args.max_jobs))
         )
         alt_split = post_alt.affine_mapping(
             operator=final_split_op
-        ).with_dense_covariance(parallel=True, n_jobs=2)
+        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(2, args.max_jobs))
         grace_split = post_grace.affine_mapping(
             operator=final_split_op
-        ).with_dense_covariance(parallel=True, n_jobs=2)
+        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(2, args.max_jobs))
         joint_split = post_joint.affine_mapping(
             operator=final_split_op
-        ).with_dense_covariance(parallel=True, n_jobs=2)
+        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(2, args.max_jobs))
 
         prior_cov_mat = prior_split.covariance.matrix(dense=True)
         alt_cov_mat = alt_split.covariance.matrix(dense=True)
@@ -714,20 +721,20 @@ def main():
         def correlation(cov):
             return cov[0, 1] / np.sqrt(cov[0, 0] * cov[1, 1])
 
-        # Consistency checks. The residual steric GMSL (total minus
+        # Consistency checks. The residual steric GMSLR (total minus
         # barystatic) should equal the direct ocean average of the steric
         # sea level: their difference diagnoses the SLE mass balance
         # (solver convergence), independently of the prior constraint.
         # Separately, under the prior mass constraint the ocean average of
-        # the dynamic SSH equals the direct steric average, so their
-        # difference (the ocean mean of the manometric part, <zeta>_O)
-        # diagnoses the constraint.
+        # the Sterodynamic SL Change equals the direct steric average, so their
+        # difference (the ocean mean of the dynamic manometric part,
+        # DMSLC) diagnoses the constraint.
         steric_resid_mm = steric_gmsl_op(true_model)[0] * scale_mm
         steric_direct_mm = steric_direct_op(true_model)[0] * scale_mm
         dyn_direct_mm = dyn_direct_op(true_model)[0] * scale_mm
 
         with open(metrics_file, "a") as f_metrics:
-            f_metrics.write("\n\nGMSL Split: Barystatic vs Steric\n")
+            f_metrics.write("\n\nGMSLR Split: Barystatic vs Steric\n")
             f_metrics.write("=" * 125 + "\n")
             f_metrics.write(
                 f"{'Metric':<22} | {'Prior':<12} | {'Alt-Only':<12} | "
@@ -741,7 +748,7 @@ def main():
                 f"{joint_split.kl_divergence(prior_split):<12.4f}\n"
             )
             f_metrics.write(
-                f"{'Bary-Steric corr':<22} | {correlation(prior_cov_mat):<+12.4f} | "
+                f"{'Barystatic-Steric corr':<22} | {correlation(prior_cov_mat):<+12.4f} | "
                 f"{correlation(alt_cov_mat):<+12.4f} | "
                 f"{correlation(grace_cov_mat):<+12.4f} | "
                 f"{correlation(joint_cov_mat):<+12.4f}\n"
@@ -752,8 +759,8 @@ def main():
                 f"diff = {steric_resid_mm - steric_direct_mm:.3e} mm\n"
             )
             f_metrics.write(
-                f"Constraint check:        <dyn SSH>_O = {dyn_direct_mm:.6f} mm | "
-                f"<zeta>_O = {dyn_direct_mm - steric_direct_mm:.3e} mm "
+                f"Constraint check:        <sterodynamic SL>_O = {dyn_direct_mm:.6f} mm | "
+                f"<DMSLC>_O = {dyn_direct_mm - steric_direct_mm:.3e} mm "
                 f"(should be ~0)\n"
             )
             f_metrics.write("-" * 125 + "\n")
@@ -778,7 +785,7 @@ def main():
                 )
             f_metrics.write("-" * 125 + "\n")
 
-        split_labels = ["Barystatic GMSL (mm)", "Steric GMSL (mm)"]
+        split_labels = ["Barystatic SLR (mm)", "Steric SLR (mm)"]
 
         inf.plot_corner_distributions(
             alt_split,
@@ -788,7 +795,7 @@ def main():
             title="",
             fill_density=False,
         )
-        figures_to_save["gmsl_split_corner_altimetry"] = plt.gcf()
+        figures_to_save["gmslr_split_corner_altimetry"] = plt.gcf()
 
         inf.plot_corner_distributions(
             grace_split,
@@ -798,7 +805,7 @@ def main():
             title="",
             fill_density=False,
         )
-        figures_to_save["gmsl_split_corner_grace"] = plt.gcf()
+        figures_to_save["gmslr_split_corner_grace"] = plt.gcf()
 
         inf.plot_corner_distributions(
             joint_split,
@@ -808,7 +815,7 @@ def main():
             title="",
             fill_density=False,
         )
-        figures_to_save["gmsl_split_corner_joint"] = plt.gcf()
+        figures_to_save["gmslr_split_corner_joint"] = plt.gcf()
 
     # ------------------ 6. MAPPING & COVARIANCE ------------------
     if args.plot_maps:
@@ -827,14 +834,15 @@ def main():
 
         plot_std = args.std_samples > 0
 
-        posterior_cases = [
-            ("joint", "Joint Posterior", post_joint),
-            ("altimetry", "Altimetry-Only Posterior", post_alt),
-            ("grace", "GRACE-Only Posterior", post_grace),
-        ]
+        posterior_cases = [("joint", "Joint Posterior", post_joint)]
+        if args.map_all_cases:
+            posterior_cases += [
+                ("altimetry", "Altimetry-Only Posterior", post_alt),
+                ("grace", "GRACE-Only Posterior", post_grace),
+            ]
         expectations = {name: post.expectation for name, _, post in posterior_cases}
 
-        # Shared per-row colour scales so the three posterior figures are
+        # Shared per-row colour scales so the mapped posterior figures are
         # directly comparable.
         true_ice, true_dyn, true_rho = true_model
         vmax_ice = max(
@@ -861,9 +869,44 @@ def main():
                     f"  Computing pointwise standard deviation from "
                     f"{args.std_samples} {label} samples..."
                 )
-                stds[name] = compute_pointwise_std(
-                    load_space, post, expectations[name], args.std_samples, n_jobs=10
+                post_ice, post_dyn, post_rho = expectations[name]
+                samples = post.samples(
+                    args.std_samples, parallel=args.parallel, n_jobs=args.max_jobs
                 )
+                var_ice, var_dyn, var_rho = (
+                    load_space.zero,
+                    load_space.zero,
+                    load_space.zero,
+                )
+
+                for s_ice, s_dyn, s_rho in samples:
+                    diff_ice = load_space.subtract(s_ice, post_ice)
+                    load_space.axpy(
+                        1.0 / args.std_samples,
+                        load_space.vector_multiply(diff_ice, diff_ice),
+                        var_ice,
+                    )
+
+                    diff_dyn = load_space.subtract(s_dyn, post_dyn)
+                    load_space.axpy(
+                        1.0 / args.std_samples,
+                        load_space.vector_multiply(diff_dyn, diff_dyn),
+                        var_dyn,
+                    )
+
+                    diff_rho = load_space.subtract(s_rho, post_rho)
+                    load_space.axpy(
+                        1.0 / args.std_samples,
+                        load_space.vector_multiply(diff_rho, diff_rho),
+                        var_rho,
+                    )
+
+                stds[name] = (
+                    load_space.vector_sqrt(var_ice),
+                    load_space.vector_sqrt(var_dyn),
+                    load_space.vector_sqrt(var_rho),
+                )
+                print(f"    {label}: samples drawn and std computed.")
             std_vmaxes = (
                 max(np.max(sd[0].data * scale_mm) for sd in stds.values()),
                 max(np.max(sd[1].data * scale_mm) for sd in stds.values()),
@@ -871,6 +914,7 @@ def main():
             )
 
         for name, label, _ in posterior_cases:
+            print(f"  Rendering {label} maps...")
             fig_maps = plot_state_maps(
                 state,
                 true_model,
@@ -886,17 +930,30 @@ def main():
                 regions=regions_to_analyze if args.plot_regions else None,
             )
             figures_to_save[f"posterior_maps_{name}"] = fig_maps
+        print("  Map rendering complete.")
 
         # =================================================================
-        # Point-wise Covariance Maps (Prior vs Alt-Only vs Joint)
+        # Point-wise Covariance Maps
+        # (Prior vs Joint; Prior vs Alt-Only vs Joint with --map-all-cases)
         # =================================================================
-        print("\nGenerating Point-wise Covariance Maps (Prior vs Alt-Only vs Joint)...")
+        cov_cases = [("Prior", exact_meas["model_prior"])]
+        # if args.map_all_cases:
+        cov_cases.append(("Grace-Only Posterior", post_grace))
+        cov_cases.append(("Altimetry-Only Posterior", post_alt))
+        cov_cases.append(("Joint Posterior", post_joint))
+        ncols_cov = len(cov_cases)
+
+        print(
+            "\nGenerating Point-wise Covariance Maps "
+            f"({' vs '.join(label for label, _ in cov_cases)})..."
+        )
 
         # Covariance maps show the raw model parameters, matching the
         # posterior maps: ice and dynamic SSH in mm, density in g/m^3.
         # Rows mixing a height component with the density component
         # therefore carry mixed units.
         comp_scales = [scale_mm, scale_mm, rho_scale_gm3]
+        row_masks = [ice_mask, ocean_mask, ocean_mask]
 
         def cov_label(row_idx, pt_idx):
             mm_components = {0, 1}
@@ -906,23 +963,27 @@ def main():
                 return r"Covariance ((g m$^{-3}$)$^{2}$)"
             return r"Covariance (mm $\cdot$ g m$^{-3}$)"
 
-        row_titles = ["Ice thickness", "Dynamic SSH", "Density"]
+        row_titles = [
+            "Ice Thickness Change",
+            "Sterodynamic SL Change",
+            "Averaged Density Change",
+        ]
 
         scenarios = [
             ("Ice", 0, (-78.0, -110.0), "WAIS"),
-            ("Ocean Dyn", 1, (30.0, -45.0), "North_Atlantic"),
+            ("Sterodynamic", 1, (30.0, -45.0), "North_Atlantic"),
         ]
 
         def plot_cov_row(axes, fields, pt, label):
-            """Helper to plot 3-way prior/alt-only/joint covariance side-by-side."""
+            """Helper to plot one covariance row across the compared cases."""
             vmaxs = [np.max(np.abs(f.data)) for f in fields]
 
             # Fallback if one or more fields vanish completely
-            for i in range(len(vmaxs)):
-                if vmaxs[i] == 0:
+            for i, v in enumerate(vmaxs):
+                if v == 0:
                     vmaxs[i] = max(vmaxs) if max(vmaxs) > 0 else 1.0
 
-            for ax, field, vmax in zip(axes, fields, vmaxs):
+            for idx, (ax, field, vmax) in enumerate(zip(axes, fields, vmaxs)):
                 sl.plot(
                     field,
                     ax=ax,
@@ -934,13 +995,19 @@ def main():
                     colorbar_kwargs={**cb_kwargs, "label": label},
                     gridlines_kwargs=gl_kwargs,
                 )
-                sl.plot_points(
-                    [pt],
-                    ax=ax,
-                    color="black",
-                    zorder=10,
-                    gridlines=False,
-                )
+
+                # Only plot the point on the first column (the Prior)
+                if idx == 0:
+                    sl.plot_points(
+                        [pt],
+                        ax=ax,
+                        marker="*",
+                        color="gold",
+                        edgecolors="black",
+                        s=150,
+                        zorder=10,
+                        gridlines=False,
+                    )
 
         for comp_name, comp_idx, pt, pt_name in scenarios:
             print(f"  Evaluating perturbation in {comp_name} at {pt}...")
@@ -949,65 +1016,36 @@ def main():
             test_vec = [load_space.zero, load_space.zero, load_space.zero]
             test_vec[comp_idx] = dirac_rep
 
-            # Extract covariances for Prior, Alt-Only, and Joint
-            prior_cov = exact_meas["model_prior"].covariance(test_vec)
-            post_alt_cov = post_alt.covariance(test_vec)
-            post_joint_cov = post_joint.covariance(test_vec)
-
-            pr_ice, pr_dyn, pr_rho = prior_cov
-            po_alt_ice, po_alt_dyn, po_alt_rho = post_alt_cov
-            po_joint_ice, po_joint_dyn, po_joint_rho = post_joint_cov
+            # Extract the covariance action for each compared case
+            covs = [measure.covariance(test_vec) for _, measure in cov_cases]
 
             perturb_scale = comp_scales[comp_idx]
 
-            # Apply scaling and spatial masks
-            pr_ice_plot = pr_ice * (perturb_scale * scale_mm) * ice_mask
-            po_alt_ice_plot = po_alt_ice * (perturb_scale * scale_mm) * ice_mask
-            po_joint_ice_plot = po_joint_ice * (perturb_scale * scale_mm) * ice_mask
-
-            pr_dyn_plot = pr_dyn * (perturb_scale * scale_mm) * ocean_mask
-            po_alt_dyn_plot = po_alt_dyn * (perturb_scale * scale_mm) * ocean_mask
-            po_joint_dyn_plot = po_joint_dyn * (perturb_scale * scale_mm) * ocean_mask
-
-            pr_rho_plot = pr_rho * (perturb_scale * rho_scale_gm3) * ocean_mask
-            po_alt_rho_plot = po_alt_rho * (perturb_scale * rho_scale_gm3) * ocean_mask
-            po_joint_rho_plot = (
-                po_joint_rho * (perturb_scale * rho_scale_gm3) * ocean_mask
-            )
-
-            # Setup 3x3 grid
+            # Setup 3 x n_cases grid
             fig_cov, axes_cov = sl.subplots(
-                3, 3, figsize=(24, 16), gridspec_kw={"hspace": 0.15, "wspace": 0.1}
+                3,
+                ncols_cov,
+                figsize=(8 * ncols_cov, 16),
+                gridspec_kw={"hspace": 0.15, "wspace": 0.1},
             )
 
-            # Plot each row
-            plot_cov_row(
-                axes_cov[0],
-                [pr_ice_plot, po_alt_ice_plot, po_joint_ice_plot],
-                pt,
-                cov_label(0, comp_idx),
-            )
-            plot_cov_row(
-                axes_cov[1],
-                [pr_dyn_plot, po_alt_dyn_plot, po_joint_dyn_plot],
-                pt,
-                cov_label(1, comp_idx),
-            )
-            plot_cov_row(
-                axes_cov[2],
-                [pr_rho_plot, po_alt_rho_plot, po_joint_rho_plot],
-                pt,
-                cov_label(2, comp_idx),
-            )
+            # Plot each row, scaled and masked per component
+            for row_idx in range(3):
+                row_fields = [
+                    cov[row_idx]
+                    * (perturb_scale * comp_scales[row_idx])
+                    * row_masks[row_idx]
+                    for cov in covs
+                ]
+                plot_cov_row(
+                    axes_cov[row_idx], row_fields, pt, cov_label(row_idx, comp_idx)
+                )
 
             # Apply Custom Titles to Grid Layout
-            axes_cov[0, 0].set_title("Prior", fontsize=16, fontweight="bold", pad=20)
-            axes_cov[0, 1].set_title(
-                "Altimetry-Only Posterior", fontsize=16, fontweight="bold", pad=20
-            )
-            axes_cov[0, 2].set_title(
-                "Joint Posterior", fontsize=16, fontweight="bold", pad=20
-            )
+            for j, (case_label, _) in enumerate(cov_cases):
+                axes_cov[0, j].set_title(
+                    case_label, fontsize=16, fontweight="bold", pad=20
+                )
 
             for i, row_title in enumerate(row_titles):
                 axes_cov[i, 0].annotate(
@@ -1032,41 +1070,39 @@ def main():
     # ------------------ 7. REGIONAL DECOMPOSITION ------------------
     if args.plot_regions:
         print("\nDecomposing Regional Sea Level Signals (3-way)...")
-        # Ocean dynamic SL includes the regional GRD response to the ocean
-        # load; steric SL loads nothing; the three coordinates sum exactly
-        # to the regional mean sea level change (see joint_utils).
-        op_dyn, op_steric, op_ice_fp = utils.regional_decomposition_operators(
-            exact_phys["state"],
-            exact_phys["load_space"],
-            exact_phys["fp_op"],
-            regions_to_analyze,
+        state = exact_phys["state"]
+        load_space = exact_phys["load_space"]
+        fp_op = exact_phys["fp_op"]
+        op_sslc, op_dmslc, op_bmslc = utils.regional_decomposition_operators(
+            state, load_space, fp_op, regions_to_analyze
         )
-
-        combined_op = (
-            inf.ColumnLinearOperator([op_dyn, op_steric, op_ice_fp]) * scale_mm
-        )
+        combined_op = inf.ColumnLinearOperator([op_sslc, op_dmslc, op_bmslc]) * scale_mm
         final_op = combined_op.codomain.coordinate_projection @ combined_op
 
         true_vals_mm = final_op(true_model)
+        print("  -> Prior push-forward (3 covariance actions)...")
         prior_meas = (
             exact_meas["model_prior"]
             .affine_mapping(operator=final_op)
-            .with_dense_covariance(parallel=True, n_jobs=3)
+            .with_dense_covariance(parallel=args.parallel, n_jobs=min(3, args.max_jobs))
         )
+        print("  -> Altimetry-only push-forward (3 posterior solves)...")
         post_alt_meas = post_alt.affine_mapping(
             operator=final_op
-        ).with_dense_covariance(parallel=True, n_jobs=3)
+        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(3, args.max_jobs))
+        print("  -> GRACE-only push-forward (3 posterior solves)...")
         post_grace_meas = post_grace.affine_mapping(
             operator=final_op
-        ).with_dense_covariance(parallel=True, n_jobs=3)
+        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(3, args.max_jobs))
+        print("  -> Joint push-forward (3 posterior solves)...")
         post_joint_meas = post_joint.affine_mapping(
             operator=final_op
-        ).with_dense_covariance(parallel=True, n_jobs=3)
+        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(3, args.max_jobs))
 
         labels = [
-            "Ocean dynamic SL (mm)",
-            "Steric SL (mm)",
-            "Barystatic GRD SL (mm)",
+            "SSLC (mm)",
+            "DMSLC (mm)",
+            "BMSLC (mm)",
         ]
 
         # Log Regional metrics
@@ -1102,8 +1138,9 @@ def main():
                 f"\n\nRegional Signal Separation ({regions_to_analyze[0]})\n"
             )
             f_metrics.write(
-                "(Components sum to the regional mean sea level change; the\n"
-                " dynamic component includes its GRD response.)\n"
+                "(Components sum to the regional mean sea level change; DMSLC\n"
+                " includes the GRD response to the ocean load, BMSLC that to\n"
+                " the land-ice load.)\n"
             )
             f_metrics.write("=" * 135 + "\n")
 
@@ -1118,7 +1155,7 @@ def main():
                 f"{'Total Var (Trace) mm²':<22} | {pr_trace:<12.4f} | {alt_trace:<12.4f} | {alt_trace_red:>9.2f}% | {grace_trace:<12.4f} | {grace_trace_red:>9.2f}% | {joint_trace:<12.4f} | {joint_trace_red:>9.2f}%\n"
             )
             f_metrics.write(
-                f"{'Generalized Var (Det)':<22} | {pr_det:<12.4e} | {alt_det:<12.4e} | {alt_det_red:>9.2f}% | {grace_det:<12.4e} | {grace_det_red:>9.2f}% | {joint_det:<12.4e} | {joint_det_red:>9.2f}%\n"
+                f"{'Generalised Var (Det)':<22} | {pr_det:<12.4e} | {alt_det:<12.4e} | {alt_det_red:>9.2f}% | {grace_det:<12.4e} | {grace_det_red:>9.2f}% | {joint_det:<12.4e} | {joint_det_red:>9.2f}%\n"
             )
             f_metrics.write("-" * 135 + "\n")
 
@@ -1127,7 +1164,7 @@ def main():
             )
             f_metrics.write("-" * 135 + "\n")
 
-            comp_names = ["Ocean dynamic SL", "Steric SL", "Barystatic GRD"]
+            comp_names = ["SSLC", "DMSLC", "BMSLC"]
             for i, name in enumerate(comp_names):
                 pr_v = prior_cov_mat[i, i]
                 a_v = alt_cov_mat[i, i]

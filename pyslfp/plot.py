@@ -120,10 +120,10 @@ def plot_points(
     ax: Optional[GeoAxes] = None,
     projection: Optional[Projection] = None,
     cmap: str = "RdBu",
-    color: str = "red",
+    color: str = "k",
     s: float = 20,
     marker: str = "o",
-    edgecolors: str = "none",
+    edgecolors: str = "None",
     zorder: int = 5,
     coasts: bool = True,  # pyslfp default (pygeoinf is False)
     rivers: bool = False,

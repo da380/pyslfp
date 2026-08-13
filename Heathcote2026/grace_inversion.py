@@ -101,13 +101,12 @@ def parse_arguments():
     parser.add_argument(
         "--prior-kernel",
         choices=["heat", "sobolev"],
-        default="heat",
+        default="sobolev",
         help=(
             "Covariance family for the direct load prior AND the spatial "
             "noise model (applied consistently, so the spectral "
             "signal-to-noise crossover stays well defined): 'heat' "
-            "(default) or 'sobolev' (Matern-type, spectral variance "
-            "(1 + scale^2 k)^-order)."
+            "or 'sobolev' (default)."
         ),
     )
     parser.add_argument(
@@ -137,7 +136,24 @@ def parse_arguments():
         help="Noise correlation scale factor.",
     )
     parser.add_argument(
-        "--noise-std-factor", type=float, default=0.1, help="Noise std factor."
+        "--noise-std-factor", type=float, default=0.1414, help="Noise std factor."
+    )
+
+    # --- Parallelisation ---
+    parser.add_argument(
+        "--parallel",
+        action="store_true",
+        help="Enable process-level parallelism at the supported call sites.",
+    )
+    parser.add_argument(
+        "--max-jobs",
+        type=int,
+        default=os.cpu_count() or 1,
+        help=(
+            "Cap on the number of worker processes when --parallel is "
+            "set; call sites with fewer independent tasks use fewer. "
+            "Ignored without --parallel."
+        ),
     )
 
     return parser.parse_args()
@@ -156,8 +172,6 @@ def main():
     output_dir = "output_plots_grace_inversion"
     os.makedirs(output_dir, exist_ok=True)
     figures_to_save = {}
-
-    inf.configure_threading(n_threads=1)
 
     # ------------------ 1. EXACT MODEL SETUP ------------------
     print(f"\nBuilding EXACT physical operators (lmax={args.lmax})...")
@@ -238,11 +252,11 @@ def main():
 
         post_avg_measure = model_posterior.affine_mapping(
             operator=tot_avg_op
-        ).with_dense_covariance(parallel=True, n_jobs=4)
+        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(4, args.max_jobs))
 
         prior_avg_measure = model_prior.affine_mapping(
             operator=tot_avg_op
-        ).with_dense_covariance(parallel=True, n_jobs=4)
+        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(4, args.max_jobs))
 
         true_avg = tot_avg_op(model)
 
@@ -252,9 +266,9 @@ def main():
 
             with open(metrics_file, "w") as f_metrics:
                 f_metrics.write(
-                    f"{'Region':<16} | {'KL Divergence':<15} | {'Prior Var (mm²)':<17} | {'Post Var (mm²)':<16} | {'Variance Reduction':<18}\n"
+                    f"{'Region':<16} | {'KL Divergence':<15} | {'Prior Var (mm² EWT)':<19} | {'Post Var (mm² EWT)':<18} | {'Variance Reduction':<18}\n"
                 )
-                f_metrics.write("-" * 92 + "\n")
+                f_metrics.write("-" * 96 + "\n")
 
                 ncols = 2
                 nrows = int(np.ceil(len(region_names) / ncols))
@@ -293,7 +307,7 @@ def main():
                     var_reduction = 100.0 * (1.0 - (post_var / prior_var))
 
                     f_metrics.write(
-                        f"{region:<16} | {kl_div:<15.2f} | {prior_var:<17.2f} | {post_var:<16.2f} | {var_reduction:>16.2f}%\n"
+                        f"{region:<16} | {kl_div:<15.2f} | {prior_var:<19.2f} | {post_var:<18.2f} | {var_reduction:>16.2f}%\n"
                     )
 
                     inf.plot_1d_distributions(
@@ -305,7 +319,7 @@ def main():
                         posterior_labels=["Bayesian", "WMB"],
                     )
 
-                    if ax.get_legend() is not None:
+                    if ax.get_legend() is not None and i != 1:
                         ax.get_legend().remove()
 
                 for j in range(i + 1, len(axes_flat)):
@@ -322,11 +336,15 @@ def main():
 
             target_deg_prior = model_prior.affine_mapping(
                 operator=target_deg_op
-            ).with_dense_covariance(parallel=True, n_jobs=min(2 * l + 1, 10))
+            ).with_dense_covariance(
+                parallel=args.parallel, n_jobs=min(2 * l + 1, args.max_jobs)
+            )
 
             target_deg_post = model_posterior.affine_mapping(
                 operator=target_deg_op
-            ).with_dense_covariance(parallel=True, n_jobs=min(2 * l + 1, 10))
+            ).with_dense_covariance(
+                parallel=args.parallel, n_jobs=min(2 * l + 1, args.max_jobs)
+            )
 
             kl_div = target_deg_post.kl_divergence(target_deg_prior)
 
@@ -345,11 +363,14 @@ def main():
 
             # Dynamically generate component names and LaTeX labels (order: m=0, m=-1, m=1, etc.)
             comp_names = [f"({l},0)"]
-            labels = [rf"$\zeta_{{{l},0}}$ (mm)"]
+            labels = [rf"$\zeta_{{{l},0}}$ (mm EWT)"]
             for m in range(1, l + 1):
                 comp_names.extend([f"({l},{-m})", f"({l},{m})"])
                 labels.extend(
-                    [rf"$\zeta_{{{l},{-m}}}$ (mm)", rf"$\zeta_{{{l},{m}}}$ (mm)"]
+                    [
+                        rf"$\zeta_{{{l},{-m}}}$ (mm EWT)",
+                        rf"$\zeta_{{{l},{m}}}$ (mm EWT)",
+                    ]
                 )
 
             with open(metrics_file, "a") as f_metrics:
@@ -359,8 +380,8 @@ def main():
                 f_metrics.write(f"Prior Total Var (Trace):  {prior_trace:.4f} mm²\n")
                 f_metrics.write(f"Post Total Var (Trace):   {post_trace:.4f} mm²\n")
                 f_metrics.write(f"Overall Trace Reduction:  {trace_reduction:.2f}%\n")
-                f_metrics.write(f"Prior Generalized Var:    {prior_det:.4e}\n")
-                f_metrics.write(f"Post Generalized Var:     {post_det:.4e}\n")
+                f_metrics.write(f"Prior Generalised Var:    {prior_det:.4e}\n")
+                f_metrics.write(f"Post Generalised Var:     {post_det:.4e}\n")
                 f_metrics.write("-" * 65 + "\n")
                 f_metrics.write(
                     f"{'Component':<18} | {'Prior Var':<12} | {'Post Var':<12} | {'Reduction'}\n"
@@ -416,6 +437,22 @@ def main():
             )
             f_metrics.write("-" * 115 + "\n")
 
+            # --- Set up a single grid figure outside the loop ---
+            nrows = len(region_names)
+            fig_sens, axes = sl.subplots(
+                nrows,
+                3,
+                figsize=(24, 5.5 * nrows),
+                gridspec_kw={"hspace": 0.15, "wspace": 0.1},
+            )
+
+            # Ensure numpy slicing works even if there is only 1 row
+            if nrows == 1:
+                axes = np.array([axes])
+
+            gl_kwargs = {"xlabel_style": {"size": 12}, "ylabel_style": {"size": 12}}
+            cb_kwargs = {"shrink": 0.8, "pad": 0.05, "orientation": "horizontal"}
+
             for i, region in enumerate(region_names):
                 # e_i (Basis vector)
                 basis_vec = property_resolution_operator.codomain.basis_vector(i)
@@ -452,32 +489,20 @@ def main():
                     bayes_error_pct = load_space.zero
                     wmb_error_pct = load_space.zero
 
-                # 1x3 Figure setup
-                fig_sens, axes = sl.subplots(
-                    1, 3, figsize=(22, 5), gridspec_kw={"wspace": 0.15}
-                )
-
-                gl_kwargs = {"xlabel_style": {"size": 12}, "ylabel_style": {"size": 12}}
-
-                # --- Plot 1: Target Kernel ---
+                # --- Plot 1: Target Kernel (Left Column) ---
                 _, im_target = sl.plot(
                     target_normed,
-                    ax=axes[0],
+                    ax=axes[i, 0],
                     cmap="seismic",
                     colorbar=True,
                     symmetric=True,
                     vmin=-1.0,
                     vmax=1.0,
-                    colorbar_kwargs={
-                        "shrink": 0.8,
-                        "pad": 0.05,
-                        "orientation": "horizontal",
-                    },
+                    colorbar_kwargs=cb_kwargs,
                     gridlines_kwargs=gl_kwargs,
                 )
-                axes[0].set_title("Target Kernel", fontsize=16)
                 im_target.colorbar.set_label("Relative Amplitude", fontsize=14)
-                utils.draw_region_boundaries(state, axes[0], regions_dict)
+                utils.draw_region_boundaries(state, axes[i, 0], regions_dict)
 
                 # --- Find shared max for the error plots ---
                 vmax_error = max(
@@ -487,51 +512,55 @@ def main():
                 if vmax_error == 0:
                     vmax_error = 1.0
 
-                # --- Plot 2: Bayesian Kernel Error ---
+                # --- Plot 2: Bayesian Kernel Error (Middle Column) ---
                 _, im_bayes = sl.plot(
                     bayes_error_pct,
-                    ax=axes[1],
+                    ax=axes[i, 1],
                     cmap="seismic",
                     colorbar=True,
                     symmetric=True,
                     vmin=-vmax_error,
                     vmax=vmax_error,
-                    colorbar_kwargs={
-                        "shrink": 0.8,
-                        "pad": 0.05,
-                        "orientation": "horizontal",
-                    },
+                    colorbar_kwargs=cb_kwargs,
                     gridlines_kwargs=gl_kwargs,
                 )
-                axes[1].set_title("Bayesian Kernel Error", fontsize=16)
                 im_bayes.colorbar.set_label("Relative Error (%)", fontsize=14)
-                utils.draw_region_boundaries(state, axes[1], regions_dict)
+                utils.draw_region_boundaries(state, axes[i, 1], regions_dict)
 
-                # --- Plot 3: WMB Kernel Error ---
+                # --- Plot 3: WMB Kernel Error (Right Column) ---
                 _, im_wmb = sl.plot(
                     wmb_error_pct,
-                    ax=axes[2],
+                    ax=axes[i, 2],
                     cmap="seismic",
                     colorbar=True,
                     symmetric=True,
                     vmin=-vmax_error,
                     vmax=vmax_error,
-                    colorbar_kwargs={
-                        "shrink": 0.8,
-                        "pad": 0.05,
-                        "orientation": "horizontal",
-                    },
+                    colorbar_kwargs=cb_kwargs,
                     gridlines_kwargs=gl_kwargs,
                 )
-                axes[2].set_title("WMB Kernel Error", fontsize=16)
                 im_wmb.colorbar.set_label("Relative Error (%)", fontsize=14)
-                utils.draw_region_boundaries(state, axes[2], regions_dict)
+                utils.draw_region_boundaries(state, axes[i, 2], regions_dict)
 
-                # Format filename
-                safe_region_name = (
-                    region.replace(" ", "_").replace("(", "").replace(")", "")
+            # --- Apply Grid Layout Titles and Row Annotations ---
+            col_labels = ["Target Kernel", "Bayesian Kernel Error", "WMB Kernel Error"]
+            for j, label in enumerate(col_labels):
+                axes[0, j].set_title(label, fontsize=16, fontweight="bold", pad=20)
+
+            for i, region in enumerate(region_names):
+                axes[i, 0].annotate(
+                    region,
+                    xy=(-0.1, 0.5),
+                    xycoords="axes fraction",
+                    fontsize=16,
+                    fontweight="bold",
+                    va="center",
+                    ha="center",
+                    rotation=90,
                 )
-                figures_to_save[f"estimator_kernels_{safe_region_name}"] = fig_sens
+
+            # Save the composite dynamically scaled figure
+            figures_to_save["estimator_kernels_regions_all"] = fig_sens
 
         # ------------------ TARGET DEGREE KERNEL ERROR ------------------
         l = args.target_degree

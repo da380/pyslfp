@@ -3,10 +3,11 @@ Extended Altimetry Bias Evaluation (3-Component Model)
 ======================================================
 
 This script calculates the analytical method bias and error distribution for
-satellite altimetry using a 3-component physical model (Ice Thickness, Ocean
-Dynamic SSH, and Ocean Density). It strictly evaluates the difference
-between true Global Mean Sea Level (water column thickness change) and the
-standard SSH-based area-averaging estimator.
+satellite altimetry using a 3-component physical model (Ice Thickness,
+Sterodynamic SL, and Ocean Density). It strictly evaluates the difference
+between the true global mean sea level rise (GMSLR, as water column
+thickness change) and the standard geocentric-sea-level (SSH)
+area-averaging estimator.
 """
 
 import argparse
@@ -69,13 +70,13 @@ def parse_arguments():
         "--ocean-dyn-scale-factor",
         type=float,
         default=0.2,
-        help="Ocean dynamic correlation scale.",
+        help="Sterodynamic correlation scale factor.",
     )
     parser.add_argument(
         "--ocean-dyn-std-factor",
         type=float,
         default=2.0,
-        help="Ocean dynamic std as factor of GMSL std.",
+        help="Sterodynamic SL std as factor of the barystatic GMSLR std.",
     )
 
     parser.add_argument(
@@ -88,14 +89,14 @@ def parse_arguments():
         "--ocean-rho-std-factor",
         type=float,
         default=0.25,
-        help="Effective steric SL std as a fraction of the dynamic topography std.",
+        help="Effective steric SL std as a fraction of the Sterodynamic SL change std.",
     )
 
     parser.add_argument(
         "--noise-std-factor",
         type=float,
         default=1.0,
-        help="Local (uncorrelated) altimetry noise std as factor of GMSL std.",
+        help="Local (uncorrelated) altimetry noise std as factor of the barystatic GMSLR std.",
     )
     parser.add_argument(
         "--noise-corr-std-factor",
@@ -103,7 +104,7 @@ def parse_arguments():
         default=0.05,
         help=(
             "Std of the optional large-scale correlated altimetry error "
-            "component, as a factor of the GMSL prior std (0 disables). "
+            "component, as a factor of the GMSLR prior std (0 disables). "
             "Represents long-wavelength systematics such as orbit and "
             "reference-frame errors; because it barely averages down, even "
             "small values (e.g. 0.02-0.05) set the error floor for "
@@ -126,7 +127,7 @@ def parse_arguments():
         default=0.9,
         help=(
             "Magnitude of the long-wavelength anti-correlation between the "
-            "ocean dynamic and density fields (0 disables; must lie in "
+            "sterodynamic and density fields (0 disables; must lie in "
             "[0, 1); the sign is applied internally."
         ),
     )
@@ -167,6 +168,23 @@ def parse_arguments():
         "--prior-shift", type=float, default=1.0, help="Prior mean shift factor."
     )
 
+    # --- Parallelisation ---
+    parser.add_argument(
+        "--parallel",
+        action="store_true",
+        help="Enable process-level parallelism at the supported call sites.",
+    )
+    parser.add_argument(
+        "--max-jobs",
+        type=int,
+        default=os.cpu_count() or 1,
+        help=(
+            "Cap on the number of worker processes when --parallel is "
+            "set; call sites with fewer independent tasks use fewer. "
+            "Ignored without --parallel."
+        ),
+    )
+
     return parser.parse_args()
 
 
@@ -178,7 +196,7 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     figures_to_save = {}
 
-    print("Initializing Earth State and 3-Component Physics Operators...")
+    print("Initialising Earth State and 3-Component Physics Operators...")
     state_dummy = EarthState.from_defaults(lmax=args.lmax)
     points = ocean_altimetry_points(state_dummy, spacing=args.spacing)
 
@@ -190,6 +208,7 @@ def main():
         continuous_sl_op,
         forward_op,
         scale_mm,
+        point_eval,
     ) = utils.build_physics_components(
         args.lmax, args.load_order, args.load_scale_km, points, is_surrogate=False
     )
@@ -215,19 +234,20 @@ def main():
         prior_kernel=args.prior_kernel,
         prior_order=args.prior_order,
         noise_corr_std_factor=args.noise_corr_std_factor,
+        point_evaluation_operator=point_eval,
     )
 
     joint_meas = inf.GaussianMeasure.from_direct_sum([model_prior, noise_meas])
     data_space = noise_meas.domain
 
-    # The TRUE GMSL uses the Sea Level Operator (SLC)
+    # The TRUE GMSLR uses the Sea Level Operator (SLC)
     true_gmsl_op = utils.true_gmsl_operator(state, load_space, continuous_sl_op)
 
     # The ESTIMATOR averages the SSH evaluated at the altimetry points
     alt_avg_op = altimetry_averaging_operator(points)
     est_gmsl_op = alt_avg_op @ forward_op
 
-    # Error Operator = True GMSL - Estimated GMSL
+    # Error Operator = True GMSLR - Estimated GMSLR
     err_gmsl_op = true_gmsl_op - est_gmsl_op
 
     op_true = inf.RowLinearOperator(
@@ -249,7 +269,7 @@ def main():
 
     # -- Plotting --
     if args.plot_maps:
-        print("Drawing a sample to visualize map components...")
+        print("Drawing a sample to visualise map components...")
         model_sample = model_prior.sample()
         ssh_sample = continuous_ssh_op(model_sample)
 
@@ -272,11 +292,24 @@ def main():
             symmetric=True,
         )
 
-        im1.colorbar.set_label("Ice Thickness (mm)", fontsize=16)
+        im1.colorbar.set_label("Ice Thickness Change (mm)", fontsize=16)
         im1.colorbar.ax.tick_params(labelsize=14)
 
         ax1.gridliner.xlabel_style = {"size": 12, "color": "black"}
         ax1.gridliner.ylabel_style = {"size": 12, "color": "black"}
+
+        ax1.text(
+            0.02,
+            0.98,
+            "(c)",
+            transform=ax1.transAxes,
+            fontsize=16,
+            fontweight="bold",
+            va="top",
+            ha="left",
+            bbox=dict(facecolor="white", alpha=0.8, edgecolor="none", pad=3.0),
+            zorder=10,
+        )
 
         figures_to_save["bias_ice_thickness"] = fig1
 
@@ -288,13 +321,26 @@ def main():
             symmetric=True,
         )
 
-        im2.colorbar.set_label("Dynamic SSH (mm)", fontsize=16)
+        im2.colorbar.set_label("Sterodynamic SL Change (mm)", fontsize=16)
         im2.colorbar.ax.tick_params(labelsize=14)
 
         ax2.gridliner.xlabel_style = {"size": 12, "color": "black"}
         ax2.gridliner.ylabel_style = {"size": 12, "color": "black"}
 
-        figures_to_save["bias_ocean_dynamic"] = fig2
+        ax2.text(
+            0.02,
+            0.98,
+            "(a)",
+            transform=ax2.transAxes,
+            fontsize=16,
+            fontweight="bold",
+            va="top",
+            ha="left",
+            bbox=dict(facecolor="white", alpha=0.8, edgecolor="none", pad=3.0),
+            zorder=10,
+        )
+
+        figures_to_save["bias_sterodynamic"] = fig2
 
         fig3, ax3 = sl.create_map_figure(figsize=(12, 6))
         _, im3 = sl.plot(
@@ -304,11 +350,24 @@ def main():
             symmetric=True,
         )
 
-        im3.colorbar.set_label(r"Density Change (g m$^{-3}$)", fontsize=16)
+        im3.colorbar.set_label(r"Averaged Density Change (g m$^{-3}$)", fontsize=16)
         im3.colorbar.ax.tick_params(labelsize=14)
 
         ax3.gridliner.xlabel_style = {"size": 12, "color": "black"}
         ax3.gridliner.ylabel_style = {"size": 12, "color": "black"}
+
+        ax3.text(
+            0.02,
+            0.98,
+            "(b)",
+            transform=ax3.transAxes,
+            fontsize=16,
+            fontweight="bold",
+            va="top",
+            ha="left",
+            bbox=dict(facecolor="white", alpha=0.8, edgecolor="none", pad=3.0),
+            zorder=10,
+        )
 
         figures_to_save["bias_density"] = fig3
 
@@ -325,16 +384,16 @@ def main():
             cmap="seismic",
             vmin=-shared_vmax,
             vmax=shared_vmax,
-            colorbar_kwargs={"label": "Continuous SSH (mm)"},
+            colorbar_kwargs={"label": "Geocentric Sea Level Change (mm)"},
         )
 
-        im4.colorbar.set_label("Continuous SSH (mm)", fontsize=16)
+        im4.colorbar.set_label("Geocentric Sea Level Change (mm)", fontsize=16)
         im4.colorbar.ax.tick_params(labelsize=14)
 
         ax4.gridliner.xlabel_style = {"size": 12, "color": "black"}
         ax4.gridliner.ylabel_style = {"size": 12, "color": "black"}
 
-        figures_to_save["bias_ssh_map"] = fig4
+        figures_to_save["bias_geocentric_sl_map"] = fig4
 
         fig5, ax5 = sl.create_map_figure(figsize=(12, 6))
         ax5.set_global()
@@ -348,24 +407,39 @@ def main():
             s=4,
             edgecolors="none",
             colorbar=True,
-            colorbar_kwargs={"label": "Observed SSH (mm)"},
+            colorbar_kwargs={"label": "Synthetic Altimetry Data (mm)"},
             zorder=5,
         )
 
-        im5.colorbar.set_label("Observed SSH (mm)", fontsize=16)
+        im5.colorbar.set_label("Synthetic Altimetry Data (mm)", fontsize=16)
         im5.colorbar.ax.tick_params(labelsize=14)
+
+        ax5.text(
+            0.02,
+            0.98,
+            "(d)",
+            transform=ax5.transAxes,
+            fontsize=16,
+            fontweight="bold",
+            va="top",
+            ha="left",
+            bbox=dict(facecolor="white", alpha=0.8, edgecolor="none", pad=3.0),
+            zorder=10,
+        )
 
         ax5.gridliner.xlabel_style = {"size": 12, "color": "black"}
         ax5.gridliner.ylabel_style = {"size": 12, "color": "black"}
 
-        figures_to_save["bias_ssh_points"] = fig5
+        figures_to_save["bias_altimetry_data"] = fig5
 
     err_samples = None
     if args.samples > 0:
         print(
             f"Drawing {args.samples} Monte Carlo samples to validate analytical bias..."
         )
-        joint_samples_list = joint_meas.samples(args.samples)
+        joint_samples_list = joint_meas.samples(
+            args.samples, parallel=args.parallel, n_jobs=args.max_jobs
+        )
         err_samples = np.array(
             [op_err(sample)[0] * scale_mm for sample in joint_samples_list]
         )
@@ -402,10 +476,10 @@ def main():
         gaussian_pdf(x_vals, 0, alt_noise_std),
         "b",
         linewidth=2,
-        label=r"Standard error",
+        label=r"Nominal error (noise only)",
     )
 
-    ax.set_xlabel("Error in GMSL estimate (mm)", fontsize=14)
+    ax.set_xlabel("Error in GMSLR estimate (mm)", fontsize=14)
     ax.set_ylabel("Probability Density", fontsize=14)
     ax.axvline(0, color="black", linestyle="--", linewidth=1.5)
     ax.grid(True, linestyle=":", alpha=0.6)
@@ -415,7 +489,7 @@ def main():
         "top", functions=(lambda x: x / true_std, lambda x: x * true_std)
     )
     sec_ax.set_xlabel(
-        r"Error Standardized by True Signal $\sigma$", fontsize=12, color="darkgreen"
+        r"Error Standardised by True Signal $\sigma$", fontsize=12, color="darkgreen"
     )
     sec_ax.tick_params(axis="x", colors="darkgreen")
 

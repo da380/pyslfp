@@ -95,13 +95,12 @@ def parse_arguments():
     parser.add_argument(
         "--prior-kernel",
         choices=["heat", "sobolev"],
-        default="heat",
+        default="sobolev",
         help=(
             "Covariance family for the direct load prior AND the spatial "
             "noise model (applied consistently, so the spectral "
             "signal-to-noise crossover stays well defined): 'heat' "
-            "(default) or 'sobolev' (Matern-type, spectral variance "
-            "(1 + scale^2 k)^-order)."
+            "or 'sobolev' (default)."
         ),
     )
     parser.add_argument(
@@ -131,13 +130,30 @@ def parse_arguments():
     parser.add_argument(
         "--noise-std-factor",
         type=float,
-        default=0.1,
+        default=0.1414,
         help="Factor scaling the noise standard deviation.",
     )
     parser.add_argument(
         "--remove-degree-1",
         action="store_true",
         help="Remove degree 1 components from the prior measure.",
+    )
+
+    # --- Parallelisation ---
+    parser.add_argument(
+        "--parallel",
+        action="store_true",
+        help="Enable process-level parallelism at the supported call sites.",
+    )
+    parser.add_argument(
+        "--max-jobs",
+        type=int,
+        default=os.cpu_count() or 1,
+        help=(
+            "Cap on the number of worker processes when --parallel is "
+            "set; call sites with fewer independent tasks use fewer. "
+            "Ignored without --parallel."
+        ),
     )
 
     return parser.parse_args()
@@ -205,11 +221,24 @@ def main():
             symmetric=True,
         )
 
-        im1.colorbar.set_label("EWT (mm)", fontsize=16)
+        im1.colorbar.set_label("Direct Load (mm EWT)", fontsize=16)
         im1.colorbar.ax.tick_params(labelsize=14)
 
         ax1.gridliner.xlabel_style = {"size": 12, "color": "black"}
         ax1.gridliner.ylabel_style = {"size": 12, "color": "black"}
+
+        ax1.text(
+            0.02,
+            0.98,
+            "(a)",
+            transform=ax1.transAxes,
+            fontsize=16,
+            fontweight="bold",
+            va="top",
+            ha="left",
+            bbox=dict(facecolor="white", alpha=0.8, edgecolor="none", pad=3.0),
+            zorder=10,
+        )
 
         utils.draw_region_boundaries(state, ax1, regions_dict)
         figures_to_save["grace_bias_direct_load"] = fig1
@@ -221,14 +250,29 @@ def main():
             cmap="seismic",
             symmetric=True,
         )
-        utils.draw_region_boundaries(state, ax2, regions_dict)
-        figures_to_save["grace_bias_induced_load"] = fig2
 
-        im2.colorbar.set_label("EWT (mm)", fontsize=16)
+        im2.colorbar.set_label("Induced Load  (mm EWT)", fontsize=16)
         im2.colorbar.ax.tick_params(labelsize=14)
 
         ax2.gridliner.xlabel_style = {"size": 12, "color": "black"}
         ax2.gridliner.ylabel_style = {"size": 12, "color": "black"}
+
+        utils.draw_region_boundaries(state, ax2, regions_dict)
+
+        ax2.text(
+            0.02,
+            0.98,
+            "(b)",
+            transform=ax2.transAxes,
+            fontsize=16,
+            fontweight="bold",
+            va="top",
+            ha="left",
+            bbox=dict(facecolor="white", alpha=0.8, edgecolor="none", pad=3.0),
+            zorder=10,
+        )
+
+        figures_to_save["grace_bias_induced_load"] = fig2
 
     # ------------------ CORE BIAS EVALUATION ------------------
     op1 = inf.BlockLinearOperator(
@@ -274,7 +318,9 @@ def main():
 
     if args.samples > 0:
         print(f"Drawing {args.samples} MC samples...")
-        joint_samples_list = joint_meas.samples(args.samples)
+        joint_samples_list = joint_meas.samples(
+            args.samples, parallel=args.parallel, n_jobs=args.max_jobs
+        )
         err_samples = np.zeros((args.samples, len(region_names)))
         for idx, sample in enumerate(joint_samples_list):
             err_samples[idx, :] = err_op(sample) * scale_mm
@@ -301,7 +347,7 @@ def main():
         mu, std = err_means[i], err_stds[i]
 
         norm_std = true_stds[i]
-        norm_label = r"Error Standardized by True Signal $\sigma$"
+        norm_label = r"Error Standardised by True Signal $\sigma$"
 
         if args.samples > 0:
             ax.hist(
@@ -330,14 +376,16 @@ def main():
             gaussian_pdf(x_vals, 0, wmb_stds[i]),
             "b-",
             linewidth=2,
-            label=r"Standard error",
+            label=r"Nominal error (noise only)",
         )
 
         ax.set_title(region, fontsize=14)
         ax.set_xlabel("Error (mm)", fontsize=12)
         ax.axvline(0, color="black", linestyle="--", linewidth=1.5)
         ax.grid(True, linestyle=":", alpha=0.6)
-        ax.legend(loc="best", fontsize=9)
+
+        if i == 1:
+            ax.legend(loc="best", fontsize=9)
 
         sec_ax = ax.secondary_xaxis(
             "top", functions=(make_forward(norm_std), make_inverse(norm_std))

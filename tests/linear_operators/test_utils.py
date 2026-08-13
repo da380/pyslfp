@@ -13,9 +13,7 @@ from pyslfp.linear_operators.utils import (
     underlying_space,
     check_load_space,
     check_response_space,
-    l2_products_operator,
     averaging_operator,
-    spatial_multiplication_operator,
 )
 from pyslfp.linear_operators.physics import (
     lebesgue_load_space,
@@ -135,37 +133,6 @@ def test_check_response_space(testing_state):
 
 
 @pytest.mark.parametrize("sobolev", [False, True])
-def test_l2_products_operator(testing_state, sobolev):
-    """Tests the operator mapping fields to a vector of L2 inner products."""
-    model = testing_state.model
-    b = model.parameters.mean_sea_floor_radius
-
-    if sobolev:
-        load_space = sobolev_load_space(model, 1.0, 0.1 * b)
-    else:
-        load_space = lebesgue_load_space(model)
-
-    # Use ocean and land projections as arbitrary weighting functions
-    w1 = testing_state.ocean_projection(value=0.0)
-    w2 = testing_state.land_projection(value=0.0)
-    weights = [w1, w2]
-
-    A = l2_products_operator(load_space, weights)
-
-    # Measures for testing
-    domain_measure = A.domain.heat_kernel_gaussian_measure(0.5 * b)
-    codomain_measure = inf.GaussianMeasure.from_standard_deviation(A.codomain, 1.0)
-
-    A.check(
-        n_checks=2,
-        check_rtol=1e-5,
-        check_atol=1e-5,
-        domain_measure=domain_measure,
-        codomain_measure=codomain_measure,
-    )
-
-
-@pytest.mark.parametrize("sobolev", [False, True])
 def test_averaging_operator(testing_state, sobolev):
     """Tests the spatial averaging operator."""
     model = testing_state.model
@@ -190,33 +157,6 @@ def test_averaging_operator(testing_state, sobolev):
     # Rigorous adjoint check
     domain_measure = A.domain.heat_kernel_gaussian_measure(0.5 * b)
     codomain_measure = inf.GaussianMeasure.from_standard_deviation(A.codomain, 1.0)
-
-    A.check(
-        n_checks=2,
-        check_rtol=1e-5,
-        check_atol=1e-5,
-        domain_measure=domain_measure,
-        codomain_measure=codomain_measure,
-    )
-
-
-@pytest.mark.parametrize("sobolev", [False, True])
-def test_spatial_multiplication_operator(testing_state, sobolev):
-    """Tests the spatial multiplication (masking) operator."""
-    model = testing_state.model
-    b = model.parameters.mean_sea_floor_radius
-
-    if sobolev:
-        load_space = sobolev_load_space(model, 1.0, 0.1 * b)
-    else:
-        load_space = lebesgue_load_space(model)
-
-    mask = testing_state.ocean_projection(value=0.0)
-
-    A = spatial_multiplication_operator(load_space, mask)
-
-    domain_measure = A.domain.heat_kernel_gaussian_measure(0.5 * b)
-    codomain_measure = A.codomain.heat_kernel_gaussian_measure(0.5 * b)
 
     A.check(
         n_checks=2,

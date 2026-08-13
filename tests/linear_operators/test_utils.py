@@ -13,9 +13,7 @@ from pyslfp.linear_operators.utils import (
     underlying_space,
     check_load_space,
     check_response_space,
-    l2_products_operator,
     averaging_operator,
-    spatial_multiplication_operator,
 )
 from pyslfp.linear_operators.physics import (
     lebesgue_load_space,

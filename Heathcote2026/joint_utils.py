@@ -60,7 +60,6 @@ from pyslfp.linear_operators import (
     ice_projection_operator,
     ocean_projection_operator,
     ocean_average_operator,
-    averaging_operator,
     grace_observation_operator,
     WMBMethod,
 )
@@ -69,11 +68,7 @@ from pyslfp.linear_operators import (
 # re-exported here so the joint scripts keep using joint_utils.<name>.
 from altimetry_utils import (
     barystatic_gmsl_weighting,
-    regional_decomposition_operators,
     effective_steric_scale,
-    gmsl_split_operators,
-    steric_sea_level_operator,
-    true_gmsl_operator,
 )
 
 

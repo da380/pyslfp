@@ -48,7 +48,7 @@ build-backend = "poetry.core.masonry.api"
 "pyslfp/physics.py" = ["E741"]
 "pyslfp/linear_operators/*" = ["E741"]
 "tests/*" = ["E731", "E741"]
-"for_paper/*" = ["E741"]
+"Heathcote2026/*" = ["E741"]
 
 # For the sphere.py file, where 'l' is a common variable name for spherical
 # harmonic degree, ignore the ambiguous variable name warning (E741).

@@ -4,9 +4,10 @@ Extended Altimetry Bias Evaluation (3-Component Model)
 
 This script calculates the analytical method bias and error distribution for
 satellite altimetry using a 3-component physical model (Ice Thickness,
-Sterodynamic SSH, and Ocean Density). It strictly evaluates the difference
-between true Global Mean Sea Level (water column thickness change) and the
-standard SSH-based area-averaging estimator.
+Sterodynamic SL, and Ocean Density). It strictly evaluates the difference
+between the true global mean sea level rise (GMSLR, as water column
+thickness change) and the standard geocentric-sea-level (SSH)
+area-averaging estimator.
 """
 
 import argparse
@@ -69,13 +70,13 @@ def parse_arguments():
         "--ocean-dyn-scale-factor",
         type=float,
         default=0.2,
-        help="Ocean dynamic correlation scale.",
+        help="Sterodynamic correlation scale factor.",
     )
     parser.add_argument(
         "--ocean-dyn-std-factor",
         type=float,
         default=2.0,
-        help="Ocean dynamic std as factor of GMSLR std.",
+        help="Sterodynamic SL std as factor of the barystatic GMSLR std.",
     )
 
     parser.add_argument(
@@ -95,7 +96,7 @@ def parse_arguments():
         "--noise-std-factor",
         type=float,
         default=1.0,
-        help="Local (uncorrelated) altimetry noise std as factor of GMSLR std.",
+        help="Local (uncorrelated) altimetry noise std as factor of the barystatic GMSLR std.",
     )
     parser.add_argument(
         "--noise-corr-std-factor",
@@ -126,7 +127,7 @@ def parse_arguments():
         default=0.9,
         help=(
             "Magnitude of the long-wavelength anti-correlation between the "
-            "ocean dynamic and density fields (0 disables; must lie in "
+            "sterodynamic and density fields (0 disables; must lie in "
             "[0, 1); the sign is applied internally."
         ),
     )
@@ -195,7 +196,7 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     figures_to_save = {}
 
-    print("Initializing Earth State and 3-Component Physics Operators...")
+    print("Initialising Earth State and 3-Component Physics Operators...")
     state_dummy = EarthState.from_defaults(lmax=args.lmax)
     points = ocean_altimetry_points(state_dummy, spacing=args.spacing)
 
@@ -268,7 +269,7 @@ def main():
 
     # -- Plotting --
     if args.plot_maps:
-        print("Drawing a sample to visualize map components...")
+        print("Drawing a sample to visualise map components...")
         model_sample = model_prior.sample()
         ssh_sample = continuous_ssh_op(model_sample)
 
@@ -339,7 +340,7 @@ def main():
             zorder=10,
         )
 
-        figures_to_save["bias_ocean_dynamic"] = fig2
+        figures_to_save["bias_sterodynamic"] = fig2
 
         fig3, ax3 = sl.create_map_figure(figsize=(12, 6))
         _, im3 = sl.plot(
@@ -392,7 +393,7 @@ def main():
         ax4.gridliner.xlabel_style = {"size": 12, "color": "black"}
         ax4.gridliner.ylabel_style = {"size": 12, "color": "black"}
 
-        figures_to_save["bias_ssh_map"] = fig4
+        figures_to_save["bias_geocentric_sl_map"] = fig4
 
         fig5, ax5 = sl.create_map_figure(figsize=(12, 6))
         ax5.set_global()
@@ -429,7 +430,7 @@ def main():
         ax5.gridliner.xlabel_style = {"size": 12, "color": "black"}
         ax5.gridliner.ylabel_style = {"size": 12, "color": "black"}
 
-        figures_to_save["bias_ssh_points"] = fig5
+        figures_to_save["bias_altimetry_data"] = fig5
 
     err_samples = None
     if args.samples > 0:

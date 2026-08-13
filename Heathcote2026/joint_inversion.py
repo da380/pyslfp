@@ -62,7 +62,7 @@ def parse_arguments():
     parser.add_argument(
         "--plot-pdfs",
         action="store_true",
-        help="Plot 1D analytical PDFs of the GMSL estimate.",
+        help="Plot 1D analytical PDFs of the GMSLR estimate.",
     )
     parser.add_argument(
         "--plot-maps",
@@ -79,7 +79,7 @@ def parse_arguments():
             "Render the spatial maps (posterior expectations, pointwise "
             "stds and covariance-map columns) for all three inversions "
             "rather than the joint inversion only. Implies --plot-maps; "
-            "not implied by --all. QoI outputs (GMSL, GMSL split, "
+            "not implied by --all. QoI outputs (GMSLR, GMSLR split, "
             "regional decomposition) always cover all three cases."
         ),
     )
@@ -91,7 +91,7 @@ def parse_arguments():
     parser.add_argument(
         "--plot-gmsl-split",
         action="store_true",
-        help="Push forward onto the 2D GMSL split (barystatic vs steric).",
+        help="Push forward onto the 2D GMSLR split (barystatic vs steric).",
     )
     parser.add_argument(
         "--std-samples",
@@ -138,13 +138,13 @@ def parse_arguments():
         "--ocean-dyn-scale-factor",
         type=float,
         default=0.2,
-        help="Ocean dynamic correlation scale.",
+        help="Sterodynamic correlation scale factor.",
     )
     parser.add_argument(
         "--ocean-dyn-std-factor",
         type=float,
         default=2.0,
-        help="Ocean dynamic std as factor of GMSL std.",
+        help="Sterodynamic SL std as factor of the barystatic GMSLR std.",
     )
 
     parser.add_argument(
@@ -164,7 +164,7 @@ def parse_arguments():
         "--alt-noise-std-factor",
         type=float,
         default=1.0,
-        help="Local (uncorrelated) altimetry noise std as factor of GMSL std.",
+        help="Local (uncorrelated) altimetry noise std as factor of the barystatic GMSLR std.",
     )
     parser.add_argument(
         "--alt-noise-corr-std-factor",
@@ -172,7 +172,7 @@ def parse_arguments():
         default=0.05,
         help=(
             "Std of the optional large-scale correlated altimetry error "
-            "component, as a factor of the GMSL prior std (0 disables). "
+            "component, as a factor of the GMSLR prior std (0 disables). "
             "Represents long-wavelength systematics such as orbit and "
             "reference-frame errors; because it barely averages down, even "
             "small values (e.g. 0.02-0.05) set the error floor for "
@@ -209,7 +209,7 @@ def parse_arguments():
         default=0.9,
         help=(
             "Magnitude of the long-wavelength anti-correlation between the "
-            "ocean dynamic and density fields (0 disables; must lie in "
+            "sterodynamic and density fields (0 disables; must lie in "
             "[0, 1); the sign is applied internally."
         ),
     )
@@ -346,7 +346,7 @@ def plot_state_maps(
         std_ice, std_dyn, std_rho = std_fields
         vmax_std_ice, vmax_std_dyn, vmax_std_rho = std_vmaxes
         std_specs = [
-            (std_ice * ice_mask_mm, "Ice thickness change STD (mm)", vmax_std_ice),
+            (std_ice * ice_mask_mm, "Ice Thickness Change STD (mm)", vmax_std_ice),
             (std_dyn * ocean_mask_mm, "Sterodynamic SL Change STD (mm)", vmax_std_dyn),
             (
                 std_rho * ocean_mask_gm3,
@@ -379,7 +379,7 @@ def plot_state_maps(
         axes[0, j].set_title(col_labels[j], fontsize=16, fontweight="bold", pad=20)
 
     row_titles = [
-        "Ice thickness Change",
+        "Ice Thickness Change",
         "Sterodynamic SL Change",
         "Averaged Density Change",
     ]
@@ -464,7 +464,7 @@ def main():
 
     scale_mm = exact_phys["scale_mm"]
     print(
-        f"Implied GMSL prior standard deviation: {exact_meas['gmsl_std'] * scale_mm:.3f} mm"
+        f"Implied barystatic GMSLR prior standard deviation: {exact_meas['gmsl_std'] * scale_mm:.3f} mm"
     )
     if args.ocean_corr > 0.0:
         print(
@@ -605,9 +605,9 @@ def main():
         joint_data, solver, preconditioner=P_joint
     )
 
-    # ------------------ 5. GMSL ------------------
+    # ------------------ 5. GMSLR ------------------
     if args.plot_pdfs:
-        print("\nPlotting GMSL PDFs...")
+        print("\nPlotting GMSLR PDFs...")
         true_gmsl_op = (
             utils.true_gmsl_operator(
                 exact_phys["state"],
@@ -660,13 +660,13 @@ def main():
             )
             f_metrics.write("-" * 80 + "\n")
             f_metrics.write(
-                f"{'GMSL':<12} | {'Alt-Only':<12} | {post_gmsl_alt.kl_divergence(prior_gmsl_measure):<10.4f} | {prior_var:<12.4f} | {alt_var:<12.4f} | {alt_red:>6.2f}%\n"
+                f"{'GMSLR':<12} | {'Alt-Only':<12} | {post_gmsl_alt.kl_divergence(prior_gmsl_measure):<10.4f} | {prior_var:<12.4f} | {alt_var:<12.4f} | {alt_red:>6.2f}%\n"
             )
             f_metrics.write(
-                f"{'GMSL':<12} | {'GRACE-Only':<12} | {post_gmsl_grace.kl_divergence(prior_gmsl_measure):<10.4f} | {prior_var:<12.4f} | {grace_var:<12.4f} | {grace_red:>6.2f}%\n"
+                f"{'GMSLR':<12} | {'GRACE-Only':<12} | {post_gmsl_grace.kl_divergence(prior_gmsl_measure):<10.4f} | {prior_var:<12.4f} | {grace_var:<12.4f} | {grace_red:>6.2f}%\n"
             )
             f_metrics.write(
-                f"{'GMSL':<12} | {'Joint':<12} | {post_gmsl_joint.kl_divergence(prior_gmsl_measure):<10.4f} | {prior_var:<12.4f} | {joint_var:<12.4f} | {joint_red:>6.2f}%\n"
+                f"{'GMSLR':<12} | {'Joint':<12} | {post_gmsl_joint.kl_divergence(prior_gmsl_measure):<10.4f} | {prior_var:<12.4f} | {joint_var:<12.4f} | {joint_red:>6.2f}%\n"
             )
 
         measures = [alt_gmsl_measure, post_gmsl_alt, post_gmsl_grace, post_gmsl_joint]
@@ -681,11 +681,11 @@ def main():
             xlabel="Global Mean Sea Level Rise (mm)",
             posterior_labels=labels,
         )
-        figures_to_save["gmsl_pdf"] = fig_pdf
+        figures_to_save["gmslr_pdf"] = fig_pdf
 
-    # ---------- 5b. GMSL SPLIT: BARYSTATIC vs STERIC ----------
+    # ---------- 5b. GMSLR SPLIT: BARYSTATIC vs STERIC ----------
     if args.plot_gmsl_split:
-        print("\nPushing forward onto the 2D GMSL split (barystatic, steric)...")
+        print("\nPushing forward onto the 2D GMSLR split (barystatic, steric)...")
         bary_op, steric_gmsl_op, steric_direct_op, dyn_direct_op = (
             utils.gmsl_split_operators(
                 exact_phys["state"],
@@ -721,14 +721,14 @@ def main():
         def correlation(cov):
             return cov[0, 1] / np.sqrt(cov[0, 0] * cov[1, 1])
 
-        # Consistency checks. The residual steric GMSL (total minus
+        # Consistency checks. The residual steric GMSLR (total minus
         # barystatic) should equal the direct ocean average of the steric
         # sea level: their difference diagnoses the SLE mass balance
         # (solver convergence), independently of the prior constraint.
         # Separately, under the prior mass constraint the ocean average of
         # the Sterodynamic SL Change equals the direct steric average, so their
-        # difference (the ocean mean of the manometric part, <zeta>_O)
-        # diagnoses the constraint.
+        # difference (the ocean mean of the dynamic manometric part,
+        # DMSLC) diagnoses the constraint.
         steric_resid_mm = steric_gmsl_op(true_model)[0] * scale_mm
         steric_direct_mm = steric_direct_op(true_model)[0] * scale_mm
         dyn_direct_mm = dyn_direct_op(true_model)[0] * scale_mm
@@ -748,7 +748,7 @@ def main():
                 f"{joint_split.kl_divergence(prior_split):<12.4f}\n"
             )
             f_metrics.write(
-                f"{'Bary-Steric corr':<22} | {correlation(prior_cov_mat):<+12.4f} | "
+                f"{'Barystatic-Steric corr':<22} | {correlation(prior_cov_mat):<+12.4f} | "
                 f"{correlation(alt_cov_mat):<+12.4f} | "
                 f"{correlation(grace_cov_mat):<+12.4f} | "
                 f"{correlation(joint_cov_mat):<+12.4f}\n"
@@ -759,8 +759,8 @@ def main():
                 f"diff = {steric_resid_mm - steric_direct_mm:.3e} mm\n"
             )
             f_metrics.write(
-                f"Constraint check:        <dyn SSH>_O = {dyn_direct_mm:.6f} mm | "
-                f"<zeta>_O = {dyn_direct_mm - steric_direct_mm:.3e} mm "
+                f"Constraint check:        <sterodynamic SL>_O = {dyn_direct_mm:.6f} mm | "
+                f"<DMSLC>_O = {dyn_direct_mm - steric_direct_mm:.3e} mm "
                 f"(should be ~0)\n"
             )
             f_metrics.write("-" * 125 + "\n")
@@ -795,7 +795,7 @@ def main():
             title="",
             fill_density=False,
         )
-        figures_to_save["gmsl_split_corner_altimetry"] = plt.gcf()
+        figures_to_save["gmslr_split_corner_altimetry"] = plt.gcf()
 
         inf.plot_corner_distributions(
             grace_split,
@@ -805,7 +805,7 @@ def main():
             title="",
             fill_density=False,
         )
-        figures_to_save["gmsl_split_corner_grace"] = plt.gcf()
+        figures_to_save["gmslr_split_corner_grace"] = plt.gcf()
 
         inf.plot_corner_distributions(
             joint_split,
@@ -815,7 +815,7 @@ def main():
             title="",
             fill_density=False,
         )
-        figures_to_save["gmsl_split_corner_joint"] = plt.gcf()
+        figures_to_save["gmslr_split_corner_joint"] = plt.gcf()
 
     # ------------------ 6. MAPPING & COVARIANCE ------------------
     if args.plot_maps:
@@ -964,14 +964,14 @@ def main():
             return r"Covariance (mm $\cdot$ g m$^{-3}$)"
 
         row_titles = [
-            "Ice thickness Change",
+            "Ice Thickness Change",
             "Sterodynamic SL Change",
             "Averaged Density Change",
         ]
 
         scenarios = [
             ("Ice", 0, (-78.0, -110.0), "WAIS"),
-            ("Ocean Dyn", 1, (30.0, -45.0), "North_Atlantic"),
+            ("Sterodynamic", 1, (30.0, -45.0), "North_Atlantic"),
         ]
 
         def plot_cov_row(axes, fields, pt, label):
@@ -1073,47 +1073,10 @@ def main():
         state = exact_phys["state"]
         load_space = exact_phys["load_space"]
         fp_op = exact_phys["fp_op"]
-        joint_space = exact_meas["model_prior"].domain
-
-        masks = [state.get_projection(r, value=0.0) for r in regions_to_analyze]
-        avg_op = sl.linear_operators.averaging_operator(state, load_space, masks)
-
-        # Dynamic manometric SL = the manometric part (zeta = eta - eta_s) PLUS
-        # the regional GRD response to the total ocean load (which is exactly
-        # the load of zeta, the steric part being column-mass neutral).
-        # Steric SL loads nothing and so has no induced response. Together
-        # with the barystatic-GRD term, the three coordinates sum exactly to
-        # the regional average of the true sea level change.
-        steric_op_field = utils.steric_sea_level_operator(
-            state, load_space
-        ) @ joint_space.subspace_projection(2)
-        op_steric = avg_op @ steric_op_field
-
-        barystatic_sl_op = fp_op.codomain.subspace_projection(0) @ fp_op
-
-        dyn_to_load = sl.linear_operators.sea_level_change_to_load_operator(
-            state, load_space, load_space
+        op_sslc, op_dmslc, op_bmslc = utils.regional_decomposition_operators(
+            state, load_space, fp_op, regions_to_analyze
         )
-        rho_to_load = sl.linear_operators.ocean_density_change_to_load_operator(
-            state, load_space, load_space
-        )
-        ocean_load_op = dyn_to_load @ joint_space.subspace_projection(
-            1
-        ) + rho_to_load @ joint_space.subspace_projection(2)
-
-        zeta_field_op = joint_space.subspace_projection(1) - steric_op_field
-        op_dyn = avg_op @ (zeta_field_op + barystatic_sl_op @ ocean_load_op)
-
-        ice_to_load = sl.linear_operators.ice_thickness_change_to_load_operator(
-            state, load_space, load_space
-        ) @ sl.linear_operators.ice_projection_operator(state, load_space)
-        op_ice_fp = (
-            avg_op @ barystatic_sl_op @ ice_to_load @ joint_space.subspace_projection(0)
-        )
-
-        combined_op = (
-            inf.ColumnLinearOperator([op_dyn, op_steric, op_ice_fp]) * scale_mm
-        )
+        combined_op = inf.ColumnLinearOperator([op_sslc, op_dmslc, op_bmslc]) * scale_mm
         final_op = combined_op.codomain.coordinate_projection @ combined_op
 
         true_vals_mm = final_op(true_model)
@@ -1137,8 +1100,8 @@ def main():
         ).with_dense_covariance(parallel=args.parallel, n_jobs=min(3, args.max_jobs))
 
         labels = [
-            "DMSLC (mm)",
             "SSLC (mm)",
+            "DMSLC (mm)",
             "BMSLC (mm)",
         ]
 
@@ -1175,8 +1138,9 @@ def main():
                 f"\n\nRegional Signal Separation ({regions_to_analyze[0]})\n"
             )
             f_metrics.write(
-                "(Components sum to the regional mean sea level change; the\n"
-                " dynamic component includes its GRD response.)\n"
+                "(Components sum to the regional mean sea level change; DMSLC\n"
+                " includes the GRD response to the ocean load, BMSLC that to\n"
+                " the land-ice load.)\n"
             )
             f_metrics.write("=" * 135 + "\n")
 
@@ -1191,7 +1155,7 @@ def main():
                 f"{'Total Var (Trace) mm²':<22} | {pr_trace:<12.4f} | {alt_trace:<12.4f} | {alt_trace_red:>9.2f}% | {grace_trace:<12.4f} | {grace_trace_red:>9.2f}% | {joint_trace:<12.4f} | {joint_trace_red:>9.2f}%\n"
             )
             f_metrics.write(
-                f"{'Generalized Var (Det)':<22} | {pr_det:<12.4e} | {alt_det:<12.4e} | {alt_det_red:>9.2f}% | {grace_det:<12.4e} | {grace_det_red:>9.2f}% | {joint_det:<12.4e} | {joint_det_red:>9.2f}%\n"
+                f"{'Generalised Var (Det)':<22} | {pr_det:<12.4e} | {alt_det:<12.4e} | {alt_det_red:>9.2f}% | {grace_det:<12.4e} | {grace_det_red:>9.2f}% | {joint_det:<12.4e} | {joint_det_red:>9.2f}%\n"
             )
             f_metrics.write("-" * 135 + "\n")
 
@@ -1200,7 +1164,7 @@ def main():
             )
             f_metrics.write("-" * 135 + "\n")
 
-            comp_names = ["DMSLC", "SSLC", "BMSLC"]
+            comp_names = ["SSLC", "DMSLC", "BMSLC"]
             for i, name in enumerate(comp_names):
                 pr_v = prior_cov_mat[i, i]
                 a_v = alt_cov_mat[i, i]

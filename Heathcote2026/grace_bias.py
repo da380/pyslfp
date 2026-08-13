@@ -221,7 +221,7 @@ def main():
             symmetric=True,
         )
 
-        im1.colorbar.set_label("Direct Load EWT (mm)", fontsize=16)
+        im1.colorbar.set_label("Direct Load (mm EWT)", fontsize=16)
         im1.colorbar.ax.tick_params(labelsize=14)
 
         ax1.gridliner.xlabel_style = {"size": 12, "color": "black"}
@@ -251,7 +251,7 @@ def main():
             symmetric=True,
         )
 
-        im2.colorbar.set_label("Induced Load EWT (mm)", fontsize=16)
+        im2.colorbar.set_label("Induced Load  (mm EWT)", fontsize=16)
         im2.colorbar.ax.tick_params(labelsize=14)
 
         ax2.gridliner.xlabel_style = {"size": 12, "color": "black"}
@@ -347,7 +347,7 @@ def main():
         mu, std = err_means[i], err_stds[i]
 
         norm_std = true_stds[i]
-        norm_label = r"Error Standardized by True Signal $\sigma$"
+        norm_label = r"Error Standardised by True Signal $\sigma$"
 
         if args.samples > 0:
             ax.hist(

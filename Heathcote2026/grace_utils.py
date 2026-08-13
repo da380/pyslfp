@@ -21,7 +21,7 @@ from pyslfp.linear_operators import (
 
 
 def build_physics_components(lmax, load_order, load_scale_km):
-    """Initializes the Earth state, Sobolev spaces, and fingerprint operator."""
+    """Initialises the Earth state, Sobolev spaces, and fingerprint operator."""
     state = EarthState.from_defaults(lmax=lmax)
 
     length_scale = state.model.parameters.length_scale
@@ -161,7 +161,7 @@ def build_total_load_operator(state, response_space, load_space, finger_print_op
 def get_regional_averaging(
     state, load_space, /, *, regions_dict=None, smoothing_scale_km=None
 ):
-    """Sets up the averaging operator using specialized geophysical basins."""
+    """Sets up the averaging operator using specialised geophysical basins."""
 
     if regions_dict is None:
         regions_dict = {

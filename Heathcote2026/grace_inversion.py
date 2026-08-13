@@ -266,9 +266,9 @@ def main():
 
             with open(metrics_file, "w") as f_metrics:
                 f_metrics.write(
-                    f"{'Region':<16} | {'KL Divergence':<15} | {'Prior Var (mm²)':<17} | {'Post Var (mm²)':<16} | {'Variance Reduction':<18}\n"
+                    f"{'Region':<16} | {'KL Divergence':<15} | {'Prior Var (mm² EWT)':<19} | {'Post Var (mm² EWT)':<18} | {'Variance Reduction':<18}\n"
                 )
-                f_metrics.write("-" * 92 + "\n")
+                f_metrics.write("-" * 96 + "\n")
 
                 ncols = 2
                 nrows = int(np.ceil(len(region_names) / ncols))
@@ -307,7 +307,7 @@ def main():
                     var_reduction = 100.0 * (1.0 - (post_var / prior_var))
 
                     f_metrics.write(
-                        f"{region:<16} | {kl_div:<15.2f} | {prior_var:<17.2f} | {post_var:<16.2f} | {var_reduction:>16.2f}%\n"
+                        f"{region:<16} | {kl_div:<15.2f} | {prior_var:<19.2f} | {post_var:<18.2f} | {var_reduction:>16.2f}%\n"
                     )
 
                     inf.plot_1d_distributions(
@@ -363,11 +363,14 @@ def main():
 
             # Dynamically generate component names and LaTeX labels (order: m=0, m=-1, m=1, etc.)
             comp_names = [f"({l},0)"]
-            labels = [rf"$\zeta_{{{l},0}}$ (mm)"]
+            labels = [rf"$\zeta_{{{l},0}}$ (mm EWT)"]
             for m in range(1, l + 1):
                 comp_names.extend([f"({l},{-m})", f"({l},{m})"])
                 labels.extend(
-                    [rf"$\zeta_{{{l},{-m}}}$ (mm)", rf"$\zeta_{{{l},{m}}}$ (mm)"]
+                    [
+                        rf"$\zeta_{{{l},{-m}}}$ (mm EWT)",
+                        rf"$\zeta_{{{l},{m}}}$ (mm EWT)",
+                    ]
                 )
 
             with open(metrics_file, "a") as f_metrics:
@@ -377,8 +380,8 @@ def main():
                 f_metrics.write(f"Prior Total Var (Trace):  {prior_trace:.4f} mm²\n")
                 f_metrics.write(f"Post Total Var (Trace):   {post_trace:.4f} mm²\n")
                 f_metrics.write(f"Overall Trace Reduction:  {trace_reduction:.2f}%\n")
-                f_metrics.write(f"Prior Generalized Var:    {prior_det:.4e}\n")
-                f_metrics.write(f"Post Generalized Var:     {post_det:.4e}\n")
+                f_metrics.write(f"Prior Generalised Var:    {prior_det:.4e}\n")
+                f_metrics.write(f"Post Generalised Var:     {post_det:.4e}\n")
                 f_metrics.write("-" * 65 + "\n")
                 f_metrics.write(
                     f"{'Component':<18} | {'Prior Var':<12} | {'Post Var':<12} | {'Reduction'}\n"

@@ -139,6 +139,23 @@ def parse_arguments():
         "--noise-std-factor", type=float, default=0.1414, help="Noise std factor."
     )
 
+    # --- Parallelisation ---
+    parser.add_argument(
+        "--parallel",
+        action="store_true",
+        help="Enable process-level parallelism at the supported call sites.",
+    )
+    parser.add_argument(
+        "--max-jobs",
+        type=int,
+        default=os.cpu_count() or 1,
+        help=(
+            "Cap on the number of worker processes when --parallel is "
+            "set; call sites with fewer independent tasks use fewer. "
+            "Ignored without --parallel."
+        ),
+    )
+
     return parser.parse_args()
 
 
@@ -155,8 +172,6 @@ def main():
     output_dir = "output_plots_grace_inversion"
     os.makedirs(output_dir, exist_ok=True)
     figures_to_save = {}
-
-    inf.configure_threading(n_threads=1)
 
     # ------------------ 1. EXACT MODEL SETUP ------------------
     print(f"\nBuilding EXACT physical operators (lmax={args.lmax})...")
@@ -237,11 +252,11 @@ def main():
 
         post_avg_measure = model_posterior.affine_mapping(
             operator=tot_avg_op
-        ).with_dense_covariance(parallel=True, n_jobs=4)
+        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(4, args.max_jobs))
 
         prior_avg_measure = model_prior.affine_mapping(
             operator=tot_avg_op
-        ).with_dense_covariance(parallel=True, n_jobs=4)
+        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(4, args.max_jobs))
 
         true_avg = tot_avg_op(model)
 
@@ -321,11 +336,15 @@ def main():
 
             target_deg_prior = model_prior.affine_mapping(
                 operator=target_deg_op
-            ).with_dense_covariance(parallel=True, n_jobs=min(2 * l + 1, 10))
+            ).with_dense_covariance(
+                parallel=args.parallel, n_jobs=min(2 * l + 1, args.max_jobs)
+            )
 
             target_deg_post = model_posterior.affine_mapping(
                 operator=target_deg_op
-            ).with_dense_covariance(parallel=True, n_jobs=min(2 * l + 1, 10))
+            ).with_dense_covariance(
+                parallel=args.parallel, n_jobs=min(2 * l + 1, args.max_jobs)
+            )
 
             kl_div = target_deg_post.kl_divergence(target_deg_prior)
 

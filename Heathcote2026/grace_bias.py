@@ -139,6 +139,23 @@ def parse_arguments():
         help="Remove degree 1 components from the prior measure.",
     )
 
+    # --- Parallelisation ---
+    parser.add_argument(
+        "--parallel",
+        action="store_true",
+        help="Enable process-level parallelism at the supported call sites.",
+    )
+    parser.add_argument(
+        "--max-jobs",
+        type=int,
+        default=os.cpu_count() or 1,
+        help=(
+            "Cap on the number of worker processes when --parallel is "
+            "set; call sites with fewer independent tasks use fewer. "
+            "Ignored without --parallel."
+        ),
+    )
+
     return parser.parse_args()
 
 
@@ -273,7 +290,9 @@ def main():
 
     if args.samples > 0:
         print(f"Drawing {args.samples} MC samples...")
-        joint_samples_list = joint_meas.samples(args.samples)
+        joint_samples_list = joint_meas.samples(
+            args.samples, parallel=args.parallel, n_jobs=args.max_jobs
+        )
         err_samples = np.zeros((args.samples, len(region_names)))
         for idx, sample in enumerate(joint_samples_list):
             err_samples[idx, :] = err_op(sample) * scale_mm
@@ -336,7 +355,6 @@ def main():
         ax.set_xlabel("Error (mm)", fontsize=12)
         ax.axvline(0, color="black", linestyle="--", linewidth=1.5)
         ax.grid(True, linestyle=":", alpha=0.6)
-        # ax.legend(loc="best", fontsize=9)
 
         if i == 1:
             ax.legend(loc="best", fontsize=9)

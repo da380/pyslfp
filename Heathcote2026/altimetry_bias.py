@@ -167,6 +167,23 @@ def parse_arguments():
         "--prior-shift", type=float, default=1.0, help="Prior mean shift factor."
     )
 
+    # --- Parallelisation ---
+    parser.add_argument(
+        "--parallel",
+        action="store_true",
+        help="Enable process-level parallelism at the supported call sites.",
+    )
+    parser.add_argument(
+        "--max-jobs",
+        type=int,
+        default=os.cpu_count() or 1,
+        help=(
+            "Cap on the number of worker processes when --parallel is "
+            "set; call sites with fewer independent tasks use fewer. "
+            "Ignored without --parallel."
+        ),
+    )
+
     return parser.parse_args()
 
 
@@ -417,7 +434,9 @@ def main():
         print(
             f"Drawing {args.samples} Monte Carlo samples to validate analytical bias..."
         )
-        joint_samples_list = joint_meas.samples(args.samples)
+        joint_samples_list = joint_meas.samples(
+            args.samples, parallel=args.parallel, n_jobs=args.max_jobs
+        )
         err_samples = np.array(
             [op_err(sample)[0] * scale_mm for sample in joint_samples_list]
         )

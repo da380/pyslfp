@@ -250,6 +250,23 @@ def parse_arguments():
         "--prior-shift", type=float, default=1.0, help="Prior mean shift factor."
     )
 
+    # --- Parallelisation ---
+    parser.add_argument(
+        "--parallel",
+        action="store_true",
+        help="Enable process-level parallelism at the supported call sites.",
+    )
+    parser.add_argument(
+        "--max-jobs",
+        type=int,
+        default=os.cpu_count() or 1,
+        help=(
+            "Cap on the number of worker processes when --parallel is "
+            "set; call sites with fewer independent tasks use fewer. "
+            "Ignored without --parallel."
+        ),
+    )
+
     return parser.parse_args()
 
 
@@ -404,7 +421,6 @@ def main():
     points = ocean_altimetry_points(state_dummy, spacing=args.spacing)
     print(f"Generated {len(points)} ocean altimetry observation points.")
 
-    inf.configure_threading(n_threads=1)
     regions_to_analyze = ["Tasman Sea"]
 
     # ------------------ 1. EXACT MODEL SETUP ------------------
@@ -534,7 +550,9 @@ def main():
         alt_noise_corr_std_factor=args.alt_noise_corr_std_factor,
     )
 
-    woodbury_solver = inf.LUSolver(galerkin=True, parallel=False, n_jobs=1)
+    woodbury_solver = inf.LUSolver(
+        galerkin=True, parallel=args.parallel, n_jobs=args.max_jobs
+    )
     alpha = 0.1
 
     # The preconditioners use the local (uncorrelated) altimetry noise
@@ -682,17 +700,17 @@ def main():
         prior_split = (
             exact_meas["model_prior"]
             .affine_mapping(operator=final_split_op)
-            .with_dense_covariance(parallel=False, n_jobs=1)
+            .with_dense_covariance(parallel=args.parallel, n_jobs=min(2, args.max_jobs))
         )
         alt_split = post_alt.affine_mapping(
             operator=final_split_op
-        ).with_dense_covariance(parallel=False, n_jobs=1)
+        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(2, args.max_jobs))
         grace_split = post_grace.affine_mapping(
             operator=final_split_op
-        ).with_dense_covariance(parallel=False, n_jobs=1)
+        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(2, args.max_jobs))
         joint_split = post_joint.affine_mapping(
             operator=final_split_op
-        ).with_dense_covariance(parallel=False, n_jobs=1)
+        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(2, args.max_jobs))
 
         prior_cov_mat = prior_split.covariance.matrix(dense=True)
         alt_cov_mat = alt_split.covariance.matrix(dense=True)
@@ -851,7 +869,9 @@ def main():
                     f"{args.std_samples} {label} samples..."
                 )
                 post_ice, post_dyn, post_rho = expectations[name]
-                samples = post.samples(args.std_samples, parallel=False, n_jobs=1)
+                samples = post.samples(
+                    args.std_samples, parallel=args.parallel, n_jobs=args.max_jobs
+                )
                 var_ice, var_dyn, var_rho = (
                     load_space.zero,
                     load_space.zero,
@@ -1100,20 +1120,20 @@ def main():
         prior_meas = (
             exact_meas["model_prior"]
             .affine_mapping(operator=final_op)
-            .with_dense_covariance(parallel=False, n_jobs=1)
+            .with_dense_covariance(parallel=args.parallel, n_jobs=min(3, args.max_jobs))
         )
         print("  -> Altimetry-only push-forward (3 posterior solves)...")
         post_alt_meas = post_alt.affine_mapping(
             operator=final_op
-        ).with_dense_covariance(parallel=False, n_jobs=1)
+        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(3, args.max_jobs))
         print("  -> GRACE-only push-forward (3 posterior solves)...")
         post_grace_meas = post_grace.affine_mapping(
             operator=final_op
-        ).with_dense_covariance(parallel=False, n_jobs=1)
+        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(3, args.max_jobs))
         print("  -> Joint push-forward (3 posterior solves)...")
         post_joint_meas = post_joint.affine_mapping(
             operator=final_op
-        ).with_dense_covariance(parallel=False, n_jobs=1)
+        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(3, args.max_jobs))
 
         labels = [
             "Dynamic Manometric SL (mm)",

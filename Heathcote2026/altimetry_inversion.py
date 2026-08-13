@@ -197,6 +197,23 @@ def parse_arguments():
         "--prior-shift", type=float, default=1.0, help="Prior mean shift factor."
     )
 
+    # --- Parallelisation ---
+    parser.add_argument(
+        "--parallel",
+        action="store_true",
+        help="Enable process-level parallelism at the supported call sites.",
+    )
+    parser.add_argument(
+        "--max-jobs",
+        type=int,
+        default=os.cpu_count() or 1,
+        help=(
+            "Cap on the number of worker processes when --parallel is "
+            "set; call sites with fewer independent tasks use fewer. "
+            "Ignored without --parallel."
+        ),
+    )
+
     return parser.parse_args()
 
 
@@ -219,7 +236,6 @@ def main():
     state_dummy = EarthState.from_defaults(lmax=args.lmax)
     points = ocean_altimetry_points(state_dummy, spacing=args.spacing)
     print(f"Generated {len(points)} ocean altimetry observation points.")
-    inf.configure_threading(n_threads=1)
 
     regions_to_analyze = ["Tasman Sea"]
 
@@ -323,7 +339,9 @@ def main():
     )
 
     print("Constructing Woodbury preconditioner from unconstrained surrogate model...")
-    woodbury_solver = inf.LUSolver(galerkin=True, parallel=True, n_jobs=8)
+    woodbury_solver = inf.LUSolver(
+        galerkin=True, parallel=args.parallel, n_jobs=args.max_jobs
+    )
     woodbury_preconditioner = inverse_problem.surrogate_woodbury_data_preconditioner(
         woodbury_solver,
         alternate_forward_operator=surr_forward_op,
@@ -403,10 +421,10 @@ def main():
 
         prior_split = model_prior.affine_mapping(
             operator=final_split_op
-        ).with_dense_covariance(parallel=True, n_jobs=2)
+        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(2, args.max_jobs))
         post_split = model_posterior.affine_mapping(
             operator=final_split_op
-        ).with_dense_covariance(parallel=True, n_jobs=2)
+        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(2, args.max_jobs))
 
         kl_div = post_split.kl_divergence(prior_split)
 
@@ -510,7 +528,7 @@ def main():
                 f"\nComputing pointwise standard deviation from {args.std_samples} posterior samples..."
             )
             samples = model_posterior.samples(
-                args.std_samples, parallel=True, n_jobs=14
+                args.std_samples, parallel=args.parallel, n_jobs=args.max_jobs
             )
             var_ice, var_dyn, var_rho = (
                 load_space.zero,
@@ -919,10 +937,10 @@ def main():
         true_vals = final_op(model)
         post_meas = model_posterior.affine_mapping(
             operator=final_op
-        ).with_dense_covariance(parallel=True, n_jobs=3)
+        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(3, args.max_jobs))
         prior_meas = model_prior.affine_mapping(
             operator=final_op
-        ).with_dense_covariance(parallel=True, n_jobs=3)
+        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(3, args.max_jobs))
 
         kl_div = post_meas.kl_divergence(prior_meas)
 

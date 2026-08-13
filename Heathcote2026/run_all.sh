@@ -85,7 +85,7 @@ PYTHON="${PYTHON:-python}"
 
 # Shared by all five scripts (identical names and defaults everywhere).
 COMMON=(
-    --lmax 64
+    --lmax 256
     --load-order 2.0
     --load-scale-km 500.0
     --prior-kernel sobolev
@@ -94,7 +94,7 @@ COMMON=(
 )
 
 # GRACE observation truncation: grace_bias, grace_inversion, joint_inversion.
-OBS_DEGREE=(--obs-degree 32)
+OBS_DEGREE=(--obs-degree 100)
 
 # Preconditioner truncation: altimetry_inversion, joint_inversion only.
 SURROGATE=(--surrogate-degree 32)
@@ -102,7 +102,7 @@ SURROGATE=(--surrogate-degree 32)
 # Altimetry-side model priors: altimetry_bias, altimetry_inversion,
 # joint_inversion (identical names and defaults in all three).
 ALT_PRIOR=(
-    --spacing 4.0
+    --spacing 1.0
     --ice-scale-factor 1.0
     --ice-std-mm 10.0
     --ocean-dyn-scale-factor 0.2

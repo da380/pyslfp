@@ -66,9 +66,17 @@ from pyslfp.linear_operators import (
 
 # Post-processing helpers shared verbatim with the altimetry pipeline,
 # re-exported here so the joint scripts keep using joint_utils.<name>.
+# The redundant "x as x" aliases mark these as intentional re-exports:
+# without them, unused-import cleanup (ruff/pyflakes F401, IDE "optimise
+# imports") strips the ones this module does not call itself, silently
+# breaking the scripts.
 from altimetry_utils import (
-    barystatic_gmsl_weighting,
-    effective_steric_scale,
+    barystatic_gmsl_weighting as barystatic_gmsl_weighting,
+    effective_steric_scale as effective_steric_scale,
+    gmsl_split_operators as gmsl_split_operators,
+    regional_decomposition_operators as regional_decomposition_operators,
+    steric_sea_level_operator as steric_sea_level_operator,
+    true_gmsl_operator as true_gmsl_operator,
 )
 
 

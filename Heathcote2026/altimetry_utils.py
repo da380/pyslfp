@@ -53,8 +53,6 @@ from pyslfp.linear_operators import (
     ice_projection_operator,
     ocean_projection_operator,
     ocean_average_operator,
-    averaging_operator,
-    l2_products_operator,
 )
 
 
@@ -141,13 +139,14 @@ def build_physics_components(
         continuous_sl_operator,
         forward_operator,
         scale_mm,
+        point_eval,
     )
 
 
 def true_gmsl_operator(state, load_space, continuous_sl_operator):
     """Returns the true spatial integration of continuous Sea Level."""
     true_avg_weight = state.ocean_projection(value=0.0) / state.ocean_area
-    true_avg_op = l2_products_operator(load_space, [true_avg_weight])
+    true_avg_op = load_space.l2_products_operator([true_avg_weight])
     return true_avg_op @ continuous_sl_operator
 
 
@@ -233,14 +232,14 @@ def gmsl_split_operators(state, load_space, continuous_sl_operator):
     """
     joint_space = continuous_sl_operator.domain
 
-    bary_avg_op = l2_products_operator(load_space, [barystatic_gmsl_weighting(state)])
+    bary_avg_op = load_space.l2_products_operator([barystatic_gmsl_weighting(state)])
     bary_op = bary_avg_op @ joint_space.subspace_projection(0)
 
     total_op = true_gmsl_operator(state, load_space, continuous_sl_operator)
     steric_op = total_op - bary_op
 
     ocean_weight = state.ocean_projection(value=0.0) / state.ocean_area
-    ocean_avg_op = l2_products_operator(load_space, [ocean_weight])
+    ocean_avg_op = load_space.l2_products_operator([ocean_weight])
     steric_direct_op = (
         ocean_avg_op
         @ steric_sea_level_operator(state, load_space)
@@ -273,6 +272,7 @@ def build_measures(
     prior_kernel="heat",
     prior_order=1.0,
     noise_corr_std_factor=0.0,
+    point_evaluation_operator=None,
 ):
     """
     Constructs the 3-component joint prior and observation noise measures.
@@ -281,6 +281,14 @@ def build_measures(
     Note: ocean_rho_std_factor sets the effective steric sea level std as a
     fraction of the OCEAN DYNAMIC SSH std (not, as previously, of the
     GMSL std). ocean_dyn_std_factor remains referenced to the GMSL std.
+
+    The GMSL prior std used for these referencings is the true barystatic
+    GMSL std, the plain L2 product of the ice field with the barystatic
+    weighting (as in gmsl_split_operators). It was previously computed
+    with averaging_operator, whose normalisation inflated it by
+    rho_w*A_O/(rho_i*A_land) (about 2.7); at fixed std factors the ocean
+    dynamic, density and altimetry noise stds are therefore smaller by
+    that factor than in earlier runs.
 
     If ocean_corr > 0 (exact model only; requires pygeoinf >= 1.8.4), the
     (Dyn, Rho) marginals are combined into a correlated invariant measure
@@ -323,7 +331,11 @@ def build_measures(
     The correlated component barely averages down and so sets an
     irreducible error floor on large-scale functionals such as GMSL. The
     surrogate always uses the local component alone, so the Woodbury
-    preconditioner is built from the uncorrelated noise.
+    preconditioner is built from the uncorrelated noise. If
+    point_evaluation_operator is supplied (the one already built inside
+    build_physics_components), it is reused for the correlated component
+    instead of constructing a second, functionally identical dense
+    operator.
     """
 
     if not 0.0 <= ocean_corr < 1.0:
@@ -367,8 +379,12 @@ def build_measures(
     ice_std = ice_std_mm / scale_mm
     ice_prior = load_measure(ice_scale, ice_std)
 
-    # Calculate GMSL variance to scale ocean and noise priors appropriately
-    B = averaging_operator(state, load_space, [barystatic_gmsl_weighting(state)])
+    # Calculate GMSL variance to scale ocean and noise priors appropriately.
+    # The plain L2 product with the barystatic weighting gives the true
+    # barystatic GMSL (as in gmsl_split_operators). Previously
+    # averaging_operator was used here, whose normalisation by the weight
+    # integral inflated this std by rho_w*A_O/(rho_i*A_land) (about 2.7).
+    B = load_space.l2_products_operator([barystatic_gmsl_weighting(state)])
     GMSL_prior_measure = ice_prior.affine_mapping(operator=B)
     GMSL_prior_std = np.sqrt(GMSL_prior_measure.covariance.matrix(dense=True)[0, 0])
 
@@ -473,10 +489,12 @@ def build_measures(
     data_space = inf.EuclideanSpace(n_points)
     noise_meas = inf.GaussianMeasure.from_standard_deviation(data_space, noise_std)
     if noise_corr_std_factor > 0.0 and not is_surrogate:
+        if point_evaluation_operator is None:
+            point_evaluation_operator = load_space.point_evaluation_operator(points)
         corr_noise_meas = load_measure(
             load_space.scale * noise_corr_scale_factor,
             noise_corr_std_factor * GMSL_prior_std,
-        ).affine_mapping(operator=load_space.point_evaluation_operator(points))
+        ).affine_mapping(operator=point_evaluation_operator)
         noise_meas = noise_meas + corr_noise_meas
 
     # Prior shift

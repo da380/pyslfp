@@ -459,6 +459,7 @@ def main():
         prior_kernel=args.prior_kernel,
         prior_order=args.prior_order,
         alt_noise_corr_std_factor=args.alt_noise_corr_std_factor,
+        point_evaluation_operator=exact_phys["point_eval"],
     )
 
     scale_mm = exact_phys["scale_mm"]

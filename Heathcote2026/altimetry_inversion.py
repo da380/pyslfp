@@ -241,10 +241,17 @@ def main():
 
     # ------------------ 1. EXACT MODEL SETUP ------------------
     print(f"\nBuilding EXACT 3-Component physical operators (lmax={args.lmax})...")
-    state, load_space, fp_op, continuous_ssh, continuous_sl, forward_op, mm_scale = (
-        utils.build_physics_components(
-            args.lmax, args.load_order, args.load_scale_km, points, is_surrogate=False
-        )
+    (
+        state,
+        load_space,
+        fp_op,
+        continuous_ssh,
+        continuous_sl,
+        forward_op,
+        mm_scale,
+        point_eval,
+    ) = utils.build_physics_components(
+        args.lmax, args.load_order, args.load_scale_km, points, is_surrogate=False
     )
 
     ocean_mask_mm = mm_scale * state.ocean_projection(value=0.0)
@@ -274,6 +281,7 @@ def main():
         prior_kernel=args.prior_kernel,
         prior_order=args.prior_order,
         noise_corr_std_factor=args.noise_corr_std_factor,
+        point_evaluation_operator=point_eval,
     )
 
     print(f"Implied GMSL prior standard deviation: {GMSL_prior_std * mm_scale:.3f} mm")
@@ -306,7 +314,7 @@ def main():
     print(
         f"\nBuilding SURROGATE operators (lmax={args.surrogate_degree}) for preconditioning..."
     )
-    surr_state, surr_load_space, _, _, _, surr_forward_op, _ = (
+    surr_state, surr_load_space, _, _, _, surr_forward_op, _, _ = (
         utils.build_physics_components(
             args.surrogate_degree,
             args.load_order,

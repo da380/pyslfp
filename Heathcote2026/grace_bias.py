@@ -221,11 +221,24 @@ def main():
             symmetric=True,
         )
 
-        im1.colorbar.set_label("EWT (mm)", fontsize=16)
+        im1.colorbar.set_label("Direct Load EWT (mm)", fontsize=16)
         im1.colorbar.ax.tick_params(labelsize=14)
 
         ax1.gridliner.xlabel_style = {"size": 12, "color": "black"}
         ax1.gridliner.ylabel_style = {"size": 12, "color": "black"}
+
+        ax1.text(
+            0.02,
+            0.98,
+            "(a)",
+            transform=ax1.transAxes,
+            fontsize=16,
+            fontweight="bold",
+            va="top",
+            ha="left",
+            bbox=dict(facecolor="white", alpha=0.8, edgecolor="none", pad=3.0),
+            zorder=10,
+        )
 
         utils.draw_region_boundaries(state, ax1, regions_dict)
         figures_to_save["grace_bias_direct_load"] = fig1
@@ -237,14 +250,29 @@ def main():
             cmap="seismic",
             symmetric=True,
         )
-        utils.draw_region_boundaries(state, ax2, regions_dict)
-        figures_to_save["grace_bias_induced_load"] = fig2
 
-        im2.colorbar.set_label("EWT (mm)", fontsize=16)
+        im2.colorbar.set_label("Induced Load EWT (mm)", fontsize=16)
         im2.colorbar.ax.tick_params(labelsize=14)
 
         ax2.gridliner.xlabel_style = {"size": 12, "color": "black"}
         ax2.gridliner.ylabel_style = {"size": 12, "color": "black"}
+
+        utils.draw_region_boundaries(state, ax2, regions_dict)
+
+        ax2.text(
+            0.02,
+            0.98,
+            "(b)",
+            transform=ax2.transAxes,
+            fontsize=16,
+            fontweight="bold",
+            va="top",
+            ha="left",
+            bbox=dict(facecolor="white", alpha=0.8, edgecolor="none", pad=3.0),
+            zorder=10,
+        )
+
+        figures_to_save["grace_bias_induced_load"] = fig2
 
     # ------------------ CORE BIAS EVALUATION ------------------
     op1 = inf.BlockLinearOperator(

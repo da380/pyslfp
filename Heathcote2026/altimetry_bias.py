@@ -40,7 +40,7 @@ def parse_arguments():
     parser.add_argument(
         "--plot-maps",
         action="store_true",
-        help="Plot an example of the sampled fields, SSH, and altimetry points.",
+        help="Plot an example of the sampled fields.",
     )
 
     # --- Resolution Settings ---
@@ -381,10 +381,10 @@ def main():
             cmap="seismic",
             vmin=-shared_vmax,
             vmax=shared_vmax,
-            colorbar_kwargs={"label": "Continuous SSH Change (mm)"},
+            colorbar_kwargs={"label": "Geocentric Sea Level Change(mm)"},
         )
 
-        im4.colorbar.set_label("Continuous SSH Change (mm)", fontsize=16)
+        im4.colorbar.set_label("Geocentric Sea Level Change (mm)", fontsize=16)
         im4.colorbar.ax.tick_params(labelsize=14)
 
         ax4.gridliner.xlabel_style = {"size": 12, "color": "black"}

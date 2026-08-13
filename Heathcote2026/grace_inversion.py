@@ -434,6 +434,22 @@ def main():
             )
             f_metrics.write("-" * 115 + "\n")
 
+            # --- Set up a single grid figure outside the loop ---
+            nrows = len(region_names)
+            fig_sens, axes = sl.subplots(
+                nrows,
+                3,
+                figsize=(24, 5.5 * nrows),
+                gridspec_kw={"hspace": 0.15, "wspace": 0.1},
+            )
+
+            # Ensure numpy slicing works even if there is only 1 row
+            if nrows == 1:
+                axes = np.array([axes])
+
+            gl_kwargs = {"xlabel_style": {"size": 12}, "ylabel_style": {"size": 12}}
+            cb_kwargs = {"shrink": 0.8, "pad": 0.05, "orientation": "horizontal"}
+
             for i, region in enumerate(region_names):
                 # e_i (Basis vector)
                 basis_vec = property_resolution_operator.codomain.basis_vector(i)
@@ -470,32 +486,20 @@ def main():
                     bayes_error_pct = load_space.zero
                     wmb_error_pct = load_space.zero
 
-                # 1x3 Figure setup
-                fig_sens, axes = sl.subplots(
-                    1, 3, figsize=(22, 5), gridspec_kw={"wspace": 0.15}
-                )
-
-                gl_kwargs = {"xlabel_style": {"size": 12}, "ylabel_style": {"size": 12}}
-
-                # --- Plot 1: Target Kernel ---
+                # --- Plot 1: Target Kernel (Left Column) ---
                 _, im_target = sl.plot(
                     target_normed,
-                    ax=axes[0],
+                    ax=axes[i, 0],
                     cmap="seismic",
                     colorbar=True,
                     symmetric=True,
                     vmin=-1.0,
                     vmax=1.0,
-                    colorbar_kwargs={
-                        "shrink": 0.8,
-                        "pad": 0.05,
-                        "orientation": "horizontal",
-                    },
+                    colorbar_kwargs=cb_kwargs,
                     gridlines_kwargs=gl_kwargs,
                 )
-                axes[0].set_title("Target Kernel", fontsize=16)
                 im_target.colorbar.set_label("Relative Amplitude", fontsize=14)
-                utils.draw_region_boundaries(state, axes[0], regions_dict)
+                utils.draw_region_boundaries(state, axes[i, 0], regions_dict)
 
                 # --- Find shared max for the error plots ---
                 vmax_error = max(
@@ -505,51 +509,55 @@ def main():
                 if vmax_error == 0:
                     vmax_error = 1.0
 
-                # --- Plot 2: Bayesian Kernel Error ---
+                # --- Plot 2: Bayesian Kernel Error (Middle Column) ---
                 _, im_bayes = sl.plot(
                     bayes_error_pct,
-                    ax=axes[1],
+                    ax=axes[i, 1],
                     cmap="seismic",
                     colorbar=True,
                     symmetric=True,
                     vmin=-vmax_error,
                     vmax=vmax_error,
-                    colorbar_kwargs={
-                        "shrink": 0.8,
-                        "pad": 0.05,
-                        "orientation": "horizontal",
-                    },
+                    colorbar_kwargs=cb_kwargs,
                     gridlines_kwargs=gl_kwargs,
                 )
-                axes[1].set_title("Bayesian Kernel Error", fontsize=16)
                 im_bayes.colorbar.set_label("Relative Error (%)", fontsize=14)
-                utils.draw_region_boundaries(state, axes[1], regions_dict)
+                utils.draw_region_boundaries(state, axes[i, 1], regions_dict)
 
-                # --- Plot 3: WMB Kernel Error ---
+                # --- Plot 3: WMB Kernel Error (Right Column) ---
                 _, im_wmb = sl.plot(
                     wmb_error_pct,
-                    ax=axes[2],
+                    ax=axes[i, 2],
                     cmap="seismic",
                     colorbar=True,
                     symmetric=True,
                     vmin=-vmax_error,
                     vmax=vmax_error,
-                    colorbar_kwargs={
-                        "shrink": 0.8,
-                        "pad": 0.05,
-                        "orientation": "horizontal",
-                    },
+                    colorbar_kwargs=cb_kwargs,
                     gridlines_kwargs=gl_kwargs,
                 )
-                axes[2].set_title("WMB Kernel Error", fontsize=16)
                 im_wmb.colorbar.set_label("Relative Error (%)", fontsize=14)
-                utils.draw_region_boundaries(state, axes[2], regions_dict)
+                utils.draw_region_boundaries(state, axes[i, 2], regions_dict)
 
-                # Format filename
-                safe_region_name = (
-                    region.replace(" ", "_").replace("(", "").replace(")", "")
+            # --- Apply Grid Layout Titles and Row Annotations ---
+            col_labels = ["Target Kernel", "Bayesian Kernel Error", "WMB Kernel Error"]
+            for j, label in enumerate(col_labels):
+                axes[0, j].set_title(label, fontsize=16, fontweight="bold", pad=20)
+
+            for i, region in enumerate(region_names):
+                axes[i, 0].annotate(
+                    region,
+                    xy=(-0.1, 0.5),
+                    xycoords="axes fraction",
+                    fontsize=16,
+                    fontweight="bold",
+                    va="center",
+                    ha="center",
+                    rotation=90,
                 )
-                figures_to_save[f"estimator_kernels_{safe_region_name}"] = fig_sens
+
+            # Save the composite dynamically scaled figure
+            figures_to_save["estimator_kernels_regions_all"] = fig_sens
 
         # ------------------ TARGET DEGREE KERNEL ERROR ------------------
         l = args.target_degree

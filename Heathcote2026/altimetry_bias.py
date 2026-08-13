@@ -75,7 +75,7 @@ def parse_arguments():
         "--ocean-dyn-std-factor",
         type=float,
         default=2.0,
-        help="Ocean dynamic std as factor of GMSL std.",
+        help="Ocean dynamic std as factor of GMSLR std.",
     )
 
     parser.add_argument(
@@ -95,7 +95,7 @@ def parse_arguments():
         "--noise-std-factor",
         type=float,
         default=1.0,
-        help="Local (uncorrelated) altimetry noise std as factor of GMSL std.",
+        help="Local (uncorrelated) altimetry noise std as factor of GMSLR std.",
     )
     parser.add_argument(
         "--noise-corr-std-factor",
@@ -103,7 +103,7 @@ def parse_arguments():
         default=0.05,
         help=(
             "Std of the optional large-scale correlated altimetry error "
-            "component, as a factor of the GMSL prior std (0 disables). "
+            "component, as a factor of the GMSLR prior std (0 disables). "
             "Represents long-wavelength systematics such as orbit and "
             "reference-frame errors; because it barely averages down, even "
             "small values (e.g. 0.02-0.05) set the error floor for "
@@ -220,14 +220,14 @@ def main():
     joint_meas = inf.GaussianMeasure.from_direct_sum([model_prior, noise_meas])
     data_space = noise_meas.domain
 
-    # The TRUE GMSL uses the Sea Level Operator (SLC)
+    # The TRUE GMSLR uses the Sea Level Operator (SLC)
     true_gmsl_op = utils.true_gmsl_operator(state, load_space, continuous_sl_op)
 
     # The ESTIMATOR averages the SSH evaluated at the altimetry points
     alt_avg_op = altimetry_averaging_operator(points)
     est_gmsl_op = alt_avg_op @ forward_op
 
-    # Error Operator = True GMSL - Estimated GMSL
+    # Error Operator = True GMSLR - Estimated GMSLR
     err_gmsl_op = true_gmsl_op - est_gmsl_op
 
     op_true = inf.RowLinearOperator(
@@ -387,11 +387,11 @@ def main():
             s=4,
             edgecolors="none",
             colorbar=True,
-            colorbar_kwargs={"label": "Observed SSH Change (mm)"},
+            colorbar_kwargs={"label": "Synthetic Altimetry Data (mm)"},
             zorder=5,
         )
 
-        im5.colorbar.set_label("Observed SSH Change (mm)", fontsize=16)
+        im5.colorbar.set_label("Synthetic Altimetry Data (mm)", fontsize=16)
         im5.colorbar.ax.tick_params(labelsize=14)
 
         ax5.text(
@@ -457,7 +457,7 @@ def main():
         label=r"Nominal error (noise only)",
     )
 
-    ax.set_xlabel("Error in GMSL estimate (mm)", fontsize=14)
+    ax.set_xlabel("Error in GMSLR estimate (mm)", fontsize=14)
     ax.set_ylabel("Probability Density", fontsize=14)
     ax.axvline(0, color="black", linestyle="--", linewidth=1.5)
     ax.grid(True, linestyle=":", alpha=0.6)

@@ -534,7 +534,7 @@ def main():
         alt_noise_corr_std_factor=args.alt_noise_corr_std_factor,
     )
 
-    woodbury_solver = inf.LUSolver(galerkin=True, parallel=True, n_jobs=8)
+    woodbury_solver = inf.LUSolver(galerkin=True, parallel=False, n_jobs=1)
     alpha = 0.1
 
     # The preconditioners use the local (uncorrelated) altimetry noise
@@ -682,17 +682,17 @@ def main():
         prior_split = (
             exact_meas["model_prior"]
             .affine_mapping(operator=final_split_op)
-            .with_dense_covariance(parallel=True, n_jobs=2)
+            .with_dense_covariance(parallel=False, n_jobs=1)
         )
         alt_split = post_alt.affine_mapping(
             operator=final_split_op
-        ).with_dense_covariance(parallel=True, n_jobs=2)
+        ).with_dense_covariance(parallel=False, n_jobs=1)
         grace_split = post_grace.affine_mapping(
             operator=final_split_op
-        ).with_dense_covariance(parallel=True, n_jobs=2)
+        ).with_dense_covariance(parallel=False, n_jobs=1)
         joint_split = post_joint.affine_mapping(
             operator=final_split_op
-        ).with_dense_covariance(parallel=True, n_jobs=2)
+        ).with_dense_covariance(parallel=False, n_jobs=1)
 
         prior_cov_mat = prior_split.covariance.matrix(dense=True)
         alt_cov_mat = alt_split.covariance.matrix(dense=True)
@@ -851,7 +851,7 @@ def main():
                     f"{args.std_samples} {label} samples..."
                 )
                 post_ice, post_dyn, post_rho = expectations[name]
-                samples = post.samples(args.std_samples, parallel=True, n_jobs=8)
+                samples = post.samples(args.std_samples, parallel=False, n_jobs=1)
                 var_ice, var_dyn, var_rho = (
                     load_space.zero,
                     load_space.zero,
@@ -1100,20 +1100,20 @@ def main():
         prior_meas = (
             exact_meas["model_prior"]
             .affine_mapping(operator=final_op)
-            .with_dense_covariance(parallel=True, n_jobs=3)
+            .with_dense_covariance(parallel=False, n_jobs=1)
         )
         print("  -> Altimetry-only push-forward (3 posterior solves)...")
         post_alt_meas = post_alt.affine_mapping(
             operator=final_op
-        ).with_dense_covariance(parallel=True, n_jobs=3)
+        ).with_dense_covariance(parallel=False, n_jobs=1)
         print("  -> GRACE-only push-forward (3 posterior solves)...")
         post_grace_meas = post_grace.affine_mapping(
             operator=final_op
-        ).with_dense_covariance(parallel=True, n_jobs=3)
+        ).with_dense_covariance(parallel=False, n_jobs=1)
         print("  -> Joint push-forward (3 posterior solves)...")
         post_joint_meas = post_joint.affine_mapping(
             operator=final_op
-        ).with_dense_covariance(parallel=True, n_jobs=3)
+        ).with_dense_covariance(parallel=False, n_jobs=1)
 
         labels = [
             "Dynamic Manometric SL (mm)",

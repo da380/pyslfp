@@ -78,6 +78,12 @@ from altimetry_utils import (
     true_gmsl_operator as true_gmsl_operator,
 )
 
+import numpy as np
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.patches import Ellipse
+
 
 def build_physics_components(
     lmax, load_order, load_scale_km, points, obs_degree, is_surrogate=False
@@ -402,3 +408,227 @@ def build_measures(
         "ice_scale": ice_scale,
         "calib": calib,
     }
+
+
+# ---------------------------------------------------------------------------
+# Comparison-summary figures (cross-estimator overlays).
+# Styled via rc_context so the calling script's global rcParams (14 pt
+# fonts for the map figures) do not leak in; sized for single-column use.
+# The small style block is duplicated in grace_utils to keep the two
+# pipelines independent.
+# ---------------------------------------------------------------------------
+
+_SUMMARY_RC = {
+    "font.size": 9,
+    "axes.labelsize": 9,
+    "xtick.labelsize": 8,
+    "ytick.labelsize": 8.5,
+    "legend.fontsize": 8,
+    "axes.linewidth": 0.7,
+    "font.family": "sans-serif",
+}
+# Okabe-Ito (colour-blind safe)
+_C_PRIOR = "#888888"
+_C_ALT = "#D55E00"
+_C_GRACE = "#0072B2"
+_C_JOINT = "#009E73"
+
+
+def plot_gmsl_split_ellipses(
+    prior_split,
+    alt_split,
+    grace_split,
+    joint_split,
+    /,
+    *,
+    true_values=None,
+    n_sigma=1.0,
+):
+    """
+    Single-panel covariance-ellipse overlay for the (barystatic, steric)
+    GMSLR split: prior, altimetry-only, GRACE-only and joint in one axes,
+    each ellipse centred on its own mean (marked with a dot), with the
+    truth marked as a cross. Contours are drawn at Mahalanobis radius
+    n_sigma; for n_sigma = 1 this encloses ~39% of the mass in 2D, not
+    68%. Dashed guides show directions of constant b + s (fixed GMSLR),
+    anchored on the true value. Measures must carry dense covariances
+    (with_dense_covariance) in mm units. Returns the figure.
+    """
+    cases = [
+        ("Prior", prior_split, dict(edgecolor=_C_PRIOR, lw=1.4, ls="-")),
+        ("GRACE only", grace_split, dict(edgecolor=_C_GRACE, lw=1.8, ls="-")),
+        ("Altimetry only", alt_split, dict(edgecolor=_C_ALT, lw=1.8, ls="--")),
+        ("Joint", joint_split, dict(edgecolor=_C_JOINT, lw=1.8, ls="-")),
+    ]
+    with mpl.rc_context(_SUMMARY_RC):
+        fig, ax = plt.subplots(figsize=(4.4, 4.4), layout="constrained")
+        xlo = ylo = np.inf
+        xhi = yhi = -np.inf
+        handles = []
+        for name, measure, style in cases:
+            mean = np.asarray(measure.expectation, dtype=float).ravel()
+            cov = np.asarray(measure.covariance.matrix(dense=True), dtype=float)
+            vals, vecs = np.linalg.eigh(cov)
+            order = np.argsort(vals)[::-1]
+            vals, vecs = vals[order], vecs[:, order]
+            angle = np.degrees(np.arctan2(vecs[1, 0], vecs[0, 0]))
+            ax.add_patch(
+                Ellipse(
+                    mean,
+                    2 * n_sigma * np.sqrt(vals[0]),
+                    2 * n_sigma * np.sqrt(vals[1]),
+                    angle=angle,
+                    fill=False,
+                    **style,
+                )
+            )
+            ax.plot(*mean, ".", color=style["edgecolor"], ms=4)
+            sx = n_sigma * np.sqrt(cov[0, 0])
+            sy = n_sigma * np.sqrt(cov[1, 1])
+            xlo, xhi = min(xlo, mean[0] - sx), max(xhi, mean[0] + sx)
+            ylo, yhi = min(ylo, mean[1] - sy), max(yhi, mean[1] + sy)
+            handles.append(
+                Line2D(
+                    [],
+                    [],
+                    color=style["edgecolor"],
+                    lw=style["lw"],
+                    ls=style["ls"],
+                    label=name,
+                )
+            )
+
+        if true_values is not None:
+            tb, ts = np.asarray(true_values, dtype=float).ravel()[:2]
+            ax.plot(tb, ts, "x", color="black", ms=7, mew=1.6, zorder=5)
+            handles.append(
+                Line2D(
+                    [],
+                    [],
+                    ls="none",
+                    marker="x",
+                    color="black",
+                    ms=7,
+                    mew=1.6,
+                    label="True Value",
+                )
+            )
+            xlo, xhi = min(xlo, tb), max(xhi, tb)
+            ylo, yhi = min(ylo, ts), max(yhi, ts)
+            sum_anchor = tb + ts
+        else:
+            sum_anchor = float(np.sum(np.asarray(joint_split.expectation, dtype=float)))
+
+        pad = 0.10 * max(xhi - xlo, yhi - ylo)
+        ax.set_xlim(xlo - pad, xhi + pad)
+        ax.set_ylim(ylo - pad, yhi + pad)
+
+        gx = np.array(ax.get_xlim())
+        span = max(xhi - xlo, yhi - ylo) + 2 * pad
+        for k in (-1, 0, 1):
+            ax.plot(
+                gx,
+                (sum_anchor + 0.55 * k * span) - gx,
+                color="0.82",
+                lw=0.7,
+                ls="--",
+                zorder=0,
+            )
+        handles.append(
+            Line2D([], [], color="0.82", lw=0.9, ls="--", label="constant $b+s$")
+        )
+
+        ax.set_aspect("equal")
+        ax.set_xlabel("Barystatic GMSLR contribution, $b$ (mm)")
+        ax.set_ylabel("Steric GMSLR contribution, $s$ (mm)")
+        ax.legend(handles=handles, loc="best", frameon=False)
+        ax.text(
+            0.02,
+            0.02,
+            f"{n_sigma:g}$\\sigma$ contours",
+            transform=ax.transAxes,
+            fontsize=7,
+            color="0.35",
+            va="bottom",
+        )
+    return fig
+
+
+def plot_component_variance_dots(
+    component_names,
+    prior_vars,
+    alt_vars,
+    grace_vars,
+    joint_vars,
+    /,
+    *,
+    xlabel="Marginal variance (mm$^2$)",
+):
+    """
+    Log-scale dot chart of marginal variances per component for the prior
+    and the three posteriors; equal horizontal offsets correspond to
+    equal variance ratios, so 'reduction percentages' become distances.
+    Inputs are 1-D arrays aligned with component_names (e.g. covariance
+    diagonals). Returns the figure.
+    """
+    series = [
+        ("Prior", prior_vars, dict(marker="o", color=_C_PRIOR, mfc="white"), 0.24),
+        ("Altimetry only", alt_vars, dict(marker="^", color=_C_ALT, mfc=_C_ALT), 0.08),
+        (
+            "GRACE only",
+            grace_vars,
+            dict(marker="s", color=_C_GRACE, mfc=_C_GRACE),
+            -0.08,
+        ),
+        ("Joint", joint_vars, dict(marker="D", color=_C_JOINT, mfc=_C_JOINT), -0.24),
+    ]
+    n = len(component_names)
+    with mpl.rc_context(_SUMMARY_RC):
+        fig, ax = plt.subplots(figsize=(5.2, 1.1 + 0.42 * n), layout="constrained")
+        ys = np.arange(n)[::-1]
+        for y in ys:
+            ax.axhline(y, color="0.92", lw=4, zorder=0)
+        handles = []
+        for name, vals, style, dodge in series:
+            ax.plot(
+                np.asarray(vals, dtype=float),
+                ys + dodge,
+                ls="none",
+                ms=4.5,
+                mew=1.1,
+                marker=style["marker"],
+                mec=style["color"],
+                mfc=style["mfc"],
+            )
+            handles.append(
+                Line2D(
+                    [],
+                    [],
+                    ls="none",
+                    ms=5,
+                    mew=1.1,
+                    marker=style["marker"],
+                    mec=style["color"],
+                    mfc=style["mfc"],
+                    label=name,
+                )
+            )
+        ax.set_yticks(ys)
+        ax.set_yticklabels(list(component_names))
+        ax.set_ylim(-0.55, n - 0.45)
+        ax.set_xscale("log")
+        ax.set_xlabel(xlabel)
+        ax.grid(axis="x", color="0.9", lw=0.6)
+        ax.tick_params(axis="y", length=0)
+        for side in ("top", "right", "left"):
+            ax.spines[side].set_visible(False)
+        ax.legend(
+            handles=handles,
+            ncols=4,
+            loc="lower left",
+            bbox_to_anchor=(0.0, 1.02),
+            frameon=False,
+            columnspacing=1.0,
+            handletextpad=0.4,
+        )
+    return fig

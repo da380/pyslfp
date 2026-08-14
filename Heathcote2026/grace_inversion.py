@@ -426,6 +426,8 @@ def main():
         # C = wmb_avg_op, A = exact_fwd_op, B = tot_avg_op
         wmb_property_resolution_operator = (wmb_avg_op @ exact_fwd_op) - tot_avg_op
 
+        kernel_ratio_rows = []
+
         with open(metrics_file, "a") as f_metrics:
             f_metrics.write("\n\n" + "=" * 115 + "\n")
             f_metrics.write(
@@ -477,6 +479,7 @@ def main():
                 f_metrics.write(
                     f"{region:<16} | {target_norm:<15.4e} | {bayes_error_norm:<15.4e} | {bayes_ratio:<15.4f} | {wmb_error_norm:<15.4e} | {wmb_ratio:<15.4f}\n"
                 )
+                kernel_ratio_rows.append((region, bayes_ratio, wmb_ratio))
 
                 # Normalize relative to pointwise max of the target
                 max_abs_val = np.max(np.abs(target_vector.data))
@@ -573,6 +576,8 @@ def main():
         for m in range(1, l + 1):
             comp_names.extend([f"({l},{-m})", f"({l},{m})"])
 
+        deg_kernel_ratio_rows = []
+
         with open(metrics_file, "a") as f_metrics:
             f_metrics.write("\n\n" + "=" * 80 + "\n")
             f_metrics.write(f"DEGREE-{l} ESTIMATOR KERNEL METRICS (BAYESIAN ONLY)\n")
@@ -617,6 +622,7 @@ def main():
                 f_metrics.write(
                     f"{comp_name:<16} | {target_norm:<15.4e} | {bayes_error_norm:<15.4e} | {bayes_ratio:<15.4f}\n"
                 )
+                deg_kernel_ratio_rows.append((comp_name, bayes_ratio))
 
                 # Normalize relative to pointwise max of the target for plotting
                 max_abs_val = np.max(np.abs(target_vector.data))
@@ -697,6 +703,12 @@ def main():
 
             # Save the composite dynamically scaled figure
             figures_to_save[f"estimator_kernels_deg{l}_all"] = fig_sens
+
+        figures_to_save["estimator_kernel_ratios"] = utils.plot_kernel_error_ratios(
+            kernel_ratio_rows,
+            degree_rows=deg_kernel_ratio_rows,
+            degree_label=f"degree {l} (Bayesian only)",
+        )
 
     # ------------------ MAPS ------------------
     if args.plot_maps:

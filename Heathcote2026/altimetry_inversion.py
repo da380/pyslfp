@@ -95,7 +95,14 @@ def parse_arguments():
         "--ice-scale-factor", type=float, default=1.0, help="Ice correlation scale."
     )
     parser.add_argument(
-        "--ice-std-mm", type=float, default=10.0, help="Ice std dev (mm)."
+        "--gmsl-bary-steric-ratio",
+        type=float,
+        default=1.7,
+        help=(
+            "Ratio of the barystatic to steric GMSL prior stds (the "
+            "steric value being the realised one under the mass "
+            "constraint); sets the ice amplitude."
+        ),
     )
     parser.add_argument(
         "--ocean-dyn-scale-factor",
@@ -104,10 +111,14 @@ def parse_arguments():
         help="Sterodynamic correlation scale factor.",
     )
     parser.add_argument(
-        "--ocean-dyn-std-factor",
+        "--ocean-dyn-std-mm",
         type=float,
-        default=2.0,
-        help="Sterodynamic SL std as factor of the barystatic GMSLR std.",
+        default=4.0,
+        help=(
+            "Pointwise std of the sterodynamic sea level field (mm, "
+            "pre-mass-constraint): the single dimensioned prior "
+            "amplitude, anchoring the chain."
+        ),
     )
     parser.add_argument(
         "--ocean-rho-scale-factor",
@@ -116,24 +127,30 @@ def parse_arguments():
         help="Ocean density correlation scale.",
     )
     parser.add_argument(
-        "--ocean-rho-std-factor",
+        "--steric-dyn-std-ratio",
         type=float,
-        default=0.25,
-        help="Effective steric SL std as a fraction of the Sterodynamic SL change std.",
+        default=0.75,
+        help=(
+            "Mean-depth steric sea level std as a fraction of the "
+            "sterodynamic std; sets the density amplitude."
+        ),
     )
     parser.add_argument(
         "--noise-std-factor",
         type=float,
-        default=1.0,
-        help="Local (uncorrelated) altimetry noise std as factor of the barystatic GMSLR std.",
+        default=0.5,
+        help=(
+            "Local (uncorrelated) altimetry noise std as factor of the "
+            "sterodynamic pointwise prior std."
+        ),
     )
     parser.add_argument(
         "--noise-corr-std-factor",
         type=float,
-        default=0.05,
+        default=0.025,
         help=(
             "Std of the optional large-scale correlated altimetry error "
-            "component, as a factor of the GMSLR prior std (0 disables). "
+            "component, as a factor of the sterodynamic pointwise prior std (0 disables). "
             "Represents long-wavelength systematics such as orbit and "
             "reference-frame errors; because it barely averages down, even "
             "small values (e.g. 0.02-0.05) set the error floor for "
@@ -261,15 +278,15 @@ def main():
     ocean_mask = state.ocean_projection(value=0.0)
     ice_mask = state.ice_projection(value=0.0)
 
-    model_prior, noise_measure, GMSL_prior_std = utils.build_measures(
+    model_prior, noise_measure, calib = utils.build_measures(
         state,
         load_space,
         args.ice_scale_factor,
-        args.ice_std_mm,
+        args.gmsl_bary_steric_ratio,
         args.ocean_dyn_scale_factor,
-        args.ocean_dyn_std_factor,
+        args.ocean_dyn_std_mm,
         args.ocean_rho_scale_factor,
-        args.ocean_rho_std_factor,
+        args.steric_dyn_std_ratio,
         args.noise_corr_scale_factor,
         args.noise_std_factor,
         points,
@@ -284,8 +301,8 @@ def main():
         point_evaluation_operator=point_eval,
     )
 
-    print(
-        f"Implied barystatic GMSLR prior standard deviation: {GMSL_prior_std * mm_scale:.3f} mm"
+    utils.print_calibration_report(
+        calib, mm_scale, state.model.parameters.density_scale
     )
     if args.ocean_corr > 0.0:
         print(
@@ -330,11 +347,11 @@ def main():
         surr_state,
         surr_load_space,
         args.ice_scale_factor,
-        args.ice_std_mm,
+        args.gmsl_bary_steric_ratio,
         args.ocean_dyn_scale_factor,
-        args.ocean_dyn_std_factor,
+        args.ocean_dyn_std_mm,
         args.ocean_rho_scale_factor,
-        args.ocean_rho_std_factor,
+        args.steric_dyn_std_ratio,
         args.noise_corr_scale_factor,
         args.noise_std_factor,
         points,
@@ -346,6 +363,7 @@ def main():
         prior_kernel=args.prior_kernel,
         prior_order=args.prior_order,
         noise_corr_std_factor=args.noise_corr_std_factor,
+        derived_stds=calib["derived_stds"],
     )
 
     print("Constructing Woodbury preconditioner from unconstrained surrogate model...")

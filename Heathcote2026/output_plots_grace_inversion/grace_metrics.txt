@@ -1,14 +1,14 @@
 Region           | KL Divergence   | Prior Var (mm² EWT) | Post Var (mm² EWT) | Variance Reduction
 ------------------------------------------------------------------------------------------------
-GRL (S Basin)    | 2.05            | 39.59               | 3.47               |            91.24%
+GRL (S Basin)    | 1.06            | 39.59               | 3.47               |            91.24%
 WAIS             | 0.66            | 32.29               | 3.59               |            88.89%
-Gulf of Mexico   | 0.71            | 35.83               | 3.53               |            90.14%
-GBM basin        | 0.66            | 30.01               | 4.09               |            86.36%
+Gulf of Mexico   | 1.18            | 35.83               | 3.53               |            90.14%
+GBM basin        | 0.74            | 30.01               | 4.09               |            86.36%
 
 
 Degree-1 Spherical Harmonic Coefficients
 =================================================================
-Joint KL Divergence:      0.2603 nats
+Joint KL Divergence:      0.8076 nats
 Prior Total Var (Trace):  31.5455 mm²
 Post Total Var (Trace):   24.7219 mm²
 Overall Trace Reduction:  21.63%

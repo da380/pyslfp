@@ -837,6 +837,14 @@ def main():
         )
         figures_to_save["gmslr_split_corner_joint"] = plt.gcf()
 
+        figures_to_save["gmslr_split_ellipses"] = utils.plot_gmsl_split_ellipses(
+            prior_split,
+            alt_split,
+            grace_split,
+            joint_split,
+            true_values=true_split,
+        )
+
     # ------------------ 6. MAPPING & COVARIANCE ------------------
     if args.plot_maps:
         print("\nGenerating 3-component spatial maps...")
@@ -1230,6 +1238,14 @@ def main():
             fill_density=False,
         )
         figures_to_save["regional_corner_joint"] = plt.gcf()
+
+        figures_to_save["regional_variance_dots"] = utils.plot_component_variance_dots(
+            comp_names,
+            np.diag(prior_cov_mat),
+            np.diag(alt_cov_mat),
+            np.diag(grace_cov_mat),
+            np.diag(joint_cov_mat),
+        )
 
     # ------------------ SAVE ALL FIGURES ------------------
     if figures_to_save:

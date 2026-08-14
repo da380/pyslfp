@@ -20,6 +20,9 @@ docs/build/
 # Any images
 *.png
 
+# Output folders
+output_plots*/
+
 
 
 

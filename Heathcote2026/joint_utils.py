@@ -179,15 +179,15 @@ def build_measures(
     state,
     load_space,
     ice_scale_factor,
-    gmsl_barystatic_std_mm,
+    gmsl_bary_steric_ratio,
     ocean_dyn_scale_factor,
-    steric_dmslc_ratio,
+    ocean_dyn_std_mm,
     ocean_rho_scale_factor,
-    gmsl_steric_std_mm,
+    steric_dyn_std_ratio,
     alt_noise_corr_scale_factor,
     alt_noise_std_factor,
     grace_noise_scale_km,
-    grace_noise_std_mm,
+    grace_noise_std_factor,
     obs_degree,
     points,
     scale_mm,
@@ -200,34 +200,33 @@ def build_measures(
     alt_noise_corr_std_factor=0.0,
     point_evaluation_operator=None,
     derived_stds=None,
-    calibrate_constrained=True,
 ):
     """
     Constructs the 3-component joint prior and dual-sensor noise measures.
 
-    The three relative amplitudes are set through GMSL-level targets
-    rather than pointwise stds (see altimetry_utils.build_conditioned_prior):
+    The amplitudes form a triangular chain anchored on one dimensioned
+    number (see altimetry_utils.build_conditioned_prior):
 
-      gmsl_barystatic_std_mm : prior std of the barystatic GMSL change (mm),
-      gmsl_steric_std_mm     : prior std of the steric GMSL change (mm),
-      steric_dmslc_ratio     : ratio of the ocean-integrated steric to
-                               dynamic-manometric (zeta = eta - eta_s)
-                               variance.
+      ocean_dyn_std_mm       : pointwise std of the sterodynamic field
+                               (mm, pre-mass-constraint),
+      steric_dyn_std_ratio   : mean-depth steric sea level std as a
+                               fraction of the sterodynamic std; sets
+                               the density amplitude,
+      gmsl_bary_steric_ratio : ratio of the barystatic to steric GMSL
+                               prior stds, the steric value being the
+                               REALISED one under the mass constraint;
+                               sets the ice amplitude.
 
-    The pointwise ice, sterodynamic and density stds are DERIVED from
-    these targets (and reported in the returned "calib" entry); the
-    per-field length scales are unchanged inputs. By default the ocean
-    amplitudes are refined so the realised POST-constraint steric std and
-    variance ratio match the targets (calibrate_constrained; the
-    barystatic std is constraint-invariant). If derived_stds is given
-    ({"ice_std", "dyn_std", "rho_std"}, nondimensional), the calibration
+    The derived pointwise stds and the realised GMSL-level statistics
+    are reported in the returned "calib" entry; the per-field length
+    scales are unchanged inputs. If derived_stds is given
+    ({"ice_std", "dyn_std", "rho_std"}, nondimensional), the derivation
     is skipped and those amplitudes are used directly -- the surrogate
     path, so the preconditioner amplitudes match the exact model instead
     of being re-derived at surrogate resolution. The altimetry noise
-    factors below remain referenced to the barystatic GMSL std, which is
-    now the input target itself; the GRACE spatial noise std is an
-    absolute value in mm (grace_noise_std_mm), no longer a factor of the
-    (now derived) ice std.
+    factors below are referenced to the sterodynamic pointwise std, the
+    field altimetry actually observes; the GRACE spatial noise std is a
+    factor of the (derived) ice pointwise std, the dominant load.
 
     If ocean_corr > 0 (exact model only; requires pygeoinf >= 1.8.4), the
     (Dyn, Rho) marginals are combined into a correlated invariant measure
@@ -263,9 +262,9 @@ def build_measures(
     uses the same kernel family so the preconditioner stays matched.
 
     The altimetry noise is the sum of a local (uncorrelated) component on
-    the track points, with std alt_noise_std_factor x the barystatic GMSLR prior std,
+    the track points, with std alt_noise_std_factor x the sterodynamic pointwise prior std,
     and an optional large-scale correlated error component with std
-    alt_noise_corr_std_factor x the barystatic GMSLR prior std (0 disables) at
+    alt_noise_corr_std_factor x the sterodynamic pointwise prior std (0 disables) at
     correlation scale load_space.scale x alt_noise_corr_scale_factor,
     representing long-wavelength systematics such as orbit and
     reference-frame errors. The correlated component barely averages down
@@ -315,11 +314,10 @@ def build_measures(
                 scale, std=std
             )
 
-    # --- 1. PRIORS: calibration, assembly, masking and conditioning ---
+    # --- 1. PRIORS: amplitude derivation, assembly, masking and conditioning ---
     ice_scale = load_space.scale * ice_scale_factor
     ocean_dyn_scale = load_space.scale * ocean_dyn_scale_factor
     ocean_rho_scale = load_space.scale * ocean_rho_scale_factor
-    gmsl_barystatic_std = gmsl_barystatic_std_mm / scale_mm
 
     model_prior, unmasked_prior, calib = build_conditioned_prior(
         state,
@@ -328,14 +326,13 @@ def build_measures(
         ice_scale,
         ocean_dyn_scale,
         ocean_rho_scale,
-        gmsl_barystatic_std,
-        gmsl_steric_std_mm / scale_mm,
-        steric_dmslc_ratio,
+        gmsl_bary_steric_ratio,
+        ocean_dyn_std_mm / scale_mm,
+        steric_dyn_std_ratio,
         is_surrogate=is_surrogate,
         ocean_corr=ocean_corr,
         corr_scale=load_space.scale * ocean_corr_scale_factor,
         derived_stds=derived_stds,
-        calibrate_constrained=calibrate_constrained,
     )
     ice_std = calib["derived_stds"]["ice_std"]
 
@@ -360,7 +357,7 @@ def build_measures(
     # as GMSL. The preconditioners are built from the local part alone
     # (alt_precond_noise / joint_precond_noise below); the low-rank
     # discrepancy this leaves is absorbed by a few extra CG iterations.
-    alt_noise_std = alt_noise_std_factor * gmsl_barystatic_std
+    alt_noise_std = alt_noise_std_factor * calib["derived_stds"]["dyn_std"]
     alt_precond_noise_meas = inf.GaussianMeasure.from_standard_deviation(
         inf.EuclideanSpace(len(points)), alt_noise_std
     )
@@ -370,16 +367,16 @@ def build_measures(
             point_evaluation_operator = load_space.point_evaluation_operator(points)
         alt_corr_noise_meas = load_measure(
             load_space.scale * alt_noise_corr_scale_factor,
-            alt_noise_corr_std_factor * gmsl_barystatic_std,
+            alt_noise_corr_std_factor * calib["derived_stds"]["dyn_std"],
         ).affine_mapping(operator=point_evaluation_operator)
         alt_noise_meas = alt_noise_meas + alt_corr_noise_meas
 
-    # GRACE Noise (absolute spatial std in mm)
+    # GRACE Noise
     grace_spatial_scale = (
         grace_noise_scale_km * 1000.0 / state.model.parameters.length_scale
     )
     grace_spatial_noise = load_measure(
-        grace_spatial_scale, grace_noise_std_mm / scale_mm
+        grace_spatial_scale, grace_noise_std_factor * ice_std
     )
     wmb = WMBMethod(state.model, obs_degree)
     grace_noise_meas = wmb.load_measure_to_observation_measure(grace_spatial_noise)
@@ -400,7 +397,7 @@ def build_measures(
         "alt_precond_noise": alt_precond_noise_meas,
         "joint_precond_noise": joint_precond_noise_meas,
         "wmb": wmb,
-        "gmsl_std": gmsl_barystatic_std,
+        "gmsl_std": calib.get("gmsl", {}).get("barystatic_std"),
         "ice_std": ice_std,
         "ice_scale": ice_scale,
         "calib": calib,

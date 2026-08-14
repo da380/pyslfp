@@ -9,9 +9,7 @@
 #
 # The threading variables must be exported BEFORE Python starts: each
 # runtime (OpenBLAS, MKL, libgomp, ...) reads them at library load time,
-# and worker processes inherit them. Limits set from inside Python via
-# threadpoolctl only patch libraries already loaded in that process;
-# freshly spawned workers and late-loaded libraries never see them.
+# and worker processes inherit them.
 #
 # Usage:
 #   ./run_all.sh                              run the default set
@@ -85,7 +83,7 @@ PYTHON="${PYTHON:-python}"
 
 # Shared by all five scripts (identical names and defaults everywhere).
 COMMON=(
-    --lmax 64
+    --lmax 256
     --load-order 2.0
     --load-scale-km 500.0
     --prior-kernel sobolev
@@ -94,7 +92,7 @@ COMMON=(
 )
 
 # GRACE observation truncation: grace_bias, grace_inversion, joint_inversion.
-OBS_DEGREE=(--obs-degree 32)
+OBS_DEGREE=(--obs-degree 100)
 
 # Preconditioner truncation: altimetry_inversion, joint_inversion only.
 SURROGATE=(--surrogate-degree 32)
@@ -102,26 +100,30 @@ SURROGATE=(--surrogate-degree 32)
 # Altimetry-side model priors: altimetry_bias, altimetry_inversion,
 # joint_inversion (identical names and defaults in all three).
 #
-# The three amplitudes are now set through GMSL-level targets: the
-# barystatic and steric GMSL prior stds (mm) and the ocean-integrated
-# steric to dynamic-manometric variance ratio. The pointwise field stds
-# are derived inside build_measures and reported at run time. 
+# One dimensioned amplitude anchors the chain: the pointwise
+# sterodynamic std (mm, pre-mass-constraint; ~ the observed regional
+# trend spread for per-year fields). The density amplitude follows from
+# the steric/sterodynamic std ratio, and the ice amplitude from the
+# barystatic/steric ratio of the REALISED GMSL prior stds under the
+# mass constraint. Derived stds and realised GMSL statistics are 
+# printed by each run.
 ALT_PRIOR=(
-    --spacing 8.0
+    --spacing 1.0
     --ice-scale-factor 1.0
-    --gmsl-barystatic-std-mm 1.0
+    --gmsl-bary-steric-ratio 1.7
     --ocean-dyn-scale-factor 0.2
-    --steric-dmslc-ratio 0.1
+    --ocean-dyn-std-mm 4.0
     --ocean-rho-scale-factor 1.0
-    --gmsl-steric-std-mm 0.5
+    --steric-dyn-std-ratio 0.75
     --ocean-corr 0.9
     --ocean-corr-scale-factor 0.4
 )
 
 # Altimetry noise: same numbers, but joint_inversion prefixes the flags
 # with "alt-". Single source of truth here keeps the runs consistent.
-ALT_NOISE_STD=1.0
-ALT_NOISE_CORR_STD=0.05
+# Factors of the sterodynamic pointwise prior std.
+ALT_NOISE_STD=0.5
+ALT_NOISE_CORR_STD=0.025
 ALT_NOISE_CORR_SCALE=4.0
 
 ALT_NOISE=(
@@ -147,11 +149,11 @@ GRACE_PRIOR=(
 )
 
 # joint_inversion's own GRACE noise parameterisation (deliberately
-# independent of GRACE_PRIOR above). The std is now absolute (mm);
-# 1.0 mm reproduces the previous 0.1 x the 10 mm ice std exactly.
+# independent of GRACE_PRIOR above); the std is a factor of the derived
+# ice pointwise std, the dominant load.
 JOINT_GRACE_NOISE=(
     --grace-noise-scale-km 50.0
-    --grace-noise-std-mm 1.0
+    --grace-noise-std-factor 0.1
 )
 
 # Per-script extras (plot selections, MC sample counts) -- edit to taste.
@@ -161,7 +163,7 @@ ALTIMETRY_BIAS_EXTRA=(--plot-maps)  # e.g. --samples 1000
 GRACE_BIAS_EXTRA=(--plot-maps)      # e.g. --samples 1000
 ALTIMETRY_INV_EXTRA=(--all)         # e.g. --std-samples 100
 GRACE_INV_EXTRA=(--all)             # e.g. --prior-sensitivity
-JOINT_INV_EXTRA=(--all --std-samples 5)             # e.g. --map-all-cases --std-samples 100
+JOINT_INV_EXTRA=(--all --std-samples 100)             # e.g. --map-all-cases --std-samples 100
 
 # ---------------------------------------------------------------------------
 # 4. Run

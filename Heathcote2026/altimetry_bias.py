@@ -63,10 +63,14 @@ def parse_arguments():
         "--ice-scale-factor", type=float, default=1.0, help="Ice correlation scale."
     )
     parser.add_argument(
-        "--gmsl-barystatic-std-mm",
+        "--gmsl-bary-steric-ratio",
         type=float,
-        default=1.0,
-        help="Prior std of the barystatic GMSL change (mm).",
+        default=1.7,
+        help=(
+            "Ratio of the barystatic to steric GMSL prior stds (the "
+            "steric value being the realised one under the mass "
+            "constraint); sets the ice amplitude."
+        ),
     )
 
     parser.add_argument(
@@ -76,13 +80,13 @@ def parse_arguments():
         help="Sterodynamic correlation scale factor.",
     )
     parser.add_argument(
-        "--steric-dmslc-ratio",
+        "--ocean-dyn-std-mm",
         type=float,
-        default=0.1,
+        default=4.0,
         help=(
-            "Prior ratio of the ocean-integrated steric variance to the "
-            "dynamic-manometric (zeta = eta - eta_s) variance; sets the "
-            "sterodynamic amplitude."
+            "Pointwise std of the sterodynamic sea level field (mm, "
+            "pre-mass-constraint): the single dimensioned prior "
+            "amplitude, anchoring the chain."
         ),
     )
 
@@ -93,25 +97,31 @@ def parse_arguments():
         help="Ocean density correlation scale.",
     )
     parser.add_argument(
-        "--gmsl-steric-std-mm",
+        "--steric-dyn-std-ratio",
         type=float,
-        default=0.5,
-        help="Prior std of the steric GMSL change (mm).",
+        default=0.75,
+        help=(
+            "Mean-depth steric sea level std as a fraction of the "
+            "sterodynamic std; sets the density amplitude."
+        ),
     )
 
     parser.add_argument(
         "--noise-std-factor",
         type=float,
-        default=1.0,
-        help="Local (uncorrelated) altimetry noise std as factor of the barystatic GMSLR std.",
+        default=0.5,
+        help=(
+            "Local (uncorrelated) altimetry noise std as factor of the "
+            "sterodynamic pointwise prior std."
+        ),
     )
     parser.add_argument(
         "--noise-corr-std-factor",
         type=float,
-        default=0.05,
+        default=0.025,
         help=(
             "Std of the optional large-scale correlated altimetry error "
-            "component, as a factor of the GMSLR prior std (0 disables). "
+            "component, as a factor of the sterodynamic pointwise prior std (0 disables). "
             "Represents long-wavelength systematics such as orbit and "
             "reference-frame errors; because it barely averages down, even "
             "small values (e.g. 0.02-0.05) set the error floor for "
@@ -225,11 +235,11 @@ def main():
         state,
         load_space,
         args.ice_scale_factor,
-        args.gmsl_barystatic_std_mm,
+        args.gmsl_bary_steric_ratio,
         args.ocean_dyn_scale_factor,
-        args.steric_dmslc_ratio,
+        args.ocean_dyn_std_mm,
         args.ocean_rho_scale_factor,
-        args.gmsl_steric_std_mm,
+        args.steric_dyn_std_ratio,
         args.noise_corr_scale_factor,
         args.noise_std_factor,
         points,
@@ -243,7 +253,9 @@ def main():
         noise_corr_std_factor=args.noise_corr_std_factor,
         point_evaluation_operator=point_eval,
     )
-    utils.print_calibration_report(calib, scale_mm)
+    utils.print_calibration_report(
+        calib, scale_mm, state.model.parameters.density_scale
+    )
 
     joint_meas = inf.GaussianMeasure.from_direct_sum([model_prior, noise_meas])
     data_space = noise_meas.domain

@@ -284,14 +284,16 @@ def parse_arguments():
     parser.add_argument(
         "--alt-noise-corr-std-factor",
         type=float,
-        default=0.025,
+        default=0.075,
         help=(
             "Std of the optional large-scale correlated altimetry error "
             "component, as a factor of the sterodynamic pointwise prior std (0 disables). "
             "Represents long-wavelength systematics such as orbit and "
-            "reference-frame errors; because it barely averages down, even "
-            "small values (e.g. 0.02-0.05) set the error floor for "
-            "large-scale averages."
+            "reference-frame errors; because it barely averages down, it "
+            "sets the error floor for large-scale averages (the implied "
+            "GMSL floor is printed with the calibration report). The "
+            "default 0.075 (~0.3 mm at the 4 mm anchor) is sized to "
+            "assessed altimetry-era GMSL systematics."
         ),
     )
     parser.add_argument(
@@ -308,14 +310,75 @@ def parse_arguments():
     parser.add_argument(
         "--grace-noise-scale-km",
         type=float,
-        default=50.0,
-        help="GRACE spatial noise correlation scale (km).",
+        default=500.0,
+        help=(
+            "GRACE spatial noise correlation scale in km (where the "
+            "noise spectrum turns; default 500 = the ice prior scale, "
+            "so the SNR crossover is shaped by the order difference "
+            "alone)."
+        ),
+    )
+    parser.add_argument(
+        "--grace-noise-order",
+        type=float,
+        default=None,
+        help=(
+            "Fix the GRACE noise spectral exponent instead of solving "
+            "it from --grace-snr-low-degree (sobolev kernel only; "
+            "mutually exclusive with it). With "
+            "--grace-snr-crossover-degree only the amplitude is then "
+            "solved; with --grace-noise-std-factor it sets the legacy "
+            "noise order. Exponents at or below 1 - (load space order) "
+            "give an illegitimate field and are warned about."
+        ),
+    )
+    parser.add_argument(
+        "--grace-snr-low-degree",
+        type=float,
+        default=None,
+        help=(
+            "Amplitude SNR of the GRACE noise against the UNMASKED "
+            "ice-load marginal at --grace-snr-reference-degree; "
+            "together with --grace-snr-crossover-degree this solves "
+            "the noise exponent and amplitude in closed form (default "
+            "4.0 when neither --grace-noise-order nor "
+            "--grace-noise-std-factor is given). Requiring a "
+            "legitimate noise field caps it; infeasible values report "
+            "the cap."
+        ),
+    )
+    parser.add_argument(
+        "--grace-snr-reference-degree",
+        type=float,
+        default=2.0,
+        help="Degree at which --grace-snr-low-degree is imposed (default 2).",
+    )
+    parser.add_argument(
+        "--grace-snr-crossover-degree",
+        type=float,
+        default=None,
+        help=(
+            "Degree at which the GRACE noise per-coefficient variance "
+            "equals that of the UNMASKED ice-load marginal (default 50 "
+            "unless --grace-noise-std-factor is given, with which it "
+            "is mutually exclusive). Solved together with "
+            "--grace-snr-low-degree, or fixes the amplitude alone when "
+            "--grace-noise-order is given. Ice masking dilutes the "
+            "per-degree signal power, so the realised crossover of the "
+            "masked signal sits lower."
+        ),
     )
     parser.add_argument(
         "--grace-noise-std-factor",
         type=float,
-        default=0.1,
-        help="GRACE spatial noise std as factor of the derived ice pointwise std.",
+        default=None,
+        help=(
+            "Legacy amplitude mode: GRACE spatial noise std as a factor "
+            "of the derived ice pointwise std, with the exponent from "
+            "--grace-noise-order (default --prior-order). Mutually "
+            "exclusive with the SNR conditions (the pre-crossover "
+            "default was 0.1 with --grace-noise-scale-km 50)."
+        ),
     )
 
     parser.add_argument(
@@ -382,7 +445,26 @@ def parse_arguments():
         ),
     )
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.grace_noise_std_factor is not None and (
+        args.grace_snr_crossover_degree is not None
+        or args.grace_snr_low_degree is not None
+    ):
+        parser.error(
+            "--grace-noise-std-factor is mutually exclusive with "
+            "--grace-snr-crossover-degree / --grace-snr-low-degree."
+        )
+    if args.grace_noise_order is not None and args.grace_snr_low_degree is not None:
+        parser.error(
+            "--grace-noise-order and --grace-snr-low-degree both fix "
+            "the noise exponent; give at most one."
+        )
+    if args.grace_noise_std_factor is None:
+        if args.grace_snr_crossover_degree is None:
+            args.grace_snr_crossover_degree = 50.0
+        if args.grace_noise_order is None and args.grace_snr_low_degree is None:
+            args.grace_snr_low_degree = 4.0
+    return args
 
 
 def plot_state_maps(
@@ -575,6 +657,10 @@ def main():
         prior_order=args.prior_order,
         alt_noise_corr_std_factor=args.alt_noise_corr_std_factor,
         point_evaluation_operator=exact_phys["point_eval"],
+        grace_noise_order=args.grace_noise_order,
+        grace_snr_crossover_degree=args.grace_snr_crossover_degree,
+        grace_snr_low_degree=args.grace_snr_low_degree,
+        grace_snr_reference_degree=args.grace_snr_reference_degree,
     )
 
     scale_mm = exact_phys["scale_mm"]
@@ -707,7 +793,9 @@ def main():
     # ------------------ 4. SOLVING POSTERIORS ------------------
     print("\nSolving for Posteriors...")
     callback = inf.ProgressCallback()
-    tolerance = 0.01 * min(args.alt_noise_std_factor, args.grace_noise_std_factor)
+    tolerance = 0.01 * min(
+        args.alt_noise_std_factor, exact_meas["grace_noise_info"]["std_factor"]
+    )
     solver = inf.CGSolver(callback=callback, rtol=tolerance)
 
     print(" -> Solving Altimetry-only...")

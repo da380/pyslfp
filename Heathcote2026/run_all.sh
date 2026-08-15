@@ -100,13 +100,6 @@ SURROGATE=(--surrogate-degree 32)
 # Altimetry-side model priors: altimetry_bias, altimetry_inversion,
 # joint_inversion (identical names and defaults in all three).
 #
-# One dimensioned amplitude anchors the chain: the pointwise
-# sterodynamic std (mm, pre-mass-constraint; ~ the observed regional
-# trend spread for per-year fields). The density amplitude follows from
-# the steric/sterodynamic std ratio, and the ice amplitude from the
-# barystatic/steric ratio of the REALISED GMSL prior stds under the
-# mass constraint. Derived stds and realised GMSL statistics are 
-# printed by each run.
 ALT_PRIOR=(
     --spacing 1.0
     --ice-scale-factor 1.0
@@ -121,9 +114,8 @@ ALT_PRIOR=(
 
 # Altimetry noise: same numbers, but joint_inversion prefixes the flags
 # with "alt-". Single source of truth here keeps the runs consistent.
-# Factors of the sterodynamic pointwise prior std.
 ALT_NOISE_STD=0.5
-ALT_NOISE_CORR_STD=0.025
+ALT_NOISE_CORR_STD=0.075
 ALT_NOISE_CORR_SCALE=4.0
 
 ALT_NOISE=(
@@ -138,22 +130,28 @@ JOINT_ALT_NOISE=(
 )
 
 # GRACE-family prior/noise parameterisation: grace_bias, grace_inversion.
-# (--noise-std-factor here is a different quantity from the altimetry one,
-# which is why it lives in this array and not a shared one.  Optional:
-# --smoothing-scale-km <km> [defaults to --load-scale-km], --remove-degree-1.)
+# The noise exponent and amplitude are solved from the amplitude SNR at
+# degree 2 and the degree where the spectral SNR crosses one (against the
+# direct load prior); the solved exponent and the implied pointwise and
+# observation-band stds are printed. 
+# Optional: --smoothing-scale-km <km> [defaults to --load-scale-km],
+# --remove-degree-1.
 GRACE_PRIOR=(
     --direct-scale-km 250.0
     --direct-std-m 0.01
-    --noise-scale-factor 0.25
-    --noise-std-factor 0.1414
+    --noise-scale-factor 1.0
+    --snr-low-degree 4.0
+    --snr-crossover-degree 50
 )
 
 # joint_inversion's own GRACE noise parameterisation (deliberately
-# independent of GRACE_PRIOR above); the std is a factor of the derived
-# ice pointwise std, the dominant load.
+# independent of GRACE_PRIOR above). The SNR conditions are stated
+# against the UNMASKED ice-load marginal, the dominant load; the solved
+# exponent is printed. 
 JOINT_GRACE_NOISE=(
-    --grace-noise-scale-km 50.0
-    --grace-noise-std-factor 0.1
+    --grace-noise-scale-km 500.0
+    --grace-snr-low-degree 4.0
+    --grace-snr-crossover-degree 50
 )
 
 # Per-script extras (plot selections, MC sample counts) -- edit to taste.

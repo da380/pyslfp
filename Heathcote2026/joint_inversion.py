@@ -22,10 +22,14 @@ inversion only by default; pass --map-all-cases to map all three.
 
 import argparse
 import os
+from collections.abc import Sequence
+from typing import Any
+
 import numpy as np
 
 import matplotlib
 
+matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import pygeoinf as inf
@@ -35,8 +39,6 @@ import joint_utils as utils
 import pyslfp as sl
 from pyslfp.state import EarthState
 from pyslfp.linear_operators import ocean_altimetry_points
-
-matplotlib.use("Agg")
 
 
 plt.rcParams.update(
@@ -49,6 +51,102 @@ plt.rcParams.update(
         "figure.titlesize": 18,
     }
 )
+
+
+def _measure_mean_std(measure: Any) -> tuple[float, float]:
+    """Mean and standard deviation of a scalar (1D) measure."""
+    if hasattr(measure, "expectation"):  # pygeoinf GaussianMeasure
+        mean = float(np.asarray(measure.expectation)[0])
+        var = float(np.asarray(measure.covariance.matrix(dense=True))[0, 0])
+    else:  # scipy-style frozen distribution
+        mean = float(np.asarray(measure.mean)[0])
+        var = float(np.asarray(measure.cov)[0, 0])
+    return mean, float(np.sqrt(var))
+
+
+def zoom_1d_distributions(
+    ax: plt.Axes,
+    measures: Sequence[Any],
+    *,
+    exclude: Sequence[int] = (),
+    n_std: float = 4.0,
+    true_value: float | None = None,
+    pad_frac: float = 0.05,
+    inset: bool = True,
+    inset_bounds: tuple[float, float, float, float] = (0.04, 0.50, 0.32, 0.45),
+    inset_label: str = "full range",
+    **plot_kwargs: Any,
+) -> plt.Axes | None:
+    """
+    Zoom the x-axis of a `plot_1d_distributions` plot onto the narrow measures.
+
+    `plot_1d_distributions` evaluates every curve on one grid spanning the
+    union of all measures, so this is a pure view change: excluded (broad)
+    measures stay drawn, they just no longer set the limits. An optional
+    inset repeats the full range for context.
+
+    Args:
+        ax: The axes filled by `inf.plot_1d_distributions`.
+        measures: The same measure list passed to that function.
+        exclude: Indices into `measures` that should not set the window.
+        n_std: Half-width of the window, in standard deviations.
+        true_value: Kept inside the window if given.
+        pad_frac: Fractional padding added either side.
+        inset: Add a small full-range inset for context.
+        inset_bounds: Inset position in axes fractions, (x0, y0, w, h).
+        inset_label: Title placed on the inset.
+        **plot_kwargs: Forwarded to `inf.plot_1d_distributions` for the
+            inset redraw (e.g. `posterior_labels`).
+
+    Returns:
+        The inset axes, or None if `inset` is False.
+    """
+    dist_stats = [_measure_mean_std(m) for m in measures]
+    dropped = set(exclude)
+    keep = [s for i, s in enumerate(dist_stats) if i not in dropped and s[1] > 0]
+    if not keep:
+        raise ValueError("No measure with positive, finite std left to zoom on.")
+
+    lo = min(mu - n_std * sd for mu, sd in keep)
+    hi = max(mu + n_std * sd for mu, sd in keep)
+    if true_value is not None:
+        lo, hi = min(lo, true_value), max(hi, true_value)
+    pad = pad_frac * (hi - lo)
+    lo, hi = lo - pad, hi + pad
+
+    full_xlim = ax.get_xlim()
+    ax.set_xlim(lo, hi)
+
+    # Rescale y to the peaks inside the window (Gaussian peak = 1/(sd*sqrt(2*pi)))
+    visible = [sd for mu, sd in dist_stats if sd > 0 and lo <= mu <= hi]
+    if visible:
+        ax.set_ylim(0.0, 1.05 / (min(visible) * np.sqrt(2.0 * np.pi)))
+
+    if not inset:
+        return None
+
+    ax_in = ax.inset_axes(inset_bounds)
+    inf.plot_1d_distributions(
+        list(measures),
+        ax=ax_in,
+        true_value=true_value,
+        title="",
+        xlabel="",
+        **plot_kwargs,
+    )
+    if ax_in.get_legend() is not None:
+        ax_in.get_legend().remove()
+    ax_in.set_ylabel("")
+    ax_in.set_xlim(*full_xlim)
+    ax_in.tick_params(labelsize=8, labelleft=False, left=False)
+    ax_in.set_title(inset_label, fontsize=9, pad=3)
+
+    # Outline the zoomed window on the full-range inset
+    y0, y1 = ax_in.get_ylim()
+    ax_in.indicate_inset(
+        (lo, y0, hi - lo, y1 - y0), edgecolor="0.3", alpha=0.8, linewidth=1.0
+    )
+    return ax_in
 
 
 def parse_arguments():
@@ -701,6 +799,19 @@ def main():
             xlabel="Global Mean Sea Level Rise (mm)",
             posterior_labels=labels,
         )
+        # Zoom onto the narrow estimates: GRACE-Only no longer sets the
+        # span but is still drawn, and the inset repeats the full range.
+        zoom_1d_distributions(
+            ax_pdf,
+            measures,
+            exclude=(labels.index("GRACE-Only"),),
+            true_value=true_gmsl_val_mm,
+            posterior_labels=labels,
+        )
+        # If Altimetry-Only and Joint still coincide at this scale, dash the
+        # Joint curve so the red shows through (then rebuild the legend):
+        # ax_pdf.get_lines()[labels.index("Joint")].set_linestyle((0, (4, 3)))
+        # ax_pdf.legend(loc="upper right", bbox_to_anchor=(0.95, 0.95))
         figures_to_save["gmslr_pdf"] = fig_pdf
 
     # ---------- 5b. GMSLR SPLIT: BARYSTATIC vs STERIC ----------

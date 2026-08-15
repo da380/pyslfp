@@ -44,7 +44,9 @@ The three prior marginals can also be switched from heat-kernel to Sobolev
 (Matern-type) covariances with a single common spectral order, giving
 rougher, power-law-tailed fields while keeping the per-field length scales
 and pointwise stds; the spatially correlated noise measures follow the same
-family (see build_measures).
+family, with the GRACE noise taking its own Sobolev exponent, by default
+solved together with its amplitude from a low-degree SNR and a crossover
+degree against the unmasked ice-load marginal (see build_measures).
 """
 
 import pygeoinf as inf
@@ -77,6 +79,9 @@ from altimetry_utils import (
     steric_sea_level_operator as steric_sea_level_operator,
     true_gmsl_operator as true_gmsl_operator,
 )
+
+# Spectral noise-amplitude resolution shared with the GRACE-only pipeline.
+from grace_utils import resolve_noise_amplitude
 
 import numpy as np
 import matplotlib as mpl
@@ -206,6 +211,10 @@ def build_measures(
     alt_noise_corr_std_factor=0.0,
     point_evaluation_operator=None,
     derived_stds=None,
+    grace_noise_order=None,
+    grace_snr_crossover_degree=None,
+    grace_snr_low_degree=None,
+    grace_snr_reference_degree=2.0,
 ):
     """
     Constructs the 3-component joint prior and dual-sensor noise measures.
@@ -231,8 +240,23 @@ def build_measures(
     path, so the preconditioner amplitudes match the exact model instead
     of being re-derived at surrogate resolution. The altimetry noise
     factors below are referenced to the sterodynamic pointwise std, the
-    field altimetry actually observes; the GRACE spatial noise std is a
-    factor of the (derived) ice pointwise std, the dominant load.
+    field altimetry actually observes. The GRACE spatial noise spectrum
+    is set against the UNMASKED ice-load marginal (ice std scaled by
+    rho_i/rho_w to water equivalent): by default its exponent and
+    amplitude are solved from a low-degree amplitude SNR
+    (grace_snr_low_degree at grace_snr_reference_degree) together with
+    the degree grace_snr_crossover_degree at which the per-coefficient
+    variances are equal; alternatively grace_noise_order fixes the
+    exponent (amplitude solved from the crossover alone), or
+    grace_noise_std_factor gives the legacy amplitude mode (a factor of
+    the derived ice pointwise std, the dominant load). The unmasked
+    marginal is a stated convention -- ice masking dilutes the
+    per-degree signal power by roughly the ice area fraction, so the
+    realised spectral crossover of the masked, multi-component signal
+    sits below the nominal degree. See
+    grace_utils.resolve_noise_amplitude for the solve, the legitimacy
+    and monotonicity conditions, and the diagnostics returned under
+    "grace_noise_info" and printed.
 
     If ocean_corr > 0 (exact model only; requires pygeoinf >= 1.8.4), the
     (Dyn, Rho) marginals are combined into a correlated invariant measure
@@ -371,19 +395,84 @@ def build_measures(
     if alt_noise_corr_std_factor > 0.0:
         if point_evaluation_operator is None:
             point_evaluation_operator = load_space.point_evaluation_operator(points)
-        alt_corr_noise_meas = load_measure(
+        alt_corr_field_meas = load_measure(
             load_space.scale * alt_noise_corr_scale_factor,
             alt_noise_corr_std_factor * calib["derived_stds"]["dyn_std"],
-        ).affine_mapping(operator=point_evaluation_operator)
+        )
+        # Irreducible error floor this component sets on GMSL-type
+        # averages: the exact std of its ocean mean, reported with the
+        # calibration so the floor is a deliberate choice.
+        gmsl_fn = load_space.l2_products_operator(
+            [state.ocean_projection(value=0.0) / state.ocean_area]
+        )
+        calib.setdefault("noise", {})["alt_corr_gmsl_floor"] = float(
+            np.sqrt(
+                alt_corr_field_meas.directional_variance(gmsl_fn.adjoint(np.ones(1)))
+            )
+        )
+        alt_corr_noise_meas = alt_corr_field_meas.affine_mapping(
+            operator=point_evaluation_operator
+        )
         alt_noise_meas = alt_noise_meas + alt_corr_noise_meas
 
-    # GRACE Noise
+    # GRACE Noise. The SNR-crossover convention is stated against the
+    # unmasked ice-load marginal (ice_std scaled to water equivalent);
+    # legacy grace_noise_std_factor remains a factor of ice_std itself.
     grace_spatial_scale = (
         grace_noise_scale_km * 1000.0 / state.model.parameters.length_scale
     )
-    grace_spatial_noise = load_measure(
-        grace_spatial_scale, grace_noise_std_factor * ice_std
+    ice_load_std = (
+        ice_std
+        * state.model.parameters.ice_density
+        / state.model.parameters.water_density
     )
+    grace_noise_info = resolve_noise_amplitude(
+        load_space,
+        prior_kernel,
+        prior_order,
+        grace_noise_order,
+        ice_scale,
+        ice_load_std,
+        grace_spatial_scale,
+        noise_std_factor=grace_noise_std_factor,
+        snr_crossover_degree=grace_snr_crossover_degree,
+        snr_low_degree=grace_snr_low_degree,
+        snr_reference_degree=grace_snr_reference_degree,
+        obs_degree=obs_degree,
+        factor_reference_std=ice_std,
+        std_to_mm=scale_mm,
+        label="GRACE spatial noise",
+    )
+    if grace_noise_info["mode"] == "amplitude":
+        # Legacy pointwise-normalised construction (identical measures
+        # to the historical behaviour).
+        if prior_kernel == "sobolev":
+            grace_spatial_noise = (
+                load_space.point_value_scaled_sobolev_kernel_gaussian_measure(
+                    grace_noise_info["noise_order"],
+                    grace_spatial_scale,
+                    std=grace_noise_info["noise_std"],
+                )
+            )
+        else:
+            grace_spatial_noise = load_measure(
+                grace_spatial_scale, grace_noise_info["noise_std"]
+            )
+    else:
+        # Solved modes: the spectrum is fixed directly by its kernel
+        # amplitude, with no pointwise normalisation of the rough field.
+        _b = grace_noise_info["kernel_amplitude"]
+        if prior_kernel == "sobolev":
+            _q = grace_noise_info["noise_order"]
+            grace_spatial_noise = load_space.invariant_gaussian_measure(
+                lambda k, b=_b, s=grace_spatial_scale, q=_q: (
+                    b * (1.0 + s * s * k) ** (-q)
+                )
+            )
+        else:
+            grace_spatial_noise = load_space.invariant_gaussian_measure(
+                lambda k, b=_b, s=grace_spatial_scale: (b * np.exp(-(s * s) * k))
+            )
     wmb = WMBMethod(state.model, obs_degree)
     grace_noise_meas = wmb.load_measure_to_observation_measure(grace_spatial_noise)
 
@@ -404,6 +493,7 @@ def build_measures(
         "joint_precond_noise": joint_precond_noise_meas,
         "wmb": wmb,
         "gmsl_std": calib.get("gmsl", {}).get("barystatic_std"),
+        "grace_noise_info": grace_noise_info,
         "ice_std": ice_std,
         "ice_scale": ice_scale,
         "calib": calib,

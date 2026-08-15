@@ -502,6 +502,12 @@ def print_calibration_report(calib, scale_mm, density_scale):
         "unconstrained <eta>_O std = "
         f"{g['eta_mean_std_unconstrained'] * scale_mm:.3f} mm"
     )
+    floor = calib.get("noise", {}).get("alt_corr_gmsl_floor")
+    if floor is not None:
+        print(
+            "  correlated altimetry error component: implied GMSL error "
+            f"floor = {floor * scale_mm:.3f} mm"
+        )
 
 
 def gmsl_split_operators(state, load_space, continuous_sl_operator):
@@ -699,7 +705,9 @@ def build_measures(
     scale load_space.scale x noise_corr_scale_factor, representing
     long-wavelength systematics such as orbit and reference-frame errors.
     The correlated component barely averages down and so sets an
-    irreducible error floor on large-scale functionals such as GMSLR. The
+    irreducible error floor on large-scale functionals such as GMSLR; the
+    implied GMSL floor (the exact std of its ocean mean) is recorded in
+    calib["noise"] and printed with the calibration report. The
     surrogate always uses the local component alone, so the Woodbury
     preconditioner is built from the uncorrelated noise. If
     point_evaluation_operator is supplied (the one already built inside
@@ -782,10 +790,22 @@ def build_measures(
     if noise_corr_std_factor > 0.0 and not is_surrogate:
         if point_evaluation_operator is None:
             point_evaluation_operator = load_space.point_evaluation_operator(points)
-        corr_noise_meas = load_measure(
+        corr_field_meas = load_measure(
             load_space.scale * noise_corr_scale_factor,
             noise_corr_std_factor * calib["derived_stds"]["dyn_std"],
-        ).affine_mapping(operator=point_evaluation_operator)
+        )
+        # Irreducible error floor this component sets on GMSL-type
+        # averages: the exact std of its ocean mean, reported with the
+        # calibration so the floor is a deliberate choice.
+        gmsl_fn = load_space.l2_products_operator(
+            [state.ocean_projection(value=0.0) / state.ocean_area]
+        )
+        calib.setdefault("noise", {})["alt_corr_gmsl_floor"] = _functional_std(
+            corr_field_meas, gmsl_fn
+        )
+        corr_noise_meas = corr_field_meas.affine_mapping(
+            operator=point_evaluation_operator
+        )
         noise_meas = noise_meas + corr_noise_meas
 
     # Prior shift

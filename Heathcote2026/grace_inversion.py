@@ -104,9 +104,10 @@ def parse_arguments():
         default="sobolev",
         help=(
             "Covariance family for the direct load prior AND the spatial "
-            "noise model (applied consistently, so the spectral "
-            "signal-to-noise crossover stays well defined): 'heat' "
-            "or 'sobolev' (default)."
+            "noise model (families are never mixed, so the spectral "
+            "signal-to-noise ratio stays monotone; the noise exponent "
+            "is solved from the SNR conditions or fixed via "
+            "--noise-order): 'heat' or 'sobolev' (default)."
         ),
     )
     parser.add_argument(
@@ -132,11 +133,72 @@ def parse_arguments():
     parser.add_argument(
         "--noise-scale-factor",
         type=float,
-        default=0.25,
-        help="Noise correlation scale factor.",
+        default=1.0,
+        help=(
+            "Noise correlation scale as a factor of --direct-scale-km "
+            "(where the noise spectrum turns; default 1.0 = the prior "
+            "scale, so the SNR crossover is shaped by the order "
+            "difference alone)."
+        ),
     )
     parser.add_argument(
-        "--noise-std-factor", type=float, default=0.1414, help="Noise std factor."
+        "--noise-order",
+        type=float,
+        default=None,
+        help=(
+            "Fix the noise spectral exponent instead of solving it "
+            "from --snr-low-degree (sobolev kernel only; mutually "
+            "exclusive with it). With --snr-crossover-degree only the "
+            "amplitude is then solved; with --noise-std-factor it sets "
+            "the legacy noise order. Exponents at or below "
+            "1 - (load space order) give an illegitimate field with an "
+            "lmax-dominated pointwise std and are warned about."
+        ),
+    )
+    parser.add_argument(
+        "--snr-low-degree",
+        type=float,
+        default=None,
+        help=(
+            "Amplitude signal-to-noise ratio of the per-coefficient "
+            "spectra at --snr-reference-degree; together with "
+            "--snr-crossover-degree this solves the noise exponent and "
+            "amplitude in closed form (default 4.0 when neither "
+            "--noise-order nor --noise-std-factor is given). Requiring "
+            "a legitimate noise field caps it (about 4.9 at the "
+            "default scales and crossover); infeasible values report "
+            "the cap."
+        ),
+    )
+    parser.add_argument(
+        "--snr-reference-degree",
+        type=float,
+        default=2.0,
+        help="Degree at which --snr-low-degree is imposed (default 2).",
+    )
+    parser.add_argument(
+        "--snr-crossover-degree",
+        type=float,
+        default=None,
+        help=(
+            "Degree at which the per-coefficient noise and signal "
+            "variances are equal (default 50 unless --noise-std-factor "
+            "is given, with which it is mutually exclusive). Solved "
+            "together with --snr-low-degree, or fixes the amplitude "
+            "alone when --noise-order is given."
+        ),
+    )
+    parser.add_argument(
+        "--noise-std-factor",
+        type=float,
+        default=None,
+        help=(
+            "Legacy amplitude mode: pointwise noise std as a factor of "
+            "--direct-std-m, with the exponent from --noise-order "
+            "(default --prior-order). Mutually exclusive with the SNR "
+            "conditions (the pre-crossover default was 0.1414 = "
+            "sqrt(2)/10 with --noise-scale-factor 0.25)."
+        ),
     )
 
     # --- Parallelisation ---
@@ -156,7 +218,25 @@ def parse_arguments():
         ),
     )
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.noise_std_factor is not None and (
+        args.snr_crossover_degree is not None or args.snr_low_degree is not None
+    ):
+        parser.error(
+            "--noise-std-factor is mutually exclusive with "
+            "--snr-crossover-degree / --snr-low-degree."
+        )
+    if args.noise_order is not None and args.snr_low_degree is not None:
+        parser.error(
+            "--noise-order and --snr-low-degree both fix the noise "
+            "exponent; give at most one."
+        )
+    if args.noise_std_factor is None:
+        if args.snr_crossover_degree is None:
+            args.snr_crossover_degree = 50.0
+        if args.noise_order is None and args.snr_low_degree is None:
+            args.snr_low_degree = 4.0
+    return args
 
 
 def main():
@@ -179,17 +259,24 @@ def main():
         utils.build_physics_components(args.lmax, args.load_order, args.load_scale_km)
     )
 
-    initial_prior, model_prior, noise_spatial, noise_scale = utils.build_measures(
-        state,
-        load_space,
-        args.direct_scale_km,
-        args.direct_std_m,
-        args.noise_scale_factor,
-        args.noise_std_factor,
-        remove_degree_1=args.remove_degree_1,
-        prior_shift=args.prior_shift,
-        prior_kernel=args.prior_kernel,
-        prior_order=args.prior_order,
+    initial_prior, model_prior, noise_spatial, noise_scale, noise_info = (
+        utils.build_measures(
+            state,
+            load_space,
+            args.direct_scale_km,
+            args.direct_std_m,
+            args.noise_scale_factor,
+            args.noise_std_factor,
+            remove_degree_1=args.remove_degree_1,
+            prior_shift=args.prior_shift,
+            prior_kernel=args.prior_kernel,
+            prior_order=args.prior_order,
+            noise_order=args.noise_order,
+            snr_crossover_degree=args.snr_crossover_degree,
+            snr_low_degree=args.snr_low_degree,
+            snr_reference_degree=args.snr_reference_degree,
+            obs_degree=args.obs_degree,
+        )
     )
     if args.prior_kernel == "sobolev":
         print(
@@ -229,7 +316,7 @@ def main():
     # ------------------ 3. POSTERIOR SOLVE ------------------
     print("\nSolving for posterior expectation...")
     callback = inf.ProgressCallback()
-    solver = inf.CGSolver(callback=callback, rtol=0.01 * args.noise_std_factor)
+    solver = inf.CGSolver(callback=callback, rtol=0.01 * noise_info["std_factor"])
 
     model_posterior = inverse_problem.model_posterior_measure(
         data, solver, preconditioner=preconditioner
@@ -724,8 +811,12 @@ def main():
         wmb_inv_op = wmb_method.potential_coefficient_to_load_operator(load_space)
         wmb_estimate = wmb_inv_op(data)
 
+        # Smooth the WMB map at the noise-dominated scale: heat kernel
+        # with half-power at the SNR crossover degree when available,
+        # otherwise the legacy 2 x noise-correlation-scale choice.
+        plot_scale = noise_info["plot_smoothing_scale"] or 2 * noise_scale
         smoothing_operator = load_space.heat_kernel_gaussian_measure(
-            2 * noise_scale
+            plot_scale
         ).covariance
         smoothed_wmb_estimate = smoothing_operator(wmb_estimate)
 

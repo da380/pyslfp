@@ -6,7 +6,10 @@ Shared utilities, physics initializations, and plotting for Bayesian GRACE inver
 The direct load prior and the spatial noise measure can optionally use
 Sobolev (Matern-type) covariances in place of the default heat kernels,
 giving rougher, power-law-tailed fields while keeping the correlation scale
-and pointwise std settings (see build_measures).
+and pointwise std settings. The noise takes its own Sobolev exponent, by
+default solved together with its amplitude from a specified low-degree
+signal-to-noise ratio and the degree at which the spectral SNR crosses one
+(see build_measures and resolve_noise_amplitude).
 """
 
 import pygeoinf as inf
@@ -51,6 +54,377 @@ def build_physics_components(lmax, load_order, load_scale_km):
     )
 
 
+def invariant_coefficient_profile(
+    kernel, order, scale, space_order, space_scale, degrees, /, *, radius=1.0
+):
+    """Unnormalised per-coefficient L2 variances c_l at the given degrees."""
+    degrees = np.asarray(degrees, dtype=float)
+    lam = degrees * (degrees + 1.0) / radius**2
+    space_weight = (1.0 + space_scale**2 * lam) ** (-space_order)
+    if kernel == "sobolev":
+        return (1.0 + scale**2 * lam) ** (-order) * space_weight
+    if kernel == "heat":
+        return np.exp(-(scale**2) * lam) * space_weight
+    raise ValueError("kernel must be 'heat' or 'sobolev'.")
+
+
+def resolve_noise_amplitude(
+    load_space,
+    prior_kernel,
+    prior_order,
+    noise_order,
+    signal_scale,
+    signal_std,
+    noise_scale,
+    /,
+    *,
+    noise_std_factor=None,
+    snr_crossover_degree=None,
+    snr_low_degree=None,
+    snr_reference_degree=2.0,
+    obs_degree=None,
+    factor_reference_std=None,
+    std_to_mm=None,
+    label="spatial noise",
+):
+    """
+    Resolves the noise spectrum (exponent and amplitude) and reports the
+    spectral signal-to-noise structure of a (signal, noise) pair of
+    invariant kernel measures on the same space.
+
+    The per-coefficient L2 variances are
+
+        signal: c_l = A_s (1 + s_s^2 lam_l)^(-q_s) w_l^(-1),
+        noise:  c_l = B   (1 + s_n^2 lam_l)^(-q_n) w_l^(-1),
+
+    with lam_l = l(l+1)/radius^2 and w_l = (1 + s0^2 lam_l)^p the load
+    space's spectral weight, which cancels in the per-coefficient ratio
+
+        SNR(l) = (A_s / B) (1 + s_s^2 lam_l)^(-q_s) (1 + s_n^2 lam_l)^(q_n).
+
+    A_s is fixed by the signal's pointwise std; the noise is then
+    resolved in one of three mutually exclusive ways:
+
+      snr_low_degree + snr_crossover_degree :
+          two log-linear conditions -- amplitude SNR = snr_low_degree
+          at degree snr_reference_degree, and SNR = 1 at the crossover
+          -- solve the pair (q_n, B) in closed form,
+
+              q_n = (q_s DL_s - ln rho_var) / DL_n,
+              DL_x = ln(1 + s_x^2 lam_{l*}) - ln(1 + s_x^2 lam_ref),
+
+          (sobolev only: the exponent is the second dof). The noise
+          must be a legitimate random field, q_n + p > 1, which caps
+          the low-degree contrast at
+          rho_amp < exp{[q_s DL_s + (p - 1) DL_n] / 2}; infeasible
+          requests raise with the cap reported.
+
+      noise_order + snr_crossover_degree :
+          fixed exponent; only B is solved from SNR(l*) = 1.
+
+      noise_std_factor :
+          legacy amplitude mode; the pointwise noise std is this factor
+          of factor_reference_std (default signal_std), with exponent
+          noise_order (default prior_order).
+
+    Writing lam = l(l+1), the log-derivative of SNR in lam has
+    numerator -[(q_s s_s^2 - q_n s_n^2) + (q_s - q_n) s_s^2 s_n^2 lam],
+    affine in lam, so SNR is monotonically decreasing -- and the
+    crossover unique -- iff q_n <= q_s and q_n s_n^2 <= q_s s_s^2 (heat
+    family: s_n <= s_s). This is enforced in the crossover modes and
+    reported otherwise. Heat kernels have no exponent, so they support
+    only the legacy and fixed-shape crossover modes.
+
+    Returns a dict with the resolution 'mode', the spectral
+    'kernel_amplitude' B, the implied pointwise 'noise_std' at the
+    space's lmax, its 'std_factor' relative to factor_reference_std,
+    the effective 'noise_order', the 'crossover_degree' (given, or
+    solved in legacy mode if reached, else None), the amplitude SNR at
+    the reference degree, the observation-band variance fraction and
+    std (l <= obs_degree, the only part the WMB map transmits),
+    band-edge NSR, 'legitimate_field' and 'monotone' flags, and a
+    'plot_smoothing_scale' (heat kernel with half-power at the
+    crossover) for map smoothing.
+    """
+    if noise_std_factor is not None and (
+        snr_crossover_degree is not None or snr_low_degree is not None
+    ):
+        raise ValueError(
+            "noise_std_factor is mutually exclusive with the SNR "
+            "conditions (snr_crossover_degree / snr_low_degree)."
+        )
+    if noise_std_factor is None and snr_crossover_degree is None:
+        raise ValueError("Give either noise_std_factor or snr_crossover_degree.")
+    if noise_order is not None and snr_low_degree is not None:
+        raise ValueError(
+            "noise_order and snr_low_degree both fix the noise "
+            "exponent; give at most one."
+        )
+    if prior_kernel not in ("heat", "sobolev"):
+        raise ValueError("prior_kernel must be 'heat' or 'sobolev'.")
+    if prior_kernel == "heat" and (
+        noise_order is not None or snr_low_degree is not None
+    ):
+        raise ValueError(
+            "noise_order / snr_low_degree apply to the sobolev family "
+            "only (the heat kernel has no exponent)."
+        )
+
+    space_order = load_space.order
+    space_scale = load_space.scale
+    lmax = load_space.lmax
+    radius = load_space.radius
+    q_s = prior_order
+
+    degrees = np.arange(lmax + 1, dtype=float)
+    weights = 2.0 * degrees + 1.0
+
+    def lam(ell):
+        ell = np.asarray(ell, dtype=float)
+        return ell * (ell + 1.0) / radius**2
+
+    def log_kernel(scale, ell):
+        return float(np.log1p(scale**2 * lam(ell)))
+
+    # Signal spectrum and its kernel amplitude A_s (from the pointwise
+    # normalisation of the point-value-scaled prior).
+    prof_s = invariant_coefficient_profile(
+        prior_kernel,
+        q_s,
+        signal_scale,
+        space_order,
+        space_scale,
+        degrees,
+        radius=radius,
+    )
+    z_s = float(np.sum(weights * prof_s))
+    kernel_amplitude_signal = 4.0 * np.pi * signal_std**2 / z_s
+
+    band_degree = int(min(obs_degree, lmax)) if obs_degree is not None else lmax
+    reference = signal_std if factor_reference_std is None else factor_reference_std
+    ref_degree = float(snr_reference_degree)
+    solved_exponent = False
+
+    if snr_crossover_degree is not None:
+        lstar = float(snr_crossover_degree)
+        if not 0.0 < lstar <= band_degree:
+            raise ValueError(
+                "snr_crossover_degree must lie in (0, "
+                f"min(obs_degree, lmax)] = (0, {band_degree}]."
+            )
+        if snr_low_degree is not None:
+            # --- two-condition solve for (q_n, B) ---
+            if ref_degree < 1.0:
+                raise ValueError("snr_reference_degree must be >= 1.")
+            if not ref_degree < lstar:
+                raise ValueError(
+                    "snr_reference_degree must lie below " "snr_crossover_degree."
+                )
+            if not snr_low_degree > 1.0:
+                raise ValueError(
+                    "snr_low_degree (the amplitude SNR at the reference "
+                    "degree) must exceed 1."
+                )
+            ln_rho_var = 2.0 * np.log(snr_low_degree)
+            dl_s = log_kernel(signal_scale, lstar) - log_kernel(
+                signal_scale, ref_degree
+            )
+            dl_n = log_kernel(noise_scale, lstar) - log_kernel(noise_scale, ref_degree)
+            q_n = float((q_s * dl_s - ln_rho_var) / dl_n)
+            solved_exponent = True
+            if q_n + space_order <= 1.0 + 1.0e-12:
+                rho_cap = np.exp((q_s * dl_s + (space_order - 1.0) * dl_n) / 2.0)
+                raise ValueError(
+                    f"The solved noise exponent q_n = {q_n:.3f} gives an "
+                    "illegitimate field (needs q_n + p > 1 with p = "
+                    f"{space_order:.1f}). For this crossover degree and "
+                    "these scales the low-degree amplitude SNR must be "
+                    f"below {rho_cap:.2f}."
+                )
+        else:
+            q_n = q_s if noise_order is None else noise_order
+
+        if prior_kernel == "sobolev":
+            lin_0 = q_s * signal_scale**2 - q_n * noise_scale**2
+            lin_1 = (q_s - q_n) * signal_scale**2 * noise_scale**2
+            monotone = lin_0 >= 0.0 and lin_1 >= 0.0 and (lin_0 + lin_1) > 0.0
+        else:
+            monotone = noise_scale < signal_scale
+        if not monotone:
+            hint = (
+                " (reduce noise_scale relative to signal_scale)"
+                if solved_exponent
+                else ""
+            )
+            raise ValueError(
+                "The SNR crossover requires a monotonically decreasing "
+                "signal-to-noise ratio: q_n <= q_s and q_n * s_n^2 <= "
+                "q_s * s_s^2 for the sobolev family (s_n < s_s for "
+                f"heat), not both equalities{hint}."
+            )
+        if prior_kernel == "sobolev":
+            log_b = (
+                np.log(kernel_amplitude_signal)
+                - q_s * log_kernel(signal_scale, lstar)
+                + q_n * log_kernel(noise_scale, lstar)
+            )
+        else:
+            q_n = None
+            log_b = (
+                np.log(kernel_amplitude_signal)
+                - signal_scale**2 * float(lam(lstar))
+                + noise_scale**2 * float(lam(lstar))
+            )
+        kernel_amplitude = float(np.exp(log_b))
+        crossover_degree = lstar
+        mode = "two-condition" if solved_exponent else "fixed-order-crossover"
+    else:
+        # --- legacy amplitude mode ---
+        q_n = (
+            (q_s if noise_order is None else noise_order)
+            if (prior_kernel == "sobolev")
+            else None
+        )
+        noise_std = noise_std_factor * reference
+        if prior_kernel == "sobolev":
+            lin_0 = q_s * signal_scale**2 - q_n * noise_scale**2
+            lin_1 = (q_s - q_n) * signal_scale**2 * noise_scale**2
+            monotone = lin_0 >= 0.0 and lin_1 >= 0.0 and (lin_0 + lin_1) > 0.0
+        else:
+            monotone = noise_scale < signal_scale
+        mode = "amplitude"
+
+    prof_n = invariant_coefficient_profile(
+        prior_kernel,
+        0.0 if q_n is None else q_n,
+        noise_scale,
+        space_order,
+        space_scale,
+        degrees,
+        radius=radius,
+    )
+    z_n = float(np.sum(weights * prof_n))
+    if mode == "amplitude":
+        kernel_amplitude = 4.0 * np.pi * noise_std**2 / z_n
+    else:
+        noise_std = float(np.sqrt(kernel_amplitude * z_n / (4.0 * np.pi)))
+
+    # Per-coefficient NSR from the kernel-only profiles (the space
+    # weight cancels; passing space_order=0 removes it).
+    kern_s = invariant_coefficient_profile(
+        prior_kernel,
+        q_s,
+        signal_scale,
+        0.0,
+        space_scale,
+        degrees,
+        radius=radius,
+    )
+    kern_n = invariant_coefficient_profile(
+        prior_kernel,
+        0.0 if q_n is None else q_n,
+        noise_scale,
+        0.0,
+        space_scale,
+        degrees,
+        radius=radius,
+    )
+    nsr = (kernel_amplitude * kern_n) / (kernel_amplitude_signal * kern_s)
+    if mode == "amplitude":
+        above = np.nonzero(nsr[1:] >= 1.0)[0]
+        crossover_degree = float(above[0] + 1) if above.size else None
+    snr_amp_ref = float(1.0 / np.sqrt(nsr[int(round(ref_degree))]))
+
+    legitimate = True if q_n is None else bool(q_n + space_order > 1.0 + 1.0e-12)
+    band_fraction = float(
+        np.sum(weights[: band_degree + 1] * prof_n[: band_degree + 1]) / z_n
+    )
+    info = {
+        "mode": mode,
+        "kernel_amplitude": float(kernel_amplitude),
+        "noise_std": float(noise_std),
+        "std_factor": float(noise_std / reference),
+        "noise_order": q_n,
+        "crossover_degree": crossover_degree,
+        "snr_low_degree": snr_amp_ref,
+        "snr_reference_degree": ref_degree,
+        "band_degree": band_degree,
+        "band_variance_fraction": band_fraction,
+        "band_std": float(noise_std * np.sqrt(band_fraction)),
+        "nsr_band_edge": float(nsr[band_degree]),
+        "monotone": monotone,
+        "legitimate_field": legitimate,
+        "plot_smoothing_scale": (
+            radius
+            * float(
+                np.sqrt(np.log(2.0) / (crossover_degree * (crossover_degree + 1.0)))
+            )
+            if crossover_degree is not None
+            else None
+        ),
+    }
+
+    if std_to_mm:
+        in_mm = lambda x: f"{x * std_to_mm:.3f} mm"  # noqa: E731
+    else:
+        in_mm = lambda x: f"{x:.4e}"  # noqa: E731
+    family = "sobolev" if prior_kernel == "sobolev" else "heat kernels"
+    print(
+        f"{label}: {family}, scale ratio s_n/s_s = " f"{noise_scale / signal_scale:.2f}"
+    )
+    if mode == "two-condition":
+        print(
+            f"  solved from amplitude SNR = {snr_amp_ref:.2f} at degree "
+            f"{ref_degree:g} and crossover at degree {crossover_degree:g}:"
+        )
+        print(
+            f"  noise order q_n = {q_n:+.3f} "
+            f"(q_n + p = {q_n + space_order:.2f} > 1: legitimate field)"
+        )
+    elif mode == "fixed-order-crossover":
+        order_txt = "" if q_n is None else f" with fixed order q_n = {q_n:.2f}"
+        print(
+            f"  amplitude from SNR crossover at degree "
+            f"{crossover_degree:g}{order_txt}: amplitude SNR = "
+            f"{snr_amp_ref:.2f} at degree {ref_degree:g}"
+        )
+        if not legitimate:
+            print(
+                "  WARNING: q_n + p <= 1 -- the noise is not a legitimate "
+                "field and its pointwise std is lmax-dominated."
+            )
+    else:
+        cross_txt = (
+            f"NSR crosses one at degree {crossover_degree:g}"
+            if crossover_degree is not None
+            else f"NSR stays below one up to lmax (NSR(lmax) = {nsr[-1]:.3f})"
+        )
+        print(f"  amplitude mode: {cross_txt}")
+        if not monotone:
+            print(
+                "  WARNING: the signal-to-noise ratio is not monotone in "
+                "degree for these orders/scales; any crossover need not "
+                "be unique."
+            )
+        if not legitimate:
+            print(
+                "  WARNING: q_n + p <= 1 -- the noise is not a legitimate "
+                "field and its pointwise std is lmax-dominated."
+            )
+    print(
+        f"  pointwise std = {in_mm(noise_std)} "
+        f"({info['std_factor']:.4f} x reference std); "
+        f"{100 * band_fraction:.1f}% of the noise variance lies in the "
+        f"band l <= {band_degree} at lmax = {lmax} "
+        f"(band std = {in_mm(info['band_std'])})"
+    )
+    print(
+        f"  noise/signal amplitude = {np.sqrt(info['nsr_band_edge']):.1f} "
+        f"at l = {band_degree}"
+    )
+    return info
+
+
 def build_measures(
     state,
     load_space,
@@ -64,6 +438,11 @@ def build_measures(
     prior_shift=0.0,
     prior_kernel="heat",
     prior_order=1.0,
+    noise_order=None,
+    snr_crossover_degree=None,
+    snr_low_degree=None,
+    snr_reference_degree=2.0,
+    obs_degree=None,
 ):
     """
     Constructs the prior and noise Gaussian measures.
@@ -77,14 +456,40 @@ def build_measures(
     order-2 spaces, prior_order = 1 gives degree-variance tails ~ l**(-5),
     and any positive order yields a finite pointwise variance. The
     correlation scale and pointwise std settings retain their meaning under
-    either family. The spatial noise measure uses the SAME covariance
-    family (with its own scale and std factors), keeping the spectral
-    signal-to-noise crossover well defined: within a common family the
-    noise-to-signal spectral ratio is monotone in degree, whereas mixed
-    families (a power-law signal against an exponentially decaying noise)
-    would make it non-monotone. Both measures remain invariant with
-    analytic spectral structure under either family, so the WMB
-    preconditioner construction is unchanged.
+    either family.
+
+    The spatial noise measure uses the same covariance family (mixed
+    families -- a power-law signal against an exponentially decaying
+    noise -- would make the spectral signal-to-noise ratio non-monotone
+    and are not supported) with its own Sobolev exponent, representing
+    -- very crudely -- the spatially correlated uncertainty of the
+    GRACE corrections (GIA, geocentre, low-degree replacements,
+    leakage) rather than the formal measurement covariance. It is
+    resolved in one of three mutually exclusive ways (see
+    resolve_noise_amplitude for the algebra and validation):
+
+      snr_low_degree + snr_crossover_degree :
+          default; the exponent and amplitude are solved in closed form
+          from the amplitude SNR at a low reference degree and the
+          degree where the per-coefficient variances are equal. The
+          noise is required to be a legitimate random field
+          (q_n + p > 1), which caps the achievable low-degree SNR,
+
+      noise_order + snr_crossover_degree :
+          fixed exponent, amplitude solved from the crossover alone,
+
+      noise_std_factor :
+          legacy; pointwise noise std as a factor of the prior's, with
+          exponent noise_order (default prior_order).
+
+    Solved-mode noise is constructed directly from its spectral kernel
+    amplitude (invariant_gaussian_measure), so no pointwise
+    normalisation of the rough field is involved; the implied pointwise
+    and observation-band stds (l <= obs_degree, the only part the WMB
+    map transmits) are reported. Both measures remain invariant with
+    analytic spectral structure, so the WMB preconditioner construction
+    is unchanged. The resolved spectrum and diagnostics are returned as
+    a fifth element and printed.
     """
     if prior_kernel not in ("heat", "sobolev"):
         raise ValueError("prior_kernel must be 'heat' or 'sobolev'.")
@@ -140,14 +545,59 @@ def build_measures(
         )
 
     noise_load_measure_scale = noise_scale_factor * direct_load_measure_scale
-    noise_load_measure_std = noise_std_factor * direct_load_measure_std
-    noise_load_measure = load_measure(noise_load_measure_scale, noise_load_measure_std)
+    noise_info = resolve_noise_amplitude(
+        load_space,
+        prior_kernel,
+        prior_order,
+        noise_order,
+        direct_load_measure_scale,
+        direct_load_measure_std,
+        noise_load_measure_scale,
+        noise_std_factor=noise_std_factor,
+        snr_crossover_degree=snr_crossover_degree,
+        snr_low_degree=snr_low_degree,
+        snr_reference_degree=snr_reference_degree,
+        obs_degree=obs_degree,
+        std_to_mm=1000.0 * length_scale / water_density,
+        label="GRACE spatial noise",
+    )
+    if noise_info["mode"] == "amplitude":
+        # Legacy pointwise-normalised construction (identical measures
+        # to the historical behaviour).
+        if prior_kernel == "sobolev":
+            noise_load_measure = (
+                load_space.point_value_scaled_sobolev_kernel_gaussian_measure(
+                    noise_info["noise_order"],
+                    noise_load_measure_scale,
+                    std=noise_info["noise_std"],
+                )
+            )
+        else:
+            noise_load_measure = load_measure(
+                noise_load_measure_scale, noise_info["noise_std"]
+            )
+    else:
+        # Solved modes: the spectrum is fixed directly by its kernel
+        # amplitude, with no pointwise normalisation of the rough field.
+        _b = noise_info["kernel_amplitude"]
+        if prior_kernel == "sobolev":
+            _q = noise_info["noise_order"]
+            noise_load_measure = load_space.invariant_gaussian_measure(
+                lambda k, b=_b, s=noise_load_measure_scale, q=_q: (
+                    b * (1.0 + s * s * k) ** (-q)
+                )
+            )
+        else:
+            noise_load_measure = load_space.invariant_gaussian_measure(
+                lambda k, b=_b, s=noise_load_measure_scale: (b * np.exp(-(s * s) * k))
+            )
 
     return (
         initial_direct_load_prior,
         direct_load_prior,
         noise_load_measure,
         noise_load_measure_scale,
+        noise_info,
     )
 
 

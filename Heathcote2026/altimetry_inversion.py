@@ -18,6 +18,9 @@ import os
 import numpy as np
 
 import matplotlib
+
+matplotlib.use("Agg")
+
 import matplotlib.pyplot as plt
 
 
@@ -38,8 +41,6 @@ plt.rcParams.update(
         "figure.titlesize": 18,
     }
 )
-
-matplotlib.use("Agg")
 
 
 def parse_arguments():

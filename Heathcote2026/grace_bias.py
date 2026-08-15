@@ -16,8 +16,10 @@ sea-level equation).
 import argparse
 import os
 import numpy as np
+
 import matplotlib
 
+matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 
@@ -30,8 +32,6 @@ from pyslfp.linear_operators import (
     grace_observation_operator,
     sea_level_change_to_load_operator,
 )
-
-matplotlib.use("Agg")
 
 
 def parse_arguments():

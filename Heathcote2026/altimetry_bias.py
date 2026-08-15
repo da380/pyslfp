@@ -13,10 +13,11 @@ area-averaging estimator.
 import argparse
 import os
 import numpy as np
+
 import matplotlib
 
-# Force headless backend to avoid Wayland/Qt display errors
 matplotlib.use("Agg")
+
 import matplotlib.pyplot as plt
 
 import pygeoinf as inf

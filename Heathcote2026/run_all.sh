@@ -85,10 +85,9 @@ PYTHON="${PYTHON:-python}"
 COMMON=(
     --lmax 256
     --load-order 2.0
-    --load-scale-km 500.0
-    --prior-kernel sobolev
-    --prior-order 1.0
-    --prior-shift 1.0
+    --load-scale-km 500.0    
+    --prior-order 3.0
+    --prior-shift 0.0
 )
 
 # GRACE observation truncation: grace_bias, grace_inversion, joint_inversion.
@@ -115,7 +114,7 @@ ALT_PRIOR=(
 # Altimetry noise: same numbers, but joint_inversion prefixes the flags
 # with "alt-". Single source of truth here keeps the runs consistent.
 ALT_NOISE_STD=0.5
-ALT_NOISE_CORR_STD=0.075
+ALT_NOISE_CORR_STD=0.01
 ALT_NOISE_CORR_SCALE=4.0
 
 ALT_NOISE=(
@@ -137,11 +136,11 @@ JOINT_ALT_NOISE=(
 # Optional: --smoothing-scale-km <km> [defaults to --load-scale-km],
 # --remove-degree-1.
 GRACE_PRIOR=(
-    --direct-scale-km 250.0
+    --direct-scale-km 250
     --direct-std-m 0.01
-    --noise-scale-factor 1.0
-    --snr-low-degree 4.0
-    --snr-crossover-degree 50
+    --noise-scale-factor 0.5
+    --snr-low-degree 10.0
+    --snr-crossover-degree 64
 )
 
 # joint_inversion's own GRACE noise parameterisation (deliberately
@@ -149,9 +148,9 @@ GRACE_PRIOR=(
 # against the UNMASKED ice-load marginal, the dominant load; the solved
 # exponent is printed. 
 JOINT_GRACE_NOISE=(
-    --grace-noise-scale-km 500.0
-    --grace-snr-low-degree 4.0
-    --grace-snr-crossover-degree 50
+    --grace-noise-scale-km 250.0
+    --grace-snr-low-degree 10.0
+    --grace-snr-crossover-degree 64
 )
 
 # Per-script extras (plot selections, MC sample counts) -- edit to taste.

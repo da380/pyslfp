@@ -77,30 +77,7 @@ def zoom_1d_distributions(
     inset_label: str = "full range",
     **plot_kwargs: Any,
 ) -> plt.Axes | None:
-    """
-    Zoom the x-axis of a `plot_1d_distributions` plot onto the narrow measures.
-
-    `plot_1d_distributions` evaluates every curve on one grid spanning the
-    union of all measures, so this is a pure view change: excluded (broad)
-    measures stay drawn, they just no longer set the limits. An optional
-    inset repeats the full range for context.
-
-    Args:
-        ax: The axes filled by `inf.plot_1d_distributions`.
-        measures: The same measure list passed to that function.
-        exclude: Indices into `measures` that should not set the window.
-        n_std: Half-width of the window, in standard deviations.
-        true_value: Kept inside the window if given.
-        pad_frac: Fractional padding added either side.
-        inset: Add a small full-range inset for context.
-        inset_bounds: Inset position in axes fractions, (x0, y0, w, h).
-        inset_label: Title placed on the inset.
-        **plot_kwargs: Forwarded to `inf.plot_1d_distributions` for the
-            inset redraw (e.g. `posterior_labels`).
-
-    Returns:
-        The inset axes, or None if `inset` is False.
-    """
+    """Zoom the x-axis of a `plot_1d_distributions` plot onto the narrow measures."""
     dist_stats = [_measure_mean_std(m) for m in measures]
     dropped = set(exclude)
     keep = [s for i, s in enumerate(dist_stats) if i not in dropped and s[1] > 0]
@@ -117,7 +94,6 @@ def zoom_1d_distributions(
     full_xlim = ax.get_xlim()
     ax.set_xlim(lo, hi)
 
-    # Rescale y to the peaks inside the window (Gaussian peak = 1/(sd*sqrt(2*pi)))
     visible = [sd for mu, sd in dist_stats if sd > 0 and lo <= mu <= hi]
     if visible:
         ax.set_ylim(0.0, 1.05 / (min(visible) * np.sqrt(2.0 * np.pi)))
@@ -141,7 +117,6 @@ def zoom_1d_distributions(
     ax_in.tick_params(labelsize=8, labelleft=False, left=False)
     ax_in.set_title(inset_label, fontsize=9, pad=3)
 
-    # Outline the zoomed window on the full-range inset
     y0, y1 = ax_in.get_ylim()
     ax_in.indicate_inset(
         (lo, y0, hi - lo, y1 - y0), edgecolor="0.3", alpha=0.8, linewidth=1.0
@@ -238,7 +213,6 @@ def parse_arguments():
             "constraint); sets the ice amplitude."
         ),
     )
-
     parser.add_argument(
         "--ocean-dyn-scale-factor",
         type=float,
@@ -255,7 +229,6 @@ def parse_arguments():
             "amplitude, anchoring the chain."
         ),
     )
-
     parser.add_argument(
         "--ocean-rho-scale-factor",
         type=float,
@@ -271,116 +244,15 @@ def parse_arguments():
             "sterodynamic std; sets the density amplitude."
         ),
     )
-
     parser.add_argument(
-        "--alt-noise-std-factor",
+        "--prior-order",
         type=float,
-        default=0.5,
-        help=(
-            "Local (uncorrelated) altimetry noise std as factor of the "
-            "sterodynamic pointwise prior std."
-        ),
+        default=3.0,
+        help="Common spectral order for prior covariance (must be > 1).",
     )
     parser.add_argument(
-        "--alt-noise-corr-std-factor",
-        type=float,
-        default=0.075,
-        help=(
-            "Std of the optional large-scale correlated altimetry error "
-            "component, as a factor of the sterodynamic pointwise prior std (0 disables). "
-            "Represents long-wavelength systematics such as orbit and "
-            "reference-frame errors; because it barely averages down, it "
-            "sets the error floor for large-scale averages (the implied "
-            "GMSL floor is printed with the calibration report). The "
-            "default 0.075 (~0.3 mm at the 4 mm anchor) is sized to "
-            "assessed altimetry-era GMSL systematics."
-        ),
+        "--prior-shift", type=float, default=0.0, help="Prior mean shift factor."
     )
-    parser.add_argument(
-        "--alt-noise-corr-scale-factor",
-        type=float,
-        default=4.0,
-        help=(
-            "Correlation scale of the correlated altimetry error "
-            "component, as a factor of the load scale (default 4.0 = "
-            "2000 km at the default load scale). Follows --prior-kernel."
-        ),
-    )
-
-    parser.add_argument(
-        "--grace-noise-scale-km",
-        type=float,
-        default=500.0,
-        help=(
-            "GRACE spatial noise correlation scale in km (where the "
-            "noise spectrum turns; default 500 = the ice prior scale, "
-            "so the SNR crossover is shaped by the order difference "
-            "alone)."
-        ),
-    )
-    parser.add_argument(
-        "--grace-noise-order",
-        type=float,
-        default=None,
-        help=(
-            "Fix the GRACE noise spectral exponent instead of solving "
-            "it from --grace-snr-low-degree (sobolev kernel only; "
-            "mutually exclusive with it). With "
-            "--grace-snr-crossover-degree only the amplitude is then "
-            "solved; with --grace-noise-std-factor it sets the legacy "
-            "noise order. Exponents at or below 1 - (load space order) "
-            "give an illegitimate field and are warned about."
-        ),
-    )
-    parser.add_argument(
-        "--grace-snr-low-degree",
-        type=float,
-        default=None,
-        help=(
-            "Amplitude SNR of the GRACE noise against the UNMASKED "
-            "ice-load marginal at --grace-snr-reference-degree; "
-            "together with --grace-snr-crossover-degree this solves "
-            "the noise exponent and amplitude in closed form (default "
-            "4.0 when neither --grace-noise-order nor "
-            "--grace-noise-std-factor is given). Requiring a "
-            "legitimate noise field caps it; infeasible values report "
-            "the cap."
-        ),
-    )
-    parser.add_argument(
-        "--grace-snr-reference-degree",
-        type=float,
-        default=2.0,
-        help="Degree at which --grace-snr-low-degree is imposed (default 2).",
-    )
-    parser.add_argument(
-        "--grace-snr-crossover-degree",
-        type=float,
-        default=None,
-        help=(
-            "Degree at which the GRACE noise per-coefficient variance "
-            "equals that of the UNMASKED ice-load marginal (default 50 "
-            "unless --grace-noise-std-factor is given, with which it "
-            "is mutually exclusive). Solved together with "
-            "--grace-snr-low-degree, or fixes the amplitude alone when "
-            "--grace-noise-order is given. Ice masking dilutes the "
-            "per-degree signal power, so the realised crossover of the "
-            "masked signal sits lower."
-        ),
-    )
-    parser.add_argument(
-        "--grace-noise-std-factor",
-        type=float,
-        default=None,
-        help=(
-            "Legacy amplitude mode: GRACE spatial noise std as a factor "
-            "of the derived ice pointwise std, with the exponent from "
-            "--grace-noise-order (default --prior-order). Mutually "
-            "exclusive with the SNR conditions (the pre-crossover "
-            "default was 0.1 with --grace-noise-scale-km 50)."
-        ),
-    )
-
     parser.add_argument(
         "--ocean-corr",
         type=float,
@@ -400,32 +272,66 @@ def parse_arguments():
             "wavenumber, as a factor of the load scale."
         ),
     )
+
+    # --- Noise Settings ---
     parser.add_argument(
-        "--prior-kernel",
-        choices=["heat", "sobolev"],
-        default="sobolev",
-        help=(
-            "Covariance family for the three model priors and any "
-            "spatially correlated noise models (applied consistently; "
-            "white-noise settings unaffected): 'heat' or "
-            "'sobolev' (default)."
-        ),
-    )
-    parser.add_argument(
-        "--prior-order",
+        "--alt-noise-std-factor",
         type=float,
-        default=1.0,
+        default=0.5,
         help=(
-            "Common spectral order for --prior-kernel sobolev (must be "
-            "positive). Sample roughness combines this order with the "
-            "model space order (--load-order): with the default order-2 "
-            "spaces, 1.0 gives degree-variance tails ~ l^-5, comparable "
-            "to observed mesoscale SSH spectra. Ignored for the heat "
-            "kernel."
+            "Local (uncorrelated) altimetry noise std as factor of the "
+            "sterodynamic pointwise prior std."
         ),
     )
     parser.add_argument(
-        "--prior-shift", type=float, default=1.0, help="Prior mean shift factor."
+        "--alt-noise-corr-std-factor",
+        type=float,
+        default=0.075,
+        help=(
+            "Std of the optional large-scale correlated altimetry error "
+            "component, as a factor of the sterodynamic pointwise prior std (0 disables)."
+        ),
+    )
+    parser.add_argument(
+        "--alt-noise-corr-scale-factor",
+        type=float,
+        default=4.0,
+        help=(
+            "Correlation scale of the correlated altimetry error "
+            "component, as a factor of the load scale."
+        ),
+    )
+    parser.add_argument(
+        "--grace-noise-scale-km",
+        type=float,
+        default=250.0,
+        help="GRACE spatial noise correlation scale in km.",
+    )
+    parser.add_argument(
+        "--grace-snr-low-degree",
+        type=float,
+        default=10.0,
+        help=(
+            "Amplitude signal-to-noise ratio of the per-coefficient "
+            "spectra at --grace-snr-reference-degree; together with "
+            "--grace-snr-crossover-degree this solves the noise exponent and "
+            "amplitude in closed form."
+        ),
+    )
+    parser.add_argument(
+        "--grace-snr-reference-degree",
+        type=float,
+        default=2.0,
+        help="Degree at which --grace-snr-low-degree is imposed.",
+    )
+    parser.add_argument(
+        "--grace-snr-crossover-degree",
+        type=float,
+        default=64,
+        help=(
+            "Degree at which the GRACE noise per-coefficient variance "
+            "equals that of the UNMASKED ice-load marginal."
+        ),
     )
 
     # --- Parallelisation ---
@@ -438,32 +344,10 @@ def parse_arguments():
         "--max-jobs",
         type=int,
         default=os.cpu_count() or 1,
-        help=(
-            "Cap on the number of worker processes when --parallel is "
-            "set; call sites with fewer independent tasks use fewer. "
-            "Ignored without --parallel."
-        ),
+        help="Cap on the number of worker processes when --parallel is set.",
     )
 
     args = parser.parse_args()
-    if args.grace_noise_std_factor is not None and (
-        args.grace_snr_crossover_degree is not None
-        or args.grace_snr_low_degree is not None
-    ):
-        parser.error(
-            "--grace-noise-std-factor is mutually exclusive with "
-            "--grace-snr-crossover-degree / --grace-snr-low-degree."
-        )
-    if args.grace_noise_order is not None and args.grace_snr_low_degree is not None:
-        parser.error(
-            "--grace-noise-order and --grace-snr-low-degree both fix "
-            "the noise exponent; give at most one."
-        )
-    if args.grace_noise_std_factor is None:
-        if args.grace_snr_crossover_degree is None:
-            args.grace_snr_crossover_degree = 50.0
-        if args.grace_noise_order is None and args.grace_snr_low_degree is None:
-            args.grace_snr_low_degree = 4.0
     return args
 
 
@@ -481,13 +365,7 @@ def plot_state_maps(
     post_label,
     regions=None,
 ):
-    """
-    3-row map figure comparing the true state with a posterior expectation,
-    with an optional third column of pointwise standard deviations.
-    Rows: ice thickness (mm), dynamic SSH (mm), vertically averaged density
-    (g/m^3). The supplied vmaxes are shared across figures so that the
-    different posteriors can be compared on identical colour scales.
-    """
+    """3-row map figure comparing true state with posterior expectation."""
     cmap = "seismic"
     cmap_std = "Blues"
     gl_kwargs = {"xlabel_style": {"size": 12}, "ylabel_style": {"size": 12}}
@@ -567,7 +445,6 @@ def plot_state_maps(
         for ax in axes.flatten():
             state.plot_boundaries(ax, regions)
 
-    # Labels
     col_labels = ["True State", post_label]
     if plot_std:
         col_labels.append("Pointwise Std. Deviation")
@@ -601,7 +478,6 @@ def main():
         args.plot_pdfs = args.plot_maps = args.plot_regions = True
         args.plot_gmsl_split = True
     if args.map_all_cases:
-        # Asking for all-case maps implies making maps at all.
         args.plot_maps = True
 
     output_dir = "output_plots_joint_inversion"
@@ -645,22 +521,19 @@ def main():
         args.alt_noise_corr_scale_factor,
         args.alt_noise_std_factor,
         args.grace_noise_scale_km,
-        args.grace_noise_std_factor,
         args.obs_degree,
         points,
         exact_phys["scale_mm"],
+        args.grace_snr_crossover_degree,
+        args.grace_snr_low_degree,
+        args.grace_snr_reference_degree,
         prior_shift=args.prior_shift,
         is_surrogate=False,
         ocean_corr=args.ocean_corr,
         ocean_corr_scale_factor=args.ocean_corr_scale_factor,
-        prior_kernel=args.prior_kernel,
         prior_order=args.prior_order,
         alt_noise_corr_std_factor=args.alt_noise_corr_std_factor,
         point_evaluation_operator=exact_phys["point_eval"],
-        grace_noise_order=args.grace_noise_order,
-        grace_snr_crossover_degree=args.grace_snr_crossover_degree,
-        grace_snr_low_degree=args.grace_snr_low_degree,
-        grace_snr_reference_degree=args.grace_snr_reference_degree,
     )
 
     scale_mm = exact_phys["scale_mm"]
@@ -674,11 +547,10 @@ def main():
             f"Correlated (Dyn, Rho) prior enabled: r0 = {args.ocean_corr:.2f}, "
             f"correlation scale factor = {args.ocean_corr_scale_factor:.2f}"
         )
-    if args.prior_kernel == "sobolev":
-        print(
-            f"Sobolev-kernel (Matern) priors enabled: common order = "
-            f"{args.prior_order:.2f}"
-        )
+    print(
+        f"Sobolev-kernel (Matern) priors enabled: common order = "
+        f"{args.prior_order:.2f}"
+    )
     if args.alt_noise_corr_std_factor > 0.0:
         print(
             f"Correlated altimetry error component enabled: std factor = "
@@ -688,8 +560,6 @@ def main():
 
     ocean_mask_mm = scale_mm * exact_phys["state"].ocean_projection(value=0.0)
     ice_mask_mm = scale_mm * exact_phys["state"].ice_projection(value=0.0)
-
-    # Unitless masks for covariance plotting
     ocean_mask = exact_phys["state"].ocean_projection(value=0.0)
     ice_mask = exact_phys["state"].ice_projection(value=0.0)
 
@@ -741,15 +611,16 @@ def main():
         args.alt_noise_corr_scale_factor,
         args.alt_noise_std_factor,
         args.grace_noise_scale_km,
-        args.grace_noise_std_factor,
         args.obs_degree,
         points,
         surr_phys["scale_mm"],
+        args.grace_snr_crossover_degree,
+        args.grace_snr_low_degree,
+        args.grace_snr_reference_degree,
         prior_shift=args.prior_shift,
         is_surrogate=True,
         ocean_corr=args.ocean_corr,
         ocean_corr_scale_factor=args.ocean_corr_scale_factor,
-        prior_kernel=args.prior_kernel,
         prior_order=args.prior_order,
         alt_noise_corr_std_factor=args.alt_noise_corr_std_factor,
         derived_stds=exact_meas["calib"]["derived_stds"],
@@ -760,9 +631,6 @@ def main():
     )
     alpha = 0.1
 
-    # The preconditioners use the local (uncorrelated) altimetry noise
-    # component only; the optional correlated error enters the exact
-    # inversions but not the preconditioning.
     P_joint = (1 - alpha) * joint_inv.surrogate_woodbury_data_preconditioner(
         woodbury_solver,
         alternate_forward_operator=surr_phys["joint_forward"],
@@ -850,7 +718,6 @@ def main():
 
         true_gmsl_val_mm = true_gmsl_op(true_model)[0]
 
-        # Log GMSL metrics
         prior_var = prior_gmsl_measure.covariance.matrix(dense=True)[0, 0]
         alt_var = post_gmsl_alt.covariance.matrix(dense=True)[0, 0]
         grace_var = post_gmsl_grace.covariance.matrix(dense=True)[0, 0]
@@ -887,8 +754,6 @@ def main():
             xlabel="Global Mean Sea Level Rise (mm)",
             posterior_labels=labels,
         )
-        # Zoom onto the narrow estimates: GRACE-Only no longer sets the
-        # span but is still drawn, and the inset repeats the full range.
         zoom_1d_distributions(
             ax_pdf,
             measures,
@@ -896,10 +761,6 @@ def main():
             true_value=true_gmsl_val_mm,
             posterior_labels=labels,
         )
-        # If Altimetry-Only and Joint still coincide at this scale, dash the
-        # Joint curve so the red shows through (then rebuild the legend):
-        # ax_pdf.get_lines()[labels.index("Joint")].set_linestyle((0, (4, 3)))
-        # ax_pdf.legend(loc="upper right", bbox_to_anchor=(0.95, 0.95))
         figures_to_save["gmslr_pdf"] = fig_pdf
 
     # ---------- 5b. GMSLR SPLIT: BARYSTATIC vs STERIC ----------
@@ -940,14 +801,6 @@ def main():
         def correlation(cov):
             return cov[0, 1] / np.sqrt(cov[0, 0] * cov[1, 1])
 
-        # Consistency checks. The residual steric GMSLR (total minus
-        # barystatic) should equal the direct ocean average of the steric
-        # sea level: their difference diagnoses the SLE mass balance
-        # (solver convergence), independently of the prior constraint.
-        # Separately, under the prior mass constraint the ocean average of
-        # the Sterodynamic SL Change equals the direct steric average, so their
-        # difference (the ocean mean of the dynamic manometric part,
-        # DMSLC) diagnoses the constraint.
         steric_resid_mm = steric_gmsl_op(true_model)[0] * scale_mm
         steric_direct_mm = steric_direct_op(true_model)[0] * scale_mm
         dyn_direct_mm = dyn_direct_op(true_model)[0] * scale_mm
@@ -1054,8 +907,6 @@ def main():
         load_space = exact_phys["load_space"]
         scale_mm = exact_phys["scale_mm"]
 
-        # Physical density units for the raw density maps (nondimensional
-        # density x density_scale = kg/m^3; x1000 -> g/m^3).
         rho_scale_gm3 = 1.0e3 * state.model.parameters.density_scale
         ocean_mask_gm3 = rho_scale_gm3 * ocean_mask
 
@@ -1069,8 +920,6 @@ def main():
             ]
         expectations = {name: post.expectation for name, _, post in posterior_cases}
 
-        # Shared per-row colour scales so the mapped posterior figures are
-        # directly comparable.
         true_ice, true_dyn, true_rho = true_model
         vmax_ice = max(
             np.max(np.abs(true_ice.data * scale_mm)),
@@ -1161,10 +1010,8 @@ def main():
 
         # =================================================================
         # Point-wise Covariance Maps
-        # (Prior vs Joint; Prior vs Alt-Only vs Joint with --map-all-cases)
         # =================================================================
         cov_cases = [("Prior", exact_meas["model_prior"])]
-        # if args.map_all_cases:
         cov_cases.append(("Grace-Only Posterior", post_grace))
         cov_cases.append(("Altimetry-Only Posterior", post_alt))
         cov_cases.append(("Joint Posterior", post_joint))
@@ -1175,10 +1022,6 @@ def main():
             f"({' vs '.join(label for label, _ in cov_cases)})..."
         )
 
-        # Covariance maps show the raw model parameters, matching the
-        # posterior maps: ice and dynamic SSH in mm, density in g/m^3.
-        # Rows mixing a height component with the density component
-        # therefore carry mixed units.
         comp_scales = [scale_mm, scale_mm, rho_scale_gm3]
         row_masks = [ice_mask, ocean_mask, ocean_mask]
 
@@ -1202,10 +1045,7 @@ def main():
         ]
 
         def plot_cov_row(axes, fields, pt, label):
-            """Helper to plot one covariance row across the compared cases."""
             vmaxs = [np.max(np.abs(f.data)) for f in fields]
-
-            # Fallback if one or more fields vanish completely
             for i, v in enumerate(vmaxs):
                 if v == 0:
                     vmaxs[i] = max(vmaxs) if max(vmaxs) > 0 else 1.0
@@ -1223,7 +1063,6 @@ def main():
                     gridlines_kwargs=gl_kwargs,
                 )
 
-                # Only plot the point on the first column (the Prior)
                 if idx == 0:
                     sl.plot_points(
                         [pt],
@@ -1243,12 +1082,9 @@ def main():
             test_vec = [load_space.zero, load_space.zero, load_space.zero]
             test_vec[comp_idx] = dirac_rep
 
-            # Extract the covariance action for each compared case
             covs = [measure.covariance(test_vec) for _, measure in cov_cases]
-
             perturb_scale = comp_scales[comp_idx]
 
-            # Setup 3 x n_cases grid
             fig_cov, axes_cov = sl.subplots(
                 3,
                 ncols_cov,
@@ -1256,7 +1092,6 @@ def main():
                 gridspec_kw={"hspace": 0.15, "wspace": 0.1},
             )
 
-            # Plot each row, scaled and masked per component
             for row_idx in range(3):
                 row_fields = [
                     cov[row_idx]
@@ -1268,7 +1103,6 @@ def main():
                     axes_cov[row_idx], row_fields, pt, cov_label(row_idx, comp_idx)
                 )
 
-            # Apply Custom Titles to Grid Layout
             for j, (case_label, _) in enumerate(cov_cases):
                 axes_cov[0, j].set_title(
                     case_label, fontsize=16, fontweight="bold", pad=20
@@ -1332,7 +1166,6 @@ def main():
             "BMSLC (mm)",
         ]
 
-        # Log Regional metrics
         prior_cov_mat = prior_meas.covariance.matrix(dense=True)
         alt_cov_mat = post_alt_meas.covariance.matrix(dense=True)
         grace_cov_mat = post_grace_meas.covariance.matrix(dense=True)
@@ -1407,7 +1240,6 @@ def main():
                 )
             f_metrics.write("-" * 135 + "\n")
 
-        # Plots
         inf.plot_corner_distributions(
             post_alt_meas,
             prior_measure=prior_meas,

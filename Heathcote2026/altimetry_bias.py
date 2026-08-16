@@ -119,16 +119,14 @@ def parse_arguments():
     parser.add_argument(
         "--noise-corr-std-factor",
         type=float,
-        default=0.075,
+        default=0.01,
         help=(
             "Std of the optional large-scale correlated altimetry error "
             "component, as a factor of the sterodynamic pointwise prior std (0 disables). "
             "Represents long-wavelength systematics such as orbit and "
             "reference-frame errors; because it barely averages down, it "
             "sets the error floor for large-scale averages (the implied "
-            "GMSL floor is printed with the calibration report). The "
-            "default 0.075 (~0.3 mm at the 4 mm anchor) is sized to "
-            "assessed altimetry-era GMSL systematics."
+            "GMSL floor is printed with the calibration report)."
         ),
     )
     parser.add_argument(
@@ -174,18 +172,11 @@ def parse_arguments():
     parser.add_argument(
         "--prior-order",
         type=float,
-        default=1.0,
-        help=(
-            "Common spectral order for --prior-kernel sobolev (must be "
-            "positive). Sample roughness combines this order with the "
-            "model space order (--load-order): with the default order-2 "
-            "spaces, 1.0 gives degree-variance tails ~ l^-5, comparable "
-            "to observed mesoscale SSH spectra. Ignored for the heat "
-            "kernel."
-        ),
+        default=3.0,
+        help=("Common spectral order for covariances. Must be > 1."),
     )
     parser.add_argument(
-        "--prior-shift", type=float, default=1.0, help="Prior mean shift factor."
+        "--prior-shift", type=float, default=0.0, help="Prior mean shift factor."
     )
 
     # --- Parallelisation ---

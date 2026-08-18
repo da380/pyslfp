@@ -33,6 +33,11 @@ extensions = [
     "sphinx.ext.viewcode",  # Adds links to the source code from the documentation.
 ]
 
+# Render docstring "Attributes:" sections as field lists within the class
+# description. Without this, napoleon and autodoc each document the attributes of a
+# dataclass such as EarthModelParameters, producing duplicate entries.
+napoleon_use_ivar = True
+
 templates_path = ["_templates"]
 exclude_patterns = []
 

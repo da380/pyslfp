@@ -12,7 +12,12 @@ build:
       - pip install poetry
     post_install:
       - VIRTUAL_ENV=$READTHEDOCS_VIRTUALENV_PATH poetry install --with dev
-      - sphinx-apidoc -f -o docs/source/ pyslfp/
+
+# The API pages under docs/source are generated with
+#   sphinx-apidoc -f -o docs/source/ pyslfp/
+# and then edited by hand to add :no-index: to the package-level automodule blocks,
+# so they are committed rather than regenerated here. Re-run the command, and restore
+# those options, after adding or renaming a module.
 
 sphinx:
   configuration: docs/source/conf.py

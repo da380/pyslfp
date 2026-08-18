@@ -3,6 +3,7 @@ Observation models and spectral estimators for GRACE gravimetry.
 
 This module provides two distinct ways to link surface mass loads to
 gravitational potential changes:
+
 1. GraceObservationModel: The exact, iterative elastic Sea Level Equation.
 2. WMBMethod: The fast, purely spectral approximation (Wahr, Molenaar, & Bryan, 1998),
    highly effective for building data-space preconditioners.

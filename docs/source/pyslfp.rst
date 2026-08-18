@@ -1,69 +1,55 @@
 pyslfp package
 ==============
 
+Subpackages
+-----------
+
+.. toctree::
+   :maxdepth: 4
+
+   pyslfp.data
+   pyslfp.ice
+   pyslfp.linear_operators
+
 Submodules
 ----------
 
-pyslfp.config module
---------------------
+pyslfp.core module
+------------------
 
-.. automodule:: pyslfp.config
+.. automodule:: pyslfp.core
    :members:
    :undoc-members:
    :show-inheritance:
 
-pyslfp.finger\_print module
----------------------------
-
-.. automodule:: pyslfp.finger_print
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-pyslfp.ice\_ng module
+pyslfp.physics module
 ---------------------
 
-.. automodule:: pyslfp.ice_ng
+.. automodule:: pyslfp.physics
    :members:
    :undoc-members:
    :show-inheritance:
 
-pyslfp.love\_numbers module
----------------------------
+pyslfp.plot module
+------------------
 
-.. automodule:: pyslfp.love_numbers
+.. automodule:: pyslfp.plot
    :members:
    :undoc-members:
    :show-inheritance:
 
-pyslfp.operators module
------------------------
+pyslfp.regions module
+---------------------
 
-.. automodule:: pyslfp.operators
+.. automodule:: pyslfp.regions
    :members:
    :undoc-members:
    :show-inheritance:
 
-pyslfp.physical\_parameters module
-----------------------------------
-
-.. automodule:: pyslfp.physical_parameters
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-pyslfp.plotting module
-----------------------
-
-.. automodule:: pyslfp.plotting
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-pyslfp.utils module
+pyslfp.state module
 -------------------
 
-.. automodule:: pyslfp.utils
+.. automodule:: pyslfp.state
    :members:
    :undoc-members:
    :show-inheritance:
@@ -75,3 +61,4 @@ Module contents
    :members:
    :undoc-members:
    :show-inheritance:
+   :no-index:

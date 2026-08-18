@@ -154,8 +154,10 @@ The tutorials can be run locally or in Google Colab.
 
 | Tutorial | Colab |
 | :--- | :--- |
-| 1 — Calculating a basic sea level fingerprint | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/tutorial1.ipynb) |
-| 2 — A deeper look at the sea level equation | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/tutorial2.ipynb) |
+| 1 — A first sea level fingerprint | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/tutorial1.ipynb) |
+| 2 — A closer look at the physics | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/tutorial2.ipynb) |
+| 3 — Operators, composition and sensitivity kernels | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/tutorial3.ipynb) |
+| 4 — A Bayesian inversion of tide gauge data | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/tutorial4.ipynb) |
 
 ## Tests
 

@@ -152,13 +152,17 @@ pairing a forward operator with the machinery needed to pose an inversion:
 Tutorials
 ---------
 
-Two introductory notebooks are kept in the ``tutorials`` directory of the repository,
-and can be run locally or in Google Colab:
+Four introductory notebooks are kept in the ``tutorials`` directory of the
+repository, and can be run locally or in Google Colab:
 
-* `Tutorial 1 — Calculating a basic sea level fingerprint
+* `Tutorial 1 — A first sea level fingerprint
   <https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/tutorial1.ipynb>`_
-* `Tutorial 2 — A deeper look at the sea level equation
+* `Tutorial 2 — A closer look at the physics
   <https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/tutorial2.ipynb>`_
+* `Tutorial 3 — Operators, composition and sensitivity kernels
+  <https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/tutorial3.ipynb>`_
+* `Tutorial 4 — A Bayesian inversion of tide gauge data
+  <https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/tutorial4.ipynb>`_
 
 
 Citation

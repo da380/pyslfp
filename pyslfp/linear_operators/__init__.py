@@ -26,6 +26,8 @@ from .spatial import (
     remove_ocean_average_operator,
     ice_sheet_averaging_operator,
     ice_sheet_basis_operator,
+    region_average_operator,
+    region_projection_operator,
 )
 
 from .tide_gauges import (
@@ -79,6 +81,8 @@ __all__ = [
     "remove_ocean_average_operator",
     "ice_sheet_averaging_operator",
     "ice_sheet_basis_operator",
+    "region_average_operator",
+    "region_projection_operator",
     # .tide_gauges
     "read_gloss_tide_gauge_data",
     "tide_gauge_operator",

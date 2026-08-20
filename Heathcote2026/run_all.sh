@@ -16,6 +16,7 @@
 #   ./run_all.sh all                          run everything
 #   ./run_all.sh list                         show the script sets and exit
 #   ./run_all.sh grace_bias joint_inversion   run exactly these, in order
+#   FAST=1 ./run_all.sh                       fast/low-res test run (lmax=64, obs=32, spacing=8)
 #   PARALLEL=0 ./run_all.sh                   serial runs (scripts' default)
 #   MAX_JOBS=8 N_THREADS=2 ./run_all.sh       8 workers x 2 threads each
 #   PYTHON=python3.12 ./run_all.sh            choose the interpreter
@@ -78,12 +79,31 @@ fi
 PYTHON="${PYTHON:-python}"
 
 # ---------------------------------------------------------------------------
-# 3. Common arguments
+# 3. Resolution / Test mode configuration
+# ---------------------------------------------------------------------------
+# Toggle quick low-resolution test runs via FAST=1 (or TEST=1):
+#   FAST=1 ./run_all.sh
+# Individual values can also be explicitly overridden.
+FAST="${FAST:-${TEST:-0}}"
+
+if [ "$FAST" -ne 0 ]; then
+    LMAX="${LMAX:-64}"
+    OBS_DEGREE_VAL="${OBS_DEGREE_VAL:-32}"
+    SPACING="${SPACING:-8.0}"
+    echo "Resolution: FAST/TEST mode (lmax=$LMAX, obs_degree=$OBS_DEGREE_VAL, spacing=$SPACING)."
+else
+    LMAX="${LMAX:-256}"
+    OBS_DEGREE_VAL="${OBS_DEGREE_VAL:-100}"
+    SPACING="${SPACING:-1.0}"
+fi
+
+# ---------------------------------------------------------------------------
+# 4. Common arguments
 # ---------------------------------------------------------------------------
 
 # Shared by all five scripts (identical names and defaults everywhere).
 COMMON=(
-    --lmax 256
+    --lmax "$LMAX"
     --load-order 2.0
     --load-scale-km 500.0    
     --prior-order 3.0
@@ -91,16 +111,15 @@ COMMON=(
 )
 
 # GRACE observation truncation: grace_bias, grace_inversion, joint_inversion.
-OBS_DEGREE=(--obs-degree 100)
+OBS_DEGREE=(--obs-degree "$OBS_DEGREE_VAL")
 
 # Preconditioner truncation: altimetry_inversion, joint_inversion only.
 SURROGATE=(--surrogate-degree 32)
 
 # Altimetry-side model priors: altimetry_bias, altimetry_inversion,
 # joint_inversion (identical names and defaults in all three).
-#
 ALT_PRIOR=(
-    --spacing 1.0
+    --spacing "$SPACING"
     --ice-scale-factor 1.0
     --gmsl-bary-steric-ratio 1.7
     --ocean-dyn-scale-factor 0.2
@@ -163,7 +182,7 @@ GRACE_INV_EXTRA=(--all)             # e.g. --prior-sensitivity
 JOINT_INV_EXTRA=(--all --std-samples 100)             # e.g. --map-all-cases --std-samples 100
 
 # ---------------------------------------------------------------------------
-# 4. Run
+# 5. Run
 # ---------------------------------------------------------------------------
 run() {
     local name="$1"

@@ -181,6 +181,9 @@ If you use `pyslfp` in published work, please cite:
   *Reciprocity and sensitivity kernels for sea level fingerprints*. Geophysical
   Journal International, **236(1)**, pp.362–378.
 
+- D.A. Heathcote, T.Holland, A.M. Mag, M.E. Tamisiea, S. Coulson, S. Dangendorf, A.J. Lloyd, A. Mashayek, J.X. Mitrovica, D. Al-Attar, 2026.
+  *A scalable Bayesian framework for modern sea-level inference*. arXiv, 2608.22336, https://arxiv.org/abs/2608.22336.
+
 The datasets that `pyslfp` downloads — the ice histories, load Love numbers, tide
 gauge network and regional definitions — are the work of others and are redistributed
 here only for convenience. If you use them, please cite their original sources, which

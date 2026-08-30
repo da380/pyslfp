@@ -13,6 +13,7 @@ from typing import Optional, Tuple
 import numpy as np
 import pyshtools as sh
 from pyshtools import SHCoeffs, SHGrid
+from pyshtools.utils import DHaj
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 
@@ -551,13 +552,8 @@ class EarthModel:
         self._normalization: str = "ortho"
         self._csphase: int = 1
 
-        self._normalization: str = "ortho"
-        self._csphase: int = 1
-
-        # Precompute the spherical integration factor
-        self._integration_factor = (
-            np.sqrt(4 * np.pi) * self.parameters.mean_sea_floor_radius**2
-        )
+        # Precompute the quadrature weights used for surface integration
+        self._integration_weights = self._compute_integration_weights()
 
     @staticmethod
     def from_defaults(*, lmax: int = 256) -> EarthModel:
@@ -633,7 +629,10 @@ class EarthModel:
     def check_field(self, f: SHGrid) -> bool:
         """Checks if an SHGrid object is compatible with instance settings."""
         is_compatible = (
-            f.lmax == self.lmax and f.grid == self.grid and f.extend == self.extend
+            f.lmax == self.lmax
+            and f.grid == self.grid
+            and f.extend == self.extend
+            and getattr(f, "sampling", self._sampling) == self._sampling
         )
         if not is_compatible:
             raise ValueError(
@@ -691,15 +690,48 @@ class EarthModel:
         """
         Integrate a function over the surface of the sphere.
 
+        The integral is evaluated with the quadrature weights of the grid
+        (Driscoll and Healy weights for DH grids, Gauss-Legendre weights
+        for GLQ grids), which is exact for band-limited fields and
+        identical to reading off the degree-zero coefficient.
+
         Args:
             f: The function to integrate, represented as an SHGrid object.
 
         Returns:
             The integral of the function over the surface.
         """
-        return (
-            self._integration_factor * self.expand_field(f, lmax_calc=0).coeffs[0, 0, 0]
-        )
+        self.check_field(f)
+        return self._integrate_data(f.data)
+
+    def _integrate_data(self, data: np.ndarray) -> float:
+        """
+        Integrates raw grid values laid out as for this model's grid.
+
+        Internal fast path used by the solvers; no compatibility checks.
+        """
+        if self._extend:
+            rows = data[:-1, :-1] if self._grid == "DH" else data[:, :-1]
+        else:
+            rows = data
+        return float(self._integration_weights @ rows.sum(axis=1))
+
+    def _compute_integration_weights(self) -> np.ndarray:
+        """
+        Returns the latitudinal quadrature weights w_j such that the surface
+        integral of a field equals sum_j w_j sum_i f_ji over the unextended grid.
+        """
+        radius_squared = self.parameters.mean_sea_floor_radius**2
+        if self._grid == "DH":
+            nlat = 2 * self.lmax + 2
+            nlon = nlat * self._sampling
+            return 2.0 * np.sqrt(2.0) * np.pi * radius_squared * DHaj(nlat) / nlon
+        elif self._grid == "GLQ":
+            _, weights = sh.expand.SHGLQ(self.lmax)
+            nlon = 2 * self.lmax + 1
+            return 2.0 * np.pi * radius_squared * weights / nlon
+        else:
+            raise ValueError(f"Unsupported grid type: {self._grid}")
 
     def with_degree(self, lmax) -> EarthModel:
         """
@@ -710,5 +742,5 @@ class EarthModel:
             lmax,
             parameters=self.parameters,
             love_number_file=self._love_number_file,
-            grid=self.grid,
+            grid=self.grid_name,
         )

@@ -35,6 +35,22 @@ poetry install              # runtime dependencies only
 poetry install --with dev   # adds pytest, sphinx, ruff and jupyter
 ```
 
+## Performance and threading
+
+The spherical harmonic transforms dominate the cost of a sea level calculation.
+They are performed by `pyshtools`, which uses the multi-threaded `ducc0` backend
+when that package is installed; `ducc0` is a declared dependency, so this is the
+default. The number of threads is read from the `OMP_NUM_THREADS` environment
+variable when Python starts (all cores if it is unset).
+
+For a single interactive calculation the default is what you want. When running
+many independent solves in worker processes, for example through the `parallel`
+options of the `pygeoinf` operators, set `OMP_NUM_THREADS=1` before starting
+Python so that each worker runs single-threaded and the cores are shared between
+workers rather than oversubscribed. The main process can still use several cores for
+its serial phases by calling `pyslfp.set_num_threads(n)` after start-up; workers
+started afterwards are unaffected, since they read the environment when they start.
+
 ## Data
 
 The package needs a number of external datasets: load Love numbers, the ICE-NG ice

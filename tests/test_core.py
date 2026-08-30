@@ -242,3 +242,47 @@ def test_earth_model_expand_methods(earth_model):
 
     # Constant field should reconstruct almost perfectly
     assert np.allclose(initial_grid.data, reconstructed_grid.data, atol=1e-10)
+
+
+# ==================================================================== #
+#                  Quadrature-based integration and DH2 support         #
+# ==================================================================== #
+
+
+@pytest.mark.parametrize("grid", ["DH", "DH2", "GLQ"])
+def test_integration_matches_degree_zero_coefficient(grid):
+    """
+    The quadrature-weight integral must agree with the degree-zero
+    coefficient of a full spherical harmonic expansion for every grid type.
+    """
+    model = EarthModel(24, grid=grid)
+    rng = np.random.default_rng(1)
+    clm = model.zero_coefficients()
+    clm.coeffs[:] = rng.standard_normal(clm.coeffs.shape)
+    field = model.expand_coefficient(clm)
+    field.data += 3.0
+
+    expected = (
+        np.sqrt(4 * np.pi)
+        * model.parameters.mean_sea_floor_radius**2
+        * model.expand_field(field, lmax_calc=0).coeffs[0, 0, 0]
+    )
+    assert np.isclose(model.integrate(field), expected, rtol=1e-12)
+
+
+def test_check_field_rejects_wrong_sampling():
+    """A DH1 grid must not be accepted by a DH2 model of the same degree."""
+    model = EarthModel(16, grid="DH2")
+    assert model.check_field(model.zero_grid()) is True
+    dh1_grid = SHGrid.from_zeros(16, grid="DH", sampling=1, extend=True)
+    with pytest.raises(ValueError, match="is not compatible"):
+        model.check_field(dh1_grid)
+
+
+def test_with_degree_preserves_sampling():
+    """with_degree must keep the DH2 sampling of the original model."""
+    model = EarthModel(16, grid="DH2")
+    refined = model.with_degree(32)
+    assert refined.lmax == 32
+    assert refined.grid_name == "DH2"
+    assert refined.sampling == 2

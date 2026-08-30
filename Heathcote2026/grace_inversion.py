@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 
 import pygeoinf as inf
 import grace_utils as utils
+from pyslfp.parallel import set_num_threads
 import pyslfp as sl
 from pygeoinf.symmetric_space.sphere import plot_points
 
@@ -162,12 +163,26 @@ def parse_arguments():
         ),
     )
 
+    parser.add_argument(
+        "--serial-threads",
+        type=int,
+        default=None,
+        help=(
+            "Threads used by the transforms and BLAS in the main process, "
+            "i.e. during the serial phases of the run. Worker processes "
+            "take their thread count from OMP_NUM_THREADS instead. "
+            "Default: leave the process settings unchanged."
+        ),
+    )
+
     args = parser.parse_args()
     return args
 
 
 def main():
     args = parse_arguments()
+    if args.serial_threads is not None:
+        set_num_threads(args.serial_threads)
     if args.all:
         args.plot_maps = args.plot_pdfs = args.plot_target_degree = (
             args.prior_sensitivity

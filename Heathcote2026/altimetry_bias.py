@@ -21,6 +21,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 import pygeoinf as inf
+from pyslfp.parallel import set_num_threads
 import pyslfp as sl
 import altimetry_utils as utils
 
@@ -196,11 +197,25 @@ def parse_arguments():
         ),
     )
 
+    parser.add_argument(
+        "--serial-threads",
+        type=int,
+        default=None,
+        help=(
+            "Threads used by the transforms and BLAS in the main process, "
+            "i.e. during the serial phases of the run. Worker processes "
+            "take their thread count from OMP_NUM_THREADS instead. "
+            "Default: leave the process settings unchanged."
+        ),
+    )
+
     return parser.parse_args()
 
 
 def main():
     args = parse_arguments()
+    if args.serial_threads is not None:
+        set_num_threads(args.serial_threads)
 
     # Setup directory to save plots
     output_dir = "output_plots_altimetry_bias"

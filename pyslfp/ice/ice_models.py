@@ -44,6 +44,23 @@ class BaseIceModel(ABC):
         """The scaling factor used to non-dimensionalize output grids."""
         return self._length_scale
 
+    @staticmethod
+    def resolve_grid(grid: str, sampling: int) -> Tuple[str, int]:
+        """
+        Normalises a grid specification for use with pyshtools constructors.
+
+        pyshtools grid constructors accept only "DH" and "GLQ", with the
+        longitudinal sampling given separately. The names "DH1" and "DH2"
+        used elsewhere (for example EarthModel.grid_name) are mapped to
+        "DH" with sampling 1 or 2 respectively.
+        """
+        grid_upper = grid.upper()
+        if grid_upper == "DH2":
+            return "DH", 2
+        if grid_upper == "DH1":
+            return "DH", 1
+        return grid, sampling
+
     @abstractmethod
     def get_ice_thickness_and_sea_level(
         self,

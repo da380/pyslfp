@@ -18,7 +18,8 @@
 #   ./run_all.sh grace_bias joint_inversion   run exactly these, in order
 #   FAST=1 ./run_all.sh                       fast/low-res test run (lmax=64, obs=32, spacing=8)
 #   PARALLEL=0 ./run_all.sh                   serial runs (scripts' default)
-#   MAX_JOBS=8 N_THREADS=2 ./run_all.sh       8 workers x 2 threads each
+#   CPU_BUDGET=6 ./run_all.sh                 use at most six cores
+#   MAX_JOBS=4 N_THREADS=2 ./run_all.sh       4 workers x 2 threads each
 #   PYTHON=python3.12 ./run_all.sh            choose the interpreter
 
 set -euo pipefail
@@ -48,32 +49,65 @@ fi
 # ---------------------------------------------------------------------------
 # 2. Threading and parallelisation
 # ---------------------------------------------------------------------------
-# N_THREADS  threads per process (BLAS/OpenMP), exported below.
-# PARALLEL   1 (default): pass --parallel --max-jobs to every script.
-#            0: pass nothing, so the scripts run serially (their default).
-# MAX_JOBS   worker-process cap; defaults to cores / N_THREADS so that
-#            n_jobs x N_THREADS <= available cores.
+# CPU_BUDGET  cores this run may use. Defaults to the physical core count
+#             minus one: SMT siblings give nothing for the transforms, and
+#             one core is kept free for the desktop and the operating
+#             system. Set it explicitly on shared machines.
+# N_THREADS   threads per worker process (transforms and BLAS), exported
+#             below. 1 is right whenever a call site has at least CPU_BUDGET
+#             independent tasks; 2 is the most worth pairing with several
+#             workers, since thread efficiency falls off quickly.
+# MAX_JOBS    worker-process cap; defaults to CPU_BUDGET / N_THREADS so
+#             that MAX_JOBS x N_THREADS <= CPU_BUDGET.
+# PARALLEL    1 (default): pass --parallel --max-jobs to every script.
+#             0: run the scripts serially (their default).
+#
+# The main process runs its serial phases with CPU_BUDGET threads
+# (--serial-threads). It idles while workers run, so the peak load stays at
+# MAX_JOBS x N_THREADS busy threads.
+physical_cores() {
+    local n=""
+    if command -v lscpu >/dev/null 2>&1; then
+        n="$(lscpu -p=CORE 2>/dev/null | grep -v '^#' | sort -u | wc -l | tr -d ' ')"
+    elif command -v sysctl >/dev/null 2>&1; then
+        n="$(sysctl -n hw.physicalcpu 2>/dev/null || true)"
+    fi
+    if [ -z "$n" ] || [ "$n" -lt 1 ] 2>/dev/null; then
+        n="$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 1)"
+    fi
+    echo "$n"
+}
+
+PHYSICAL_CORES="$(physical_cores)"
+LOGICAL_CORES="$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 1)"
+CPU_BUDGET_DEFAULT=$((PHYSICAL_CORES - 1))
+if [ "$CPU_BUDGET_DEFAULT" -lt 1 ]; then CPU_BUDGET_DEFAULT=1; fi
+CPU_BUDGET="${CPU_BUDGET:-$CPU_BUDGET_DEFAULT}"
 N_THREADS="${N_THREADS:-1}"
-CORES="$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 1)"
 PARALLEL="${PARALLEL:-1}"
 
-MAX_JOBS_DEFAULT=$((CORES / N_THREADS))
+MAX_JOBS_DEFAULT=$((CPU_BUDGET / N_THREADS))
 if [ "$MAX_JOBS_DEFAULT" -lt 1 ]; then MAX_JOBS_DEFAULT=1; fi
 MAX_JOBS="${MAX_JOBS:-$MAX_JOBS_DEFAULT}"
 
-export OMP_NUM_THREADS="$N_THREADS"        # OpenMP: SHTOOLS, libgomp/libiomp
+if [ $((MAX_JOBS * N_THREADS)) -gt "$CPU_BUDGET" ]; then
+    echo "Warning: MAX_JOBS x N_THREADS = $((MAX_JOBS * N_THREADS)) exceeds CPU_BUDGET=$CPU_BUDGET." >&2
+fi
+
+export OMP_NUM_THREADS="$N_THREADS"        # OpenMP and ducc0 thread pool in workers
 export OPENBLAS_NUM_THREADS="$N_THREADS"
 export MKL_NUM_THREADS="$N_THREADS"
 export BLIS_NUM_THREADS="$N_THREADS"
 export VECLIB_MAXIMUM_THREADS="$N_THREADS" # macOS Accelerate
 export NUMEXPR_NUM_THREADS="$N_THREADS"
 
-PAR_ARGS=()
+PAR_ARGS=(--serial-threads "$CPU_BUDGET")
+echo "Cores: $PHYSICAL_CORES physical, $LOGICAL_CORES logical; budget $CPU_BUDGET."
 if [ "$PARALLEL" -eq 1 ]; then
-    PAR_ARGS=(--parallel --max-jobs "$MAX_JOBS")
-    echo "Parallel: up to $MAX_JOBS worker(s) x $N_THREADS thread(s) each ($CORES cores detected)."
+    PAR_ARGS+=(--parallel --max-jobs "$MAX_JOBS")
+    echo "Parallel: up to $MAX_JOBS worker(s) x $N_THREADS thread(s) each; serial phases use $CPU_BUDGET thread(s)."
 else
-    echo "Serial: backend threading limited to $N_THREADS thread(s)."
+    echo "Serial: $CPU_BUDGET thread(s) in the main process."
 fi
 
 PYTHON="${PYTHON:-python}"

@@ -50,6 +50,16 @@ class Regions:
         self._iho_seas_regions: Optional[regionmask.Regions] = None
         self._ne_ocean_regions: Optional[regionmask.Regions] = None
 
+        # Per-dataset cache of rasterised masks on this grid (see _dataset_masks).
+        # Excluded from pickling so that worker processes receive a small object.
+        self._mask_cache: dict[str, Tuple[List[Any], np.ndarray]] = {}
+
+    def __getstate__(self) -> dict:
+        """Drops the mask cache when pickling; it is rebuilt on demand."""
+        state = self.__dict__.copy()
+        state["_mask_cache"] = {}
+        return state
+
     @property
     def imbie_ant_regions(self) -> regionmask.Regions:
         """IMBIE2 Antarctic drainage basins (Rignot et al., 2011)."""
@@ -353,6 +363,53 @@ class Regions:
                     f"Region '{name}' not found in {dataset_key}."
                 ) from exc
 
+        region_keys, packed_masks = self._dataset_masks(dataset_key, rm_obj)
+        nlon = len(self.lons()) - 1
+        nlat = len(self.lats())
+
+        valid_rows = [
+            region_keys.index(rid) for rid in region_ids if rid in region_keys
+        ]
+
+        if valid_rows:
+            specific_layers = np.unpackbits(
+                packed_masks[valid_rows], axis=-1, count=nlon
+            ).astype(bool)
+            combined_layer = np.any(specific_layers, axis=0)
+
+            if not np.any(combined_layer):
+                warnings.warn(
+                    f"Regions '{region_names}' in {dataset_key} contain no grid points "
+                    f"at lmax={self.lmax}. Consider increasing resolution.",
+                    UserWarning,
+                )
+        else:
+            combined_layer = np.zeros((nlat, nlon), dtype=bool)
+
+        mask_data = np.where(combined_layer, 1.0, value)
+        masked_data = np.hstack((mask_data, mask_data[:, 0:1]))
+
+        return SHGrid.from_array(masked_data, grid=self.grid)
+
+    def _dataset_masks(
+        self, dataset_key: str, rm_obj: regionmask.Regions
+    ) -> Tuple[List[Any], np.ndarray]:
+        """
+        Returns the rasterised masks of every region in a dataset on this grid.
+
+        Rasterising is the expensive step and depends only on the grid, so the
+        result is computed once per dataset and cached, bit-packed along
+        longitude to keep the memory footprint small (about one byte per
+        eight grid points per region).
+
+        Returns:
+            A tuple of the region keys (in row order) and a uint8 array of
+            shape (n_regions, nlat, ceil(nlon / 8)) holding the packed masks.
+        """
+        cached = self._mask_cache.get(dataset_key)
+        if cached is not None:
+            return cached
+
         lons, lats = self.lons(), self.lats()
         lon_mesh, lat_mesh = np.meshgrid(lons[:-1], lats)
         lon_mesh_180 = np.where(lon_mesh > 180, lon_mesh - 360, lon_mesh)
@@ -363,25 +420,10 @@ class Regions:
             )
             mask_3d = rm_obj.mask_3D(lon_mesh_180, lat_mesh, wrap_lon=False)
 
-        valid_ids = [rid for rid in region_ids if rid in mask_3d.region.values]
-
-        if valid_ids:
-            specific_layers = mask_3d.sel(region=valid_ids).values
-            combined_layer = np.any(specific_layers, axis=0)
-
-            if not np.any(combined_layer):
-                warnings.warn(
-                    f"Regions '{region_names}' in {dataset_key} contain no grid points "
-                    f"at lmax={self.lmax}. Consider increasing resolution.",
-                    UserWarning,
-                )
-        else:
-            combined_layer = np.zeros((len(lats), len(lons) - 1), dtype=bool)
-
-        mask_data = np.where(combined_layer, 1.0, value)
-        masked_data = np.hstack((mask_data, mask_data[:, 0:1]))
-
-        return SHGrid.from_array(masked_data, grid=self.grid)
+        region_keys = list(mask_3d.region.values)
+        packed = np.packbits(mask_3d.values.astype(bool), axis=-1)
+        self._mask_cache[dataset_key] = (region_keys, packed)
+        return region_keys, packed
 
     def regionmask_projection(
         self, region_names: Union[str, List[str]], /, *, value: float = np.nan
@@ -399,9 +441,12 @@ class Regions:
                     f"Region '{name}' not found in the AR6 dataset."
                 ) from exc
 
-        lons, lats = self.lons(), self.lats()
-        mask_unextended = self._ar6_regions.mask(lons[:-1], lats)
-        combined_layer = np.isin(mask_unextended.data, region_ids)
+        cached = self._mask_cache.get("AR6")
+        if cached is None:
+            lons, lats = self.lons(), self.lats()
+            cached = self._ar6_regions.mask(lons[:-1], lats).values
+            self._mask_cache["AR6"] = cached
+        combined_layer = np.isin(cached, region_ids)
 
         masked_data_unextended = np.where(combined_layer, 1.0, value)
         masked_data = np.hstack(

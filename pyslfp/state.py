@@ -154,13 +154,13 @@ class EarthState(Regions):
             self.model.parameters.water_density * self.sea_level.data
             - self.model.parameters.ice_density * self.ice_thickness.data
             > 0,
-            1,
-            0,
+            1.0,
+            0.0,
         )
 
         if self.exclude_caspian:
             caspian_mask_data = self.caspian_sea_projection(value=0).data
-            ocean_data = np.where(ocean_data - caspian_mask_data > 0, 1, 0)
+            ocean_data = np.where(ocean_data - caspian_mask_data > 0, 1.0, 0.0)
 
         return SHGrid.from_array(ocean_data, grid=self.grid)
 

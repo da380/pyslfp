@@ -27,6 +27,7 @@ import matplotlib.pyplot as plt
 import pygeoinf as inf
 
 import altimetry_utils as utils
+from pyslfp.parallel import set_num_threads
 import pyslfp as sl
 from pyslfp.state import EarthState
 from pyslfp.linear_operators import ocean_altimetry_points
@@ -232,11 +233,25 @@ def parse_arguments():
         ),
     )
 
+    parser.add_argument(
+        "--serial-threads",
+        type=int,
+        default=None,
+        help=(
+            "Threads used by the transforms and BLAS in the main process, "
+            "i.e. during the serial phases of the run. Worker processes "
+            "take their thread count from OMP_NUM_THREADS instead. "
+            "Default: leave the process settings unchanged."
+        ),
+    )
+
     return parser.parse_args()
 
 
 def main():
     args = parse_arguments()
+    if args.serial_threads is not None:
+        set_num_threads(args.serial_threads)
     if args.all:
         args.plot_pdfs = args.plot_maps = args.plot_regions = True
         args.plot_gmsl_split = True

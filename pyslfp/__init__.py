@@ -20,6 +20,11 @@ from .physics import SeaLevelEquation, LinearSeaLevelEquation
 from .plot import plot, plot_points, create_map_figure, plot_coastline, subplots
 
 # ---------------------------------------------------------------------------
+# 4b. Thread control for the numerical backends
+# ---------------------------------------------------------------------------
+from .parallel import set_num_threads, physical_core_count
+
+# ---------------------------------------------------------------------------
 # 5. Expose Sub-packages for Namespaced Access
 # ---------------------------------------------------------------------------
 # Allows users to do: `pyslfp.linear_operators.ocean_average_operator(...)`
@@ -45,6 +50,9 @@ __all__ = [
     "create_map_figure",
     "plot_coastline",
     "subplots",
+    # Thread control
+    "set_num_threads",
+    "physical_core_count",
     # Sub-packages
     "linear_operators",
     "ice",

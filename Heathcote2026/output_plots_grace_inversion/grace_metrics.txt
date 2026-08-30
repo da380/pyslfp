@@ -1,14 +1,14 @@
 Region           | KL Divergence   | Prior Var (mm² EWT) | Post Var (mm² EWT) | Variance Reduction
 ------------------------------------------------------------------------------------------------
-GRL (S Basin)    | 1.58            | 51.33               | 3.66               |            92.87%
-WAIS             | 1.24            | 42.53               | 3.92               |            90.79%
-Gulf of Mexico   | 1.92            | 46.96               | 3.78               |            91.94%
-GBM basin        | 0.74            | 39.47               | 4.55               |            88.48%
+GRL (S Basin)    | 0.98            | 51.33               | 3.66               |            92.86%
+WAIS             | 1.31            | 42.53               | 3.91               |            90.79%
+Gulf of Mexico   | 0.85            | 46.96               | 3.78               |            91.94%
+GBM basin        | 1.30            | 39.47               | 4.55               |            88.48%
 
 
 Degree-1 Spherical Harmonic Coefficients
 =================================================================
-Joint KL Divergence:      1.7809 nats
+Joint KL Divergence:      1.2334 nats
 Prior Total Var (Trace):  45.5064 mm²
 Post Total Var (Trace):   28.2509 mm²
 Overall Trace Reduction:  37.92%
@@ -29,9 +29,9 @@ REGIONAL ESTIMATOR KERNEL METRICS (PRIOR-FREE COMPARISON)
 Region           | Target Norm     | Bayes Err Norm  | Bayes Ratio     | WMB Err Norm    | WMB Ratio      
 -------------------------------------------------------------------------------------------------------------------
 GRL (S Basin)    | 6.9382e+10      | 2.0492e+10      | 0.2953          | 2.4814e+10      | 0.3576         
-WAIS             | 6.2375e+10      | 2.1516e+10      | 0.3449          | 2.1835e+10      | 0.3501         
-Gulf of Mexico   | 6.5797e+10      | 2.1136e+10      | 0.3212          | 2.6356e+10      | 0.4006         
-GBM basin        | 6.0148e+10      | 2.2954e+10      | 0.3816          | 2.7436e+10      | 0.4561         
+WAIS             | 6.2375e+10      | 2.1510e+10      | 0.3448          | 2.1835e+10      | 0.3501         
+Gulf of Mexico   | 6.5797e+10      | 2.1146e+10      | 0.3214          | 2.6356e+10      | 0.4006         
+GBM basin        | 6.0148e+10      | 2.2949e+10      | 0.3815          | 2.7436e+10      | 0.4561         
 
 
 ================================================================================

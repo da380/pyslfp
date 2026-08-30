@@ -92,7 +92,7 @@ class IceNG(BaseIceModel):
         self, file: str, lmax: int, /, *, grid: str, sampling: int, extend: bool
     ) -> Tuple[SHGrid, SHGrid]:
         """Reads a netCDF file, interpolates fields, and applies non-dimensionalization."""
-        data = xr.open_dataset(file)
+        grid, sampling = self.resolve_grid(grid, sampling)
         ice_thickness = SHGrid.from_zeros(
             lmax, grid=grid, sampling=sampling, extend=extend
         )
@@ -107,15 +107,21 @@ class IceNG(BaseIceModel):
             ice_var, topo_var = "stgit", "Topo"
             lon_var = "lon"
 
+        with xr.open_dataset(file) as data:
+            lat_values = data.lat.values
+            lon_values = data[lon_var].values
+            ice_values = data[ice_var].values
+            topo_values = data[topo_var].values
+
         ice_thickness_function = RegularGridInterpolator(
-            (data.lat.values, data[lon_var].values),
-            data[ice_var].values,
+            (lat_values, lon_values),
+            ice_values,
             bounds_error=False,
             fill_value=None,
         )
         topography_function = RegularGridInterpolator(
-            (data.lat.values, data[lon_var].values),
-            data[topo_var].values,
+            (lat_values, lon_values),
+            topo_values,
             bounds_error=False,
             fill_value=None,
         )
@@ -173,6 +179,7 @@ class IceNG(BaseIceModel):
         """
         Returns the scaled ice thickness and sea level for a given date.
         """
+        grid, sampling = self.resolve_grid(grid, sampling)
         ice_thickness, topography = self.get_ice_thickness_and_topography(
             date, lmax, grid=grid, sampling=sampling, extend=extend
         )

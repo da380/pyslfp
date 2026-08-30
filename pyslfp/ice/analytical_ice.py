@@ -37,6 +37,7 @@ class AnalyticalIceModel(BaseIceModel):
         (date = 0.0 -> present day, date = 21.0 -> LGM)
         """
         # Create an empty grid just to extract the required lat/lon arrays
+        grid, sampling = self.resolve_grid(grid, sampling)
         template = SHGrid.from_zeros(lmax, grid=grid, sampling=sampling, extend=extend)
         lats, lons = np.meshgrid(template.lats(), template.lons(), indexing="ij")
 

@@ -214,3 +214,34 @@ def test_plot_coastline_smoke_test(analytical_state):
         assert artist is not None
     finally:
         plt.close(fig)
+
+
+# ==================================================================== #
+#                  Region mask caching and pickling                     #
+# ==================================================================== #
+
+
+def test_region_mask_cache_is_reused_and_not_pickled():
+    """
+    Rasterised region masks are cached per dataset, give identical results
+    on reuse, and are dropped when the state is pickled for worker processes.
+    """
+    import pickle
+
+    state = EarthState.for_testing(lmax=16)
+    first = state.greenland_projection(value=0)
+    assert "AR6" in state._mask_cache
+    second = state.west_antarctic_projection(value=0)
+    assert np.array_equal(first.data, state.greenland_projection(value=0).data)
+
+    restored = pickle.loads(pickle.dumps(state))
+    assert restored._mask_cache == {}
+    assert np.array_equal(restored.greenland_projection(value=0).data, first.data)
+    assert np.array_equal(restored.west_antarctic_projection(value=0).data, second.data)
+    assert np.array_equal(restored.ocean_function.data, state.ocean_function.data)
+
+
+def test_ocean_function_is_float_valued():
+    state = EarthState.for_testing(lmax=16)
+    assert state.ocean_function.data.dtype == np.float64
+    assert set(np.unique(state.ocean_function.data)) <= {0.0, 1.0}

@@ -22,6 +22,14 @@ pyslfp.core module
    :undoc-members:
    :show-inheritance:
 
+pyslfp.parallel module
+----------------------
+
+.. automodule:: pyslfp.parallel
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 pyslfp.physics module
 ---------------------
 

@@ -17,8 +17,7 @@ from urllib3.util.retry import Retry
 from .config import DATADIR
 
 # The unique identifier for your Zenodo record
-# RECORD_ID: str = "19494464"
-RECORD_ID: str = "19555068"
+RECORD_ID: str = "22251209"
 
 # Centralized mapping of dataset keys to their local folder names
 FOLDER_MAP: Dict[str, str] = {
@@ -31,6 +30,7 @@ FOLDER_MAP: Dict[str, str] = {
     "TIDE_GAUGE": "tide_gauge",
     "IMBIE_ANT": "ANT_Basins_IMBIE2",
     "MOUGINOT_GRL": "Greenland_Basins",
+    "ETOPO": "etopo",
 }
 
 # 1. Base automated generator

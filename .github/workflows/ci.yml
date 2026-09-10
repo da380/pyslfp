@@ -2,47 +2,192 @@ name: CI
 
 on:
   push:
-    branches: [ main] 
+    branches: [main, develop]
   pull_request:
-    branches: [ main]
+    branches: [main, develop]
+  # The slow tests are excluded from every run above; `full-tests` picks them up,
+  # and is run on demand from the Actions tab.
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Superseded pull request runs are pointless; pushes to a branch are kept so
+  # that main and develop keep a complete history of green and red commits.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  # Keep the dataset cache inside the workspace rather than at ~/.pyslfp_data,
+  # so that the path in the cache step and the path the library uses are the
+  # same string on Linux, macOS and Windows alike.
+  PYSLFP_DATA: ${{ github.workspace }}/.pyslfp_data
 
 jobs:
-  build-and-test:
+  # Linting, formatting, notebook stripping and the file-hygiene checks, taken
+  # straight from .pre-commit-config.yaml so that the hooks and CI can never
+  # disagree about what "clean" means. Running `ruff check` alone here, as this
+  # workflow used to, let formatting drift past CI unnoticed. Runs once on
+  # Linux: none of these checks are platform-dependent.
+  lint:
+    name: Lint (pre-commit)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Cache pre-commit environments
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - name: Install pre-commit
+        run: pip install pre-commit
+
+      - name: Run hooks
+        env:
+          # `no-commit-to-branch` guards local commits; on a CI checkout of main
+          # it would fail every run. `pytest` is a pre-push hook and is covered
+          # by the test job below, across all three platforms.
+          SKIP: no-commit-to-branch,pytest
+        run: pre-commit run --all-files --show-diff-on-failure --color=always
+
+  test:
+    name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
+      # One platform failing is worth knowing about on the others too.
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.12"]
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4      
-      
+      - uses: actions/checkout@v7
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
 
-    - name: Install Poetry
-      run: |
-        pip install poetry
-        poetry config virtualenvs.create false
+      - name: Install Poetry
+        run: |
+          pip install poetry
+          poetry config virtualenvs.create false
 
-    - name: Install dependencies
-      run: poetry install --with dev
+      - name: Install dependencies
+        run: poetry install --with dev
 
-    - name: Cache PySLFP Data
-      uses: actions/cache@v4
-      with:
-        path: ~/.pyslfp_data          
-        key: ${{ runner.os }}-pyslfp-data-${{ hashFiles('pyslfp/downloader.py') }}
+      - name: Cache pyslfp datasets
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.PYSLFP_DATA }}
+          # The key used to hash pyslfp/downloader.py, which has not existed
+          # since the data layer moved into pyslfp/data/. hashFiles returns an
+          # empty string for a pattern that matches nothing, so the key was
+          # constant and the cache could never be invalidated by a change to
+          # the Zenodo record it points at.
+          key: ${{ runner.os }}-pyslfp-data-${{ hashFiles('pyslfp/data/downloader.py') }}
+          restore-keys: |
+            ${{ runner.os }}-pyslfp-data-
 
-    - name: Lint with ruff
-      run: poetry run ruff check .
+      - name: Test with pytest
+        run: poetry run pytest --cov=pyslfp --cov-report=term-missing
 
-    - name: Test with pytest
-      run: poetry run pytest --cov=pyslfp
+      - name: Build package
+        run: poetry build
 
-    - name: Build package
-      run: poetry build
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: |
+          pip install poetry
+          poetry config virtualenvs.create false
+
+      - name: Install dependencies
+        run: poetry install --with dev
+
+      # Read the Docs builds with fail_on_warning, so a warning that gets past
+      # this job breaks the published documentation instead of a pull request.
+      # The API stubs are generated by conf.py, so this covers a module that has
+      # been added, renamed or moved as well as the prose.
+      - name: Build documentation
+        run: poetry run sphinx-build -b html -W --keep-going docs/source docs/build/html
+
+      - name: Upload built documentation
+        uses: actions/upload-artifact@v7
+        with:
+          name: docs-html
+          path: docs/build/html
+          retention-days: 7
+
+  # The slow tests are the ones that read the real Zenodo datasets: the ICE-NG
+  # histories, the IHO seas and HydroBASINS shapefiles, the GLOSS tide gauge
+  # network. Several hundred megabytes and a few minutes, which is why they are
+  # deselected by default rather than run on every push.
+  #
+  # Run by hand: Actions -> CI -> Run workflow. Worth doing before a release,
+  # and after a change to the regions, ice or tide gauge code, which is what
+  # these tests cover.
+  full-tests:
+    name: Full test suite (including slow)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: |
+          pip install poetry
+          poetry config virtualenvs.create false
+
+      - name: Install dependencies
+        run: poetry install --with dev
+
+      - name: Cache pyslfp datasets
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.PYSLFP_DATA }}
+          key: ${{ runner.os }}-pyslfp-data-${{ hashFiles('pyslfp/data/downloader.py') }}
+          restore-keys: |
+            ${{ runner.os }}-pyslfp-data-
+
+      # test_iceng_real_data_integration is guarded by a skipif that checks for
+      # the ICE-7G directory at import time, so on a cold cache it would skip
+      # rather than run and the job would pass without testing anything.
+      # Fetching first turns that skip into a real assertion. ETOPO is not
+      # fetched: nothing in the test suite reads it, and it is 198 MB.
+      - name: Fetch datasets
+        run: |
+          poetry run python -c "
+          from pyslfp.data.downloader import ensure_data
+          for key in ['LOVE_NUMBERS', 'ICE7G', 'ICE6G', 'ICE5G', 'HYDRO',
+                      'IHO_SEAS', 'TIDE_GAUGE', 'IMBIE_ANT', 'MOUGINOT_GRL']:
+              ensure_data(key)
+          "
+
+      - name: Test with pytest
+        run: poetry run pytest -m "" --cov=pyslfp --cov-report=term-missing

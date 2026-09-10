@@ -1,26 +1,35 @@
-[tool.poetry]
+[project]
 name = "pyslfp"
 version = "2.0.6"
 description = "Package for computing elastic sea level fingerprints"
-authors = ["David Al-Attar and Dan Heathcote"]
+# NOTE: poetry-core renders only authors[0] into the distribution metadata
+# (Package._get_author), so the names are kept as one combined credit line to
+# avoid dropping a co-author from the published package.
+authors = [{ name = "David Al-Attar, Dan Heathcote" }]
 readme = "README.md"
 license = "BSD-3-Clause"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.0.0",
+    "scipy>=1.13.0",
+    "pyshtools>=4.14.1",
+    "matplotlib>=3.9.0",
+    "pyqt6>=6.9.0",
+    "Cartopy>=0.25.0,<0.26.0",
+    "pygeoinf>=1.8.9",
+    "regionmask>=0.13.0,<0.14.0",
+    "cf-xarray>=0.10.11,<0.11.0",
+    # The multi-threaded backend pyshtools uses for the spherical harmonic
+    # transforms, and the control knob for its thread count. See the threading
+    # section of the README.
+    "ducc0>=0.35",
+    "threadpoolctl>=3.0",
+]
 
-
-[tool.poetry.dependencies]
-python = ">=3.12"
-numpy = ">=2.0.0"
-scipy = ">=1.13.0"
-pyshtools = ">=4.14.1"
-matplotlib = ">=3.9.0"
-pyqt6 = ">=6.9.0"
-Cartopy = "^0.25.0"
-pygeoinf = ">=1.8.9"
-regionmask = "^0.13.0"
-cf-xarray = "^0.10.11"
-pre-commit = "^4.6.0"
-ducc0 = ">=0.35"
-threadpoolctl = ">=3.0"
+[project.urls]
+Homepage = "https://github.com/da380/pyslfp"
+Documentation = "https://pyslfp.readthedocs.io"
+Repository = "https://github.com/da380/pyslfp"
 
 [tool.poetry.group.dev]
 optional = true
@@ -30,31 +39,40 @@ pytest = "^8.3.5"
 pytest-cov = "^6.2.1"
 jupyter = "^1.1.1"
 furo = "^2025.7.19"
-sphinx = "<8.2"
+# Lower bound: the apidoc template in docs/apidoc_templates is named
+# package.rst.jinja, which is the name Sphinx looks for from 7.4 onwards (it was
+# package.rst_t before). The upper bound is the one this project has always
+# carried; raise it only after checking the docs still build with -W.
+sphinx = ">=7.4,<8.2"
+# Keep in step with the `rev` of the ruff hook in .pre-commit-config.yaml, so
+# that the hook and `poetry run ruff` format identically.
 ruff = "^0.5.5"
+# pre-commit was a runtime dependency until this was written, which installed it
+# for everyone who merely used the library. It belongs here.
+pre-commit = "^4.6.0"
+# Strips outputs and normalises cell ids in the tutorial notebooks. Driven by
+# pre-commit; listed here so it can also be run by hand on a single notebook.
+nbstripout = "^0.9.1"
 
 
 [build-system]
-requires = ["poetry-core"]
+requires = ["poetry-core>=2.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 
-# --- Added Ruff Configuration ---
 [tool.ruff]
-
-
+# Scratch scripts, not part of the library or its examples.
+exclude = ["work"]
 
 [tool.ruff.lint.per-file-ignores]
-# Ignore ambiguous variable name 'l' in physics/spectral code
+# 'l' is the conventional name for spherical harmonic degree throughout the
+# physics and spectral code, so E741 (ambiguous variable name) is noise there.
 "pyslfp/core.py" = ["E741"]
 "pyslfp/physics.py" = ["E741"]
 "pyslfp/linear_operators/*" = ["E741"]
-"tests/*" = ["E731", "E741"]
 "Heathcote2026/*" = ["E741"]
-
-# For the sphere.py file, where 'l' is a common variable name for spherical
-# harmonic degree, ignore the ambiguous variable name warning (E741).
-#"pygeoinf/symmetric_space/sphere.py" = ["E741"]
+# Tests additionally use lambdas as throwaway fixtures (E731).
+"tests/*" = ["E731", "E741"]
 
 
 [tool.pytest.ini_options]
@@ -62,6 +80,15 @@ filterwarnings = [
     "ignore:Overriding `Axes.cla` in GeoAxes is pending deprecation:PendingDeprecationWarning:cartopy.mpl.geoaxes",
 ]
 markers = [
-    "slow: marks tests as slow (run with '-m slow' or exclude with '-m \"not slow\"')"
+    "slow: takes tens of seconds or more; excluded from the default run",
 ]
+# The default run excludes `slow`. Those tests are not less important, but they
+# are the ones whose cost is the point, so they are worth minutes rather than
+# seconds and are worth them occasionally:
+#
+#     pytest              the fast suite
+#     pytest -m slow      only the expensive ones
+#     pytest -m ""        everything
+#
+# CI runs the fast suite on every push; the whole suite is a manual CI job.
 addopts = "-m 'not slow'"

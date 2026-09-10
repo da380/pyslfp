@@ -126,9 +126,11 @@ def test_shapefile_lazy_loading(mock_read_file, mock_ensure, region_engine, mock
 
     # We must patch 'to_crs', 'dissolve', and 'reset_index' on the mock_gdf itself
     # because the code calls these methods. We make them return 'self' (the gdf).
-    with patch.object(gpd.GeoDataFrame, "to_crs", return_value=mock_gdf), patch.object(
-        gpd.GeoDataFrame, "dissolve", return_value=mock_gdf
-    ), patch.object(gpd.GeoDataFrame, "reset_index", return_value=mock_gdf):
+    with (
+        patch.object(gpd.GeoDataFrame, "to_crs", return_value=mock_gdf),
+        patch.object(gpd.GeoDataFrame, "dissolve", return_value=mock_gdf),
+        patch.object(gpd.GeoDataFrame, "reset_index", return_value=mock_gdf),
+    ):
         # 2. Trigger IMBIE load
         # (pyslfp/regions.py:61-66)
         ant_regions = region_engine.list_imbie_ant_regions()
@@ -414,9 +416,11 @@ def test_list_all_regions(mock_read_file, mock_ensure, region_engine, mock_gdf):
 
     # Patch the GeoDataFrame methods so they gracefully return the mock_gdf
     # for the other loaders (IMBIE, Mouginot, etc.)
-    with patch.object(gpd.GeoDataFrame, "to_crs", return_value=mock_gdf), patch.object(
-        gpd.GeoDataFrame, "dissolve", return_value=mock_gdf
-    ), patch.object(gpd.GeoDataFrame, "reset_index", return_value=mock_gdf):
+    with (
+        patch.object(gpd.GeoDataFrame, "to_crs", return_value=mock_gdf),
+        patch.object(gpd.GeoDataFrame, "dissolve", return_value=mock_gdf),
+        patch.object(gpd.GeoDataFrame, "reset_index", return_value=mock_gdf),
+    ):
         all_regions = region_engine.list_all_regions()
 
     assert isinstance(all_regions, dict)

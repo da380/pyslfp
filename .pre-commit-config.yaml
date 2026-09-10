@@ -1,28 +1,70 @@
+# Hooks that guard every commit and push.
+#
+# Install them once, after `poetry install --with dev`:
+#
+#     poetry run pre-commit install --hook-type pre-commit --hook-type pre-push
+#
+# Both hook types matter: the linting, notebook and file-hygiene hooks run on
+# `git commit`, the test suite on `git push`. CI runs this same file (see the
+# `Lint` job in .github/workflows/ci.yml), so a clean commit here is a green
+# lint job there.
+
 repos:
-  # --- 1. Prevent accidental commits to main (Runs on commit) ---
+  # --- 1. Repository hygiene ---
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
+      # Work happens on `develop` and reaches `main` through a pull request.
       - id: no-commit-to-branch
         args: [--branch, main]
+      # The workflows and pyproject are edited by hand often enough to be worth
+      # parsing before they reach CI, where a typo costs a round trip.
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      # The datasets this project uses run to hundreds of megabytes and live on
+      # Zenodo, not in git. This is the backstop for an accidental `git add` of
+      # a downloaded ice model or a figure directory.
+      - id: check-added-large-files
+        args: [--maxkb=1024]
 
-  # --- 2. Ruff: Linting & Formatting (Runs on commit) ---
+  # --- 2. Strip notebook outputs ---
+  # Tutorials are committed as source, not as a record of one run. Outputs are
+  # megabytes of base64 images and run-dependent numbers that make every diff
+  # unreadable and every re-execution a spurious change. nbstripout also
+  # renumbers cell ids, so simply opening a notebook stops dirtying the tree.
+  - repo: https://github.com/kynan/nbstripout
+    rev: 0.9.1
+    hooks:
+      - id: nbstripout
+
+  # --- 3. Ruff: linting and formatting ---
+  # `rev` tracks the ruff version in pyproject.toml's dev group so that the hook
+  # and `poetry run ruff` format identically. Bump the two together, never one
+  # alone: a mismatch reformats files back and forth between commits. They had
+  # drifted (hook v0.3.0 against a v0.5.5 dependency) until this was written.
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.3.0
+    rev: v0.5.7
     hooks:
       - id: ruff
-        args: [ --fix ]
+        args: [--fix]
       - id: ruff-format
 
-  # --- 3. Pytest (Runs on PUSH only) ---
+  # --- 4. Pytest (local hook) ---
+  # On push rather than on commit. The suite takes long enough that running it
+  # per commit is what teaches people to reach for `--no-verify`; running it
+  # per push still keeps a broken tree off the remote.
+  #
+  # This runs the default selection, which pyproject.toml's `addopts` narrows to
+  # `-m 'not slow'`. The slow tests are covered by the `full-tests` job in CI,
+  # which is run on demand, and can be run here by hand with
+  # `poetry run pytest -m slow`.
   - repo: local
     hooks:
       - id: pytest
-        name: pytest (full suite)
-        # Forces pytest to run all tests, including those marked as slow        
+        name: pytest
         entry: poetry run pytest
         language: system
         pass_filenames: false
         always_run: true
-        # This ensures the hook only triggers when you try to push
         stages: [pre-push]

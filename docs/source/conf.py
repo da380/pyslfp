@@ -5,14 +5,11 @@
 
 # -- Path setup --------------------------------------------------------------
 
-# If extensions (or modules to document with autodoc) are in another directory,
-# add these directories to sys.path here. If the directory is relative to the
-# documentation root, use os.path.abspath to make it absolute, like shown here.
-#
 import os
 import sys
 
-# This line points Sphinx to the root directory of your project so it can find your library.
+# Points Sphinx at the repository root so that autodoc can import the package
+# from the source tree rather than from an installed copy.
 sys.path.insert(0, os.path.abspath("../.."))
 
 
@@ -26,25 +23,82 @@ author = "David Al-Attar, Dan Heathcote"
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
-# Add the Sphinx extensions necessary for a modern documentation site.
 extensions = [
-    "sphinx.ext.autodoc",  # Automatically generate docs from docstrings.
-    "sphinx.ext.napoleon",  # Enables Sphinx to understand NumPy-style docstrings.
-    "sphinx.ext.viewcode",  # Adds links to the source code from the documentation.
+    "sphinx.ext.autodoc",  # Generate docs from docstrings.
+    "sphinx.ext.napoleon",  # Understand NumPy- and Google-style docstrings.
+    "sphinx.ext.viewcode",  # Link from the documentation to the source.
+    "sphinx.ext.intersphinx",  # Link types from numpy, scipy and matplotlib.
 ]
 
-# Render docstring "Attributes:" sections as field lists within the class
-# description. Without this, napoleon and autodoc each document the attributes of a
-# dataclass such as EarthModelParameters, producing duplicate entries.
+exclude_patterns = []
+
+# The docstrings use Markdown's convention of single backticks for inline code
+# (`EarthState`, `regionmask`). Left to itself reStructuredText reads those as
+# "title reference" and renders them as italics; this makes them render as code,
+# which is what they mean everywhere in this project.
+default_role = "code"
+
+# Dataclasses such as EarthModelParameters and LoveNumbers describe their fields
+# in an `Attributes:` docstring section *and* declare them as annotated fields.
+# Napoleon's default turns that section into standalone `.. attribute::`
+# directives, which autodoc then documents a second time from the annotations.
+# Rendering them as info-field entries instead keeps the descriptions and leaves
+# each field defined exactly once.
 napoleon_use_ivar = True
 
-templates_path = ["_templates"]
-exclude_patterns = []
+# Types that appear in signatures and return descriptions resolve to the
+# upstream documentation; this is worth about seven hundred links across the API
+# reference. Two libraries are deliberately absent: pyshtools, whose
+# documentation is built with MkDocs and so publishes no objects.inv for Sphinx
+# to read, and scipy, whose inventory is large and resolved nothing.
+intersphinx_mapping = {
+    "python": ("https://docs.python.org/3", None),
+    "numpy": ("https://numpy.org/doc/stable", None),
+    "matplotlib": ("https://matplotlib.org/stable", None),
+}
+# An inventory is fetched over the network, so a build can fail for reasons that
+# have nothing to do with this repository. The timeout bounds the wait; the
+# other half of the answer is that Read the Docs does not build with
+# fail_on_warning, so a blip cannot break the published documentation. Only the
+# CI docs job treats warnings as errors, where a re-run is a click away.
+intersphinx_timeout = 10
 
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
-# Set the HTML theme to 'furo' for a clean, modern look.
 html_theme = "furo"
 html_static_path = ["_static"]
+
+
+# -- Generated API reference -------------------------------------------------
+# sphinx-apidoc runs from here rather than from .readthedocs.yaml or a Makefile
+# rule, so that a local build, a CI build and a Read the Docs build all produce
+# the same pages from the same settings. The .rst files it writes are build
+# output, not source, and are gitignored; previously they were committed and
+# then hand-edited to add `:no-index:`, which meant every added or renamed
+# module needed a manual regeneration step to avoid quietly disappearing from
+# the documentation.
+
+_SOURCE_DIR = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.abspath(os.path.join(_SOURCE_DIR, "..", ".."))
+
+
+def _run_apidoc(_app):
+    """Regenerate the per-module .rst stubs before the build reads them."""
+    from sphinx.ext.apidoc import main
+
+    main(
+        [
+            "--force",
+            "--templatedir",
+            os.path.join(_REPO_ROOT, "docs", "apidoc_templates"),
+            "--output-dir",
+            _SOURCE_DIR,
+            os.path.join(_REPO_ROOT, "pyslfp"),
+        ]
+    )
+
+
+def setup(app):
+    app.connect("builder-inited", _run_apidoc)

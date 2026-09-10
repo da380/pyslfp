@@ -133,9 +133,12 @@ def fetch_dataset(dataset_key: str, /) -> None:
 
         total_size = int(response.headers.get("content-length", 0))
 
-        with open(zip_path, "wb") as f, tqdm.tqdm(
-            total=total_size, unit="B", unit_scale=True, desc=dataset_key
-        ) as pbar:
+        with (
+            open(zip_path, "wb") as f,
+            tqdm.tqdm(
+                total=total_size, unit="B", unit_scale=True, desc=dataset_key
+            ) as pbar,
+        ):
             for chunk in response.iter_content(chunk_size=8192):
                 if chunk:
                     f.write(chunk)

@@ -1,32 +1,41 @@
-__pycache__
-.ipynb_checkpoints
+# Editor and OS noise
 *~
-dist/*
+.ipynb_checkpoints
 
 # Python bytecode
 __pycache__/
 *.pyc
 
-# Pytest cache
+# Build artefacts
+dist/*
+
+# Linter and test caches
 .pytest_cache/
+.ruff_cache/
 
 # Coverage reports
 .coverage
+.coverage.*
+coverage.xml
 htmlcov/
 
 # Sphinx documentation build output
 docs/build/
+# ...including the API stubs, which docs/source/conf.py regenerates on every
+# build. They were committed once, went stale, and had to be hand-edited after
+# every module rename; see the note in conf.py.
+docs/source/modules.rst
+docs/source/pyslfp*.rst
 
-# Any images
-*.png
+# Figures written by scripts into whatever directory they are run from, which
+# is normally the repository root. The anchor keeps that noise out without
+# hiding deliberate figures such as docs/figures/, which a bare `*.png` rule
+# would have needed `git add -f` to track.
+/*.png
 
-# Output folders
+# Output folders written by the Heathcote2026 scripts.
 output_plots*/
 
-
-
-
-
-
-
-
+# The dataset cache, when PYSLFP_DATA points inside the repository. CI does
+# exactly this so that the cache path is the same string on every platform.
+.pyslfp_data/

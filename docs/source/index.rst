@@ -30,6 +30,14 @@ Installation
 
    pip install pyslfp
 
+Plotting works out of the box. ``plt.show()`` needs matplotlib to have an
+interactive backend, which on a Python built with tkinter — the usual case — it
+already has. Where tkinter is absent, or if you would rather use Qt:
+
+.. code-block:: bash
+
+   pip install "pyslfp[interactive]"
+
 For development, clone the repository and use Poetry:
 
 .. code-block:: bash

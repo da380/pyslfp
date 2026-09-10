@@ -14,7 +14,6 @@ dependencies = [
     "scipy>=1.13.0",
     "pyshtools>=4.14.1",
     "matplotlib>=3.9.0",
-    "pyqt6>=6.9.0",
     "Cartopy>=0.25.0,<0.26.0",
     "pygeoinf>=1.8.9",
     "regionmask>=0.13.0,<0.14.0",
@@ -25,6 +24,18 @@ dependencies = [
     "ducc0>=0.35",
     "threadpoolctl>=3.0",
 ]
+
+[project.optional-dependencies]
+# A Qt backend for matplotlib, for interactive use: `pip install pyslfp[interactive]`.
+#
+# This was a hard runtime dependency until this was written, which put about
+# 250 MB of Qt into every install, including headless ones on CI and Read the
+# Docs. Nothing in the library imports it, or selects a backend at all: it was
+# there so that `plt.show()` in the README example opens a window. It is not
+# needed for that on a Python built with tkinter, which is the usual case and
+# where matplotlib falls back to tkagg, itself interactive. It is worth having
+# where tkinter is absent, or for anyone who prefers Qt.
+interactive = ["pyqt6>=6.9.0"]
 
 [project.urls]
 Homepage = "https://github.com/da380/pyslfp"

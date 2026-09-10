@@ -28,6 +28,14 @@ Documentation is at [pyslfp.readthedocs.io](https://pyslfp.readthedocs.io).
 pip install pyslfp
 ```
 
+Plotting works out of the box. `plt.show()` needs matplotlib to have an
+interactive backend, which on a Python built with tkinter — the usual case — it
+already has. Where tkinter is absent, or if you would rather use Qt:
+
+```bash
+pip install "pyslfp[interactive]"
+```
+
 For development, clone the repository and use Poetry:
 
 ```bash
@@ -195,6 +203,10 @@ them downloads several hundred megabytes.
 transforms and grids, `pygeoinf` for the Hilbert space and inference machinery,
 `matplotlib` and `Cartopy` for plotting, and `regionmask` with `cf-xarray` for the
 regional masks.
+
+The only optional dependency is `pyqt6`, under the `interactive` extra described
+above. Nothing in the library imports it; it exists so that matplotlib has a Qt
+backend to fall back on.
 
 ## Citation
 

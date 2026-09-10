@@ -28,12 +28,23 @@ Documentation is at [pyslfp.readthedocs.io](https://pyslfp.readthedocs.io).
 pip install pyslfp
 ```
 
+Plotting works out of the box. `plt.show()` needs matplotlib to have an
+interactive backend, which on a Python built with tkinter — the usual case — it
+already has. Where tkinter is absent, or if you would rather use Qt:
+
+```bash
+pip install "pyslfp[interactive]"
+```
+
 For development, clone the repository and use Poetry:
 
 ```bash
 poetry install              # runtime dependencies only
-poetry install --with dev   # adds pytest, sphinx, ruff and jupyter
+poetry install --with dev   # adds pytest, sphinx, ruff, jupyter and the hooks
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the git hooks, the documentation
+build and the release process.
 
 ## Performance and threading
 
@@ -56,7 +67,7 @@ started afterwards are unaffected, since they read the environment when they sta
 The package needs a number of external datasets: load Love numbers, the ICE-NG ice
 histories, and shapefiles for the various regional definitions. These are not
 distributed with the package. They are downloaded from
-[Zenodo](https://zenodo.org/records/19555068) automatically, on first use, and then
+[Zenodo](https://zenodo.org/records/19494463) automatically, on first use, and then
 cached locally, so the first call that needs a given dataset will pause while it is
 fetched and a progress bar is shown. Subsequent calls read from the cache.
 
@@ -178,9 +189,13 @@ The tutorials can be run locally or in Google Colab.
 ## Tests
 
 ```bash
-poetry run pytest             # the default suite
-poetry run pytest -m slow     # the slower tests, excluded by default
+poetry run pytest             # the fast suite, which is the default
+poetry run pytest -m slow     # only the slow tests
+poetry run pytest -m ""       # everything
 ```
+
+The slow tests are the ones that read the real datasets, so the first run of
+them downloads several hundred megabytes.
 
 ## Dependencies
 
@@ -188,6 +203,10 @@ poetry run pytest -m slow     # the slower tests, excluded by default
 transforms and grids, `pygeoinf` for the Hilbert space and inference machinery,
 `matplotlib` and `Cartopy` for plotting, and `regionmask` with `cf-xarray` for the
 regional masks.
+
+The only optional dependency is `pyqt6`, under the `interactive` extra described
+above. Nothing in the library imports it; it exists so that matplotlib has a Qt
+backend to fall back on.
 
 ## Citation
 
@@ -203,7 +222,7 @@ If you use `pyslfp` in published work, please cite:
 The datasets that `pyslfp` downloads — the ice histories, load Love numbers, tide
 gauge network and regional definitions — are the work of others and are redistributed
 here only for convenience. If you use them, please cite their original sources, which
-are recorded on the [Zenodo record](https://zenodo.org/records/19555068).
+are recorded on the [Zenodo record](https://zenodo.org/records/19494463).
 
 ## License
 

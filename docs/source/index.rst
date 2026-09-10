@@ -30,12 +30,23 @@ Installation
 
    pip install pyslfp
 
+Plotting works out of the box. ``plt.show()`` needs matplotlib to have an
+interactive backend, which on a Python built with tkinter — the usual case — it
+already has. Where tkinter is absent, or if you would rather use Qt:
+
+.. code-block:: bash
+
+   pip install "pyslfp[interactive]"
+
 For development, clone the repository and use Poetry:
 
 .. code-block:: bash
 
    poetry install              # runtime dependencies only
-   poetry install --with dev   # adds pytest, sphinx, ruff and jupyter
+   poetry install --with dev   # adds pytest, sphinx, ruff, jupyter and the hooks
+
+The git hooks, the documentation build and the release process are described in
+`CONTRIBUTING.md <https://github.com/da380/pyslfp/blob/main/CONTRIBUTING.md>`_.
 
 
 Data
@@ -51,7 +62,7 @@ By default the cache lives in ``~/.pyslfp_data``. This can be changed by setting
 ``PYSLFP_DATA`` environment variable, which is useful on shared machines and in CI.
 Datasets are fetched individually, so only what is actually used gets downloaded.
 
-.. _Zenodo: https://zenodo.org/records/19555068
+.. _Zenodo: https://zenodo.org/records/19494463
 
 
 A first calculation
@@ -176,7 +187,7 @@ If you use ``pyslfp`` in published work, please cite:
 
 The datasets that ``pyslfp`` downloads are the work of others and are redistributed
 only for convenience. If you use them, please cite their original sources, which are
-recorded on the `Zenodo record <https://zenodo.org/records/19555068>`_.
+recorded on the `Zenodo record <https://zenodo.org/records/19494463>`_.
 
 
 .. toctree::

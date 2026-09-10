@@ -1,0 +1,77 @@
+{# Sphinx's stock apidoc package template, with one change: the package-level
+   `automodule` is rendered with no options.
+
+   The stock template passes `automodule_options` (members, undoc-members,
+   show-inheritance) there as well as to each submodule. Because pyslfp's
+   __init__.py files re-export the library's classes, that documented every
+   class twice — once as pyslfp.physics.SeaLevelEquation and again as
+   pyslfp.SeaLevelEquation — which doubled the size of the package page and left
+   every bare `EarthState` in a docstring pointing at two possible targets.
+
+   The committed stubs used to solve this by adding `:no-index:` to the
+   package-level block by hand. That suppressed the duplicates, but it also
+   removed the package itself from the index, so `:mod:`pyslfp.linear_operators``
+   in index.rst had nothing to resolve to. Rendering with no options keeps the
+   section heading and the package docstring, registers the module, and drops
+   only the duplicated members. No __init__.py in this project defines a class
+   or function of its own, so nothing is lost.
+
+   Sphinx >= 7.4 looks for this file under this name (it was package.rst_t
+   before), hence the lower bound on sphinx in pyproject.toml. #}
+{%- macro automodule(modname, options) -%}
+.. automodule:: {{ modname }}
+{%- for option in options %}
+   :{{ option }}:
+{%- endfor %}
+{%- endmacro %}
+
+{%- macro toctree(docnames) -%}
+.. toctree::
+   :maxdepth: {{ maxdepth }}
+{% for docname in docnames %}
+   {{ docname }}
+{%- endfor %}
+{%- endmacro %}
+
+{%- if is_namespace %}
+{{- [pkgname, "namespace"] | join(" ") | e | heading }}
+{% else %}
+{{- [pkgname, "package"] | join(" ") | e | heading }}
+{% endif %}
+
+{%- if is_namespace %}
+.. py:module:: {{ pkgname }}
+{% endif %}
+
+{%- if modulefirst and not is_namespace %}
+{{ automodule(pkgname, []) }}
+{% endif %}
+
+{%- if subpackages %}
+Subpackages
+-----------
+
+{{ toctree(subpackages) }}
+{% endif %}
+
+{%- if submodules %}
+Submodules
+----------
+{% if separatemodules %}
+{{ toctree(submodules) }}
+{% else %}
+{%- for submodule in submodules %}
+{% if show_headings %}
+{{- [submodule, "module"] | join(" ") | e | heading(2) }}
+{% endif %}
+{{ automodule(submodule, automodule_options) }}
+{% endfor %}
+{%- endif %}
+{%- endif %}
+
+{%- if not modulefirst and not is_namespace %}
+Module contents
+---------------
+
+{{ automodule(pkgname, []) }}
+{% endif %}

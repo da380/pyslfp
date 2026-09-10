@@ -39,7 +39,6 @@ def mock_xr_dataset():
 # Patch ensure_data on the class to prevent it from downloading files
 @patch("pyslfp.ice.ice_ng.ensure_data")
 class TestIceNG:
-
     def test_initialization(self, mock_ensure):
         """Tests that the IceNG class correctly stores its version."""
         loader = IceNG(version="ICE6G")

@@ -4,28 +4,46 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: read
+
 jobs:
   publish:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.12'
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
 
-    - name: Install Poetry
-      run: |
-        pip install poetry
-        poetry config virtualenvs.create false
+      - name: Install Poetry
+        run: pip install poetry
 
-    - name: Install dependencies
-      run: poetry install
+      # The release tag and the version in pyproject.toml are set by hand, in
+      # two different places, several steps apart (see CONTRIBUTING.md). If they
+      # disagree, PyPI accepts whatever pyproject says and the tag then points
+      # at something that was never published under that name. Catching it here
+      # costs one step and cannot be undone later: PyPI does not allow a version
+      # to be re-uploaded.
+      - name: Check the tag matches the package version
+        run: |
+          version=$(poetry version --short)
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$version" != "$tag" ]; then
+            echo "::error::Release tag '${GITHUB_REF_NAME}' does not match pyproject.toml version '${version}'."
+            exit 1
+          fi
+          echo "Tag and version agree on ${version}."
 
-    - name: Build package
-      run: poetry build
+      # `poetry build` reads pyproject.toml and the source tree; it does not
+      # need the dependencies installed. Dropping the install takes Cartopy,
+      # PyQt6 and pyshtools out of the publish path entirely, so a wheel that
+      # is slow or briefly unavailable can no longer fail a release.
+      - name: Build package
+        run: poetry build
 
-    - name: Publish package to PyPI
-      run: poetry publish --username __token__ --password ${{ secrets.PYPI_API_TOKEN }}
+      - name: Publish package to PyPI
+        run: poetry publish --username __token__ --password ${{ secrets.PYPI_API_TOKEN }}

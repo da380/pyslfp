@@ -30,7 +30,7 @@ FOLDER_MAP: Dict[str, str] = {
     "TIDE_GAUGE": "tide_gauge",
     "IMBIE_ANT": "ANT_Basins_IMBIE2",
     "MOUGINOT_GRL": "Greenland_Basins",
-    "ETOPO": "etopo",
+    "ETOPO": "pyslfp_etopo",
 }
 
 # 1. Base automated generator
@@ -51,6 +51,9 @@ DATASET_URLS["IMBIE_ANT"] = (
 )
 DATASET_URLS["MOUGINOT_GRL"] = (
     f"https://zenodo.org/records/{RECORD_ID}/files/pyslfp_mouginot_grl.zip?download=1"
+)
+DATASET_URLS["ETOPO"] = (
+    f"https://zenodo.org/records/{RECORD_ID}/files/pyslfp_etopo.zip?download=1"
 )
 
 

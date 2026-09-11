@@ -249,13 +249,15 @@ def test_earth_model_expand_methods(earth_model):
 # ==================================================================== #
 
 
+@pytest.mark.parametrize("extend", [True, False])
 @pytest.mark.parametrize("grid", ["DH", "DH2", "GLQ"])
-def test_integration_matches_degree_zero_coefficient(grid):
+def test_integration_matches_degree_zero_coefficient(grid, extend):
     """
     The quadrature-weight integral must agree with the degree-zero
-    coefficient of a full spherical harmonic expansion for every grid type.
+    coefficient of a full spherical harmonic expansion for every grid type,
+    on both extended and non-extended grids.
     """
-    model = EarthModel(24, grid=grid)
+    model = EarthModel(24, grid=grid, extend=extend)
     rng = np.random.default_rng(1)
     clm = model.zero_coefficients()
     clm.coeffs[:] = rng.standard_normal(clm.coeffs.shape)
@@ -286,3 +288,39 @@ def test_with_degree_preserves_sampling():
     assert refined.lmax == 32
     assert refined.grid_name == "DH2"
     assert refined.sampling == 2
+
+
+# ==================================================================== #
+#                         Non-extended grids                           #
+# ==================================================================== #
+
+
+@pytest.mark.parametrize("grid", ["DH", "DH2", "GLQ"])
+def test_non_extended_zero_grid_shape(grid):
+    """A non-extended model drops the redundant longitude column (and DH pole row)."""
+    extended = EarthModel(16, grid=grid).zero_grid()
+    model = EarthModel(16, grid=grid, extend=False)
+    zero_grid = model.zero_grid()
+    assert model.extend is False
+    assert zero_grid.extend is False
+    expected_nlat = extended.nlat - 1 if model.grid == "DH" else extended.nlat
+    assert zero_grid.data.shape == (expected_nlat, extended.nlon - 1)
+
+
+def test_check_field_rejects_wrong_extend():
+    """A non-extended model must reject extended grids, and vice versa."""
+    extended = EarthModel(16, grid="DH2")
+    non_extended = EarthModel(16, grid="DH2", extend=False)
+    assert non_extended.check_field(non_extended.zero_grid()) is True
+    with pytest.raises(ValueError, match="is not compatible"):
+        non_extended.check_field(extended.zero_grid())
+    with pytest.raises(ValueError, match="is not compatible"):
+        extended.check_field(non_extended.zero_grid())
+
+
+def test_with_degree_preserves_extend():
+    """with_degree must keep the extend setting of the original model."""
+    model = EarthModel(16, grid="DH2", extend=False)
+    refined = model.with_degree(32)
+    assert refined.lmax == 32
+    assert refined.extend is False

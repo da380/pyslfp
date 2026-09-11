@@ -136,6 +136,11 @@ class EarthState(Regions):
         return self.model.grid
 
     @property
+    def extend(self) -> bool:
+        """True if grids include the redundant 360 degree longitude column."""
+        return self.model.extend
+
+    @property
     def lmax(self) -> int:
         """The maximum spherical harmonic degree."""
         return self.model.lmax

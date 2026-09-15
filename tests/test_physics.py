@@ -351,7 +351,7 @@ def _reference_linear_solution(state, direct_load, rotational_feedbacks, rtol=1e
     h_b = ln.h[None, :, None]
     k_b = ln.k[None, :, None]
     r, i = p.rotation_factor, p.inertia_factor
-    ht, kt = ln.ht[2], ln.kt[2]
+    ht, kt = ln.h_t[2], ln.k_t[2]
 
     ocean = state.ocean_function
     area = state.ocean_area

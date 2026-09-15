@@ -5,6 +5,7 @@ This module fetches required datasets (e.g., ice models, shapefiles, Love number
 from Zenodo automatically if they are not found in the local configuration directory.
 """
 
+import shutil
 import zipfile
 from pathlib import Path
 from typing import Dict
@@ -17,11 +18,11 @@ from urllib3.util.retry import Retry
 from .config import DATADIR
 
 # The unique identifier for your Zenodo record
-RECORD_ID: str = "22251209"
+RECORD_ID: str = "22770094"
 
 # Centralized mapping of dataset keys to their local folder names
 FOLDER_MAP: Dict[str, str] = {
-    "LOVE_NUMBERS": "love_numbers",
+    "LOVE_NUMBERS": "pyslfp_love_numbers",
     "ICE7G": "ice7g",
     "ICE6G": "ice6g",
     "ICE5G": "ice5g",
@@ -82,13 +83,16 @@ def _get_robust_session() -> requests.Session:
     return session
 
 
-def ensure_data(dataset_key: str, /) -> Path:
+def ensure_data(dataset_key: str, /, *, refresh: bool = False) -> Path:
     """
     Checks for the data folder. If missing, automatically downloads it from Zenodo.
 
     Args:
         dataset_key (str): The unique identifier for the dataset (e.g., "ICE7G").
             Must be passed positionally.
+        refresh (bool): If True, the cached folder is deleted and the dataset
+            downloaded again, which is how a dataset that has changed on
+            Zenodo is picked up. Defaults to False.
 
     Returns:
         Path: The absolute path to the verified local data directory.
@@ -100,6 +104,9 @@ def ensure_data(dataset_key: str, /) -> Path:
         raise ValueError(f"Unknown dataset key: {dataset_key}")
 
     target = DATADIR / FOLDER_MAP[dataset_key]
+
+    if refresh and target.exists():
+        shutil.rmtree(target)
 
     # If the folder doesn't exist or is empty, fetch it
     if not target.exists() or not any(target.iterdir()):

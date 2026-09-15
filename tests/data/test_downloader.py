@@ -29,7 +29,7 @@ def test_ensure_data_triggers_download(mock_zipfile, mock_session, mock_datadir)
 
     target_path = dl.ensure_data("LOVE_NUMBERS")
 
-    assert target_path == mock_datadir / "love_numbers"
+    assert target_path == mock_datadir / "pyslfp_love_numbers"
     expected_url = dl.DATASET_URLS["LOVE_NUMBERS"]
     mock_session_instance.get.assert_called_once_with(expected_url, stream=True)
 
@@ -125,3 +125,25 @@ def test_fetch_dataset_cleans_up_zip_on_extraction_failure(
     assert (
         not zip_path.exists()
     ), "The temporary zip file was not cleaned up after an error!"
+
+
+def test_ensure_data_cache_and_refresh(tmp_path, monkeypatch):
+    monkeypatch.setattr(dl, "DATADIR", tmp_path)
+    fetched = []
+
+    def fake_fetch(key, /):
+        fetched.append(key)
+        folder = tmp_path / dl.FOLDER_MAP[key]
+        folder.mkdir(exist_ok=True)
+        (folder / "PREM_4096.dat").write_text("new")
+
+    monkeypatch.setattr(dl, "fetch_dataset", fake_fetch)
+    folder = dl.ensure_data("LOVE_NUMBERS")
+    assert folder == tmp_path / "pyslfp_love_numbers" and fetched == ["LOVE_NUMBERS"]
+    (folder / "stale.dat").write_text("old")
+    dl.ensure_data("LOVE_NUMBERS")
+    assert fetched == ["LOVE_NUMBERS"]  # present and non-empty: left alone
+    dl.ensure_data("LOVE_NUMBERS", refresh=True)
+    assert fetched == ["LOVE_NUMBERS"] * 2
+    assert not (folder / "stale.dat").exists()  # the folder was removed first
+    assert (folder / "PREM_4096.dat").read_text() == "new"

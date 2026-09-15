@@ -30,6 +30,7 @@ from .parallel import set_num_threads, physical_core_count
 # Allows users to do: `pyslfp.linear_operators.ocean_average_operator(...)`
 from . import linear_operators
 from . import ice
+from . import love_numbers
 
 
 # ---------------------------------------------------------------------------
@@ -56,4 +57,5 @@ __all__ = [
     # Sub-packages
     "linear_operators",
     "ice",
+    "love_numbers",
 ]

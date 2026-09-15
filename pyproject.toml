@@ -23,6 +23,7 @@ dependencies = [
     # section of the README.
     "ducc0>=0.35",
     "threadpoolctl>=3.0",
+    "planetmodel (>=1.0.0,<2.0.0)",
 ]
 
 [project.optional-dependencies]
@@ -83,7 +84,9 @@ exclude = ["work"]
 "pyslfp/core.py" = ["E741"]
 "pyslfp/physics.py" = ["E741"]
 "pyslfp/linear_operators/*" = ["E741"]
+"pyslfp/love_numbers/*" = ["E741", "E743"]
 "Heathcote2026/*" = ["E741"]
+"tutorials/*" = ["E741"]
 # Tests additionally use lambdas as throwaway fixtures (E731).
 "tests/*" = ["E731", "E741"]
 

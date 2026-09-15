@@ -52,7 +52,7 @@ The git hooks, the documentation build and the release process are described in
 Data
 ----
 
-The package needs a number of external datasets: load Love numbers, the ICE-NG ice
+The package needs a number of external datasets: a table of load Love numbers, the ICE-NG ice
 histories, and shapefiles for the various regional definitions. These are not
 distributed with the package. They are downloaded from Zenodo_ automatically, on first
 use, and then cached locally, so the first call that needs a given dataset will pause
@@ -61,8 +61,110 @@ while it is fetched and a progress bar is shown. Subsequent calls read from the 
 By default the cache lives in ``~/.pyslfp_data``. This can be changed by setting the
 ``PYSLFP_DATA`` environment variable, which is useful on shared machines and in CI.
 Datasets are fetched individually, so only what is actually used gets downloaded.
+A dataset that has changed on Zenodo is picked up by
+``pyslfp.data.ensure_data(key, refresh=True)``, which deletes the cached copy and
+downloads it again.
 
-.. _Zenodo: https://zenodo.org/records/19494463
+.. _Zenodo: https://zenodo.org/records/22770094
+
+
+Love numbers
+------------
+
+The solid Earth enters the sea level equation through its elastic Love numbers. By
+default ``EarthModel`` uses the precomputed table for PREM. The package can also
+compute them, from any spherically layered model that planetmodel_ describes, by
+solving the loading and tidal problem degree by degree on a radial spectral-element
+mesh:
+
+.. code-block:: python
+
+   from planetmodel import PREM
+   from pyslfp import EarthModel, LoveNumbers
+
+   love = LoveNumbers.from_model(PREM(ocean=False), 256)
+   love.write("prem_256.dat")
+   model = EarthModel(256, love_numbers=love)
+
+The table carries the radius, surface gravity and gravitational constant of the body
+it was computed for, and ``EarthModel`` takes those from the table so that the sea
+level equation and its adjoint stay consistent. See ``pyslfp.love_numbers`` in the
+API reference, and the third tutorial script.
+
+Definitions and conventions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The numbers the library holds are not the usual dimensionless ones, so their
+definition is worth setting down. The solver works with the physical
+gravitational potential, which is negative near added mass, and with
+dimensional numbers: a displacement or a potential per unit of the forcing
+that produced it. A surface load of density :math:`\sigma_{lm} Y_{lm}` acts in
+two ways. It presses on the surface with the traction
+:math:`-g\sigma_{lm} Y_{lm}`, and it attracts the body as a surface mass in
+Poisson's equation. The generalised Love numbers are the surface response to
+each acting alone. With the displacement written as
+:math:`\mathbf{u} = U Y_{lm}\hat{\mathbf{r}} + V \nabla_1 Y_{lm}` and the
+potential perturbation as :math:`\phi Y_{lm}`, both at :math:`r = a`,
+
+.. math::
+
+   U = h_l^u \zeta^u_{lm} + h_l^\phi \zeta^\phi_{lm}, \qquad
+   V = l_l^u \zeta^u_{lm} + l_l^\phi \zeta^\phi_{lm}, \qquad
+   \phi = k_l^u \zeta^u_{lm} + k_l^\phi \zeta^\phi_{lm},
+
+where :math:`\zeta^u` is a surface density that presses but does not attract
+and :math:`\zeta^\phi` one that attracts but does not press. A true load does
+both, so its numbers are the sums
+
+.. math::
+
+   h_l = h_l^u + h_l^\phi, \qquad l_l = l_l^u + l_l^\phi, \qquad k_l = k_l^u + k_l^\phi,
+
+which are the properties ``h``, ``l`` and ``k``. In SI, :math:`h` and
+:math:`l` are in m³ kg⁻¹ and :math:`k` in m⁴ kg⁻¹ s⁻². A third channel, the
+tangential traction :math:`-g\zeta^v_{lm} \nabla_1 Y_{lm}`, has the numbers
+:math:`h^v_l`, :math:`l^v_l` and :math:`k^v_l`, and is what the adjoint
+problem for a functional of horizontal displacement needs. The tidal numbers
+:math:`h^t_l`, :math:`l^t_l` and :math:`k^t_l` are the response to the unit
+external potential :math:`\psi = (r/a)^l Y_{lm}`, so :math:`h^t` and
+:math:`l^t` are in s² m⁻¹ and :math:`k^t` is dimensionless.
+
+The conventional dimensionless load numbers :math:`h'_l`, :math:`l'_l` and
+:math:`k'_l` of Farrell (1972) refer the response to the direct potential of
+the load, :math:`4\pi G a\sigma_{lm}/(2l+1)` in the geodetic sign convention,
+where the potential is positive near mass. They follow from the numbers above
+by
+
+.. math::
+
+   h'_l = \frac{(2l+1)\, g}{4\pi G a}\, h_l, \qquad
+   l'_l = \frac{(2l+1)\, g}{4\pi G a}\, l_l, \qquad
+   k'_l = -\frac{2l+1}{4\pi G a}\, k_l - 1,
+
+and the geodetic tidal numbers differ from the library's only by the sign of
+the potential and a factor of gravity:
+
+.. math::
+
+   k^T_l = k^t_l, \qquad h^T_l = -g\, h^t_l, \qquad l^T_l = -g\, l^t_l .
+
+``LoveNumbers.conventional()`` and ``LoveNumbers.tidal()`` return these. The
+problem is self-adjoint, which gives the reciprocity relations
+
+.. math::
+
+   g\, h^\phi_l = k^u_l, \qquad h^v_l = l(l+1)\, l^u_l, \qquad k^v_l = g\, l(l+1)\, l^\phi_l,
+
+the first being eq. (64) of Al-Attar et al. (2024);
+``LoveNumbers.reciprocity_residual()`` checks all three. Degree 1 is in the
+centre-of-mass frame, where the surface potential perturbation vanishes and
+:math:`k'_1 = -1`. At degree 0 the tidal numbers are zero, a uniform external
+potential being a gauge, while the load numbers are not: mass conservation
+fixes :math:`k_0 = -4\pi G a`. The sea level solver uses the generalised
+numbers directly, because the adjoint theory is written in them rather than
+in :math:`h` and :math:`k` alone.
+
+.. _planetmodel: https://github.com/da380/planetmodel
 
 
 A first calculation
@@ -187,7 +289,7 @@ If you use ``pyslfp`` in published work, please cite:
 
 The datasets that ``pyslfp`` downloads are the work of others and are redistributed
 only for convenience. If you use them, please cite their original sources, which are
-recorded on the `Zenodo record <https://zenodo.org/records/19494463>`_.
+recorded on the `Zenodo record <https://zenodo.org/records/22770094>`_.
 
 
 .. toctree::

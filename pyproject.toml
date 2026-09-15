@@ -1,6 +1,6 @@
 [project]
 name = "pyslfp"
-version = "2.0.6"
+version = "2.0.7"
 description = "Package for computing elastic sea level fingerprints"
 # NOTE: poetry-core renders only authors[0] into the distribution metadata
 # (Package._get_author), so the names are kept as one combined credit line to

@@ -26,8 +26,8 @@ class MockRegionHost(EarthModel, Regions):
     and Regions (the mixin being tested) for pure isolation.
     """
 
-    def __init__(self, lmax=64):
-        EarthModel.__init__(self, lmax, grid="DH")
+    def __init__(self, lmax=64, extend=True):
+        EarthModel.__init__(self, lmax, grid="DH", extend=extend)
         Regions.__init__(self)
 
 
@@ -35,6 +35,12 @@ class MockRegionHost(EarthModel, Regions):
 def region_engine():
     """Provides a low-resolution host instance."""
     return MockRegionHost(lmax=64)
+
+
+@pytest.fixture
+def non_extended_region_engine():
+    """Provides a low-resolution host instance on a non-extended grid."""
+    return MockRegionHost(lmax=64, extend=False)
 
 
 @pytest.fixture
@@ -95,6 +101,18 @@ def test_ar6_regionmask_projections(region_engine):
 
     with pytest.raises(ValueError, match="not found in the AR6 dataset"):
         region_engine.regionmask_projection("Atlantis")
+
+
+@pytest.mark.slow
+def test_ar6_regionmask_projection_non_extended(
+    region_engine, non_extended_region_engine
+):
+    """AR6 masks on a non-extended grid match the extended masks at shared points."""
+    extended = region_engine.greenland_projection(value=0)
+    non_extended = non_extended_region_engine.greenland_projection(value=0)
+
+    assert non_extended.extend is False
+    assert np.array_equal(non_extended.data, extended.data[:-1, :-1])
 
 
 @pytest.mark.slow
@@ -165,6 +183,25 @@ def test_shapefile_projection_routing(
     # Error routing
     with pytest.raises(ValueError, match="not found in ANT"):
         region_engine.imbie_ant_projection("FakeBasin")
+
+
+@patch("pyslfp.regions.ensure_data")
+@patch("pyslfp.regions.gpd.read_file")
+def test_shapefile_projection_non_extended(
+    mock_read_file, mock_ensure, region_engine, non_extended_region_engine, mock_gdf
+):
+    """
+    Test that _apply_regionmask on a non-extended grid returns a non-extended
+    SHGrid matching the extended mask without its redundant row and column.
+    """
+    mock_read_file.return_value.to_crs.return_value = mock_gdf
+
+    extended = region_engine.imbie_ant_projection("AntA", value=0)
+    non_extended = non_extended_region_engine.imbie_ant_projection("AntA", value=0)
+
+    assert non_extended.extend is False
+    assert non_extended.data.shape == (extended.nlat - 1, extended.nlon - 1)
+    assert np.array_equal(non_extended.data, extended.data[:-1, :-1])
 
 
 def test_invalid_dataset_key(region_engine):

@@ -525,6 +525,7 @@ class EarthModel:
         parameters: Optional[EarthModelParameters] = None,
         love_number_file: Optional[str] = None,
         grid: str = "DH",
+        extend: bool = True,
     ) -> None:
         """
         Initializes an EarthModel configuration.
@@ -534,6 +535,12 @@ class EarthModel:
             parameters (Optional[EarthModelParameters]): The Earth's physical scales.
                 If None, standard non-dimensionalized parameters are generated.
             love_number_file (Optional[str]): Path to a custom Love number file.
+            grid (str): The pyshtools grid format ("DH", "DH2" or "GLQ").
+                Defaults to "DH".
+            extend (bool): If True, grids include the redundant 360 degree longitude
+                column (and, for DH grids, the 90 degree south latitude row). Set to
+                False to work with native non-extended grids (e.g. high-resolution
+                topography data). Defaults to True.
         """
         self._lmax = lmax
         self._parameters = parameters or EarthModelParameters.from_defaults()
@@ -547,8 +554,9 @@ class EarthModel:
             self._grid = grid
             self._sampling = 1
 
+        self._extend: bool = extend
+
         # Internal parameters (do not change)
-        self._extend: bool = True
         self._normalization: str = "ortho"
         self._csphase: int = 1
 
@@ -743,4 +751,5 @@ class EarthModel:
             parameters=self.parameters,
             love_number_file=self._love_number_file,
             grid=self.grid_name,
+            extend=self.extend,
         )

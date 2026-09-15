@@ -28,7 +28,7 @@ class Regions:
     Note:
         This class is intended to be used as a mixin for the `FingerPrint` class.
         It expects the child class to provide `lats()`, `lons()`, `lmax`,
-        and `grid` properties.
+        `grid`, and `extend` properties.
     """
 
     # ==================================================================== #
@@ -364,7 +364,9 @@ class Regions:
                 ) from exc
 
         region_keys, packed_masks = self._dataset_masks(dataset_key, rm_obj)
-        nlon = len(self.lons()) - 1
+        # On extended grids the final longitude column is a redundant copy of the
+        # first (360E == 0E), so the masks only cover the unique columns.
+        nlon = len(self.lons()) - 1 if self.extend else len(self.lons())
         nlat = len(self.lats())
 
         valid_rows = [
@@ -387,9 +389,10 @@ class Regions:
             combined_layer = np.zeros((nlat, nlon), dtype=bool)
 
         mask_data = np.where(combined_layer, 1.0, value)
-        masked_data = np.hstack((mask_data, mask_data[:, 0:1]))
+        if self.extend:
+            mask_data = np.hstack((mask_data, mask_data[:, 0:1]))
 
-        return SHGrid.from_array(masked_data, grid=self.grid)
+        return SHGrid.from_array(mask_data, grid=self.grid)
 
     def _dataset_masks(
         self, dataset_key: str, rm_obj: regionmask.Regions
@@ -411,7 +414,10 @@ class Regions:
             return cached
 
         lons, lats = self.lons(), self.lats()
-        lon_mesh, lat_mesh = np.meshgrid(lons[:-1], lats)
+        # On extended grids the final longitude column is a redundant copy of the
+        # first, so only the unique columns are rasterised.
+        mask_lons = lons[:-1] if self.extend else lons
+        lon_mesh, lat_mesh = np.meshgrid(mask_lons, lats)
         lon_mesh_180 = np.where(lon_mesh > 180, lon_mesh - 360, lon_mesh)
 
         with warnings.catch_warnings():
@@ -444,14 +450,15 @@ class Regions:
         cached = self._mask_cache.get("AR6")
         if cached is None:
             lons, lats = self.lons(), self.lats()
-            cached = self._ar6_regions.mask(lons[:-1], lats).values
+            # See _dataset_masks: only the unique longitude columns are masked.
+            mask_lons = lons[:-1] if self.extend else lons
+            cached = self._ar6_regions.mask(mask_lons, lats).values
             self._mask_cache["AR6"] = cached
         combined_layer = np.isin(cached, region_ids)
 
-        masked_data_unextended = np.where(combined_layer, 1.0, value)
-        masked_data = np.hstack(
-            (masked_data_unextended, masked_data_unextended[:, 0:1])
-        )
+        masked_data = np.where(combined_layer, 1.0, value)
+        if self.extend:
+            masked_data = np.hstack((masked_data, masked_data[:, 0:1]))
         return SHGrid.from_array(masked_data, grid=self.grid)
 
     def imbie_ant_projection(

@@ -6,6 +6,8 @@ import pytest
 import numpy as np
 from pyshtools import SHGrid
 
+from pyslfp.core import EarthModel
+from pyslfp.ice import AnalyticalIceModel
 from pyslfp.state import EarthState
 from pyslfp.physics import SeaLevelEquation, LinearSeaLevelEquation
 
@@ -137,6 +139,39 @@ def test_nonlinear_solver_smoke_test(analytical_state):
 
     # Verify the Caspian Sea policy inherited correctly
     assert new_state.exclude_caspian == analytical_state.exclude_caspian
+
+
+@pytest.mark.parametrize("grid", ["DH", "DH2"])
+def test_nonlinear_solver_non_extended_grid(grid):
+    """
+    The non-linear solver must run on a non-extended grid and agree with the
+    extended solution at the shared grid points.
+    """
+    lmax = 16
+    results = {}
+    for extend in (True, False):
+        model = EarthModel(lmax, grid=grid, extend=extend)
+        ice_model = AnalyticalIceModel(length_scale=model.parameters.length_scale)
+        ice_thickness, sea_level = ice_model.get_ice_thickness_and_sea_level(
+            0.0, lmax, grid=model.grid_name, sampling=model.sampling, extend=extend
+        )
+        state = EarthState(ice_thickness, sea_level, model, exclude_caspian=False)
+
+        ice_melt_nd = -100.0 / model.parameters.length_scale
+        ice_thickness_change = model.zero_grid()
+        ice_thickness_change.data = np.where(
+            state.ice_thickness.data > 0, ice_melt_nd, 0.0
+        )
+
+        new_state, slc, _, _, _ = SeaLevelEquation(model).solve_nonlinear_equation(
+            state, ice_thickness_change=ice_thickness_change, max_iterations=15
+        )
+        assert new_state.extend is extend
+        results[extend] = slc.data
+
+    extended, non_extended = results[True], results[False]
+    assert non_extended.shape == (extended.shape[0] - 1, extended.shape[1] - 1)
+    assert np.allclose(non_extended, extended[:-1, :-1], rtol=1e-8, atol=1e-12)
 
 
 def test_nonlinear_mass_conservation_with_complex_loads(analytical_state):

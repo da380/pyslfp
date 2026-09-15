@@ -7,18 +7,18 @@ sea-level fingerprinting.
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from dataclasses import dataclass, field, replace
+from pathlib import Path
+from typing import Optional, Union
 
 import numpy as np
 import pyshtools as sh
 from pyshtools import SHCoeffs, SHGrid
 from pyshtools.utils import DHaj
-import matplotlib.pyplot as plt
-from matplotlib.figure import Figure
+from planetmodel import units
+from planetmodel.units import Scales
 
-
-from pyslfp.data import DATADIR, ensure_data
+from pyslfp.love_numbers.table import LoveNumbers
 
 # =====================================================================
 # Default Earth Model Physical Parameters (PREM and standard values)
@@ -35,6 +35,9 @@ POLAR_MOMENT_OF_INERTIA: float = 8.0359e37
 ROTATION_FREQUENCY: float = 7.27220521664304e-05
 WATER_DENSITY: float = 1000.0
 ICE_DENSITY: float = 917.0
+# The one definition of G: planetmodel's (CODATA 2018), so that Love numbers
+# computed from a model and the rotational feedback use the same value.
+GRAVITATIONAL_CONSTANT: float = units.G_SI
 
 # =====================================================================
 
@@ -47,16 +50,28 @@ class EarthModelParameters:
     This is a frozen dataclass; all properties are strictly immutable
     to ensure physical consistency across the solver lifecycle.
 
+    The three base scales define a planetmodel `Scales` (length, mass and
+    time), held as `scales`, and every non-dimensional value is its raw
+    value divided by the scale factor of its dimensions.
+
+    The radius of the solid surface, the surface gravity and G describe the
+    body the Love numbers were computed for, and `EarthModel` takes them
+    from its Love numbers through `with_body`; the sea level equation's
+    adjoint is exact only when the two agree.
+
     Attributes:
         length_scale (float): The length scale used for non-dimensionalization. Default is 1.0.
         density_scale (float): The density scale used for non-dimensionalization. Default is 1.0.
         time_scale (float): The time scale used for non-dimensionalization. Default is 1.0.
+        scales (Scales): The planetmodel scales the three define.
         raw_equatorial_radius (float): Earth's equatorial radius in meters.
         raw_polar_radius (float): Earth's polar radius in meters.
         raw_mean_radius (float): Earth's mean radius in meters.
         raw_mean_sea_floor_radius (float): Mean radius of the solid Earth surface in meters.
         raw_mass (float): Total mass of the Earth in kilograms.
         raw_gravitational_acceleration (float): Surface gravity in m/s^2.
+        raw_gravitational_constant (float): G in m^3 kg^-1 s^-2. Defaults to
+            planetmodel's CODATA 2018 value.
         raw_equatorial_moment_of_inertia (float): Equatorial moment of inertia in kg*m^2.
         raw_polar_moment_of_inertia (float): Polar moment of inertia in kg*m^2.
         raw_rotation_frequency (float): Earth's rotation frequency in rad/s.
@@ -76,20 +91,15 @@ class EarthModelParameters:
     raw_mean_sea_floor_radius: float = MEAN_SEA_FLOOR_RADIUS
     raw_mass: float = MASS
     raw_gravitational_acceleration: float = GRAVITATIONAL_ACCELERATION
+    raw_gravitational_constant: float = GRAVITATIONAL_CONSTANT
     raw_equatorial_moment_of_inertia: float = EQUATORIAL_MOMENT_OF_INERTIA
     raw_polar_moment_of_inertia: float = POLAR_MOMENT_OF_INERTIA
     raw_rotation_frequency: float = ROTATION_FREQUENCY
     raw_water_density: float = WATER_DENSITY
     raw_ice_density: float = ICE_DENSITY
 
-    # Derived non-dimensional properties initialized automatically
-    mass_scale: float = field(init=False)
-    frequency_scale: float = field(init=False)
-    load_scale: float = field(init=False)
-    velocity_scale: float = field(init=False)
-    acceleration_scale: float = field(init=False)
-    gravitational_potential_scale: float = field(init=False)
-    moment_of_inertia_scale: float = field(init=False)
+    # The scales, and the non-dimensional values, set in __post_init__
+    scales: Scales = field(init=False)
 
     equatorial_radius: float = field(init=False)
     polar_radius: float = field(init=False)
@@ -109,84 +119,54 @@ class EarthModelParameters:
     inertia_factor: float = field(init=False)
 
     def __post_init__(self) -> None:
-        """Calculates and locks in all derived scales and parameters."""
-
-        # Base scales
-        object.__setattr__(
-            self, "mass_scale", self.density_scale * self.length_scale**3
-        )
-        object.__setattr__(self, "frequency_scale", 1.0 / self.time_scale)
-        object.__setattr__(self, "load_scale", self.mass_scale / self.length_scale**2)
-        object.__setattr__(self, "velocity_scale", self.length_scale / self.time_scale)
-        object.__setattr__(
-            self, "acceleration_scale", self.velocity_scale / self.time_scale
-        )
-        object.__setattr__(
-            self,
-            "gravitational_potential_scale",
-            self.acceleration_scale * self.length_scale,
-        )
-        object.__setattr__(
-            self, "moment_of_inertia_scale", self.mass_scale * self.length_scale**2
+        """Builds the scales and locks in every non-dimensional value."""
+        scales = Scales(
+            length=self.length_scale,
+            mass=self.density_scale * self.length_scale**3,
+            time=self.time_scale,
         )
 
-        # Non-dimensional physical constants
-        object.__setattr__(
-            self, "equatorial_radius", self.raw_equatorial_radius / self.length_scale
-        )
-        object.__setattr__(
-            self, "polar_radius", self.raw_polar_radius / self.length_scale
-        )
-        object.__setattr__(
-            self, "mean_radius", self.raw_mean_radius / self.length_scale
-        )
-        object.__setattr__(
-            self,
-            "mean_sea_floor_radius",
-            self.raw_mean_sea_floor_radius / self.length_scale,
-        )
-        object.__setattr__(self, "mass", self.raw_mass / self.mass_scale)
-        object.__setattr__(
-            self,
+        def put(name: str, value: float) -> None:
+            object.__setattr__(self, name, value)
+
+        def nd(raw: float, dims: units.Dimensions) -> float:
+            return raw / scales.factor(dims)
+
+        moment_of_inertia = units.MASS * units.LENGTH**2
+
+        put("scales", scales)
+        put("equatorial_radius", nd(self.raw_equatorial_radius, units.LENGTH))
+        put("polar_radius", nd(self.raw_polar_radius, units.LENGTH))
+        put("mean_radius", nd(self.raw_mean_radius, units.LENGTH))
+        put("mean_sea_floor_radius", nd(self.raw_mean_sea_floor_radius, units.LENGTH))
+        put("mass", nd(self.raw_mass, units.MASS))
+        put(
             "gravitational_acceleration",
-            self.raw_gravitational_acceleration / self.acceleration_scale,
+            nd(self.raw_gravitational_acceleration, units.GRAVITY),
         )
-
-        g_nd = 6.6723e-11 * self.mass_scale * self.time_scale**2 / self.length_scale**3
-        object.__setattr__(self, "gravitational_constant", g_nd)
-
-        object.__setattr__(
-            self,
+        put(
+            "gravitational_constant",
+            nd(self.raw_gravitational_constant, units.GRAVITATIONAL_CONSTANT),
+        )
+        put(
             "equatorial_moment_of_inertia",
-            self.raw_equatorial_moment_of_inertia / self.moment_of_inertia_scale,
+            nd(self.raw_equatorial_moment_of_inertia, moment_of_inertia),
         )
-        object.__setattr__(
-            self,
+        put(
             "polar_moment_of_inertia",
-            self.raw_polar_moment_of_inertia / self.moment_of_inertia_scale,
+            nd(self.raw_polar_moment_of_inertia, moment_of_inertia),
         )
-        object.__setattr__(
-            self,
-            "rotation_frequency",
-            self.raw_rotation_frequency / self.frequency_scale,
-        )
-        object.__setattr__(
-            self, "water_density", self.raw_water_density / self.density_scale
-        )
-        object.__setattr__(
-            self, "ice_density", self.raw_ice_density / self.density_scale
-        )
+        put("rotation_frequency", nd(self.raw_rotation_frequency, units.FREQUENCY))
+        put("water_density", nd(self.raw_water_density, units.DENSITY))
+        put("ice_density", nd(self.raw_ice_density, units.DENSITY))
 
-        object.__setattr__(
-            self,
+        put(
             "rotation_factor",
             np.sqrt((4 * np.pi) / 15.0)
             * self.rotation_frequency
             * self.mean_sea_floor_radius**2,
         )
-
-        object.__setattr__(
-            self,
+        put(
             "inertia_factor",
             np.sqrt(5 / (12 * np.pi))
             * self.rotation_frequency
@@ -196,6 +176,23 @@ class EarthModelParameters:
                 * (self.polar_moment_of_inertia - self.equatorial_moment_of_inertia)
             ),
         )
+
+    def with_body(self, love_numbers: LoveNumbers, /) -> EarthModelParameters:
+        """
+        The same parameters with the raw sea-floor radius, surface gravity
+        and G replaced by those of a Love number table, where the table
+        records them; a value the table does not know (NaN) is kept.
+        """
+        si = love_numbers.in_si()
+        changes = {}
+        for raw, value in (
+            ("raw_mean_sea_floor_radius", si.radius),
+            ("raw_gravitational_acceleration", si.surface_gravity),
+            ("raw_gravitational_constant", si.G),
+        ):
+            if np.isfinite(value):
+                changes[raw] = float(value)
+        return replace(self, **changes)
 
     @staticmethod
     def from_defaults() -> EarthModelParameters:
@@ -216,297 +213,6 @@ class EarthModelParameters:
         )
 
 
-class LoveNumbers:
-    """
-    Loads, stores, and non-dimensionalizes elastic Love numbers.
-
-    This class handles the ingestion of Love number data files and computes
-    the appropriate non-dimensional forms required for the spherical harmonic
-    solutions of the Sea Level Equation.
-    """
-
-    def __init__(
-        self,
-        lmax: int,
-        params: EarthModelParameters,
-        /,
-        *,
-        file: Optional[str] = None,
-    ) -> None:
-        """
-        Initialize the Love numbers for a specific Earth model.
-
-        Args:
-            lmax (int): The maximum spherical harmonic degree.
-            params (EarthModelParameters): The non-dimensionalized parameters of the Earth.
-            file (Optional[str]): Path to a custom Love number `.dat` file. If None,
-                it uses the default PREM_4096 dataset, downloading it if necessary.
-
-        Raises:
-            ValueError: If the requested lmax exceeds the maximum degree in the data file.
-        """
-        if file is None:
-            ensure_data("LOVE_NUMBERS")
-            file = str(DATADIR / "love_numbers" / "PREM_4096.dat")
-
-        data = np.loadtxt(file)
-        data_degree = len(data[:, 0]) - 1
-
-        if lmax > data_degree:
-            raise ValueError(
-                f"lmax ({lmax}) exceeds Love number file max degree ({data_degree})."
-            )
-
-        self._lmax = lmax
-        self._params = params
-
-        # Non-dimensionalize Love numbers using the immutable parameters
-        self._h_u = data[: lmax + 1, 1] * params.load_scale / params.length_scale
-        self._k_u = (
-            data[: lmax + 1, 2]
-            * params.load_scale
-            / params.gravitational_potential_scale
-        )
-        self._h_phi = data[: lmax + 1, 3] * params.load_scale / params.length_scale
-        self._k_phi = (
-            data[: lmax + 1, 4]
-            * params.load_scale
-            / params.gravitational_potential_scale
-        )
-
-        self._h = self._h_u + self._h_phi
-        self._k = self._k_u + self._k_phi
-
-        self._ht = (
-            data[: lmax + 1, 5]
-            * params.gravitational_potential_scale
-            / params.length_scale
-        )
-        self._kt = data[: lmax + 1, 6]
-
-    # ---------------------------------------------------------#
-    #                     Properties                           #
-    # ---------------------------------------------------------#
-
-    @property
-    def lmax(self) -> int:
-        """The maximum spherical harmonic degree."""
-        return self._lmax
-
-    @property
-    def h_u(self) -> np.ndarray:
-        """Non-dimensional vertical displacement Love number for direct mass loading."""
-        return self._h_u
-
-    @property
-    def k_u(self) -> np.ndarray:
-        """Non-dimensional gravitational potential Love number for direct mass loading."""
-        return self._k_u
-
-    @property
-    def h_phi(self) -> np.ndarray:
-        """Non-dimensional vertical displacement Love number for potential loading."""
-        return self._h_phi
-
-    @property
-    def k_phi(self) -> np.ndarray:
-        """Non-dimensional gravitational potential Love number for potential loading."""
-        return self._k_phi
-
-    @property
-    def h(self) -> np.ndarray:
-        """Total displacement Love number (degree-dependent)."""
-        return self._h
-
-    @property
-    def k(self) -> np.ndarray:
-        """Total gravitational potential Love number (degree-dependent)."""
-        return self._k
-
-    @property
-    def ht(self) -> np.ndarray:
-        """Tidal (rotational) displacement Love number."""
-        return self._ht
-
-    @property
-    def kt(self) -> np.ndarray:
-        """Tidal (rotational) gravitational potential Love number."""
-        return self._kt
-
-    # ---------------------------------------------------------#
-    #                 Green's Functions                        #
-    # ---------------------------------------------------------#
-
-    def displacement_greens_function(
-        self, angle: float, /, *, lmax: Optional[int] = None
-    ) -> float:
-        """
-        Evaluates the displacement Green's function at a given angular separation.
-
-        Args:
-            angle (float): The angular separation in radians.
-            lmax (Optional[int]): The maximum degree to include in the summation.
-                If None, uses the instance's lmax.
-
-        Returns:
-            float: The non-dimensional displacement value.
-        """
-        return self._greens_function(angle, lmax=lmax, displacement=True)
-
-    def potential_greens_function(
-        self, angle: float, /, *, lmax: Optional[int] = None
-    ) -> float:
-        """
-        Evaluates the gravitational potential Green's function at a given angular separation.
-
-        Args:
-            angle (float): The angular separation in radians.
-            lmax (Optional[int]): The maximum degree to include in the summation.
-                If None, uses the instance's lmax.
-
-        Returns:
-            float: The non-dimensional gravitational potential value.
-        """
-        return self._greens_function(angle, lmax=lmax, displacement=False)
-
-    def _greens_function(
-        self, angle: float, /, *, lmax: Optional[int] = None, displacement: bool = True
-    ) -> float:
-        """Internal helper for computing evaluating summed Legendre polynomials."""
-        calc_lmax = lmax if lmax is not None else self.lmax
-
-        x = np.cos(angle)
-        ps = sh.legendre.PLegendre(calc_lmax, x)
-        degrees = np.arange(calc_lmax + 1)
-
-        love_numbers = (
-            self.h[: calc_lmax + 1] if displacement else self.k[: calc_lmax + 1]
-        )
-        smoothing = np.exp(-10 * (degrees**2) / calc_lmax**2)
-
-        terms = (
-            (2 * degrees + 1)
-            * love_numbers
-            * smoothing
-            * ps
-            / (4 * np.pi * self._params.mean_sea_floor_radius**2)
-        )
-        return float(np.sum(terms))
-
-    def plot_greens_functions(
-        self, /, *, lmax: Optional[int] = None, n_points: int = 181
-    ) -> Tuple[Figure, np.ndarray]:
-        """
-        Generates a quick visualization of the Green's functions.
-
-        Args:
-            lmax (Optional[int]): The maximum degree to evaluate.
-            n_points (int): The number of points to sample between 0 and 180 degrees.
-
-        Returns:
-            Tuple[Figure, np.ndarray]: The matplotlib Figure and Axes objects.
-        """
-        calc_lmax = lmax if lmax is not None else self.lmax
-
-        angles_deg = np.linspace(1e-4, 180, n_points)
-        angles_rad = np.deg2rad(angles_deg)
-
-        g_disp = [
-            self.displacement_greens_function(angle, lmax=calc_lmax)
-            for angle in angles_rad
-        ]
-        g_pot = [
-            self.potential_greens_function(angle, lmax=calc_lmax)
-            / self._params.gravitational_acceleration
-            for angle in angles_rad
-        ]
-
-        fig, axes = plt.subplots(2, 1, figsize=(8, 10), sharex=True, layout="tight")
-
-        axes[0].plot(angles_deg, g_disp, "b-")
-        axes[0].set_title("Displacement Green's function", fontsize=20)
-        axes[0].set_ylabel("Non-dimensional length per unit mass", fontsize=20)
-        axes[0].grid(True, linestyle=":", alpha=0.6)
-
-        axes[1].plot(angles_deg, g_pot, "r-")
-        axes[1].set_title("Potential Green's function", fontsize=20)
-        axes[1].set_ylabel("Non-dimensional length per unit mass", fontsize=20)
-        axes[1].grid(True, linestyle=":", alpha=0.6)
-        axes[1].set_xlabel("Angular Separation (degrees)", fontsize=20)
-        axes[1].set_xlim(0, 180)
-
-        return fig, axes
-
-    def plot_greens_functions_split(
-        self,
-        /,
-        *,
-        split_angle: float = 20.0,
-        lmax: Optional[int] = None,
-        n_points: int = 300,
-    ) -> Tuple[Figure, np.ndarray]:
-        """
-        Generates a broken axis plot to show detail for near and far fields.
-
-        Args:
-            split_angle (float): The angle in degrees at which to break the x-axis.
-            lmax (Optional[int]): The maximum degree to evaluate.
-            n_points (int): The number of points to sample.
-
-        Returns:
-            Tuple[Figure, np.ndarray]: The matplotlib Figure and Axes objects.
-        """
-        calc_lmax = lmax if lmax is not None else self.lmax
-
-        angles_deg = np.linspace(1e-4, 180, n_points)
-        angles_rad = np.deg2rad(angles_deg)
-
-        g_disp = np.array(
-            [self.displacement_greens_function(a, lmax=calc_lmax) for a in angles_rad]
-        )
-        g_geoid = np.array(
-            [
-                -self.potential_greens_function(a, lmax=calc_lmax)
-                / self._params.gravitational_acceleration
-                for a in angles_rad
-            ]
-        )
-
-        fig, axes = plt.subplots(
-            2,
-            2,
-            figsize=(12, 8),
-            gridspec_kw={"width_ratios": [1, 3], "wspace": 0.05},
-            constrained_layout=True,
-        )
-        fig.supxlabel("Angular Separation (degrees)", fontsize=20)
-
-        axes[0, 0].set_ylabel("Displacement", fontsize=20)
-        axes[1, 0].set_ylabel("Geoid Anomaly", fontsize=20)
-
-        near_mask = angles_deg < split_angle
-        far_mask = angles_deg >= split_angle
-
-        axes[0, 0].plot(angles_deg[near_mask], g_disp[near_mask], "b-")
-        axes[0, 1].plot(angles_deg[far_mask], g_disp[far_mask], "b-")
-        axes[0, 0].set_title("Near Field", fontsize=20)
-        axes[0, 1].set_title("Far Field (Zoomed)", fontsize=20)
-
-        axes[1, 0].plot(angles_deg[near_mask], g_geoid[near_mask], "r-")
-        axes[1, 1].plot(angles_deg[far_mask], g_geoid[far_mask], "r-")
-
-        for i in range(2):
-            axes[i, 0].set_xlim(0, split_angle)
-            axes[i, 1].set_xlim(split_angle, 180)
-            for j in range(2):
-                axes[i, j].grid(True, linestyle=":", alpha=0.6)
-
-        for ax in axes[0, :]:
-            ax.tick_params(axis="x", labelbottom=False)
-
-        return fig, axes
-
-
 class EarthModel:
     """
     The unified physics configuration object for the library.
@@ -523,7 +229,8 @@ class EarthModel:
         /,
         *,
         parameters: Optional[EarthModelParameters] = None,
-        love_number_file: Optional[str] = None,
+        love_numbers: Optional[Union[LoveNumbers, str, Path]] = None,
+        love_number_file: Optional[Union[str, Path]] = None,
         grid: str = "DH",
         extend: bool = True,
     ) -> None:
@@ -534,7 +241,15 @@ class EarthModel:
             lmax (int): The maximum spherical harmonic degree.
             parameters (Optional[EarthModelParameters]): The Earth's physical scales.
                 If None, standard non-dimensionalized parameters are generated.
-            love_number_file (Optional[str]): Path to a custom Love number file.
+                The sea-floor radius, surface gravity and G are then taken from
+                the Love numbers, see `EarthModelParameters.with_body`.
+            love_numbers (Optional[LoveNumbers | str | Path]): The Love numbers,
+                as a `LoveNumbers` table (from `LoveNumbers.from_model`, say) or
+                the path of a file written by `LoveNumbers.write`. If None, the
+                shipped PREM table is used, downloaded on first use. The table
+                must be real and reach `lmax`.
+            love_number_file (Optional[str | Path]): The older name of
+                `love_numbers` for a path; one of the two may be given.
             grid (str): The pyshtools grid format ("DH", "DH2" or "GLQ").
                 Defaults to "DH".
             extend (bool): If True, grids include the redundant 360 degree longitude
@@ -542,10 +257,23 @@ class EarthModel:
                 False to work with native non-extended grids (e.g. high-resolution
                 topography data). Defaults to True.
         """
+        if love_numbers is not None and love_number_file is not None:
+            raise ValueError("give love_numbers or love_number_file, not both")
+        source = love_number_file if love_numbers is None else love_numbers
+        if source is None:
+            table = LoveNumbers.default()
+        elif isinstance(source, LoveNumbers):
+            table = source
+        else:
+            table = LoveNumbers.from_file(source)
+        if table.is_complex:
+            raise ValueError("the sea level equation takes real Love numbers")
+
         self._lmax = lmax
-        self._parameters = parameters or EarthModelParameters.from_defaults()
-        self._love_number_file = love_number_file
-        self._love_numbers = LoveNumbers(lmax, self._parameters, file=love_number_file)
+        base = parameters or EarthModelParameters.from_defaults()
+        self._parameters = base.with_body(table)
+        self._love_number_table = table
+        self._love_numbers = table.converted(self._parameters.scales).truncated(lmax)
 
         if grid == "DH2":
             self._grid = "DH"
@@ -572,6 +300,48 @@ class EarthModel:
             lmax (int): Truncation degree for discretisation. Defaults to 256.
         """
         return EarthModel(lmax)
+
+    @staticmethod
+    def from_planet_model(
+        model,
+        lmax: int,
+        /,
+        *,
+        parameters: Optional[EarthModelParameters] = None,
+        mesh=None,
+        ngll: int = 5,
+        eps: float = 1e-8,
+        grid: str = "DH",
+        extend: bool = True,
+    ) -> EarthModel:
+        """
+        Returns an Earth model whose Love numbers are computed from a planetmodel
+        model, such as `planetmodel.PREM(ocean=False)`.
+
+        The model's surface must be solid. Its radius, surface gravity and G
+        become the body of the parameters. `mesh`, `ngll` and `eps` are passed
+        to `LoveNumbers.from_model`; the mesh is sized for `lmax` by default.
+
+        Args:
+            model: A planetmodel model holding density and elastic moduli.
+            lmax (int): Truncation degree for discretisation.
+            parameters (Optional[EarthModelParameters]): The scales; see `EarthModel`.
+            mesh: A planetmodel `RadialMesh` over the model, or None.
+            ngll (int): Nodes per element of the default mesh.
+            eps (float): The truncation level of the degree-l solutions.
+            grid (str): The pyshtools grid format.
+            extend (bool): Whether grids include the redundant longitude column.
+        """
+        love_numbers = LoveNumbers.from_model(
+            model, lmax, mesh=mesh, ngll=ngll, eps=eps
+        )
+        return EarthModel(
+            lmax,
+            parameters=parameters,
+            love_numbers=love_numbers,
+            grid=grid,
+            extend=extend,
+        )
 
     @property
     def lmax(self) -> int:
@@ -619,7 +389,8 @@ class EarthModel:
 
     @property
     def love_numbers(self) -> LoveNumbers:
-        """The elastic Love numbers for this Earth model."""
+        """The elastic Love numbers, in the model's non-dimensional units
+        and truncated at its lmax."""
         return self._love_numbers
 
     # --------------------------------------------------------#
@@ -749,7 +520,7 @@ class EarthModel:
         return EarthModel(
             lmax,
             parameters=self.parameters,
-            love_number_file=self._love_number_file,
+            love_numbers=self._love_number_table,
             grid=self.grid_name,
             extend=self.extend,
         )

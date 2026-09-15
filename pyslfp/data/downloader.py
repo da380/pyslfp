@@ -5,6 +5,7 @@ This module fetches required datasets (e.g., ice models, shapefiles, Love number
 from Zenodo automatically if they are not found in the local configuration directory.
 """
 
+import shutil
 import zipfile
 from pathlib import Path
 from typing import Dict
@@ -16,12 +17,31 @@ from urllib3.util.retry import Retry
 
 from .config import DATADIR
 
-# The unique identifier for your Zenodo record
-RECORD_ID: str = "22251209"
+# The Zenodo record the datasets are fetched from: one version of the
+# concept record, so it changes whenever a new version is published.
+RECORD_ID: str = "22770094"
 
-# Centralized mapping of dataset keys to their local folder names
+# The zip file on the record holding each dataset. These are the names as
+# they appear on the record, not derived from anything else.
+DATASET_FILES: Dict[str, str] = {
+    "LOVE_NUMBERS": "pyslfp_love_numbers.zip",
+    "ICE7G": "pyslfp_ice7g.zip",
+    "ICE6G": "pyslfp_ice6g.zip",
+    "ICE5G": "pyslfp_ice5g.zip",
+    "HYDRO": "pyslfp_hydrobasins_v1.zip",
+    "IHO_SEAS": "pyslfp_iho_seas_v3.zip",
+    "TIDE_GAUGE": "pyslfp_tide_gauge.zip",
+    "IMBIE_ANT": "pyslfp_imbie_ant.zip",
+    "MOUGINOT_GRL": "pyslfp_mouginot_grl.zip",
+    "ETOPO": "pyslfp_etopo.zip",
+}
+
+# The folder each zip extracts to under DATADIR. The folder is whatever the
+# zip was made with and bears no fixed relation to the zip's name: some carry
+# the pyslfp_ prefix and some do not, so the two tables are kept separately
+# rather than one being derived from the other.
 FOLDER_MAP: Dict[str, str] = {
-    "LOVE_NUMBERS": "love_numbers",
+    "LOVE_NUMBERS": "pyslfp_love_numbers",
     "ICE7G": "ice7g",
     "ICE6G": "ice6g",
     "ICE5G": "ice5g",
@@ -33,28 +53,10 @@ FOLDER_MAP: Dict[str, str] = {
     "ETOPO": "pyslfp_etopo",
 }
 
-# 1. Base automated generator
 DATASET_URLS: Dict[str, str] = {
-    key: f"https://zenodo.org/records/{RECORD_ID}/files/pyslfp_{val.lower()}.zip?download=1"
-    for key, val in FOLDER_MAP.items()
+    key: f"https://zenodo.org/records/{RECORD_ID}/files/{name}?download=1"
+    for key, name in DATASET_FILES.items()
 }
-
-# 2. Overrides for specific filenames on Zenodo
-DATASET_URLS["HYDRO"] = (
-    f"https://zenodo.org/records/{RECORD_ID}/files/pyslfp_hydrobasins_v1.zip?download=1"
-)
-DATASET_URLS["IHO_SEAS"] = (
-    f"https://zenodo.org/records/{RECORD_ID}/files/pyslfp_iho_seas_v3.zip?download=1"
-)
-DATASET_URLS["IMBIE_ANT"] = (
-    f"https://zenodo.org/records/{RECORD_ID}/files/pyslfp_imbie_ant.zip?download=1"
-)
-DATASET_URLS["MOUGINOT_GRL"] = (
-    f"https://zenodo.org/records/{RECORD_ID}/files/pyslfp_mouginot_grl.zip?download=1"
-)
-DATASET_URLS["ETOPO"] = (
-    f"https://zenodo.org/records/{RECORD_ID}/files/pyslfp_etopo.zip?download=1"
-)
 
 
 def _get_robust_session() -> requests.Session:
@@ -82,13 +84,16 @@ def _get_robust_session() -> requests.Session:
     return session
 
 
-def ensure_data(dataset_key: str, /) -> Path:
+def ensure_data(dataset_key: str, /, *, refresh: bool = False) -> Path:
     """
     Checks for the data folder. If missing, automatically downloads it from Zenodo.
 
     Args:
         dataset_key (str): The unique identifier for the dataset (e.g., "ICE7G").
             Must be passed positionally.
+        refresh (bool): If True, the cached folder is deleted and the dataset
+            downloaded again, which is how a dataset that has changed on
+            Zenodo is picked up. Defaults to False.
 
     Returns:
         Path: The absolute path to the verified local data directory.
@@ -100,6 +105,9 @@ def ensure_data(dataset_key: str, /) -> Path:
         raise ValueError(f"Unknown dataset key: {dataset_key}")
 
     target = DATADIR / FOLDER_MAP[dataset_key]
+
+    if refresh and target.exists():
+        shutil.rmtree(target)
 
     # If the folder doesn't exist or is empty, fetch it
     if not target.exists() or not any(target.iterdir()):

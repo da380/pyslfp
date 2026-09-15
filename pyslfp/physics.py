@@ -149,8 +149,8 @@ class SeaLevelEquation:
         # Degree-2 quantities for the rotational feedback
         self._h2 = love_numbers.h[2]
         self._k2 = love_numbers.k[2]
-        self._ht2 = love_numbers.ht[2]
-        self._kt2 = love_numbers.kt[2]
+        self._ht2 = love_numbers.h_t[2]
+        self._kt2 = love_numbers.k_t[2]
         self._rotation_denominator = (
             1.0 - self._inertia_factor * self._kt2 * self._rotation_factor
         )

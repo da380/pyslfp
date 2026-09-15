@@ -87,7 +87,13 @@ same files back and forth between commits.
 
 The datasets live on Zenodo, on a versioned record. `RECORD_ID` in
 `pyslfp/data/downloader.py` names the version the library fetches, and must be
-updated to the new record id when a new version is published. The documentation
+updated to the new record id when a new version is published. The same module
+holds two tables that must be kept in step with the record by hand: `DATASET_FILES`,
+the name of each zip on the record, and `FOLDER_MAP`, the folder each zip
+extracts to. The zip and its folder need not share a name, so neither table is
+derived from the other. A copy of the file names lives in
+`tests/data/test_downloader.py`, and the slow test there checks the record's
+own listing. The documentation
 deliberately links to the concept record
 (<https://zenodo.org/records/19494463>), which always resolves to the latest
 version, so that it cannot fall behind the code the way it had done before this

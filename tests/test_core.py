@@ -7,8 +7,18 @@ import numpy as np
 from dataclasses import FrozenInstanceError
 from pyshtools import SHGrid, SHCoeffs
 
+from planetmodel import units
+
 from pyslfp.core import EarthModelParameters, LoveNumbers, EarthModel
-from pyslfp.core import MEAN_RADIUS, MASS, WATER_DENSITY, ICE_DENSITY
+from pyslfp.core import (
+    MEAN_RADIUS,
+    MEAN_SEA_FLOOR_RADIUS,
+    MASS,
+    WATER_DENSITY,
+    ICE_DENSITY,
+)
+from pyslfp.data import DATADIR
+from pyslfp.love_numbers import NAMES
 
 
 # ==================================================================== #
@@ -20,6 +30,12 @@ from pyslfp.core import MEAN_RADIUS, MASS, WATER_DENSITY, ICE_DENSITY
 def default_params():
     """Provides standard non-dimensionalized Earth parameters."""
     return EarthModelParameters.from_defaults()
+
+
+@pytest.fixture
+def default_love(default_params):
+    """The shipped table in the default non-dimensional units, to degree 64."""
+    return LoveNumbers.default(lmax=64).converted(default_params.scales)
 
 
 @pytest.fixture
@@ -78,6 +94,24 @@ def test_parameters_non_dimensionalisation_factory(default_params):
     assert np.isclose(default_params.ice_density, expected_ice_density)
 
 
+def test_parameters_scales(default_params):
+    """The three base scales define the planetmodel Scales, and every
+    non-dimensional value comes from them; G is planetmodel's."""
+    p = default_params
+    assert p.scales.length == p.length_scale
+    assert p.scales.time == p.time_scale
+    assert np.isclose(p.scales.factor(units.DENSITY), p.density_scale)
+    assert np.isclose(
+        p.gravitational_constant,
+        units.G_SI / p.scales.factor(units.GRAVITATIONAL_CONSTANT),
+    )
+    assert EarthModelParameters().gravitational_constant == units.G_SI
+    # radius, mean density and surface gravity are one in the default scheme
+    assert np.isclose(p.mean_radius, 1.0)
+    assert np.isclose(p.gravitational_acceleration, 1.0)
+    assert np.isclose(3 * p.mass / (4 * np.pi * p.mean_radius**3), 1.0)
+
+
 def test_parameters_are_immutable(default_params):
     """
     Tests that the dataclass is strictly frozen to prevent accidental
@@ -92,74 +126,85 @@ def test_parameters_are_immutable(default_params):
 # ==================================================================== #
 
 
-def test_love_numbers_initialization_and_loading(default_params):
-    """
-    Tests that LoveNumbers correctly loads the default data file and
-    constructs arrays of the exact required length (lmax + 1).
-    """
-    lmax = 64
-    ln = LoveNumbers(lmax, default_params)
-
-    # Core arrays should be lmax + 1 in length
-    for array in [ln.h, ln.k, ln.ht, ln.kt]:
+def test_love_numbers_default_loads_and_truncates():
+    """The shipped table is read in SI, with every column, and cut at lmax."""
+    ln = LoveNumbers.default(lmax=64)
+    assert ln.lmax == 64
+    assert ln.scales == units.Scales.SI
+    for name in NAMES:
+        array = getattr(ln, name)
         assert isinstance(array, np.ndarray)
-        assert len(array) == lmax + 1
+        assert len(array) == 65
+        assert np.all(np.isfinite(array))
+    assert ln.radius == MEAN_SEA_FLOOR_RADIUS
+    assert ln.G == units.G_SI
+    assert ln.reciprocity_residual().max() < 1e-12
 
 
-def test_love_numbers_lmax_too_large_raises_error(default_params):
-    """
-    Tests that requesting an lmax higher than the data file supports
-    raises a ValueError.
-    """
-    lmax_too_large = 5000  # Default PREM goes to 4096
-    with pytest.raises(ValueError, match="exceeds Love number file max degree"):
-        LoveNumbers(lmax_too_large, default_params)
+def test_love_numbers_lmax_too_large_raises_error():
+    """Requesting an lmax beyond the table raises a ValueError."""
+    with pytest.raises(ValueError, match="exceeds"):
+        LoveNumbers.default(lmax=5000)  # the shipped PREM table stops at 4096
 
 
-def test_greens_functions_evaluation(default_params):
+def test_non_dimensionalisation_matches_the_hand_formulae(default_params, default_love):
+    """`converted` reproduces the column-by-column scaling the library used
+    to do by hand: displacement per unit surface density by load / length,
+    potential per unit surface density by load / potential, and so on."""
+    data = np.loadtxt(DATADIR / "pyslfp_love_numbers" / "PREM_4096.dat")[:65]
+    columns = {name: data[:, j + 1] for j, name in enumerate(NAMES)}
+    p = default_params
+    load = p.density_scale * p.length_scale
+    potential = (p.length_scale / p.time_scale) ** 2
+    ln = default_love
+    assert np.allclose(ln.h_u, columns["h_u"] * load / p.length_scale, rtol=1e-12)
+    assert np.allclose(ln.k_u, columns["k_u"] * load / potential, rtol=1e-12)
+    assert np.allclose(ln.h_phi, columns["h_phi"] * load / p.length_scale, rtol=1e-12)
+    assert np.allclose(ln.k_phi, columns["k_phi"] * load / potential, rtol=1e-12)
+    assert np.allclose(ln.h_t, columns["h_t"] * potential / p.length_scale, rtol=1e-12)
+    assert np.allclose(ln.k_t, columns["k_t"], rtol=1e-12)
+    assert np.isclose(ln.radius, p.mean_sea_floor_radius)
+    # the table's g and G are PREM's and planetmodel's, not the default
+    # parameters' raw constants; the parameters take them on through `with_body`
+    assert np.isclose(ln.G, units.G_SI / p.scales.factor(units.GRAVITATIONAL_CONSTANT))
+    assert np.isclose(p.with_body(ln).gravitational_constant, ln.G)
+    assert np.isclose(p.with_body(ln).gravitational_acceleration, ln.surface_gravity)
+
+
+def test_greens_functions_evaluation(default_love):
     """Smoke test to ensure the Green's functions compute finite floats."""
-    ln = LoveNumbers(64, default_params)
-
-    # Evaluate at 10 degrees (in radians)
+    ln = default_love
     angle_rad = np.deg2rad(10.0)
     g_disp = ln.displacement_greens_function(angle_rad)
     g_pot = ln.potential_greens_function(angle_rad)
-
     assert isinstance(g_disp, float)
     assert np.isfinite(g_disp)
     assert isinstance(g_pot, float)
     assert np.isfinite(g_pot)
 
 
-def test_love_numbers_sub_properties(default_params):
+def test_love_numbers_sub_properties(default_love):
     """Ensure all individual Love number components are exposed correctly."""
-    lmax = 64
-    ln = LoveNumbers(lmax, default_params)
-
+    ln = default_love
     for array in [ln.h_u, ln.k_u, ln.h_phi, ln.k_phi]:
         assert isinstance(array, np.ndarray)
-        assert len(array) == lmax + 1
+        assert len(array) == 65
 
 
-def test_greens_functions_peak_at_origin(default_params):
+def test_greens_functions_peak_at_origin(default_love):
     """Sanity check: Green's functions should be highly concentrated near 0 degrees."""
-    ln = LoveNumbers(64, default_params)
-
+    ln = default_love
     g_disp_0 = ln.displacement_greens_function(0.0)
     g_disp_10 = ln.displacement_greens_function(np.deg2rad(10.0))
-
-    # The absolute magnitude at 0 degrees should be strictly larger than at 10 degrees
     assert abs(g_disp_0) > abs(g_disp_10)
 
 
-def test_love_numbers_plotting_smoke_test(default_params):
+def test_love_numbers_plotting_smoke_test(default_love):
     """Ensure the Matplotlib plotting methods execute without crashing."""
-    ln = LoveNumbers(32, default_params)  # Lower lmax for faster plot generation
-
+    ln = default_love.truncated(32)  # lower lmax for faster plot generation
     fig1, axes1 = ln.plot_greens_functions(n_points=10)
     assert fig1 is not None
     assert len(axes1) == 2
-
     fig2, axes2 = ln.plot_greens_functions_split(n_points=20)
     assert fig2 is not None
     assert axes2.shape == (2, 2)

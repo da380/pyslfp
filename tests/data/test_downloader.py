@@ -147,3 +147,39 @@ def test_ensure_data_cache_and_refresh(tmp_path, monkeypatch):
     assert fetched == ["LOVE_NUMBERS"] * 2
     assert not (folder / "stale.dat").exists()  # the folder was removed first
     assert (folder / "PREM_4096.dat").read_text() == "new"
+
+
+# The zip files on the Zenodo record, by dataset key, as listed at
+# https://zenodo.org/api/records/<RECORD_ID>. A copy kept here so that an
+# edit to the downloader's table is a deliberate change made in two places.
+ZENODO_FILES = {
+    "LOVE_NUMBERS": "pyslfp_love_numbers.zip",
+    "ICE7G": "pyslfp_ice7g.zip",
+    "ICE6G": "pyslfp_ice6g.zip",
+    "ICE5G": "pyslfp_ice5g.zip",
+    "HYDRO": "pyslfp_hydrobasins_v1.zip",
+    "IHO_SEAS": "pyslfp_iho_seas_v3.zip",
+    "TIDE_GAUGE": "pyslfp_tide_gauge.zip",
+    "IMBIE_ANT": "pyslfp_imbie_ant.zip",
+    "MOUGINOT_GRL": "pyslfp_mouginot_grl.zip",
+    "ETOPO": "pyslfp_etopo.zip",
+}
+
+
+def test_dataset_tables_agree():
+    assert dl.DATASET_FILES == ZENODO_FILES
+    assert set(dl.FOLDER_MAP) == set(dl.DATASET_URLS) == set(ZENODO_FILES)
+    for key, name in ZENODO_FILES.items():
+        expected = f"https://zenodo.org/records/{dl.RECORD_ID}/files/{name}?download=1"
+        assert dl.DATASET_URLS[key] == expected
+
+
+@pytest.mark.slow
+def test_every_dataset_is_on_the_record():
+    """Each zip the downloader names is present on the Zenodo record."""
+    listing = requests.get(
+        f"https://zenodo.org/api/records/{dl.RECORD_ID}", timeout=30
+    ).json()
+    on_record = {entry["key"] for entry in listing["files"]}
+    missing = set(dl.DATASET_FILES.values()) - on_record
+    assert not missing, f"not on record {dl.RECORD_ID}: {sorted(missing)}"

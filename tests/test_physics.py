@@ -353,7 +353,11 @@ def _reference_linear_solution(state, direct_load, rotational_feedbacks, rtol=1e
     k_b = ln.k[None, :, None]
     r, i = p.rotation_factor, p.inertia_factor
     r3, i3 = p.axial_rotation_factor, p.axial_inertia_factor
+    r0 = p.uniform_rotation_factor
     ht, kt = ln.h_t[2], ln.k_t[2]
+    # the degree-0 terms of the axial feedback, absent from an older table
+    hc, kc, mc = (ln.h_c, ln.k_c, ln.m_c) if ln.has_axial else (0.0, 0.0, 0.0)
+    trace = (4.0 / 3.0) * p.rotation_frequency / p.polar_moment_of_inertia
 
     ocean = state.ocean_function
     area = state.ocean_area
@@ -372,10 +376,16 @@ def _reference_linear_solution(state, direct_load, rotational_feedbacks, rtol=1e
             psi = np.zeros((2, 2))
             psi[:, 1] = r * omega[:2]
             psi[0, 0] = r3 * omega[2]
+            psi0 = r0 * omega[2]
             disp_lm.coeffs[:, 2, :2] += ht * psi
             pot_lm.coeffs[:, 2, :2] += kt * psi
+            disp_lm.coeffs[0, 0, 0] += hc * psi0
+            pot_lm.coeffs[0, 0, 0] += kc * psi0
             omega = np.concatenate(
-                [i * pot_lm.coeffs[:, 2, 1], [-i3 * pot_lm.coeffs[0, 2, 0]]]
+                [
+                    i * pot_lm.coeffs[:, 2, 1],
+                    [-i3 * pot_lm.coeffs[0, 2, 0] - trace * mc * psi0],
+                ]
             )
             psi[:, 1] = r * omega[:2]
             psi[0, 0] = r3 * omega[2]

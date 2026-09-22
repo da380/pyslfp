@@ -380,14 +380,16 @@ the adjoint identity closes to 1e-12; zeroing any one of h_c, m_u, the
 shell term or the psi_00 row alone breaks it (2e-5, 2e-5, 3e-3, 2e-5),
 so every term is exercised and matched.
 
-*Table and data.* `~/.pyslfp_data/pyslfp_love_numbers/PREM_4096_axial.dat`
-is the regenerated table, PREM without ocean to degree 4096 with the
-axial line, 32 s; its twelve columns agree with the shipped table to
-4e-16. To make the default model exact, David uploads it as
-`PREM_4096.dat` in a new version of the Zenodo record and users refresh
-with `LoveNumbers.default(refresh=True)`; until then the default runs
-the harmonic treatment and a model from `from_planet_model` the exact
-one. The cached copy was not overwritten.
+*Table and data.* The regenerated table, PREM without ocean to degree
+4096 with the axial line (32 s; twelve columns agreeing with the
+previous one to 4e-16), is on Zenodo as `PREM_4096.dat` in record
+22891291 (DOI 10.5281/zenodo.22891291), uploaded 22 September; the
+record number is set in the downloader, README and docs, and a fresh
+download gives `has_axial` True. (Record 22891191, made the same day,
+has the old table inside the folder and the new one loose at the top
+level, so the downloader read the old one; superseded.) Existing
+installs need `LoveNumbers.default(refresh=True)` once, since the cache
+is only checked for presence.
 
 *Tests.* `tests/love_numbers/test_solver.py::test_axial_numbers`
 (reciprocity, shell theorem, signs, single-degree solves agree, the

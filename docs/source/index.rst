@@ -65,7 +65,7 @@ A dataset that has changed on Zenodo is picked up by
 ``pyslfp.data.ensure_data(key, refresh=True)``, which deletes the cached copy and
 downloads it again.
 
-.. _Zenodo: https://zenodo.org/records/22770094
+.. _Zenodo: https://zenodo.org/records/22891291
 
 
 Love numbers
@@ -300,7 +300,7 @@ If you use ``pyslfp`` in published work, please cite:
 
 The datasets that ``pyslfp`` downloads are the work of others and are redistributed
 only for convenience. If you use them, please cite their original sources, which are
-recorded on the `Zenodo record <https://zenodo.org/records/22770094>`_.
+recorded on the `Zenodo record <https://zenodo.org/records/22891291>`_.
 
 
 .. toctree::

@@ -68,7 +68,7 @@ The package needs a number of external datasets: a precomputed table of load Lov
 numbers, the ICE-NG ice histories, and shapefiles for the various regional
 definitions. These are not
 distributed with the package. They are downloaded from
-[Zenodo](https://zenodo.org/records/22770094) automatically, on first use, and then
+[Zenodo](https://zenodo.org/records/22891291) automatically, on first use, and then
 cached locally, so the first call that needs a given dataset will pause while it is
 fetched and a progress bar is shown. Subsequent calls read from the cache.
 
@@ -346,7 +346,7 @@ If you use `pyslfp` in published work, please cite:
 The datasets that `pyslfp` downloads — the ice histories, load Love numbers, tide
 gauge network and regional definitions — are the work of others and are redistributed
 here only for convenience. If you use them, please cite their original sources, which
-are recorded on the [Zenodo record](https://zenodo.org/records/22770094).
+are recorded on the [Zenodo record](https://zenodo.org/records/22891291).
 
 ## License
 

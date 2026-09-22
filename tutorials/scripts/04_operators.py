@@ -162,34 +162,50 @@ sl.plot(
 )
 
 # %% [markdown]
-# ## Polar wander
+# ## Polar wander and the length of day
 #
-# The fourth component of the response is the change in angular velocity,
-# from which the shift of the pole follows. Its kernels are spherical
-# harmonics of degree two and order one.
+# The fourth component of the response is the change in angular velocity.
+# Its two components orthogonal to the rotation axis give the shift of the
+# pole, and their kernels are spherical harmonics of degree two and order
+# one. The component along the axis gives the change in the length of day,
+# and its kernel is the zonal harmonic of degree two: mass moved from the
+# poles towards the equator slows the Earth.
 
 # %%
-pole = response_space.subspace_projection(3) @ fingerprint
+rotation = response_space.subspace_projection(3) @ fingerprint
+omega = rotation(load)
 pole_factor = params.mean_sea_floor_radius / params.rotation_frequency
-shift = pole(load) * pole_factor * metre
+shift = omega[:2] * pole_factor * metre
 print(f"pole displacement: {np.linalg.norm(shift):.1f} m")
+
+second = params.time_scale
+day = 2 * np.pi / params.rotation_frequency * second
+lod_factor = -day / params.rotation_frequency
+print(f"length of day change: {omega[2] * lod_factor * 1000:.3f} ms")
 
 fig, axes = plt.subplots(
     1,
-    2,
-    figsize=(13, 4),
+    3,
+    figsize=(19, 4),
     subplot_kw={"projection": ccrs.Robinson()},
     layout="constrained",
 )
 for ax, i, label in zip(axes, [0, 1], ["x axis", "y axis"]):
-    unit = np.zeros(2)
+    unit = np.zeros(3)
     unit[i] = 1.0
     sl.plot(
-        per_thousand_gigatonnes(pole.adjoint(unit) * pole_factor),
+        per_thousand_gigatonnes(rotation.adjoint(unit) * pole_factor),
         ax=ax,
         symmetric=True,
         colorbar_kwargs={"label": f"Pole shift towards the {label} (mm per 1000 Gt)"},
     )
+lod_kernel = rotation.adjoint(np.array([0.0, 0.0, 1.0])) * lod_factor
+sl.plot(
+    lod_kernel * (1000 * gigatonne) * 1000,
+    ax=axes[2],
+    symmetric=True,
+    colorbar_kwargs={"label": "Length of day change (ms per 1000 Gt)"},
+)
 
 # %% [markdown]
 # ## Sobolev spaces and point observations

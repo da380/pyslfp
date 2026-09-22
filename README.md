@@ -105,7 +105,11 @@ sea level equation and its adjoint stay consistent. The numbers are the
 generalised Love numbers of Al-Attar et al. (2024): the response to the traction
 and the attraction of a load separately, to a tangential traction, and to a tidal
 potential, with the tangential displacement numbers alongside the vertical ones.
-A model frozen at a frequency with `planetmodel.frozen` gives complex,
+Degree 0 also carries five axial numbers: the response to the spherical mean of
+the centrifugal potential of a change in spin rate, which goes as $r^2$ rather
+than being a constant, and the inertia moments of the degree-0 responses, which
+the axial component of the rotational feedback needs and no surface Love number
+gives. A model frozen at a frequency with `planetmodel.frozen` gives complex,
 viscoelastic numbers, which can be computed and plotted but not yet used in the
 sea level solver. The precomputed table is exactly what `LoveNumbers.from_model`
 gives for `PREM(ocean=False)` to degree 4096.
@@ -195,7 +199,8 @@ sle = sl.LinearSeaLevelEquation.from_defaults(lmax=256)
 # The load associated with a 10% loss of West Antarctic ice.
 direct_load = sle.state.west_antarctic_load(fraction=0.1)
 
-# Sea level change, vertical displacement, potential change, and polar wander.
+# Sea level change, vertical displacement, potential change, and the angular
+# velocity change (polar wander and length of day).
 sea_level_change, displacement, potential_change, angular_velocity_change = (
     sle.solve_sea_level_equation(direct_load)
 )

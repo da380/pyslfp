@@ -132,7 +132,10 @@ by conservation of the direct load, so the step stays, but the test that
 checks the adjoint identity of `FingerPrintOperator` is where a wrong
 degree-0 treatment would show, and is the test to extend.
 
-**The axial rotation component.** The theory (eq. 27 onwards) keeps all
+**The axial rotation component.** Superseded by `axial_rotation_plan.md`
+(22 September 2026): the degree-0 numbers do not enter, and what the
+exact treatment needs is an interior moment the table does not hold.
+The paragraph is kept as written. The theory (eq. 27 onwards) keeps all
 three components of omega; the numerics drop omega_3 because the change
 in the polar moment of inertia is dominated by I_3 and because the
 degree-0 deformation it needs was not available. The centrifugal

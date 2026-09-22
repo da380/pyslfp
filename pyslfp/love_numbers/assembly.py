@@ -312,31 +312,42 @@ class DegreeSystem:
             b[i] = -self.material.surface_gravity * a * a * self.l * (self.l + 1.0)
         return b
 
-    def tide(self) -> np.ndarray:
-        """The force of a unit external potential psi = (r/a)^l: the known
-        psi moved to the right-hand side, term by term of the bilinear
-        form, with the fluid density perturbation responding to the total
-        potential.  Zero at l = 0; at l = 1 the centre-of-mass constraint
-        leaves a non-trivial response."""
+    def tide(self, *, power: int | None = None) -> np.ndarray:
+        """The force of a unit external potential psi = (r/a)^power, the
+        power defaulting to l, the harmonic tide: the known psi moved to
+        the right-hand side, term by term of the bilinear form, with the
+        fluid density perturbation responding to the total potential.  A
+        constant potential (power 0) is a gauge and gives zero; at l = 1
+        the centre-of-mass constraint leaves a non-trivial response.  The
+        one non-harmonic case in use is power 2 at l = 0, the spherical
+        mean of the centrifugal potential of a change in spin rate, which
+        is a body force alone: at l = 0 there is no tangential dof and a
+        fluid region is a mu = 0 elastic medium."""
         mat, mesh, l, e0 = self.material, self.mesh, self.l, self.first_element
+        p = l if power is None else int(power)
+        if p < 0:
+            raise ValueError("power must be non-negative")
         b = np.zeros(self.ndof)
-        if l == 0:
+        if p == 0:
             return b
         a = mat.radius
         k2 = l * (l + 1.0)
         for e in range(e0, mesh.nspec):
             r = mesh.r[e]
             Wq = mesh.w * float(mesh.jac[e])
-            psi = (r / a) ** l
-            dpsi = (l / a) * (r / a) ** (l - 1)
+            psi = (r / a) ** p
+            dpsi = (p / a) * (r / a) ** (p - 1)
             gd = self.dof[mesh.gmap[e]]
-            if mat.fluid[e]:
+            if mat.fluid[e] and l > 0:
                 b[gd[:, 2]] -= Wq * _stratification(r, mat.drho[e], mat.g[e]) * psi
             else:
-                b[gd[:, 0]] -= Wq * mat.rho[e] * r * r * dpsi
-                b[gd[:, 1]] -= k2 * Wq * mat.rho[e] * r * psi
+                # at l = 0 the centre has no U dof
+                live = gd[:, 0] >= 0
+                b[gd[live, 0]] -= (Wq * mat.rho[e] * r * r * dpsi)[live]
+                if l > 0:
+                    b[gd[:, 1]] -= k2 * Wq * mat.rho[e] * r * psi
         for e, gn, rt, gt, rf, sgn in self._interfaces():
-            b[self.dof[gn, 0]] -= sgn * rf * rt * rt * (rt / a) ** l
+            b[self.dof[gn, 0]] -= sgn * rf * rt * rt * (rt / a) ** p
         return b
 
     # -- solving ----------------------------------------------------------------

@@ -37,12 +37,33 @@ k_0 = -4 pi G a by mass conservation.  The split matters: the adjoint
 theory of the sea level equation is written in the generalised numbers,
 not in h and k alone.
 
+Five scalars, the axial numbers, describe degree 0 further, for the
+component of the rotational feedback along the rotation axis.  A change
+in spin rate has a centrifugal potential whose spherical mean is
+proportional to r^2, not a constant, and the trace of the inertia
+tensor changes with any uniform radial deformation; neither is in the
+surface response to a load or to a harmonic tide.  `h_c` and `k_c` are
+the surface displacement and potential per unit centrifugal potential
+(r/a)^2 at degree 0 (k_c vanishes by the shell theorem), and `m_u`,
+`m_phi` and `m_c` are the inertia moments sqrt(4 pi) int rho U r^3 dr,
+which is int rho u . x dV, of the degree-0 response to the two load
+channels and to the centrifugal potential.  Symmetry of the bilinear
+form gives
+
+    m_u = sqrt(4 pi) g a^4 h_c / 2,   m_phi = sqrt(4 pi) a^4 k_c / 2,
+
+checked by `axial_reciprocity_residual`; m_phi vanishes with k_c, a
+surface shell attracting nothing inside it.  A table from a file that
+predates them has them NaN, and the sea level equation then neglects
+the deformation terms of the axial feedback.
+
 The file is plain text, one row per degree from 0, in SI: h per unit
 surface density in m^3 kg^-1, k likewise in m^4 kg^-1 s^-2, h_t in
 s^2 m^-1 and k_t dimensionless.  Its comment lines name the columns
-(`columns: l h_u l_u k_u ...`) and record the body's radius, surface
-gravity and G, all of which the reader takes back; a file with no
-column line is read in the seven-column layout of the original table,
+(`columns: l h_u l_u k_u ...`), record the body's radius, surface
+gravity and G, and give the axial numbers (`axial h_c ... k_c ...`),
+all of which the reader takes back; a file with no column line is read
+in the seven-column layout of the original table,
 `l h_u k_u h_phi k_phi h_t k_t`, with the tangential numbers NaN.
 """
 
@@ -60,7 +81,13 @@ if TYPE_CHECKING:
     from matplotlib.figure import Figure
     from planetmodel import Model, RadialMesh
 
-__all__ = ["NAMES", "LEGACY_COLUMNS", "LoveNumbers", "read_love_numbers"]
+__all__ = [
+    "NAMES",
+    "AXIAL_NAMES",
+    "LEGACY_COLUMNS",
+    "LoveNumbers",
+    "read_love_numbers",
+]
 
 #: The twelve Love numbers, in the order the file writes them.
 NAMES = (
@@ -69,6 +96,9 @@ NAMES = (
     "h_v", "l_v", "k_v",
     "h_t", "l_t", "k_t",
 )  # fmt: skip
+
+#: The five axial numbers of degree 0, in the order the file writes them.
+AXIAL_NAMES = ("h_c", "k_c", "m_u", "m_phi", "m_c")
 
 #: The column layout of a file with no line naming its columns.
 LEGACY_COLUMNS = ("l", "h_u", "k_u", "h_phi", "k_phi", "h_t", "k_t")
@@ -91,6 +121,13 @@ _DIMENSIONS = {
     "h_t": _PER_POTENTIAL_LENGTH,
     "l_t": _PER_POTENTIAL_LENGTH,
     "k_t": Dimensions(),
+    # the axial numbers: h_c like h_t, k_c like k_t, and the moments an
+    # inertia (mass length^2) per unit of their forcing
+    "h_c": _PER_POTENTIAL_LENGTH,
+    "k_c": Dimensions(),
+    "m_u": Dimensions(length=4),
+    "m_phi": Dimensions(length=4),
+    "m_c": Dimensions(mass=1, time=2),
 }
 _LENGTH = Dimensions(length=1)
 _ACCELERATION = Dimensions(length=1, time=-2)
@@ -98,6 +135,9 @@ _GRAVITATIONAL_CONSTANT = Dimensions(mass=-1, length=3, time=-2)
 
 #: The comment line recording the body the numbers belong to, in SI.
 _BODY_LINE = "body radius {radius:.15e} surface_gravity {g:.15e} G {G:.15e}"
+
+#: The comment line recording the axial numbers, in SI.
+_AXIAL_LINE = "axial " + " ".join(f"{name} {{{name}:+.15e}}" for name in AXIAL_NAMES)
 
 
 @dataclass(frozen=True)
@@ -107,8 +147,9 @@ class LoveNumbers:
 
     `radius`, `surface_gravity` and `G` are the body's, in the same
     units; `omega` is the frequency of a frozen viscoelastic model, whose
-    numbers are complex, and None for an elastic one.  Built by
-    `from_model`, `from_file` or `default`, never by hand in normal use.
+    numbers are complex, and None for an elastic one.  The five axial
+    numbers of degree 0 are NaN when unknown.  Built by `from_model`,
+    `from_file` or `default`, never by hand in normal use.
     """
 
     degree: np.ndarray
@@ -130,6 +171,11 @@ class LoveNumbers:
     _: KW_ONLY
     scales: Scales = Scales.SI
     omega: float | None = None
+    h_c: complex = np.nan
+    k_c: complex = np.nan
+    m_u: complex = np.nan
+    m_phi: complex = np.nan
+    m_c: complex = np.nan
 
     def __post_init__(self) -> None:
         n = len(self.degree)
@@ -204,7 +250,8 @@ class LoveNumbers:
         ):
             if given is not None:
                 body[key] = float(given)
-        out = cls(columns["l"].astype(int), scales=Scales.SI, **body, **values)
+        axial = {name: body.pop(name) for name in AXIAL_NAMES}
+        out = cls(columns["l"].astype(int), scales=Scales.SI, **body, **values, **axial)
         return out if lmax is None else out.truncated(lmax)
 
     @classmethod
@@ -236,6 +283,11 @@ class LoveNumbers:
     @property
     def is_complex(self) -> bool:
         return self.h_u.dtype.kind == "c"
+
+    @property
+    def has_axial(self) -> bool:
+        """Whether the five axial numbers of degree 0 are known."""
+        return all(np.isfinite(getattr(self, name)) for name in AXIAL_NAMES)
 
     def truncated(self, lmax: int, /) -> LoveNumbers:
         """The same numbers for degrees up to `lmax`."""
@@ -297,6 +349,21 @@ class LoveNumbers:
             worst = np.maximum(worst, np.where(scale > 0.0, np.abs(x - y) / safe, 0.0))
         return worst
 
+    def axial_reciprocity_residual(self) -> float:
+        """The larger of the two relative residuals of the axial numbers,
+        ``abs(m_u - sqrt(4 pi) g a^4 h_c / 2)`` against the size of m_u
+        and ``abs(m_phi - sqrt(4 pi) a^4 k_c / 2)`` against the size of
+        m_u again, m_phi and k_c being zero in exact arithmetic; NaN for
+        a table without the axial numbers."""
+        if not self.has_axial:
+            return np.nan
+        half = 0.5 * np.sqrt(4.0 * np.pi) * self.radius**4
+        scale = abs(self.m_u)
+        return max(
+            abs(self.m_u - half * self.surface_gravity * self.h_c) / scale,
+            abs(self.m_phi - half * self.k_c) / scale,
+        )
+
     # -- units and files ----------------------------------------------------
 
     def converted(self, scales: Scales, /) -> LoveNumbers:
@@ -341,6 +408,10 @@ class LoveNumbers:
             "external potential (r/a)^l, degree 1 in the centre-of-mass frame\n"
             + _BODY_LINE.format(radius=si.radius, g=si.surface_gravity, G=si.G)
         )
+        if si.has_axial:
+            header += "\n" + _AXIAL_LINE.format(
+                **{name: getattr(si, name) for name in AXIAL_NAMES}
+            )
         np.savetxt(path, cols, fmt=["%6d"] + ["%+.15e"] * len(NAMES), header=header)
 
     # -- Green's functions --------------------------------------------------
@@ -469,10 +540,12 @@ class LoveNumbers:
 
 
 def _read_header(path: str | Path) -> tuple[list[str] | None, dict[str, float]]:
-    """The column names of a file's `columns:` line (None without one) and
-    the radius, surface gravity and G of its `body` line (NaN without)."""
+    """The column names of a file's `columns:` line (None without one), the
+    radius, surface gravity and G of its `body` line and the axial numbers
+    of its `axial` line (NaN without)."""
     names = None
     body = {"radius": np.nan, "surface_gravity": np.nan, "G": np.nan}
+    body.update({name: np.nan for name in AXIAL_NAMES})
     with open(path) as fh:
         for line in fh:
             if not line.startswith("#"):
@@ -484,6 +557,11 @@ def _read_header(path: str | Path) -> tuple[list[str] | None, dict[str, float]]:
                 body["radius"] = float(tokens[2])
                 body["surface_gravity"] = float(tokens[4])
                 body["G"] = float(tokens[6])
+            elif tokens[:1] == ["axial"]:
+                pairs = dict(zip(tokens[1::2], tokens[2::2]))
+                for name in AXIAL_NAMES:
+                    if name in pairs:
+                        body[name] = float(pairs[name])
     return names, body
 
 

@@ -236,6 +236,7 @@ def test_solve_degree_and_the_solution(material, love):
         "load_potential",
         "load_tangential",
         "tide",
+        "centrifugal",
     )
     with pytest.raises(ValueError):
         solve_degree(material, 3, mesh=material.mesh)
@@ -394,3 +395,53 @@ def test_frozen_prem_at_a_tidal_period(material):
     assert abs(k2.real / warm.tidal()["k"][2] - 1.0) < 2e-2
     assert 0.0 < abs(k2.imag) < 1e-2
     assert love.reciprocity_residual().max() < 1e-12
+
+
+# ==================================================================== #
+#                     The axial numbers of degree 0                    #
+# ==================================================================== #
+
+
+def test_axial_numbers(material):
+    """
+    The degree-0 response to the centrifugal potential (r/a)^2 and the
+    inertia moments: reciprocity of the bilinear form ties the moment of
+    the force-channel response to the surface displacement under the
+    centrifugal potential, the exterior potential of a spherically
+    symmetric deformation vanishes (so k_c and the moment of the
+    potential-channel response do too), and a spin-up expands the body.
+    """
+    from pyslfp.love_numbers import inertia_moment
+    from pyslfp.love_numbers.table import AXIAL_NAMES
+
+    love = love_numbers(material, 2)
+    assert love.has_axial
+    assert love.axial_reciprocity_residual() < 1e-12
+    assert abs(love.k_c) < 1e-10 * abs(love.k_t[2])
+    assert abs(love.m_phi) < 1e-10 * abs(love.m_u)
+    # a negative potential coefficient is a spin-up, an outward body force
+    assert love.h_c < 0.0 and love.m_c < 0.0
+    # a downward traction compresses the body
+    assert love.m_u < 0.0
+
+    # the same numbers from the single-degree solves
+    spin = solve_degree(material, 0, forcing="centrifugal")
+    assert abs(spin.surface[0] - love.h_c) < 1e-12 * abs(love.h_c)
+    assert abs(inertia_moment(material, spin.U) - love.m_c) < 1e-12 * abs(love.m_c)
+    # the centrifugal forcing at degree 2 is the harmonic tide
+    tide = solve_degree(material, 2, forcing="tide").surface
+    same = solve_degree(material, 2, forcing="centrifugal").surface
+    for x, y in zip(tide, same):
+        assert abs(x - y) < 1e-12 * abs(x)
+    # a constant potential is a gauge
+    system = DegreeSystem(material, 0)
+    assert not np.any(system.tide())
+
+    # units and the file carry them
+    nd = love.converted(Scales(length=love.radius, mass=1e24, time=1e3))
+    assert nd.has_axial and nd.axial_reciprocity_residual() < 1e-12
+    for name in AXIAL_NAMES:
+        if name != "k_c":  # dimensionless
+            assert getattr(nd, name) != getattr(love, name)
+    assert nd.in_si().m_c == pytest.approx(love.m_c, rel=1e-14)
+    assert love.truncated(1).has_axial

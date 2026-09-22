@@ -33,8 +33,15 @@ end.
 from .assembly import DegreeSystem
 from .material import Material, NodalModuli, nodal_moduli
 from .plot import plot_degree_solution, plot_love_numbers
-from .solver import FORCINGS, DegreeSolution, graded_mesh, love_numbers, solve_degree
-from .table import LEGACY_COLUMNS, NAMES, LoveNumbers, read_love_numbers
+from .solver import (
+    FORCINGS,
+    DegreeSolution,
+    graded_mesh,
+    inertia_moment,
+    love_numbers,
+    solve_degree,
+)
+from .table import AXIAL_NAMES, LEGACY_COLUMNS, NAMES, LoveNumbers, read_love_numbers
 
 __all__ = [
     "Material",
@@ -46,8 +53,10 @@ __all__ = [
     "solve_degree",
     "graded_mesh",
     "LoveNumbers",
+    "inertia_moment",
     "love_numbers",
     "read_love_numbers",
+    "AXIAL_NAMES",
     "NAMES",
     "LEGACY_COLUMNS",
     "plot_love_numbers",

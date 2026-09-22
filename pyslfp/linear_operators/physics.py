@@ -376,11 +376,11 @@ def lebesgue_response_space(earth_model: EarthModel, /) -> HilbertSpaceDirectSum
 
     Returns:
         HilbertSpaceDirectSum: A composite space comprising SLC, Displacement,
-            Gravitational Potential, and a 2D Euclidean space for Angular Velocity.
+            Gravitational Potential, and a 3D Euclidean space for Angular Velocity.
     """
     field_space = lebesgue_load_space(earth_model)
     return HilbertSpaceDirectSum(
-        [field_space, field_space, field_space, EuclideanSpace(2)]
+        [field_space, field_space, field_space, EuclideanSpace(3)]
     )
 
 
@@ -432,7 +432,7 @@ def sobolev_response_space(
         grid=earth_model.grid,
     )
     return HilbertSpaceDirectSum(
-        [field_space, field_space, field_space, EuclideanSpace(2)]
+        [field_space, field_space, field_space, EuclideanSpace(3)]
     )
 
 
@@ -446,10 +446,15 @@ def centrifugal_potential_operator(
 ) -> LinearOperator:
     """
     Returns the LinearOperator the maps an angular velocity perturbation
-    to the corresponding centrifugal potential perturbation.
+    [omega_x, omega_y, omega_z] to the corresponding centrifugal potential
+    perturbation.
+
+    The transverse components give the degree-2, order-1 potential and the
+    axial component the degree-2, order-0 potential together with its
+    degree-0 part, a constant on the surface.
     """
 
-    domain = EuclideanSpace(2)
+    domain = EuclideanSpace(3)
 
     sobolev_field = sobolev_parameters is not None
 
@@ -460,16 +465,27 @@ def centrifugal_potential_operator(
         codomain = lebesgue_load_space(model)
 
     r = model.parameters.rotation_factor
+    r_axial = model.parameters.axial_rotation_factor
+    r_uniform = model.parameters.uniform_rotation_factor
     b = model.parameters.mean_sea_floor_radius
 
     def mapping(w: np.ndarray) -> SHGrid:
         cpc_lm = model.zero_coefficients()
-        cpc_lm.coeffs[:, 2, 1] = model.parameters.rotation_factor * w
+        cpc_lm.coeffs[:, 2, 1] = r * w[:2]
+        cpc_lm.coeffs[0, 2, 0] = r_axial * w[2]
+        cpc_lm.coeffs[0, 0, 0] = r_uniform * w[2]
         return model.expand_coefficient(cpc_lm)
 
     def adjoint_mapping(cpc: SHGrid) -> np.ndarray:
         cpc_lm = model.expand_field(cpc, lmax_calc=2)
-        return r * b * b * cpc_lm.coeffs[:, 2, 1]
+        w = np.empty(3)
+        w[:2] = r * b * b * cpc_lm.coeffs[:, 2, 1]
+        w[2] = (
+            b
+            * b
+            * (r_axial * cpc_lm.coeffs[0, 2, 0] + r_uniform * cpc_lm.coeffs[0, 0, 0])
+        )
+        return w
 
     l2_codomain = underlying_space(codomain)
 

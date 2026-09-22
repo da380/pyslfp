@@ -116,8 +116,8 @@ def check_response_space(
         raise ValueError("Subspaces 1 and 2 must match the field type of subspace 0.")
 
     rot_space = response_space.subspace(3)
-    if not isinstance(rot_space, EuclideanSpace) or not (rot_space.dim == 2):
-        raise ValueError("Subspace 3 must be a 2D Euclidean space for rotation.")
+    if not isinstance(rot_space, EuclideanSpace) or not (rot_space.dim == 3):
+        raise ValueError("Subspace 3 must be a 3D Euclidean space for rotation.")
 
     if point_values:
         if not isinstance(field_space, Sobolev) or not (field_space.order > 1.0):

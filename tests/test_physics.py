@@ -51,6 +51,7 @@ def test_zero_load_input(linear_solver):
     assert np.allclose(slc.data, 0.0)
     assert np.allclose(disp.data, 0.0)
     assert np.allclose(potc.data, 0.0)
+    assert avc.shape == (3,)
     assert np.allclose(avc, 0.0)
 
 
@@ -351,13 +352,18 @@ def _reference_linear_solution(state, direct_load, rotational_feedbacks, rtol=1e
     h_b = ln.h[None, :, None]
     k_b = ln.k[None, :, None]
     r, i = p.rotation_factor, p.inertia_factor
+    r3, i3 = p.axial_rotation_factor, p.axial_inertia_factor
+    r0 = p.uniform_rotation_factor
     ht, kt = ln.h_t[2], ln.k_t[2]
+    # the degree-0 terms of the axial feedback, absent from an older table
+    hc, kc, mc = (ln.h_c, ln.k_c, ln.m_c) if ln.has_axial else (0.0, 0.0, 0.0)
+    trace = (4.0 / 3.0) * p.rotation_frequency / p.polar_moment_of_inertia
 
     ocean = state.ocean_function
     area = state.ocean_area
     mean_slc = -model.integrate(direct_load) / (rho * area)
     load = direct_load + rho * ocean * mean_slc
-    omega = np.zeros(2)
+    omega = np.zeros(3)
 
     for _ in range(2000):
         lm = model.expand_field(load)
@@ -366,10 +372,24 @@ def _reference_linear_solution(state, direct_load, rotational_feedbacks, rtol=1e
         disp_lm.coeffs *= h_b
         pot_lm.coeffs *= k_b
         if rotational_feedbacks:
-            disp_lm.coeffs[:, 2, 1] += ht * r * omega
-            pot_lm.coeffs[:, 2, 1] += kt * r * omega
-            omega = i * pot_lm.coeffs[:, 2, 1]
-            pot_lm.coeffs[:, 2, 1] += r * omega
+            # Lagged centrifugal potential: order 1 transverse, order 0 axial
+            psi = np.zeros((2, 2))
+            psi[:, 1] = r * omega[:2]
+            psi[0, 0] = r3 * omega[2]
+            psi0 = r0 * omega[2]
+            disp_lm.coeffs[:, 2, :2] += ht * psi
+            pot_lm.coeffs[:, 2, :2] += kt * psi
+            disp_lm.coeffs[0, 0, 0] += hc * psi0
+            pot_lm.coeffs[0, 0, 0] += kc * psi0
+            omega = np.concatenate(
+                [
+                    i * pot_lm.coeffs[:, 2, 1],
+                    [-i3 * pot_lm.coeffs[0, 2, 0] - trace * mc * psi0],
+                ]
+            )
+            psi[:, 1] = r * omega[:2]
+            psi[0, 0] = r3 * omega[2]
+            pot_lm.coeffs[:, 2, :2] += psi
         disp = model.expand_coefficient(disp_lm)
         pot = model.expand_coefficient(pot_lm)
         slc = (disp + pot * (1.0 / g)) * (-1.0)
@@ -381,7 +401,7 @@ def _reference_linear_solution(state, direct_load, rotational_feedbacks, rtol=1e
             break
 
     if rotational_feedbacks:
-        pot_lm.coeffs[:, 2, 1] -= r * omega
+        pot_lm.coeffs[:, 2, :2] -= psi
         pot = model.expand_coefficient(pot_lm)
     return slc, disp, pot, omega
 
@@ -400,6 +420,56 @@ def test_linear_solver_matches_reference_iteration(linear_solver, rotational_fee
         assert np.max(np.abs(got.data - expected.data)) < 1e-9 * scale
     if rotational_feedbacks:
         assert np.max(np.abs(out[3] - ref[3])) < 1e-8 * np.max(np.abs(ref[3]))
+
+
+def test_axial_rotation_is_length_of_day_formula(linear_solver):
+    """
+    The axial angular velocity change must agree with the textbook
+    length-of-day formula, omega_z / Omega = -(1 + k_2') c_33 / C, with
+    c_33 the load's own inertia change, int a^2 sin^2(theta) sigma dS, and
+    the small tidal feedback applied. The integral is taken from the
+    degree-0 and degree-2 coefficients of the converged load, since
+    sin^2(theta) is a combination of Y_00 and Y_20.
+    """
+    np.random.seed(5)
+    state = linear_solver.state
+    model = state.model
+    p = model.parameters
+    ln = model.love_numbers
+    a = p.mean_sea_floor_radius
+
+    load = random_load(state)
+    slc, _, _, omega = linear_solver.solve_sea_level_equation(load, rtol=1e-12)
+
+    total_load = load + p.water_density * state.ocean_function * slc
+    sigma = model.expand_field(total_load).coeffs
+    c33 = (
+        (2.0 / 3.0)
+        * a**4
+        * (
+            np.sqrt(4.0 * np.pi) * sigma[0, 0, 0]
+            - np.sqrt(4.0 * np.pi / 5.0) * sigma[0, 2, 0]
+        )
+    )
+
+    one_plus_k2 = ln.k[2] / (-4.0 * np.pi * p.gravitational_constant * a / 5.0)
+    feedback = 1.0 + p.axial_inertia_factor * p.axial_rotation_factor * ln.k_t[2]
+    if ln.has_axial:
+        # the uniform expansion under the spin change adds to the inertia
+        feedback += (
+            (4.0 / 3.0)
+            * p.rotation_frequency
+            * ln.m_c
+            * p.uniform_rotation_factor
+            / p.polar_moment_of_inertia
+        )
+    expected = (
+        -p.rotation_frequency * one_plus_k2 * c33 / p.polar_moment_of_inertia / feedback
+    )
+
+    assert abs(omega[2] - expected) < 1e-8 * abs(expected)
+    # Moving mass off the poles slows the earth
+    assert (omega[2] < 0) == (c33 > 0)
 
 
 def test_picard_and_anderson_agree(analytical_state):

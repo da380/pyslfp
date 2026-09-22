@@ -117,13 +117,13 @@ def test_check_response_space(testing_state):
 
     # Invalid: Subspaces 1 and 2 don't match 0
     sob = sobolev_load_space(model, 1.0, 0.1 * b)
-    mismatched = inf.HilbertSpaceDirectSum([leb, sob, leb, inf.EuclideanSpace(2)])
+    mismatched = inf.HilbertSpaceDirectSum([leb, sob, leb, inf.EuclideanSpace(3)])
     with pytest.raises(ValueError, match="Subspaces 1 and 2 must match"):
         check_response_space(mismatched)
 
-    # Invalid: Rotation space is wrong
-    bad_rot = inf.HilbertSpaceDirectSum([leb, leb, leb, inf.EuclideanSpace(3)])
-    with pytest.raises(ValueError, match="2D Euclidean space for rotation"):
+    # Invalid: Rotation space is wrong (the transverse-only dimension of old)
+    bad_rot = inf.HilbertSpaceDirectSum([leb, leb, leb, inf.EuclideanSpace(2)])
+    with pytest.raises(ValueError, match="3D Euclidean space for rotation"):
         check_response_space(bad_rot)
 
 

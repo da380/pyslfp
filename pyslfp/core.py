@@ -114,9 +114,18 @@ class EarthModelParameters:
     water_density: float = field(init=False)
     ice_density: float = field(init=False)
 
-    # Quantities useful in calculations
+    # Rotational feedback factors. The transverse pair maps the angular
+    # velocity components orthogonal to the rotation axis to the degree-2,
+    # order-1 centrifugal potential and back from the potential perturbation;
+    # the axial pair does the same at degree 2, order 0 for the component
+    # along the axis, where the polar moment replaces the difference of the
+    # principal moments. The axial component also has a degree-0 centrifugal
+    # potential, the uniform factor times omega_z.
     rotation_factor: float = field(init=False)
     inertia_factor: float = field(init=False)
+    axial_rotation_factor: float = field(init=False)
+    axial_inertia_factor: float = field(init=False)
+    uniform_rotation_factor: float = field(init=False)
 
     def __post_init__(self) -> None:
         """Builds the scales and locks in every non-dimensional value."""
@@ -175,6 +184,25 @@ class EarthModelParameters:
                 self.gravitational_constant
                 * (self.polar_moment_of_inertia - self.equatorial_moment_of_inertia)
             ),
+        )
+        put(
+            "axial_rotation_factor",
+            np.sqrt((16 * np.pi) / 45.0)
+            * self.rotation_frequency
+            * self.mean_sea_floor_radius**2,
+        )
+        put(
+            "uniform_rotation_factor",
+            -np.sqrt((16 * np.pi) / 9.0)
+            * self.rotation_frequency
+            * self.mean_sea_floor_radius**2,
+        )
+        put(
+            "axial_inertia_factor",
+            np.sqrt(5 / (9 * np.pi))
+            * self.rotation_frequency
+            * self.mean_sea_floor_radius**3
+            / (self.gravitational_constant * self.polar_moment_of_inertia),
         )
 
     def with_body(self, love_numbers: LoveNumbers, /) -> EarthModelParameters:

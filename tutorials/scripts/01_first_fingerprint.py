@@ -32,7 +32,8 @@ direct_load = sle.state.west_antarctic_load(fraction=0.1)
 #
 # The solver returns the sea level change, the vertical displacement of
 # the solid surface, the change in gravitational potential and the change
-# in the Earth's angular velocity. Only the first is used here. All are
+# in the Earth's angular velocity (two components for the shift of the
+# pole and one for the length of day). Only the first is used here. All are
 # non-dimensional, and the parameters of the Earth model turn them back
 # into metres.
 

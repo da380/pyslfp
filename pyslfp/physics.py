@@ -14,9 +14,12 @@ per iteration; displacement and gravitational potential are synthesised
 once from the converged load. Surface integrals use the quadrature weights
 held by the EarthModel rather than a truncated transform.
 
-The degree-2, order-1 rotational feedback is a scalar fixed point and is
-solved in closed form within every iteration, so the returned displacement,
-potential and angular velocity are all consistent with the same load.
+The rotational feedback lives at degree 2: the transverse angular velocity
+components at order 1 and the axial component at order 0, the latter
+with a degree-0 part through the axial Love numbers of the table. Each is
+a scalar fixed point solved in closed form within every iteration, so the
+returned displacement, potential and angular velocity are all consistent
+with the same load; see ``SeaLevelEquation._rotation``.
 
 The linear solver accelerates the fixed-point iteration with Anderson
 mixing on the load coefficients. Set ``SeaLevelEquation.anderson_memory``
@@ -130,9 +133,13 @@ class SeaLevelEquation:
         self._radius = parameters.mean_sea_floor_radius
         self._rotation_factor = parameters.rotation_factor
         self._inertia_factor = parameters.inertia_factor
+        self._axial_rotation_factor = parameters.axial_rotation_factor
+        self._axial_inertia_factor = parameters.axial_inertia_factor
+        self._uniform_rotation_factor = parameters.uniform_rotation_factor
         self._inverse_inertia_difference = 1.0 / (
             parameters.polar_moment_of_inertia - parameters.equatorial_moment_of_inertia
         )
+        self._inverse_polar_inertia = 1.0 / parameters.polar_moment_of_inertia
 
         # Love numbers shaped for broadcasting over coefficient arrays
         love_numbers = model.love_numbers
@@ -151,8 +158,36 @@ class SeaLevelEquation:
         self._k2 = love_numbers.k[2]
         self._ht2 = love_numbers.h_t[2]
         self._kt2 = love_numbers.k_t[2]
+        # Degree-0 quantities for the axial feedback: the response to the
+        # uniform part of the centrifugal potential and the inertia moments
+        # of the degree-0 responses, zero when the table does not hold them
+        if love_numbers.has_axial:
+            self._hc = love_numbers.h_c
+            self._kc = love_numbers.k_c
+            self._mu = love_numbers.m_u
+            self._mphi = love_numbers.m_phi
+            self._mc = love_numbers.m_c
+        else:
+            self._hc = self._kc = self._mu = self._mphi = self._mc = 0.0
+        omega = parameters.rotation_frequency
+        polar_inertia = parameters.polar_moment_of_inertia
+        # (4/3) Omega / C on the moments, and the inertia of a uniform shell
+        # (2/3) Omega a^4 sqrt(4 pi) / C on degree-0 mass-like sources
+        self._trace_factor = (4.0 / 3.0) * omega / polar_inertia
+        self._shell_factor = (
+            (2.0 / 3.0) * omega * self._radius**4 * np.sqrt(4.0 * np.pi) / polar_inertia
+        )
+
+        # Fixed-point denominators for the transverse (order 1) and axial
+        # (order 0) components; the axial sign follows from the polar
+        # entry -C of the inertia matrix in the Euler equation.
         self._rotation_denominator = (
             1.0 - self._inertia_factor * self._kt2 * self._rotation_factor
+        )
+        self._axial_rotation_denominator = (
+            1.0
+            + self._axial_inertia_factor * self._kt2 * self._axial_rotation_factor
+            + self._trace_factor * self._mc * self._uniform_rotation_factor
         )
 
         # Number of previous iterates retained by the Anderson acceleration
@@ -200,45 +235,86 @@ class SeaLevelEquation:
 
     def _rotation(
         self,
-        load_21: np.ndarray,
+        load_2: np.ndarray,
         /,
         *,
-        static_disp_21: Optional[np.ndarray] = None,
-        static_grav_21: Optional[np.ndarray] = None,
+        load_0: float = 0.0,
+        static_disp_2: Optional[np.ndarray] = None,
+        static_grav_2: Optional[np.ndarray] = None,
+        displacement_load_0: float = 0.0,
+        potential_load_0: float = 0.0,
         angular_momentum_change: Optional[np.ndarray] = None,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float]:
         """
-        Solves the degree-2, order-1 rotational feedback exactly.
+        Solves the rotational feedback exactly.
+
+        The components of the angular velocity change orthogonal to the
+        rotation axis are set by the degree-2, order-1 coefficients of the
+        potential and the axial component by the order-0 coefficient
+        (MacCullagh's formula), while each feeds back through the tidal
+        Love numbers at the same order. The axial component also depends on
+        the trace of the inertia perturbation, which the degree-2 potential
+        does not see: the inertia of degree-0 mass-like sources (the load
+        and the potential load, as a uniform shell) and the inertia moments
+        of the degree-0 deformation they and the uniform part of the
+        centrifugal potential drive, through the axial Love numbers. A
+        table without those numbers gives the deformation terms as zero.
 
         Args:
-            load_21: The (cos, sin) load coefficients of degree 2, order 1.
-            static_disp_21: Degree-2, order-1 displacement from static loads.
-            static_grav_21: Degree-2, order-1 potential from static loads.
-            angular_momentum_change: External angular momentum perturbation.
+            load_2: The load coefficients of degree 2 at orders 0 and 1,
+                shaped (2, 2) with rows (cos, sin) and columns (m=0, m=1).
+            load_0: The degree-0 load coefficient, zero for a load that
+                conserves mass.
+            static_disp_2: The same block of displacement from static loads.
+            static_grav_2: The same block of potential from static loads.
+            displacement_load_0: The degree-0 displacement load coefficient.
+            potential_load_0: The degree-0 potential load coefficient.
+            angular_momentum_change: External angular momentum perturbation,
+                [x, y, z].
 
         Returns:
-            Tuple of angular velocity change, displacement coefficients,
-            gravitational potential coefficients (without the centrifugal
-            term), and the centrifugal potential coefficients.
+            Tuple of angular velocity change [omega_x, omega_y, omega_z],
+            the (2, 2) blocks of displacement coefficients, gravitational
+            potential coefficients (without the centrifugal term) and
+            centrifugal potential coefficients, and the degree-0 centrifugal
+            potential coefficient.
         """
-        grav_forcing = self._k2 * load_21
-        disp_forcing = self._h2 * load_21
-        if static_grav_21 is not None:
-            grav_forcing = grav_forcing + static_grav_21
-        if static_disp_21 is not None:
-            disp_forcing = disp_forcing + static_disp_21
+        grav_forcing = self._k2 * load_2
+        disp_forcing = self._h2 * load_2
+        if static_grav_2 is not None:
+            grav_forcing = grav_forcing + static_grav_2
+        if static_disp_2 is not None:
+            disp_forcing = disp_forcing + static_disp_2
 
-        forcing = self._inertia_factor * grav_forcing
-        if angular_momentum_change is not None:
-            forcing = (
-                forcing - self._inverse_inertia_difference * angular_momentum_change
+        transverse = self._inertia_factor * grav_forcing[:, 1]
+        axial = (
+            -self._axial_inertia_factor * grav_forcing[0, 0]
+            - self._trace_factor
+            * (
+                (self._mu + self._mphi) * load_0
+                + self._mu * displacement_load_0
+                + self._mphi * potential_load_0
             )
+            - self._shell_factor * (load_0 + potential_load_0)
+        )
+        if angular_momentum_change is not None:
+            transverse = (
+                transverse
+                - self._inverse_inertia_difference * angular_momentum_change[:2]
+            )
+            axial = axial + self._inverse_polar_inertia * angular_momentum_change[2]
 
-        omega = forcing / self._rotation_denominator
-        centrifugal = self._rotation_factor * omega
-        disp_21 = disp_forcing + self._ht2 * centrifugal
-        grav_21 = grav_forcing + self._kt2 * centrifugal
-        return omega, disp_21, grav_21, centrifugal
+        omega = np.empty(3)
+        omega[:2] = transverse / self._rotation_denominator
+        omega[2] = axial / self._axial_rotation_denominator
+
+        centrifugal = np.zeros((2, 2))
+        centrifugal[:, 1] = self._rotation_factor * omega[:2]
+        centrifugal[0, 0] = self._axial_rotation_factor * omega[2]
+        centrifugal_0 = self._uniform_rotation_factor * omega[2]
+        disp_2 = disp_forcing + self._ht2 * centrifugal
+        grav_2 = grav_forcing + self._kt2 * centrifugal
+        return omega, disp_2, grav_2, centrifugal, centrifugal_0
 
     def _warn_not_converged(self, name: str, err: float, count: int) -> None:
         warnings.warn(
@@ -281,7 +357,7 @@ class SeaLevelEquation:
                 - Relative Sea Level Change
                 - Vertical Displacement
                 - Gravity Potential Change
-                - Angular Velocity Change [omega_x, omega_y]
+                - Angular Velocity Change [omega_x, omega_y, omega_z]
         """
         return self.solve_generalised_equation(
             state,
@@ -316,7 +392,7 @@ class SeaLevelEquation:
             direct_load (Optional[SHGrid]): Standard surface mass forcing.
             displacement_load (Optional[SHGrid]): External vertical surface displacement forcing.
             gravitational_potential_load (Optional[SHGrid]): External gravitational potential forcing.
-            angular_momentum_change (Optional[np.ndarray]): External angular momentum perturbation.
+            angular_momentum_change (Optional[np.ndarray]): External angular momentum perturbation, [x, y, z].
             rotational_feedbacks (bool): Whether to calculate polar wander effects.
             rtol (float): The relative tolerance for convergence, measured as the
                 change in sea level over the oceans between iterations relative
@@ -375,7 +451,7 @@ class SeaLevelEquation:
                 model.zero_grid(),
                 model.zero_grid(),
                 model.zero_grid(),
-                np.zeros(2),
+                np.zeros(3),
             )
 
         self._solver_counter += 1
@@ -394,27 +470,36 @@ class SeaLevelEquation:
 
         if static_disp is not None:
             static_slc = -(static_disp + static_grav / g)
-            static_disp_21 = static_disp[:, 2, 1].copy()
-            static_grav_21 = static_grav[:, 2, 1].copy()
+            static_disp_2 = static_disp[:, 2, :2].copy()
+            static_grav_2 = static_grav[:, 2, :2].copy()
         else:
             static_slc = None
-            static_disp_21 = None
-            static_grav_21 = None
+            static_disp_2 = None
+            static_grav_2 = None
+        displacement_load_0 = 0.0 if displacement_load is None else disp_lm[0, 0, 0]
+        potential_load_0 = (
+            0.0 if gravitational_potential_load is None else grav_lm[0, 0, 0]
+        )
 
         def sea_level_from_load(load_lm: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
             """Synthesises the mass-conserving sea level change for a load."""
             slc_lm = self._slc_factor * load_lm
             if static_slc is not None:
                 slc_lm += static_slc
-            omega = np.zeros(2)
+            omega = np.zeros(3)
             if rotational_feedbacks:
-                omega, disp_21, grav_21, centrifugal = self._rotation(
-                    load_lm[:, 2, 1],
-                    static_disp_21=static_disp_21,
-                    static_grav_21=static_grav_21,
+                omega, disp_2, grav_2, centrifugal, centrifugal_0 = self._rotation(
+                    load_lm[:, 2, :2],
+                    load_0=load_lm[0, 0, 0],
+                    static_disp_2=static_disp_2,
+                    static_grav_2=static_grav_2,
+                    displacement_load_0=displacement_load_0,
+                    potential_load_0=potential_load_0,
                     angular_momentum_change=angular_momentum_change,
                 )
-                slc_lm[:, 2, 1] = -(disp_21 + (grav_21 + centrifugal) / g)
+                slc_lm[:, 2, :2] = -(disp_2 + (grav_2 + centrifugal) / g)
+                # uniform, and so absorbed by mass conservation below
+                slc_lm[0, 0, 0] -= (self._hc + (self._kc + 1.0) / g) * centrifugal_0
             slc = self._synthesise(slc_lm)
             slc += mean_slc - model._integrate_data(ocean_function * slc) / ocean_area
             return slc, omega
@@ -460,14 +545,19 @@ class SeaLevelEquation:
             displacement_lm += static_disp
             potential_lm += static_grav
         if rotational_feedbacks:
-            _, disp_21, grav_21, _ = self._rotation(
-                load_lm[:, 2, 1],
-                static_disp_21=static_disp_21,
-                static_grav_21=static_grav_21,
+            _, disp_2, grav_2, _, centrifugal_0 = self._rotation(
+                load_lm[:, 2, :2],
+                load_0=load_lm[0, 0, 0],
+                static_disp_2=static_disp_2,
+                static_grav_2=static_grav_2,
+                displacement_load_0=displacement_load_0,
+                potential_load_0=potential_load_0,
                 angular_momentum_change=angular_momentum_change,
             )
-            displacement_lm[:, 2, 1] = disp_21
-            potential_lm[:, 2, 1] = grav_21
+            displacement_lm[:, 2, :2] = disp_2
+            potential_lm[:, 2, :2] = grav_2
+            displacement_lm[0, 0, 0] += self._hc * centrifugal_0
+            potential_lm[0, 0, 0] += self._kc * centrifugal_0
 
         grid = model.grid
         return (
@@ -515,7 +605,7 @@ class SeaLevelEquation:
                 - Relative Sea Level Change
                 - Vertical Displacement
                 - Gravity Potential Change
-                - Angular Velocity Change [omega_x, omega_y]
+                - Angular Velocity Change [omega_x, omega_y, omega_z]
         """
         model = self._model
         g = self._g
@@ -556,7 +646,7 @@ class SeaLevelEquation:
         current_ocean_func = initial_ocean_func.copy()
         current_bathy = initial_bathy.copy()
         slc_data = np.zeros_like(initial_bathy)
-        angular_velocity_change = np.zeros(2)
+        angular_velocity_change = np.zeros(3)
 
         exclude_caspian = initial_state.exclude_caspian
         caspian_mask = (
@@ -570,7 +660,8 @@ class SeaLevelEquation:
         err = np.inf
         converged = False
         count = 0
-        disp_21 = grav_21 = None
+        disp_2 = grav_2 = None
+        centrifugal_0 = 0.0
 
         while count < max_iterations:
             grounded_ice_change = ice_density * (
@@ -590,10 +681,11 @@ class SeaLevelEquation:
 
             slc_lm = self._slc_factor * load_lm
             if rotational_feedbacks:
-                angular_velocity_change, disp_21, grav_21, centrifugal = self._rotation(
-                    load_lm[:, 2, 1]
+                angular_velocity_change, disp_2, grav_2, centrifugal, centrifugal_0 = (
+                    self._rotation(load_lm[:, 2, :2], load_0=load_lm[0, 0, 0])
                 )
-                slc_lm[:, 2, 1] = -(disp_21 + (grav_21 + centrifugal) / g)
+                slc_lm[:, 2, :2] = -(disp_2 + (grav_2 + centrifugal) / g)
+                slc_lm[0, 0, 0] -= (self._hc + (self._kc + 1.0) / g) * centrifugal_0
 
             slc_local = self._synthesise(slc_lm)
 
@@ -656,8 +748,10 @@ class SeaLevelEquation:
         displacement_lm = self._h * load_lm
         potential_lm = self._k * load_lm
         if rotational_feedbacks:
-            displacement_lm[:, 2, 1] = disp_21
-            potential_lm[:, 2, 1] = grav_21
+            displacement_lm[:, 2, :2] = disp_2
+            potential_lm[:, 2, :2] = grav_2
+            displacement_lm[0, 0, 0] += self._hc * centrifugal_0
+            potential_lm[0, 0, 0] += self._kc * centrifugal_0
 
         grid = model.grid
         final_sea_level = SHGrid.from_array(current_bathy, grid=grid)
@@ -750,7 +844,7 @@ class LinearSeaLevelEquation:
                 - Relative Sea Level Change
                 - Vertical Displacement
                 - Gravity Potential Change
-                - Angular Velocity Change [omega_x, omega_y]
+                - Angular Velocity Change [omega_x, omega_y, omega_z]
         """
         return self._sle.solve_sea_level_equation(
             self.state,
@@ -783,7 +877,7 @@ class LinearSeaLevelEquation:
             direct_load (Optional[SHGrid]): Standard surface mass forcing.
             displacement_load (Optional[SHGrid]): External vertical surface displacement forcing.
             gravitational_potential_load (Optional[SHGrid]): External gravitational potential forcing.
-            angular_momentum_change (Optional[np.ndarray]): External angular momentum perturbation.
+            angular_momentum_change (Optional[np.ndarray]): External angular momentum perturbation, [x, y, z].
             rotational_feedbacks (bool): Whether to calculate polar wander effects.
             rtol (float): The relative tolerance for convergence.
             max_iterations (Optional[int]): Hard limit on iteration count.

@@ -129,3 +129,45 @@ def test_fingerprint_adjoint_is_exact_with_a_consistent_body(table):
         model.parameters.raw_gravitational_constant == units.G_SI
     )  # adopted from the table
     assert _adjoint_mismatch(model) < 1e-9
+
+
+def test_axial_feedback_uses_the_tables_degree_zero_numbers(table):
+    """
+    With the axial numbers a change in spin rate expands or contracts the
+    body uniformly, so the degree-0 displacement responds to a zonal
+    load; without them (a table from an older file) that response is
+    absent, while the adjoint identity closes either way, each treatment
+    being self-adjoint.
+    """
+    from dataclasses import replace
+
+    from pyslfp.physics import LinearSeaLevelEquation
+
+    assert table.has_axial
+    without = replace(
+        table, h_c=np.nan, k_c=np.nan, m_u=np.nan, m_phi=np.nan, m_c=np.nan
+    )
+    assert not without.has_axial
+
+    responses = {}
+    for name, love in (("with", table), ("without", without)):
+        model = EarthModel(LMAX, love_numbers=love)
+        state = _state(model)
+        load = state.northern_hemisphere_load(fraction=1.0)
+        _, disp, _, omega = LinearSeaLevelEquation(state).solve_sea_level_equation(
+            load, rtol=1e-12
+        )
+        responses[name] = (model.expand_field(disp).coeffs[0, 0, 0], omega[2])
+        assert _adjoint_mismatch(model) < 1e-9
+
+    u0_with, omega_with = responses["with"]
+    u0_without, omega_without = responses["without"]
+    assert abs(u0_without) < 1e-6 * abs(u0_with)
+    expected = table.converted(EarthModel(LMAX, love_numbers=table).parameters.scales)
+    params = EarthModel(LMAX, love_numbers=table).parameters
+    assert u0_with == pytest.approx(
+        expected.h_c * params.uniform_rotation_factor * omega_with, rel=1e-9
+    )
+    # the degree-0 feedback on the spin rate itself is small and stabilising
+    assert abs(omega_with / omega_without - 1.0) < 1e-3
+    assert abs(omega_with) < abs(omega_without)

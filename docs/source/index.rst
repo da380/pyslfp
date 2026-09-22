@@ -65,7 +65,7 @@ A dataset that has changed on Zenodo is picked up by
 ``pyslfp.data.ensure_data(key, refresh=True)``, which deletes the cached copy and
 downloads it again.
 
-.. _Zenodo: https://zenodo.org/records/22770094
+.. _Zenodo: https://zenodo.org/records/22891291
 
 
 Love numbers
@@ -160,9 +160,19 @@ the first being eq. (64) of Al-Attar et al. (2024);
 centre-of-mass frame, where the surface potential perturbation vanishes and
 :math:`k'_1 = -1`. At degree 0 the tidal numbers are zero, a uniform external
 potential being a gauge, while the load numbers are not: mass conservation
-fixes :math:`k_0 = -4\pi G a`. The sea level solver uses the generalised
-numbers directly, because the adjoint theory is written in them rather than
-in :math:`h` and :math:`k` alone.
+fixes :math:`k_0 = -4\pi G a`. Degree 0 also carries five axial numbers,
+``h_c``, ``k_c``, ``m_u``, ``m_phi`` and ``m_c``: the surface response to the
+spherical mean of the centrifugal potential of a change in spin rate, which
+goes as :math:`r^2` rather than being a constant, and the inertia moments
+:math:`\sqrt{4\pi}\int \rho\, U\, r^3\, dr` of the degree-0 responses to the two
+load channels and to that potential. The component of the rotational feedback
+along the rotation axis needs them, because the trace of the inertia
+perturbation is not seen by the degree-2 potential; symmetry gives
+:math:`m_u = \sqrt{4\pi}\, g a^4 h_c / 2`, which
+``LoveNumbers.axial_reciprocity_residual()`` checks, and :math:`k_c` and
+:math:`m_\phi` vanish by the shell theorem. The sea level solver uses the
+generalised numbers directly, because the adjoint theory is written in them
+rather than in :math:`h` and :math:`k` alone.
 
 .. _planetmodel: https://github.com/da380/planetmodel
 
@@ -184,7 +194,8 @@ resulting sea level fingerprint:
    # The load associated with a 10% loss of West Antarctic ice.
    direct_load = sle.state.west_antarctic_load(fraction=0.1)
 
-   # Sea level change, vertical displacement, potential change, and polar wander.
+   # Sea level change, vertical displacement, potential change, and the angular
+   # velocity change (polar wander and length of day).
    sea_level_change, displacement, potential_change, angular_velocity_change = (
        sle.solve_sea_level_equation(direct_load)
    )
@@ -289,7 +300,7 @@ If you use ``pyslfp`` in published work, please cite:
 
 The datasets that ``pyslfp`` downloads are the work of others and are redistributed
 only for convenience. If you use them, please cite their original sources, which are
-recorded on the `Zenodo record <https://zenodo.org/records/22770094>`_.
+recorded on the `Zenodo record <https://zenodo.org/records/22891291>`_.
 
 
 .. toctree::

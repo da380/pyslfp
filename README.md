@@ -68,7 +68,7 @@ The package needs a number of external datasets: a precomputed table of load Lov
 numbers, the ICE-NG ice histories, and shapefiles for the various regional
 definitions. These are not
 distributed with the package. They are downloaded from
-[Zenodo](https://zenodo.org/records/22770094) automatically, on first use, and then
+[Zenodo](https://zenodo.org/records/22891291) automatically, on first use, and then
 cached locally, so the first call that needs a given dataset will pause while it is
 fetched and a progress bar is shown. Subsequent calls read from the cache.
 
@@ -105,7 +105,11 @@ sea level equation and its adjoint stay consistent. The numbers are the
 generalised Love numbers of Al-Attar et al. (2024): the response to the traction
 and the attraction of a load separately, to a tangential traction, and to a tidal
 potential, with the tangential displacement numbers alongside the vertical ones.
-A model frozen at a frequency with `planetmodel.frozen` gives complex,
+Degree 0 also carries five axial numbers: the response to the spherical mean of
+the centrifugal potential of a change in spin rate, which goes as $r^2$ rather
+than being a constant, and the inertia moments of the degree-0 responses, which
+the axial component of the rotational feedback needs and no surface Love number
+gives. A model frozen at a frequency with `planetmodel.frozen` gives complex,
 viscoelastic numbers, which can be computed and plotted but not yet used in the
 sea level solver. The precomputed table is exactly what `LoveNumbers.from_model`
 gives for `PREM(ocean=False)` to degree 4096.
@@ -195,7 +199,8 @@ sle = sl.LinearSeaLevelEquation.from_defaults(lmax=256)
 # The load associated with a 10% loss of West Antarctic ice.
 direct_load = sle.state.west_antarctic_load(fraction=0.1)
 
-# Sea level change, vertical displacement, potential change, and polar wander.
+# Sea level change, vertical displacement, potential change, and the angular
+# velocity change (polar wander and length of day).
 sea_level_change, displacement, potential_change, angular_velocity_change = (
     sle.solve_sea_level_equation(direct_load)
 )
@@ -341,7 +346,7 @@ If you use `pyslfp` in published work, please cite:
 The datasets that `pyslfp` downloads — the ice histories, load Love numbers, tide
 gauge network and regional definitions — are the work of others and are redistributed
 here only for convenience. If you use them, please cite their original sources, which
-are recorded on the [Zenodo record](https://zenodo.org/records/22770094).
+are recorded on the [Zenodo record](https://zenodo.org/records/22891291).
 
 ## License
 

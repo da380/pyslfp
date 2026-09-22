@@ -2,10 +2,14 @@
 
 A degree is solved for one forcing: a unit surface density through its
 traction-like piece, its attraction piece, or both, a unit tangential
-traction, or a unit external potential psi = (r/a)^l.  The surface values of U, V and phi per unit
-forcing are the generalised Love numbers; `table` states the
-conventions, the units and the file.  Everything here is in the
-material's units.
+traction, a unit external potential psi = (r/a)^l, or the centrifugal
+potential (r/a)^2 whatever the degree.  The surface values of U, V and
+phi per unit forcing are the generalised Love numbers; `table` states
+the conventions, the units and the file.  At degree 0 the solutions
+also give the axial numbers: the surface response to the centrifugal
+potential and the inertia moments sqrt(4 pi) int rho U r^3 dr of each
+response, which the axial rotational feedback of the sea level equation
+needs.  Everything here is in the material's units.
 """
 
 from __future__ import annotations
@@ -25,9 +29,23 @@ from .table import NAMES, LoveNumbers
 if TYPE_CHECKING:
     from planetmodel import Model
 
-__all__ = ["FORCINGS", "DegreeSolution", "graded_mesh", "solve_degree", "love_numbers"]
+__all__ = [
+    "FORCINGS",
+    "DegreeSolution",
+    "graded_mesh",
+    "inertia_moment",
+    "solve_degree",
+    "love_numbers",
+]
 
-FORCINGS = ("load", "load_force", "load_potential", "load_tangential", "tide")
+FORCINGS = (
+    "load",
+    "load_force",
+    "load_potential",
+    "load_tangential",
+    "tide",
+    "centrifugal",
+)
 
 
 @dataclass(frozen=True)
@@ -157,14 +175,17 @@ def solve_degree(
     """The degree-l solution of a model, or of a ready `Material`, for
     one forcing of `FORCINGS`: a unit surface density through both
     channels, its traction-like or attraction piece alone, a unit
-    tangential traction, or a unit external potential.  Given a model, the mesh is built with the
-    `lmax=l` rule unless supplied."""
+    tangential traction, a unit external potential (r/a)^l, or the
+    centrifugal potential (r/a)^2.  Given a model, the mesh is built
+    with the `lmax=l` rule unless supplied."""
     if forcing not in FORCINGS:
         raise ValueError(f"forcing must be one of {FORCINGS}, got {forcing!r}")
     material = _material(model_or_material, mesh=mesh, ngll=ngll, lmax=l, eps=eps)
     system = DegreeSystem(material, l, eps=eps)
     if forcing == "tide":
         b = system.tide()
+    elif forcing == "centrifugal":
+        b = system.tide(power=2)
     elif forcing == "load_tangential":
         b = system.tangential()
     else:
@@ -176,6 +197,16 @@ def solve_degree(
     return DegreeSolution(int(l), forcing, material.mesh, U, V, phi)
 
 
+def inertia_moment(material: Material, U: np.ndarray) -> complex:
+    """sqrt(4 pi) int rho U r^3 dr over the mesh for a nodal radial
+    displacement U of degree 0, which is int rho u . x dV, a quarter of
+    the change in the trace of the inertia tensor that the displacement
+    u = U Y_00 r_hat produces."""
+    mesh = material.mesh
+    weights = mesh.w[None, :] * mesh.jac[:, None]
+    return np.sqrt(4.0 * np.pi) * np.sum(weights * material.rho * U * mesh.r**3)
+
+
 def love_numbers(
     model_or_material: Model | Material,
     lmax: int,
@@ -185,34 +216,41 @@ def love_numbers(
     eps: float = 1e-8,
 ) -> LoveNumbers:
     """The Love numbers of a model, or of a ready `Material`, for every
-    degree from 0 to `lmax`.
+    degree from 0 to `lmax`, with the axial numbers from degree 0.
 
-    Each degree is assembled once and solved for the four forcings.
-    Given a model, the mesh is `graded_mesh(model, lmax, ngll=ngll,
-    eps=eps)` unless supplied.  A model frozen at a frequency gives
-    complex numbers.
+    Each degree is assembled once and solved for the four forcings, and
+    degree 0 for the centrifugal potential besides.  Given a model, the
+    mesh is `graded_mesh(model, lmax, ngll=ngll, eps=eps)` unless
+    supplied.  A model frozen at a frequency gives complex numbers.
     """
     if lmax < 0:
         raise ValueError("lmax must be non-negative")
     material = _material(model_or_material, mesh=mesh, ngll=ngll, lmax=lmax, eps=eps)
     dtype = complex if material.is_complex else float
     out = {name: np.zeros(lmax + 1, dtype=dtype) for name in NAMES}
+    axial = {}
     for l in range(lmax + 1):
         system = DegreeSystem(material, l, eps=eps)
-        B = np.column_stack(
-            [
-                system.load(part="force"),
-                system.load(part="potential"),
-                system.tangential(),
-                system.tide(),
-            ]
-        )
-        X = system.solve(B)
+        columns = [
+            system.load(part="force"),
+            system.load(part="potential"),
+            system.tangential(),
+            system.tide(),
+        ]
+        if l == 0:
+            columns.append(system.tide(power=2))
+        X = system.solve(np.column_stack(columns))
         for j, channel in enumerate(("u", "phi", "v", "t")):
             for letter, component in (("h", "U"), ("l", "V"), ("k", "phi")):
                 i = system.surface_dof(component)
                 if i >= 0:
                     out[f"{letter}_{channel}"][l] = X[i, j]
+        if l == 0:
+            axial["h_c"] = X[system.surface_dof("U"), 4]
+            axial["k_c"] = X[system.surface_dof("phi"), 4]
+            for name, j in (("m_u", 0), ("m_phi", 1), ("m_c", 4)):
+                U, _, _ = system.expand(X[:, j])
+                axial[name] = inertia_moment(material, U)
     return LoveNumbers(
         np.arange(lmax + 1),
         radius=material.radius,
@@ -221,4 +259,5 @@ def love_numbers(
         scales=material.scales,
         omega=material.omega,
         **out,
+        **axial,
     )

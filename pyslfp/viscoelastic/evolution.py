@@ -63,6 +63,10 @@ class SeaLevelSnapshot:
     gravity_potential_change: SHGrid = field(repr=False)
     angular_velocity_change: np.ndarray = field(repr=False)
     date: float | None = None
+    #: The step's ocean function under migrating shorelines (None when
+    #: the shorelines are frozen at the background state's): the C(t)
+    #: record an adjoint calculation reads back.
+    ocean_function: SHGrid | None = field(default=None, repr=False)
 
 
 class SeaLevelEvolution:
@@ -311,6 +315,7 @@ class SeaLevelEvolution:
         dates: Sequence[float],
         ice_model: BaseIceModel,
         *,
+        shorelines: str = "frozen",
         rotational_feedbacks: bool = True,
         rtol: float = 1e-9,
         verbose: bool = False,
@@ -320,10 +325,23 @@ class SeaLevelEvolution:
         `dates` are in kiloyears before present, decreasing (the past
         first), and should include the history's breakpoints; the model
         interpolates between them, per the `BaseIceModel` contract.
-        The direct load is the grounded ice change since the first
-        date, grounded meaning outside the background state's (frozen)
-        ocean function.  The snapshots carry their dates.
+        The snapshots carry their dates.
+
+        With `shorelines="frozen"` the equation is linear: the direct
+        load is the grounded ice change since the first date, grounded
+        meaning outside the background state's fixed ocean function.
+        With `shorelines="migrating"` each step solves the nonlinear
+        equation instead: the ocean function follows the flotation
+        condition, grounding and mass conservation are re-evaluated as
+        the shorelines move, and every snapshot records its ocean
+        function -- the C(t) history an adjoint calculation reads
+        back.  The background state must then be the state at the
+        first date, whose ice thickness is the history's.
         """
+        if shorelines not in ("frozen", "migrating"):
+            raise ValueError(
+                f"shorelines must be 'frozen' or 'migrating', got {shorelines!r}"
+            )
         dates = np.asarray(dates, dtype=float)
         if dates.ndim != 1 or dates.size < 2 or np.any(np.diff(dates) >= 0.0):
             raise ValueError(
@@ -334,6 +352,14 @@ class SeaLevelEvolution:
         if not np.isclose(ice_model.length_scale, parameters.length_scale):
             raise ValueError(
                 "the ice model's length scale differs from the Earth model's"
+            )
+        if shorelines == "migrating":
+            return self._run_migrating(
+                dates,
+                ice_model,
+                rotational_feedbacks=rotational_feedbacks,
+                rtol=rtol,
+                verbose=verbose,
             )
         kyr = KYR / parameters.scales.factor(units.TIME)
         date0 = float(dates[0])
@@ -365,6 +391,125 @@ class SeaLevelEvolution:
             verbose=verbose,
         )
         snapshots = [replace(snap, date=date0 - snap.t / kyr) for snap in snapshots]
+        return snapshots, vstate
+
+    def _thickness(self, ice_model: BaseIceModel, date: float) -> np.ndarray:
+        return ice_model.get_ice_thickness(
+            date,
+            self.model.lmax,
+            grid=self.model.grid_name,
+            sampling=self.model.sampling,
+            extend=self.model.extend,
+        ).data
+
+    def _total_load_coeffs(self, final_state: EarthState) -> np.ndarray:
+        """The surface load the nonlinear solve's final state carries,
+        relative to the background: grounded ice and ocean water, the
+        construction of the solver's own iteration, so the radial step
+        is finished under the load its sea level solution saw."""
+        parameters = self.model.parameters
+        start = self.state
+        grounded = parameters.ice_density * (
+            (1.0 - final_state.ocean_function.data) * final_state.ice_thickness.data
+            - (1.0 - start.ocean_function.data) * start.ice_thickness.data
+        )
+        ocean = parameters.water_density * (
+            final_state.ocean_function.data * final_state.sea_level.data
+            - start.ocean_function.data * start.sea_level.data
+        )
+        return self.model.expand_field(
+            SHGrid.from_array(grounded + ocean, grid=self.model.grid, copy=False)
+        ).coeffs
+
+    def _run_migrating(self, dates, ice_model, *, rotational_feedbacks, rtol, verbose):
+        """The migrating-shoreline loop: each step's equilibrium is the
+        nonlinear equation, with the memory field through the response
+        channels, and the converged state's load finishes the radial
+        step.  The solutions and the state are consistent to the
+        nonlinear iteration's tolerance (the fixed point is no longer
+        eliminated exactly, as it is in the linear path)."""
+        op = self.operator
+        model = self.model
+        parameters = model.parameters
+        if rotational_feedbacks is True:
+            self._assert_transverse_stable()
+        kyr = KYR / parameters.scales.factor(units.TIME)
+        date0 = float(dates[0])
+
+        start_ice = self._thickness(ice_model, date0)
+        scale = np.max(np.abs(start_ice))
+        if np.max(np.abs(self.state.ice_thickness.data - start_ice)) > 1e-6 * scale:
+            raise ValueError(
+                "the background state's ice thickness is not the history's "
+                "at the first date; build the state at dates[0]"
+            )
+
+        vstate = op.zero_state(ncols=lambda l: 2 * (l + 1))
+        sigma = np.zeros((2, model.lmax + 1, model.lmax + 1))
+        psi = np.zeros_like(sigma)
+        zero = model.zero_grid()
+        snapshots = [
+            SeaLevelSnapshot(
+                0.0,
+                zero,
+                zero,
+                zero,
+                np.zeros(3),
+                date=date0,
+                ocean_function=self.state.ocean_function,
+            )
+        ]
+        for a, b in zip(dates[:-1], dates[1:]):
+            # the step grid is in dates; the operator works in the
+            # material's units
+            dt = (a - b) * kyr * self._to_mat_time
+            step = op.start_step(
+                vstate,
+                dt,
+                scheme=self.scheme,
+                load=self._columns(sigma, self._to_mat_density),
+                tide=self._columns(psi, self._to_mat_potential),
+            )
+            sle = self._sle_for(dt)
+            memory_u = self._coeffs(step.memory_surface("U"), self._to_nd_length)
+            memory_phi = self._coeffs(step.memory_surface("phi"), self._to_nd_potential)
+            moment = step.inertia_moment()[0] * self._to_nd_moment
+            change = SHGrid.from_array(
+                self._thickness(ice_model, float(b)) - start_ice,
+                grid=model.grid,
+                copy=False,
+            )
+            final_state, slc, disp, potential, omega = sle.solve_nonlinear_equation(
+                self.state,
+                ice_thickness_change=change,
+                displacement_response=memory_u,
+                gravitational_potential_response=memory_phi,
+                inertia_moment_change=moment,
+                rotational_feedbacks=rotational_feedbacks,
+                rtol=rtol,
+                verbose=verbose,
+            )
+            sigma = self._total_load_coeffs(final_state)
+            psi = (
+                self._centrifugal(omega)
+                if rotational_feedbacks
+                else np.zeros_like(sigma)
+            )
+            vstate, _ = step.finish(
+                load=self._columns(sigma, self._to_mat_density),
+                tide=self._columns(psi, self._to_mat_potential),
+            )
+            snapshots.append(
+                SeaLevelSnapshot(
+                    float(vstate.t / self._to_mat_time),
+                    slc,
+                    disp,
+                    potential,
+                    omega,
+                    date=float(b),
+                    ocean_function=final_state.ocean_function,
+                )
+            )
         return snapshots, vstate
 
 

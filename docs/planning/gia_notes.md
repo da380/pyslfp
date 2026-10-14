@@ -273,11 +273,24 @@ earlier or repeats cycles.
 - Glacial-cycle spin-up for production runs (start a cycle earlier,
   or repeat the deglaciation saw-tooth), removing the cold-start
   bias at 26 ka.
-- Migrating shorelines in the evolution, pulled forward as the
-  prerequisite of the ice-history adjoints (shorelines matter and the
-  frozen restriction is not to be baked in); then the adjoints
-  themselves -- see docs/planning/gia_adjoint_plan.md, which records
-  the Yu et al. (2025) basis, the stored-C(t) design and the gates.
+- DONE (14 Oct, after the restructure): migrating shorelines.
+  `solve_nonlinear_equation` grew the response channels, the
+  inertia-moment term and the tri-state rotation;
+  `run_ice_history(..., shorelines="migrating")` solves the nonlinear
+  equation per step, with every snapshot recording its ocean function
+  -- the C(t) history the adjoint reads back.  Gates: migrating equals
+  frozen when no shoreline can move (which caught a units slip in the
+  step size -- the per-step fields match the engine exactly); the
+  melting cap floods and the water budget balances its grounded loss;
+  the elastic limit reproduces the elastic nonlinear solver date by
+  date.  Note: under migrating shorelines the per-step slaving is
+  consistent to the nonlinear iteration's tolerance, not eliminated
+  exactly; and the convergence-order gate stays on the frozen path,
+  where the discretisation is smooth.
+- Next: the ice-history adjoints -- see
+  docs/planning/gia_adjoint_plan.md (Yu et al. 2025 basis, the
+  discrete transpose, the stored-C(t) design and the gates).  The
+  per-step transpose derivation goes in these notes first.
 - Performance beyond the rank-one and sparse-scatter wins: thread the
   per-degree loop (the Fortran precedent OpenMPs it; pyslfp/parallel
   is the natural home).  `effective_love_numbers` still assembles its

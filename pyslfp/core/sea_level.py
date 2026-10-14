@@ -661,6 +661,9 @@ class SeaLevelEquation:
         sediment_thickness_change: Optional[SHGrid] = None,
         dynamic_sea_level_change: Optional[SHGrid] = None,
         sediment_density: Optional[float] = None,
+        displacement_response: Optional[SHCoeffs] = None,
+        gravitational_potential_response: Optional[SHCoeffs] = None,
+        inertia_moment_change: float = 0.0,
         rotational_feedbacks: bool = True,
         rtol: float = 1e-9,
         max_iterations: int = 50,
@@ -679,7 +682,19 @@ class SeaLevelEquation:
             dynamic_sea_level_change (Optional[SHGrid]): Ocean dynamic sea level forcing.
             sediment_density (Optional[float]): Non-dimensional density of the
                 sediment layer. Defaults to 2300 kg/m^3 non-dimensionalised.
-            rotational_feedbacks (bool): Whether to calculate polar wander effects.
+            displacement_response (Optional[SHCoeffs]): A ready displacement
+                response, in coefficient form, present whatever the loads,
+                with no Love number applied: a viscoelastic step's memory
+                field.  The water it displaces is conserved by the explicit
+                mass budget.
+            gravitational_potential_response (Optional[SHCoeffs]): The
+                matching ready potential response.
+            inertia_moment_change (float): A ready change of the inertia
+                moment accompanying the responses, for the trace term of
+                the axial feedback; see `solve_generalised_equation`.
+            rotational_feedbacks (bool | str): True for the full feedback,
+                "axial" for the axial component alone, False for none; see
+                `solve_generalised_equation`.
             rtol (float): The relative tolerance for convergence.
             max_iterations (int): Hard limit on non-linear iteration count.
             verbose (bool): If True, prints iteration metrics.
@@ -700,6 +715,13 @@ class SeaLevelEquation:
         if sediment_density is None:
             sediment_density = 2300.0 / model.parameters.density_scale
 
+        if rotational_feedbacks not in (True, False, "axial"):
+            raise ValueError(
+                "rotational_feedbacks must be True, False or 'axial', "
+                f"got {rotational_feedbacks!r}"
+            )
+        transverse = rotational_feedbacks is True
+
         for field in (
             ice_thickness_change,
             sediment_thickness_change,
@@ -707,6 +729,27 @@ class SeaLevelEquation:
         ):
             if field is not None:
                 model.check_field(field)
+
+        static_disp = None
+        static_grav = None
+        if displacement_response is not None:
+            model.check_coefficient(displacement_response)
+            static_disp = displacement_response.coeffs.copy()
+        if gravitational_potential_response is not None:
+            model.check_coefficient(gravitational_potential_response)
+            static_grav = gravitational_potential_response.coeffs.copy()
+        if static_disp is not None and static_grav is None:
+            static_grav = np.zeros_like(static_disp)
+        elif static_grav is not None and static_disp is None:
+            static_disp = np.zeros_like(static_grav)
+        if static_disp is not None:
+            static_slc = -(static_disp + static_grav / g)
+            static_disp_2 = static_disp[:, 2, :2].copy()
+            static_grav_2 = static_grav[:, 2, :2].copy()
+        else:
+            static_slc = None
+            static_disp_2 = None
+            static_grav_2 = None
 
         initial_bathy = initial_state.sea_level.data
         initial_ice = initial_state.ice_thickness.data
@@ -765,9 +808,18 @@ class SeaLevelEquation:
             load_lm = self._expand(total_load)
 
             slc_lm = self._slc_factor * load_lm
+            if static_slc is not None:
+                slc_lm += static_slc
             if rotational_feedbacks:
                 angular_velocity_change, disp_2, grav_2, centrifugal, centrifugal_0 = (
-                    self._rotation(load_lm[:, 2, :2], load_0=load_lm[0, 0, 0])
+                    self._rotation(
+                        load_lm[:, 2, :2],
+                        load_0=load_lm[0, 0, 0],
+                        static_disp_2=static_disp_2,
+                        static_grav_2=static_grav_2,
+                        inertia_moment=inertia_moment_change,
+                        transverse=transverse,
+                    )
                 )
                 slc_lm[:, 2, :2] = -(disp_2 + (grav_2 + centrifugal) / g)
                 slc_lm[0, 0, 0] -= (self._hc + (self._kc + 1.0) / g) * centrifugal_0
@@ -832,7 +884,11 @@ class SeaLevelEquation:
         # Displacement and potential for the load of the final iteration
         displacement_lm = self._h * load_lm
         potential_lm = self._k * load_lm
+        if static_disp is not None:
+            displacement_lm += static_disp
+            potential_lm += static_grav
         if rotational_feedbacks:
+            # disp_2 and grav_2 already include the response terms
             displacement_lm[:, 2, :2] = disp_2
             potential_lm[:, 2, :2] = grav_2
             displacement_lm[0, 0, 0] += self._hc * centrifugal_0

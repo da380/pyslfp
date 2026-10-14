@@ -214,6 +214,103 @@ def test_initial_sea_level_calibration(setting):
     assert worst < 1e-5 * scale
 
 
+class _ThinningCap(BaseIceModel):
+    """The 5 km cap losing just one metre over the history: every cell
+    stays grounded, so the shorelines cannot move."""
+
+    def get_ice_thickness(self, date, lmax, /, *, grid="DH", sampling=1, extend=True):
+        grid, sampling = self.resolve_grid(grid, sampling)
+        cap = SHGrid.from_cap(
+            15.0, 60.0, -85.0, lmax=lmax, grid=grid, sampling=sampling, extend=extend
+        )
+        fraction = np.clip(date / _MeltingCap.START, 0.0, 1.0)
+        thickness = _MeltingCap.THICKNESS - (1.0 - fraction)
+        return (thickness / self.length_scale) * cap
+
+
+def test_migrating_matches_frozen_when_shorelines_cannot_move(setting):
+    material, earth, _, _, _ = setting
+    scale = earth.parameters.length_scale
+    ice_model = _ThinningCap(length_scale=scale)
+    ice = earth.zero_grid()
+    ice.data[:, :] = ice_model.get_ice_thickness(
+        _MeltingCap.START, LMAX, grid=earth.grid_name, extend=earth.extend
+    ).data
+    sea = earth.constant_grid(3000.0 / scale)
+    state = EarthState(ice, sea, earth, exclude_caspian=False)
+    evo = SeaLevelEvolution(_maxwell_operator(material), state)
+    dates = np.linspace(10.0, 0.0, 5)
+    frozen, _ = evo.run_ice_history(dates, ice_model, shorelines="frozen")
+    moving, _ = evo.run_ice_history(dates, ice_model, shorelines="migrating")
+    for f, m in zip(frozen, moving):
+        assert np.array_equal(
+            m.ocean_function.data, state.ocean_function.data
+        )  # nothing moved
+        top = np.max(np.abs(f.sea_level_change.data))
+        diff = np.max(np.abs(f.sea_level_change.data - m.sea_level_change.data))
+        assert diff <= 1e-6 * max(top, 1e-30), f.date
+
+
+def test_migrating_shorelines_move_and_conserve_mass(setting):
+    """The melting 5 km cap floods: its grounded region becomes ocean,
+    and the explicit water budget balances the grounded ice loss."""
+    material, earth, _, _, _ = setting
+    ice_model, state = _history_state(material, earth)
+    evo = SeaLevelEvolution(_maxwell_operator(material), state)
+    dates = np.linspace(10.0, 0.0, 5)
+    snapshots, _ = evo.run_ice_history(dates, ice_model, shorelines="migrating")
+    C0 = state.ocean_function.data
+    Cf = snapshots[-1].ocean_function.data
+    assert earth.integrate(SHGrid.from_array(Cf - C0, grid=earth.grid)) > 0.0
+    parameters = earth.parameters
+    water = parameters.water_density * earth.integrate(
+        SHGrid.from_array(
+            Cf * (state.sea_level.data + snapshots[-1].sea_level_change.data)
+            - C0 * state.sea_level.data,
+            grid=earth.grid,
+        )
+    )
+    grounded = parameters.ice_density * earth.integrate(
+        SHGrid.from_array(
+            (1.0 - Cf) * 0.0 - (1.0 - C0) * state.ice_thickness.data,
+            grid=earth.grid,
+        )
+    )
+    assert abs(water + grounded) < 1e-8 * abs(grounded)
+    # and the frozen run misses the marine ingress
+    frozen, _ = evo.run_ice_history(dates, ice_model, shorelines="frozen")
+    diff = np.max(
+        np.abs(frozen[-1].sea_level_change.data - snapshots[-1].sea_level_change.data)
+    )
+    assert diff > 1e-3 * np.max(np.abs(snapshots[-1].sea_level_change.data))
+
+
+def test_migrating_elastic_limit(setting):
+    """With an infinite relaxation time the migrating evolution is the
+    elastic nonlinear solver applied date by date."""
+    material, earth, _, _, _ = setting
+    shape = material.moduli.shape
+    rheo = Rheology(material, [(np.full(shape, MU), np.zeros(shape))])
+    ice_model, state = _history_state(material, earth)
+    evo = SeaLevelEvolution(ViscoelasticOperator(rheo, LMAX), state)
+    dates = np.linspace(10.0, 0.0, 4)
+    snapshots, _ = evo.run_ice_history(dates, ice_model, shorelines="migrating")
+    sle = SeaLevelEquation(earth)
+    for snap in snapshots[1:]:
+        change = SHGrid.from_array(
+            ice_model.get_ice_thickness(
+                snap.date, LMAX, grid=earth.grid_name, extend=earth.extend
+            ).data
+            - state.ice_thickness.data,
+            grid=earth.grid,
+        )
+        _, want, _, _, _ = sle.solve_nonlinear_equation(
+            state, ice_thickness_change=change
+        )
+        top = np.max(np.abs(want.data))
+        assert np.max(np.abs(snap.sea_level_change.data - want.data)) < 1e-7 * top
+
+
 def test_rotation_feeds_back_and_evolves(setting):
     material, _, state, load, tau_nd = setting
     evo = SeaLevelEvolution(_maxwell_operator(material), state)

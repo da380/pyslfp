@@ -222,6 +222,43 @@ class EarthModelParameters:
                 changes[raw] = float(value)
         return replace(self, **changes)
 
+    def with_hydrostatic_moments(
+        self, fluid_tidal_number: float, /, *, non_hydrostatic_fraction: float = 0.008
+    ) -> EarthModelParameters:
+        """The same parameters with the difference of the principal
+        moments set from a model's hydrostatic fluid limit.
+
+        The equilibrium inertia tensor of the rotational feedback is
+        specified, never computed from the spherically symmetric model
+        (Yu et al. 2025): the default is observed values.  The
+        alternative provided here follows Mitrovica et al. (2005): the
+        oblateness a model can sustain hydrostatically is
+
+            C - A = (1 + delta) k_hyd Omega^2 a^5 / (3 G),
+
+        with k_hyd the model's fluid-limit degree-2 tidal Love number
+        (`pyslfp.love_numbers.fluid_tidal_number`) and delta the
+        prescribed non-hydrostatic excess (0.8 per cent for the Earth).
+        The equatorial moment is adjusted, the polar moment kept, so
+        the axial feedback is untouched.  With delta > 0 the transverse
+        feedback is stable for any rheology of the model, since its
+        tidal response can never exceed k_hyd.
+        """
+        if fluid_tidal_number <= 0.0:
+            raise ValueError("the fluid tidal number must be positive")
+        oblateness = (
+            (1.0 + non_hydrostatic_fraction)
+            * fluid_tidal_number
+            * self.raw_rotation_frequency**2
+            * self.raw_mean_sea_floor_radius**5
+            / (3.0 * self.raw_gravitational_constant)
+        )
+        return replace(
+            self,
+            raw_equatorial_moment_of_inertia=self.raw_polar_moment_of_inertia
+            - oblateness,
+        )
+
     @staticmethod
     def from_defaults() -> EarthModelParameters:
         """

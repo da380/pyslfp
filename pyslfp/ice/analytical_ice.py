@@ -10,10 +10,10 @@ from typing import Tuple
 import numpy as np
 from pyshtools import SHGrid
 
-from .ice_models import BaseIceModel
+from .ice_models import BaseIceSeaLevelModel
 
 
-class AnalyticalIceModel(BaseIceModel):
+class AnalyticalIceModel(BaseIceSeaLevelModel):
     """
     A synthetic ice model generating smooth, Super-Gaussian-based
     continents and ice caps.

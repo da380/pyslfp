@@ -18,7 +18,7 @@ from cartopy.mpl.geoaxes import GeoAxes
 
 from .core import EarthModel
 from .regions import Regions
-from .ice import IceNG, AnalyticalIceModel
+from .ice import AnalyticalIceModel, BaseIceSeaLevelModel, IceNG
 from .plot import plot_coastline
 
 
@@ -76,14 +76,48 @@ class EarthState(Regions):
 
         earth_model = EarthModel(lmax)
         ice_model = IceNG(length_scale=earth_model.parameters.length_scale)
+        return EarthState.from_ice_model(ice_model, 0.0, earth_model)
+
+    @staticmethod
+    def from_ice_model(
+        ice_model: BaseIceSeaLevelModel,
+        date: float,
+        model: EarthModel,
+        /,
+        *,
+        exclude_caspian: bool = True,
+    ) -> EarthState:
+        """
+        The state an ice-and-sea-level model records at a date.
+
+        Only a model carrying a sea level history (an inversion product
+        such as ICE-NG) can supply a state directly; for a
+        thickness-only model the initial sea level is found separately,
+        e.g. by `pyslfp.gia.calibrate_initial_sea_level`.
+
+        Args:
+            ice_model (BaseIceSeaLevelModel): The ice and sea level model,
+                with the Earth model's length scale.
+            date (float): The date in kiloyears before present.
+            model (EarthModel): The Earth model of the state.
+            exclude_caspian (bool): Whether the ocean function masks the
+                Caspian Sea.
+        """
+        if not isinstance(ice_model, BaseIceSeaLevelModel):
+            raise TypeError(
+                "the ice model carries no sea level history; supply the "
+                "initial sea level separately"
+            )
         ice_thickness, sea_level = ice_model.get_ice_thickness_and_sea_level(
-            0.0,
-            lmax,
-            grid=earth_model.grid_name,
-            sampling=earth_model.sampling,
-            extend=earth_model.extend,
+            date,
+            model.lmax,
+            grid=model.grid_name,
+            sampling=model.sampling,
+            extend=model.extend,
         )
-        return EarthState(ice_thickness, sea_level, earth_model)
+        return EarthState(
+            ice_thickness, sea_level, model, exclude_caspian=exclude_caspian
+        )
 
     @staticmethod
     def for_testing(lmax: int) -> EarthState:

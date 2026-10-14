@@ -201,6 +201,19 @@ class SeaLevelEquation:
         """The number of times the solver has been executed."""
         return self._solver_counter
 
+    @property
+    def transverse_rotation_denominator(self) -> float:
+        """The stability margin of the transverse (polar wander) fixed
+        point, 1 minus the ratio of the degree-2 tidal response to the
+        oblateness the specified moments of inertia sustain.  The
+        moments are specified, never computed from the spherically
+        symmetric model (Yu et al. 2025); when this margin is not
+        positive they cannot support the model's tidal response and the
+        transverse feedback is invalid -- specify consistent moments
+        (see `EarthModelParameters.with_hydrostatic_moments`) or
+        restrict the feedback to its axial part."""
+        return self._rotation_denominator
+
     # ---------------------------------------------------------#
     #                 Internal Helpers                         #
     # ---------------------------------------------------------#
@@ -243,7 +256,9 @@ class SeaLevelEquation:
         static_grav_2: Optional[np.ndarray] = None,
         displacement_load_0: float = 0.0,
         potential_load_0: float = 0.0,
+        inertia_moment: float = 0.0,
         angular_momentum_change: Optional[np.ndarray] = None,
+        transverse: bool = True,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float]:
         """
         Solves the rotational feedback exactly.
@@ -269,8 +284,18 @@ class SeaLevelEquation:
             static_grav_2: The same block of potential from static loads.
             displacement_load_0: The degree-0 displacement load coefficient.
             potential_load_0: The degree-0 potential load coefficient.
+            inertia_moment: A ready change of the inertia moment
+                sqrt(4 pi) int rho U r^3 dr (the axial-number convention),
+                from deformation not driven by the loads above; it joins
+                the trace term of the axial feedback.
             angular_momentum_change: External angular momentum perturbation,
                 [x, y, z].
+            transverse: Whether the transverse (polar wander) components
+                are solved; False leaves omega_x = omega_y = 0 and keeps
+                the axial feedback alone.  The transverse fixed point is
+                near-singular when the tidal Love number approaches its
+                fluid limit (the secular resonance), where the static
+                closure here does not apply; see the viscoelastic solvers.
 
         Returns:
             Tuple of angular velocity change [omega_x, omega_y, omega_z],
@@ -286,7 +311,7 @@ class SeaLevelEquation:
         if static_disp_2 is not None:
             disp_forcing = disp_forcing + static_disp_2
 
-        transverse = self._inertia_factor * grav_forcing[:, 1]
+        transverse_forcing = self._inertia_factor * grav_forcing[:, 1]
         axial = (
             -self._axial_inertia_factor * grav_forcing[0, 0]
             - self._trace_factor
@@ -294,18 +319,21 @@ class SeaLevelEquation:
                 (self._mu + self._mphi) * load_0
                 + self._mu * displacement_load_0
                 + self._mphi * potential_load_0
+                + inertia_moment
             )
             - self._shell_factor * (load_0 + potential_load_0)
         )
         if angular_momentum_change is not None:
-            transverse = (
-                transverse
+            transverse_forcing = (
+                transverse_forcing
                 - self._inverse_inertia_difference * angular_momentum_change[:2]
             )
             axial = axial + self._inverse_polar_inertia * angular_momentum_change[2]
 
         omega = np.empty(3)
-        omega[:2] = transverse / self._rotation_denominator
+        omega[:2] = (
+            transverse_forcing / self._rotation_denominator if transverse else 0.0
+        )
         omega[2] = axial / self._axial_rotation_denominator
 
         centrifugal = np.zeros((2, 2))
@@ -376,6 +404,9 @@ class SeaLevelEquation:
         direct_load: Optional[SHGrid] = None,
         displacement_load: Optional[SHGrid] = None,
         gravitational_potential_load: Optional[SHGrid] = None,
+        displacement_response: Optional[SHCoeffs] = None,
+        gravitational_potential_response: Optional[SHCoeffs] = None,
+        inertia_moment_change: float = 0.0,
         angular_momentum_change: Optional[np.ndarray] = None,
         rotational_feedbacks: bool = True,
         rtol: float = 1e-9,
@@ -392,8 +423,21 @@ class SeaLevelEquation:
             direct_load (Optional[SHGrid]): Standard surface mass forcing.
             displacement_load (Optional[SHGrid]): External vertical surface displacement forcing.
             gravitational_potential_load (Optional[SHGrid]): External gravitational potential forcing.
+            displacement_response (Optional[SHCoeffs]): A ready displacement
+                response, in coefficient form, present whatever the loads:
+                it joins the static terms directly, with no Love number
+                applied.  A viscoelastic step's memory field enters here.
+            gravitational_potential_response (Optional[SHCoeffs]): The
+                matching ready potential response.
+            inertia_moment_change (float): A ready change of the inertia
+                moment sqrt(4 pi) int rho U r^3 dr accompanying the
+                responses, for the trace term of the axial feedback.
             angular_momentum_change (Optional[np.ndarray]): External angular momentum perturbation, [x, y, z].
-            rotational_feedbacks (bool): Whether to calculate polar wander effects.
+            rotational_feedbacks (bool | str): True for the full feedback,
+                "axial" for the axial component alone, False for none.
+                The transverse fixed point requires moments of inertia
+                that sustain more oblateness than the tidal response, see
+                `transverse_rotation_denominator`.
             rtol (float): The relative tolerance for convergence, measured as the
                 change in sea level over the oceans between iterations relative
                 to its magnitude.
@@ -410,6 +454,13 @@ class SeaLevelEquation:
 
         loads_present = False
         non_zero_rhs = False
+
+        if rotational_feedbacks not in (True, False, "axial"):
+            raise ValueError(
+                "rotational_feedbacks must be True, False or 'axial', "
+                f"got {rotational_feedbacks!r}"
+            )
+        transverse = rotational_feedbacks is True
 
         if direct_load is not None:
             model.check_field(direct_load)
@@ -440,6 +491,31 @@ class SeaLevelEquation:
             else:
                 static_disp += self._h_phi * grav_lm
                 static_grav += self._k_phi * grav_lm
+
+        if displacement_response is not None:
+            self._model.check_coefficient(displacement_response)
+            loads_present = True
+            resp = displacement_response.coeffs
+            non_zero_rhs = non_zero_rhs or np.max(np.abs(resp)) > 0
+            static_disp = resp.copy() if static_disp is None else static_disp + resp
+
+        if gravitational_potential_response is not None:
+            self._model.check_coefficient(gravitational_potential_response)
+            loads_present = True
+            resp = gravitational_potential_response.coeffs
+            non_zero_rhs = non_zero_rhs or np.max(np.abs(resp)) > 0
+            static_grav = resp.copy() if static_grav is None else static_grav + resp
+
+        # the response channels may arrive singly; the static pair acts
+        # together below
+        if static_disp is not None and static_grav is None:
+            static_grav = np.zeros_like(static_disp)
+        elif static_grav is not None and static_disp is None:
+            static_disp = np.zeros_like(static_grav)
+
+        if inertia_moment_change != 0.0:
+            loads_present = True
+            non_zero_rhs = True
 
         if angular_momentum_change is not None:
             loads_present = True
@@ -495,7 +571,9 @@ class SeaLevelEquation:
                     static_grav_2=static_grav_2,
                     displacement_load_0=displacement_load_0,
                     potential_load_0=potential_load_0,
+                    inertia_moment=inertia_moment_change,
                     angular_momentum_change=angular_momentum_change,
+                    transverse=transverse,
                 )
                 slc_lm[:, 2, :2] = -(disp_2 + (grav_2 + centrifugal) / g)
                 # uniform, and so absorbed by mass conservation below
@@ -552,7 +630,9 @@ class SeaLevelEquation:
                 static_grav_2=static_grav_2,
                 displacement_load_0=displacement_load_0,
                 potential_load_0=potential_load_0,
+                inertia_moment=inertia_moment_change,
                 angular_momentum_change=angular_momentum_change,
+                transverse=transverse,
             )
             displacement_lm[:, 2, :2] = disp_2
             potential_lm[:, 2, :2] = grav_2
@@ -862,6 +942,9 @@ class LinearSeaLevelEquation:
         direct_load: Optional[SHGrid] = None,
         displacement_load: Optional[SHGrid] = None,
         gravitational_potential_load: Optional[SHGrid] = None,
+        displacement_response: Optional[SHCoeffs] = None,
+        gravitational_potential_response: Optional[SHCoeffs] = None,
+        inertia_moment_change: float = 0.0,
         angular_momentum_change: Optional[np.ndarray] = None,
         rotational_feedbacks: bool = True,
         rtol: float = 1e-9,
@@ -892,6 +975,9 @@ class LinearSeaLevelEquation:
             direct_load=direct_load,
             displacement_load=displacement_load,
             gravitational_potential_load=gravitational_potential_load,
+            displacement_response=displacement_response,
+            gravitational_potential_response=gravitational_potential_response,
+            inertia_moment_change=inertia_moment_change,
             angular_momentum_change=angular_momentum_change,
             rotational_feedbacks=rotational_feedbacks,
             rtol=rtol,

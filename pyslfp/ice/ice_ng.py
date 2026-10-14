@@ -13,14 +13,14 @@ from scipy.interpolate import RegularGridInterpolator
 from pyshtools import SHGrid
 
 from pyslfp.data import DATADIR, ensure_data
-from .ice_models import BaseIceModel
+from .ice_models import BaseIceSeaLevelModel
 
 
 # Define the literal type for valid model versions
 IceNGVersion = Literal["ICE5G", "ICE6G", "ICE7G"]
 
 
-class IceNG(BaseIceModel):
+class IceNG(BaseIceSeaLevelModel):
     """
     A data loader for the ICE-5G, ICE-6G, and ICE-7G glacial isostatic
     adjustment models.

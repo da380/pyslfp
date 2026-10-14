@@ -22,12 +22,19 @@ from pyslfp.plot import plot
 
 class BaseIceModel(ABC):
     """
-    Abstract base class for all spatial ice and topography models.
+    Abstract base class for ice history models.
 
-    Any custom model (e.g., ICE-7G, BedMachine, AWIC, synthetic loads) must
-    inherit from this class and implement the `get_ice_thickness_and_sea_level`
-    method to be fully compatible with the EarthState container.
+    An ice model is a provider of ice thickness at any time: histories
+    interpolate internally, so a consumer may ask for any date.  That is
+    all a forward simulation requires of the ice; the sea level it needs
+    besides belongs to the initial state, which is supplied separately
+    (and may be found by iteration against present-day observations).
+    Models that also carry a sea level history, such as the ICE-NG
+    inversion products, derive from `BaseIceSeaLevelModel` below.
     """
+
+    #: The fields `animate` can render; subclasses carrying more extend it.
+    _animatable_fields: Tuple[str, ...] = ("ice_thickness",)
 
     def __init__(self, /, *, length_scale: float = 1.0) -> None:
         """
@@ -60,6 +67,120 @@ class BaseIceModel(ABC):
         if grid_upper == "DH1":
             return "DH", 1
         return grid, sampling
+
+    @abstractmethod
+    def get_ice_thickness(
+        self,
+        date: float,
+        lmax: int,
+        /,
+        *,
+        grid: str = "DH",
+        sampling: int = 1,
+        extend: bool = True,
+    ) -> SHGrid:
+        """
+        The ice thickness at a specific time and spatial resolution.
+
+        Args:
+            date (float): The time in kiloyears before present (ka).
+            lmax (int): The maximum spherical harmonic degree.
+            grid (str): The pyshtools grid format (e.g., "DH", "GLQ").
+            sampling (int): The grid sampling factor (1 for standard, 2 for oversampled).
+            extend (bool): Whether to extend the grid to include the poles.
+
+        Returns:
+            SHGrid: The ice thickness, scaled by the model's `length_scale`.
+        """
+        pass
+
+
+    def animate(
+        self,
+        output_file: str,
+        /,
+        *,
+        field: str = "ice_thickness",
+        start_date_ka: float = 26.0,
+        end_date_ka: float = 0.0,
+        num_frames: int = 261,
+        fps: int = 15,
+        lmax: int = 180,
+        **plot_kwargs,
+    ) -> None:
+        """
+        Generates and saves an animation of this ice model over time.
+
+        Args:
+            output_file (str): Path for the output video (e.g., 'anim.mp4').
+            field (str): Data field to animate ('ice_thickness' or 'sea_level').
+            start_date_ka (float): Start date in ka.
+            end_date_ka (float): End date in ka.
+            num_frames (int): Total number of frames in the animation.
+            fps (int): Frames per second for the output video.
+            lmax (int): Max spherical harmonic degree for the data grids.
+            **plot_kwargs: Additional keyword arguments passed to the plot function.
+        """
+        print(f"Initializing animation for {self.__class__.__name__}...")
+        valid_fields = self._animatable_fields
+        if field not in valid_fields:
+            raise ValueError(f"Field must be one of {valid_fields}, not '{field}'.")
+
+        dates = np.linspace(start_date_ka, end_date_ka, num_frames)
+
+        def get_data_for_date(date: float):
+            method_name = f"get_{field}"
+            return getattr(self, method_name)(date, lmax)
+
+        print("Generating initial frame...")
+        initial_data = get_data_for_date(dates[0])
+
+        if "symmetric" not in plot_kwargs and field == "sea_level":
+            plot_kwargs["symmetric"] = True
+
+        # Use the newly updated plot function from plotting.py
+        ax, artist = plot(initial_data, **plot_kwargs)
+        fig = ax.figure
+
+        if getattr(artist, "colorbar", None):
+            unit_label = (
+                "Non-dimensional Units" if self.length_scale != 1.0 else "Meters"
+            )
+            artist.colorbar.set_label(unit_label)
+
+        title = ax.set_title(f"Date: {dates[0]:.2f} ka")
+
+        def update(frame_num: int):
+            current_date = dates[frame_num]
+            print(
+                f"  -> Processing frame {frame_num + 1}/{num_frames} (Date: {current_date:.2f} ka)"
+            )
+            new_data = get_data_for_date(current_date)
+            artist.set_array(new_data.data.ravel())
+            title.set_text(f"Date: {current_date:.2f} ka")
+            return [artist, title]
+
+        print("Creating animation object...")
+        ani = FuncAnimation(fig, func=update, frames=num_frames, blit=False)
+
+        Path(output_file).parent.mkdir(parents=True, exist_ok=True)
+        print(f"\nSaving animation to '{output_file}'... (This may take a while)")
+        ani.save(output_file, writer="ffmpeg", fps=fps, dpi=150)
+        print("Done!")
+        plt.close(fig)
+
+
+class BaseIceSeaLevelModel(BaseIceModel):
+    """
+    An ice model that also carries a sea level history.
+
+    The ICE-NG products are of this type: being the result of an
+    inversion, they record the sea level consistent with their ice at
+    every time, and a background `EarthState` can be read straight off
+    them.  A generic ice model provides only the thickness.
+    """
+
+    _animatable_fields: Tuple[str, ...] = ("ice_thickness", "sea_level")
 
     @abstractmethod
     def get_ice_thickness_and_sea_level(
@@ -119,80 +240,6 @@ class BaseIceModel(ABC):
             date, lmax, grid=grid, sampling=sampling, extend=extend
         )
         return sea_level
-
-    def animate(
-        self,
-        output_file: str,
-        /,
-        *,
-        field: str = "ice_thickness",
-        start_date_ka: float = 26.0,
-        end_date_ka: float = 0.0,
-        num_frames: int = 261,
-        fps: int = 15,
-        lmax: int = 180,
-        **plot_kwargs,
-    ) -> None:
-        """
-        Generates and saves an animation of this ice model over time.
-
-        Args:
-            output_file (str): Path for the output video (e.g., 'anim.mp4').
-            field (str): Data field to animate ('ice_thickness' or 'sea_level').
-            start_date_ka (float): Start date in ka.
-            end_date_ka (float): End date in ka.
-            num_frames (int): Total number of frames in the animation.
-            fps (int): Frames per second for the output video.
-            lmax (int): Max spherical harmonic degree for the data grids.
-            **plot_kwargs: Additional keyword arguments passed to the plot function.
-        """
-        print(f"Initializing animation for {self.__class__.__name__}...")
-        valid_fields = ("ice_thickness", "sea_level")
-        if field not in valid_fields:
-            raise ValueError(f"Field must be one of {valid_fields}, not '{field}'.")
-
-        dates = np.linspace(start_date_ka, end_date_ka, num_frames)
-
-        def get_data_for_date(date: float):
-            method_name = f"get_{field}"
-            return getattr(self, method_name)(date, lmax)
-
-        print("Generating initial frame...")
-        initial_data = get_data_for_date(dates[0])
-
-        if "symmetric" not in plot_kwargs and field == "sea_level":
-            plot_kwargs["symmetric"] = True
-
-        # Use the newly updated plot function from plotting.py
-        ax, artist = plot(initial_data, **plot_kwargs)
-        fig = ax.figure
-
-        if getattr(artist, "colorbar", None):
-            unit_label = (
-                "Non-dimensional Units" if self.length_scale != 1.0 else "Meters"
-            )
-            artist.colorbar.set_label(unit_label)
-
-        title = ax.set_title(f"Date: {dates[0]:.2f} ka")
-
-        def update(frame_num: int):
-            current_date = dates[frame_num]
-            print(
-                f"  -> Processing frame {frame_num + 1}/{num_frames} (Date: {current_date:.2f} ka)"
-            )
-            new_data = get_data_for_date(current_date)
-            artist.set_array(new_data.data.ravel())
-            title.set_text(f"Date: {current_date:.2f} ka")
-            return [artist, title]
-
-        print("Creating animation object...")
-        ani = FuncAnimation(fig, func=update, frames=num_frames, blit=False)
-
-        Path(output_file).parent.mkdir(parents=True, exist_ok=True)
-        print(f"\nSaving animation to '{output_file}'... (This may take a while)")
-        ani.save(output_file, writer="ffmpeg", fps=fps, dpi=150)
-        print("Done!")
-        plt.close(fig)
 
     def animate_joint(
         self,

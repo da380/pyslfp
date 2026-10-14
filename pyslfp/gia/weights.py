@@ -1,0 +1,78 @@
+"""The per-step weight algebra of the viscoelastic time-stepping schemes.
+
+Everything is a function of h = dt / tau, evaluated per node and per
+branch.  The exponential trapezoid update of an internal variable m
+driven by a strain scalar d is
+
+    m^{n+1} = e m^n + alpha d^n + beta d^{n+1},
+
+with e = exp(-h), phi1 = (1 - e) / h, alpha = phi1 - e and
+beta = 1 - phi1; phi1 is series-expanded below h = 1e-3, where the
+direct quotient loses digits.  The backward Euler update is
+
+    m^{n+1} = (m^n + h d^{n+1}) / (1 + h),
+
+and the exponential Euler update is the trapezoid's with the strain
+frozen at the start, m^{n+1} = e m^n + (1 - e) d^n.  Eliminating
+m^{n+1} from the step's equilibrium leaves an effective shear modulus
+mu_inf + sum_k w_k mu_k whose weight w_k is 1 / (1 + h) for backward
+Euler and 1 - beta = phi1 for the trapezoid.
+
+An elastic region is h = 0 (tau infinite, stored as itau = 0): e = 1,
+alpha = beta = 0 and both effective weights are 1, so the variable
+stays put and the effective modulus is the unrelaxed one.  The weights
+lie in (0, 1] at the nodes where they are evaluated; anything that
+ever interpolates them between nodes must clamp to that interval.
+
+This is a port of AdGIA's `detail::ExponentialTrapezoidWeights` and
+the scheme eliminations of `viscoelastic.cpp`; the two must stay
+algebraically identical for the cross-benchmarks to isolate spatial
+discretisation.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+from numpy.typing import ArrayLike
+
+__all__ = [
+    "exponential_trapezoid_weights",
+    "backward_euler_weight",
+]
+
+_SERIES_SWITCH = 1e-3
+
+
+def _phi1(h: np.ndarray, e: np.ndarray) -> np.ndarray:
+    """(1 - exp(-h)) / h, by the quotient above the switch and by the
+    alternating series below it, exact at h = 0."""
+    small = h < _SERIES_SWITCH
+    hs = np.where(small, h, 1.0)  # keep the series arguments benign
+    series = 1.0 - hs / 2.0 + hs**2 / 6.0 - hs**3 / 24.0 + hs**4 / 120.0
+    with np.errstate(divide="ignore", invalid="ignore"):
+        quotient = (1.0 - e) / np.where(small, 1.0, h)
+    return np.where(small, series, quotient)
+
+
+def exponential_trapezoid_weights(
+    h: ArrayLike,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(e, alpha, beta) of the exponential trapezoid update for
+    h = dt / tau >= 0, elementwise: e = exp(-h), alpha = phi1 - e,
+    beta = 1 - phi1.  The effective-modulus weight is 1 - beta = phi1."""
+    h = np.asarray(h, dtype=float)
+    if np.any(h < 0.0):
+        raise ValueError("h = dt / tau must be non-negative")
+    e = np.exp(-h)
+    phi1 = _phi1(h, e)
+    return e, phi1 - e, 1.0 - phi1
+
+
+def backward_euler_weight(h: ArrayLike) -> np.ndarray:
+    """The backward Euler weight 1 / (1 + h) for h = dt / tau >= 0,
+    elementwise: both the effective-modulus weight and the factor on
+    the start state in the memory force."""
+    h = np.asarray(h, dtype=float)
+    if np.any(h < 0.0):
+        raise ValueError("h = dt / tau must be non-negative")
+    return 1.0 / (1.0 + h)

@@ -1,0 +1,1037 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[a4paper,margin=25mm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb}
+\usepackage{bm}
+\usepackage{booktabs}
+\usepackage[dvipsnames]{xcolor}
+\usepackage[authoryear,round]{natbib}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+
+\newcommand{\dd}{\mathrm{d}}
+\newcommand{\rhat}{\hat{\mathbf{r}}}
+\newcommand{\x}{\mathbf{x}}
+\newcommand{\uu}{\mathbf{u}}
+\newcommand{\grad}{\nabla}
+\newcommand{\gradone}{\nabla_{1}}
+\newcommand{\Ylm}{Y_{\ell m}}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\Ad}{\mathcal{A}_{\ell}}
+\newcommand{\sph}{\mathbb{S}^2}
+
+\numberwithin{equation}{section}
+
+\title{\texttt{pyslfp}: theory and numerical methods}
+\author{David Al-Attar\\[2pt]
+\small Bullard Laboratories, Department of Earth Sciences, University of Cambridge}
+\date{October 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+This note sets out the physics and numerics behind \texttt{pyslfp}, a Python
+library for gravitationally self-consistent sea level fingerprints on a
+spherically symmetric, rotating, elastic earth. It states the conventions in
+force throughout the code; the generalised load Love numbers, their reciprocity
+relations and the axial numbers that enter the rotational feedback; the
+spectral-element solution of the radial loading problem at each spherical
+harmonic degree; the linear, generalised and nonlinear forms of the sea level
+equation together with the iterative methods used to solve them; and the
+closed-form treatment of the rotational feedback. A final section describes the
+internal-variable formulation of viscoelastic loading that is being added. Every
+sign and factor below is the one the code uses.
+\end{abstract}
+
+\tableofcontents
+
+%======================================================================
+\section{Overview}
+\label{sec:overview}
+%======================================================================
+
+A change in the distribution of ice, water or sediment on the earth's surface
+deforms the solid earth, perturbs its gravitational field and alters its
+rotation. Each of these changes the height of the sea surface relative to the
+solid surface, and the water so redistributed is itself a load. The resulting
+pattern of relative sea level change, the \emph{fingerprint} of the source, is
+the solution of the sea level equation
+\citep{FarrellClark1976,MitrovicaMilne2003,KendallEtAl2005}. Throughout,
+$\xi$ denotes the relative sea level change and $\zeta$ the surface load, a
+surface mass density.
+
+\texttt{pyslfp} computes, for a prescribed change in ice thickness (or any
+other surface load), the relative sea level change $\xi$, the radial
+displacement $u$ of the solid surface, the gravitational potential perturbation
+$\phi$ at the surface, and the perturbation $\bm{\omega}$ of the angular velocity.
+It does so on a spherically symmetric earth whose response is entirely
+characterised, degree by degree, by a table of Love numbers. The library has
+three layers.
+\begin{enumerate}
+\item The radial earth model is held by the separate package
+\texttt{planetmodel}, which supplies layered models (density, elastic moduli,
+the radii of discontinuities), their gravity, unit systems, and radial meshes
+of Gauss--Lobatto--Legendre (GLL) spectral elements.
+\item The module \texttt{pyslfp.love\_numbers} solves the linearised,
+quasi-static, self-gravitating loading problem of such a model at each degree
+$\ell$ (Section~\ref{sec:radial}), and returns a table of generalised Love
+numbers (Section~\ref{sec:love}). A default table for PREM without its ocean
+layer, for degrees $0\le\ell\le 4096$, is distributed with the library.
+\item The sea level solvers in \texttt{pyslfp.physics} work entirely in the
+spherical harmonic domain on the surface: given the Love numbers they solve
+the sea level equation by fixed-point iteration, with the rotational feedback
+eliminated exactly within each iteration (Sections~\ref{sec:sle}
+and~\ref{sec:rotation}).
+\end{enumerate}
+The class \code{EarthModel} binds a Love number table to a set of
+non-dimensional scales and spherical harmonic conventions; it adopts the body
+(solid surface radius $a$, surface gravity $g$ and gravitational constant $G$)
+recorded with the table, so that the sea level equation and its adjoint use
+exactly the body for which the Love numbers were computed. A further layer,
+\texttt{pyslfp.linear\_operators}, wraps the linear solver as a linear
+operator between Hilbert spaces, with its adjoint, for use in inverse problems.
+
+%======================================================================
+\section{Conventions and non-dimensionalisation}
+\label{sec:conventions}
+%======================================================================
+
+\subsection{Spherical harmonics}
+
+Fields on the surface are expanded in real spherical harmonics $\Ylm$ that are
+orthonormal on the unit sphere,
+\begin{equation}
+\int_{\sph} \Ylm\, Y_{\ell' m'}\,\dd\Omega = \delta_{\ell\ell'}\delta_{mm'},
+\end{equation}
+without the Condon--Shortley phase (in \texttt{pyshtools}, normalisation
+\code{'ortho'} and \code{csphase=1}). Orders $m\ge 0$ carry the cosine
+harmonics $Y^{c}_{\ell m}\propto P_{\ell m}(\cos\theta)\cos m\varphi$ and $m<0$
+the sine harmonics; where the distinction matters we write
+$Y^{c}_{\ell m}$ and $Y^{s}_{\ell m}$. The ones needed explicitly are
+\begin{equation}
+Y_{00} = \frac{1}{\sqrt{4\pi}},\qquad
+Y_{20} = \sqrt{\frac{5}{4\pi}}\,\frac{3\cos^{2}\theta-1}{2},\qquad
+Y^{c,s}_{21} = \sqrt{\frac{15}{4\pi}}\,\sin\theta\cos\theta\,
+\{\cos\varphi,\sin\varphi\}.
+\label{eq:Y2}
+\end{equation}
+A field $f$ on the surface has coefficients $f_{\ell m}$ with
+$f=\sum_{\ell m} f_{\ell m}\Ylm$, the series being truncated at a degree $L$
+(\code{lmax}). The surface itself is the sphere of radius $b$, the mean radius
+of the solid surface; once a Love number table is attached, $b=a$, the radius
+of the body for which the table was computed. Surface integrals are therefore
+\begin{equation}
+\int_{\partial M} f\,\dd S = b^{2}\int_{\sph} f\,\dd\Omega = \sqrt{4\pi}\,b^{2} f_{00},
+\label{eq:integral}
+\end{equation}
+and are evaluated in grid space with the exact quadrature weights of the
+Driscoll--Healy or Gauss--Legendre grid in use, which agrees with
+\eqref{eq:integral} for band-limited $f$ and is exact also for products such as
+$C\xi$ that are not band-limited to $L$.
+
+\subsection{Signs}
+
+The gravitational potential is the physical potential, $\Phi=-G\int\rho/|\x-\x'|\,\dd V'$,
+so that $\phi$ is negative near added mass and gravity is $\mathbf{g}=-\grad\Phi$,
+with $g=\partial_r\Phi>0$ in the unperturbed state. The centrifugal potential
+of rotation with angular velocity $\bm{\Omega}$ is
+$-\tfrac12|\bm{\Omega}\times\x|^{2}$ with the same sign convention. Radial
+displacement is positive outward.
+
+\subsection{Scales}
+
+The class \code{EarthModelParameters} holds every physical constant in a
+non-dimensional form fixed by three base scales: a length $\mathsf{L}$, a
+density $\mathsf{P}$ and a time $\mathsf{T}$. These define a mass scale
+$\mathsf{M}=\mathsf{P}\mathsf{L}^{3}$, and a quantity with dimensions
+$\mathrm{M}^{\alpha}\mathrm{L}^{\beta}\mathrm{T}^{\gamma}$ is stored as its SI
+value divided by $\mathsf{M}^{\alpha}\mathsf{L}^{\beta}\mathsf{T}^{\gamma}$.
+The same three scales define a \texttt{planetmodel} unit system, so that Love
+numbers computed from a model in one set of units can be converted to those of
+the sea level solver by the same rule. The default scheme is
+\begin{equation}
+\mathsf{L} = R_{\oplus},\qquad
+\mathsf{P} = \bar\rho = \frac{3M_{\oplus}}{4\pi R_{\oplus}^{3}},\qquad
+\mathsf{T} = \sqrt{R_{\oplus}/g_{0}},
+\label{eq:scales}
+\end{equation}
+with $R_{\oplus}=6371$\,km the mean radius, $M_{\oplus}=5.974\times10^{24}$\,kg
+and $g_{0}=9.825652323$\,m\,s$^{-2}$. In these units the mean density is one,
+the reference gravity is one, and the gravitational constant is
+$G\mathsf{P}\mathsf{T}^{2} = 3GM_{\oplus}/(4\pi R_{\oplus}^{2}g_{0})$, close to
+$3/4\pi$. The remaining constants are the water and ice densities
+$\rho_{w}=1000$ and $\rho_{i}=917$\,kg\,m$^{-3}$, the rotation rate
+$\Omega=7.2722\times10^{-5}$\,rad\,s$^{-1}$, and the equatorial and polar moments
+of inertia $A=8.0096\times10^{37}$ and $C=8.0359\times10^{37}$\,kg\,m$^{2}$.
+The radius $b$, surface gravity $g$ and $G$ are then replaced by those recorded
+with the Love number table, where the table records them.
+
+From these the parameters derive five rotational factors, used in
+Section~\ref{sec:rotation}:
+\begin{gather}
+R_{\perp} = \sqrt{\frac{4\pi}{15}}\,\Omega b^{2},\qquad
+R_{z} = \sqrt{\frac{16\pi}{45}}\,\Omega b^{2},\qquad
+R_{0} = -\sqrt{\frac{16\pi}{9}}\,\Omega b^{2},
+\label{eq:rotfactors}\\
+I_{\perp} = \sqrt{\frac{5}{12\pi}}\,\frac{\Omega b^{3}}{G(C-A)},\qquad
+I_{z} = \sqrt{\frac{5}{9\pi}}\,\frac{\Omega b^{3}}{GC}.
+\label{eq:inertiafactors}
+\end{gather}
+In the code these are \code{rotation\_factor}, \code{axial\_rotation\_factor},
+\code{uniform\_rotation\_factor}, \code{inertia\_factor} and
+\code{axial\_inertia\_factor}. The $R$ factors map angular velocity to
+centrifugal potential coefficients; the $I$ factors map potential coefficients
+to angular velocity through MacCullagh's formula.
+
+%======================================================================
+\section{Generalised Love numbers}
+\label{sec:love}
+%======================================================================
+
+\subsection{Load channels}
+
+On a spherically symmetric earth a forcing of degree $\ell$ and order $m$
+produces a response of the same degree and order, with amplitudes independent
+of $m$. The displacement and potential are written
+\begin{equation}
+\uu = U(r)\,\Ylm\,\rhat + V(r)\,\gradone\Ylm,\qquad \phi = \phi(r)\,\Ylm,
+\label{eq:spheroidal}
+\end{equation}
+where $\gradone$ is the surface gradient on the unit sphere
+\citep{DahlenTromp1998}, so that
+\begin{equation}
+\int_{\sph}|\gradone\Ylm|^{2}\,\dd\Omega = k^{2}\equiv\ell(\ell+1).
+\end{equation}
+Following
+\citet[eq.~62]{AlAttarEtAl2024}, the action of a surface load on the earth is
+split into two parts: a normal traction $-g\zeta\,\rhat$ applied to the
+surface, and the gravitational attraction of the surface mass, a source in
+Poisson's equation. Each is given its own amplitude, $\zeta^{u}$ for the
+traction-like part and $\zeta^{\phi}$ for the potential source, while a true
+surface load $\zeta$ acts through both. A third channel, absent from the
+paper, is a tangential traction $-g\zeta^{v}\gradone\Ylm$, the tangential
+counterpart of the traction part of a load. Finally an external potential
+$\psi=(r/a)^{\ell}\Ylm$ represents a harmonic tidal or centrifugal forcing. The
+surface response is
+\begin{equation}
+\begin{aligned}
+u_{\ell m} &= h_{\ell}\,\zeta_{\ell m} + h^{u}_{\ell}\,\zeta^{u}_{\ell m}
+ + h^{\phi}_{\ell}\,\zeta^{\phi}_{\ell m} + h^{v}_{\ell}\,\zeta^{v}_{\ell m}
+ + h^{t}_{\ell}\,\psi_{\ell m},\\
+v_{\ell m} &= l_{\ell}\,\zeta_{\ell m} + l^{u}_{\ell}\,\zeta^{u}_{\ell m}
+ + l^{\phi}_{\ell}\,\zeta^{\phi}_{\ell m} + l^{v}_{\ell}\,\zeta^{v}_{\ell m}
+ + l^{t}_{\ell}\,\psi_{\ell m},\\
+\phi_{\ell m} &= k_{\ell}\,\zeta_{\ell m} + k^{u}_{\ell}\,\zeta^{u}_{\ell m}
+ + k^{\phi}_{\ell}\,\zeta^{\phi}_{\ell m} + k^{v}_{\ell}\,\zeta^{v}_{\ell m}
+ + k^{t}_{\ell}\,\psi_{\ell m},
+\end{aligned}
+\label{eq:generalised}
+\end{equation}
+where $u_{\ell m}=U(a)$, $v_{\ell m}=V(a)$ and $\phi_{\ell m}=\phi(a)$ are the
+surface values, $\psi_{\ell m}$ is the amplitude of the external potential at
+$r=a$, and, because a true load acts through both channels,
+\begin{equation}
+h_{\ell} = h^{u}_{\ell}+h^{\phi}_{\ell},\qquad
+l_{\ell} = l^{u}_{\ell}+l^{\phi}_{\ell},\qquad
+k_{\ell} = k^{u}_{\ell}+k^{\phi}_{\ell}.
+\end{equation}
+The degree $\ell$ is written as a subscript throughout to distinguish it from
+the tangential Love number $l$. The twelve numbers
+$(h,l,k)^{u,\phi,v,t}_{\ell}$ are what the code computes and stores; the load
+sums are derived. They are dimensional: $h^{u,\phi,v}$ and $l^{u,\phi,v}$ are
+lengths per unit surface density, $k^{u,\phi,v}$ potentials per unit surface
+density, $h^{t}$ and $l^{t}$ lengths per unit potential, and $k^{t}$ is
+dimensionless.
+
+The split into channels is not needed to solve the sea level equation forward,
+for which $h_{\ell}$ and $k_{\ell}$ suffice. It is needed because the adjoint
+of the sea level equation is itself a sea level equation in which an
+observation of displacement acts through the traction channel alone and an
+observation of potential through the source channel alone
+\citep{AlAttarEtAl2024}; similarly an observation of horizontal displacement
+requires the tangential channel. Section~\ref{sec:generalised} shows how these
+enter the solver.
+
+\subsection{Reciprocity}
+
+The weak form of the loading problem (Section~\ref{sec:radial}) is symmetric.
+Each channel enters as a linear functional of the test functions evaluated at
+the surface,
+\begin{equation}
+\zeta^{u}:\ -g a^{2}\,\hat U(a),\qquad
+\zeta^{\phi}:\ -a^{2}\,\hat\phi(a),\qquad
+\zeta^{v}:\ -g a^{2} k^{2}\,\hat V(a),
+\label{eq:loadfunctionals}
+\end{equation}
+so the matrix of surface responses to the three load channels is symmetric up to
+the factors of $g$ and of the norm $k^{2}$ of $\gradone\Ylm$. Writing $\mathsf{A}$
+for the discrete system matrix and $\mathbf{e}_{U},\mathbf{e}_{V},\mathbf{e}_{\phi}$
+for the surface degrees of freedom, for instance,
+$k^{u}_{\ell} = -g a^{2}\,\mathbf{e}_{\phi}^{\mathsf T}\mathsf{A}^{-1}\mathbf{e}_{U}$
+and $h^{\phi}_{\ell} = -a^{2}\,\mathbf{e}_{U}^{\mathsf T}\mathsf{A}^{-1}\mathbf{e}_{\phi}$.
+This gives the three reciprocity relations
+\begin{equation}
+g\,h^{\phi}_{\ell} = k^{u}_{\ell},\qquad
+h^{v}_{\ell} = k^{2}\,l^{u}_{\ell},\qquad
+k^{v}_{\ell} = g\,k^{2}\,l^{\phi}_{\ell},
+\label{eq:reciprocity}
+\end{equation}
+the first being eq.~(64) of \citet{AlAttarEtAl2024}. They hold to rounding in
+the computed tables and are checked by \code{LoveNumbers.reciprocity\_residual}.
+
+\subsection{Conventional numbers}
+
+The conventional dimensionless load Love numbers $h'_{\ell},l'_{\ell},k'_{\ell}$
+\citep{Farrell1972} are defined against the potential of the surface mass layer
+itself. A load $\zeta_{\ell m}\Ylm$ on the sphere of radius $a$ has exterior
+potential $-4\pi G a\,\zeta_{\ell m}/(2\ell+1)$ at $r=a$, so
+\begin{equation}
+h'_{\ell} = \frac{(2\ell+1)\,g}{4\pi G a}\,h_{\ell},\qquad
+l'_{\ell} = \frac{(2\ell+1)\,g}{4\pi G a}\,l_{\ell},\qquad
+k'_{\ell} = -\frac{2\ell+1}{4\pi G a}\,k_{\ell} - 1,
+\label{eq:conventional}
+\end{equation}
+where $k_{\ell}$ contains the direct attraction of the load and $k'_{\ell}$ does
+not. The geodetic tidal numbers are $k^{T}_{\ell}=k^{t}_{\ell}$,
+$h^{T}_{\ell}=-g\,h^{t}_{\ell}$ and $l^{T}_{\ell}=-g\,l^{t}_{\ell}$.
+In these terms the factor that maps load to sea level (Section~\ref{sec:sle})
+is
+\begin{equation}
+-\Big(h_{\ell}+\frac{k_{\ell}}{g}\Big)
+= \frac{4\pi G a}{(2\ell+1)\,g}\,\big(1+k'_{\ell}-h'_{\ell}\big)
+= \frac{3}{(2\ell+1)\,\bar\rho}\,\big(1+k'_{\ell}-h'_{\ell}\big),
+\label{eq:slcfactor}
+\end{equation}
+with $\bar\rho = 3g/(4\pi G a)$ the mean density of the body.
+
+The Green's functions for a point mass at angular distance $\theta$ follow from
+the addition theorem,
+\begin{equation}
+G_{u}(\theta) = \sum_{\ell}\frac{2\ell+1}{4\pi a^{2}}\,h_{\ell}\,P_{\ell}(\cos\theta),\qquad
+G_{\phi}(\theta) = \sum_{\ell}\frac{2\ell+1}{4\pi a^{2}}\,k_{\ell}\,P_{\ell}(\cos\theta),
+\end{equation}
+and are summed in the code with the taper $\exp(-10\ell^{2}/L^{2})$.
+
+\subsection{Degrees zero and one}
+
+At $\ell=1$ the problem is posed in the frame of the centre of mass of the
+earth and its load. The degree-one exterior potential of a body is
+proportional to the offset of its centre of mass from the origin, so in this
+frame it vanishes and $\phi(a)=0$ for every forcing. The potential source
+channel then does no work, and
+\begin{equation}
+h^{\phi}_{1}=l^{\phi}_{1}=k^{\phi}_{1}=0,\qquad k_{1}=0,\qquad k'_{1}=-1.
+\end{equation}
+At $\ell=0$ there is no tangential displacement, and a uniform external
+potential is a gauge, so the tidal numbers vanish. The load numbers do not:
+conservation of mass fixes the exterior potential of the loaded body,
+\begin{equation}
+k_{0} = -4\pi G a,\qquad k'_{0}=0,
+\end{equation}
+while $h_{0}$ is the radial compression of the earth under the weight of a
+uniform layer.
+
+\subsection{Axial numbers}
+\label{sec:axial}
+
+Five further scalars describe the degree-zero response more completely; they
+are needed for the component of the rotational feedback along the rotation
+axis (Section~\ref{sec:rotation}). A change $\omega_{z}$ in spin rate has a
+centrifugal potential whose spherical mean is proportional to $r^{2}$, not
+constant, and so is not harmonic; and any uniform radial deformation changes
+the trace of the inertia tensor. Neither effect is contained in the surface
+response to a load or to a harmonic tide. We define
+\begin{itemize}
+\item[] $h_{c}$, $k_{c}$: the surface displacement and potential at degree zero
+per unit centrifugal potential $(r/a)^{2}Y_{00}$;
+\item[] $m_{u}$, $m_{\phi}$, $m_{c}$: the inertia moments
+\begin{equation}
+m = \int_{M}\rho\,\uu\cdot\x\,\dd V = \sqrt{4\pi}\int_{0}^{a}\rho\,U\,r^{3}\,\dd r
+\label{eq:moment}
+\end{equation}
+of the degree-zero responses to unit forcing in the traction channel, the
+source channel and the centrifugal potential respectively.
+\end{itemize}
+The moment \eqref{eq:moment} is one quarter of the change in the trace of the
+inertia tensor produced by the displacement, since
+$\delta\!\int\rho|\x|^{2}\dd V = 2\int\rho\,\uu\cdot\x\,\dd V$ for a
+mass-conserving displacement and $\operatorname{tr}\mathbf{I}=2\int\rho|\x|^{2}\dd V$.
+The shell theorem gives $k_{c}=0$: a spherically symmetric redistribution of
+mass inside the body leaves its exterior potential unchanged.
+
+The centrifugal forcing enters the weak form as the functional
+$-\int\rho r^{2}\,\partial_{r}\psi\,\hat U\,\dd r$ with $\psi=(r/a)^{2}$
+(Section~\ref{sec:forcings}), that is
+$-(2/a^{2})\int\rho r^{3}\hat U\,\dd r = -\big(2/(\sqrt{4\pi}a^{2})\big)\,\hat m$,
+where $\hat m$ is the moment \eqref{eq:moment} of the test function. The same
+symmetry argument as for \eqref{eq:reciprocity} then gives
+\begin{equation}
+m_{u} = \tfrac12\sqrt{4\pi}\,g\,a^{4}\,h_{c},\qquad
+m_{\phi} = \tfrac12\sqrt{4\pi}\,a^{4}\,k_{c},
+\label{eq:axialreciprocity}
+\end{equation}
+checked by \code{axial\_reciprocity\_residual}; in particular $m_{\phi}=0$, a
+surface shell attracting nothing inside it. The self-moment
+$m_{c}=-\tfrac12\sqrt{4\pi}a^{2}\,\mathbf{b}_{c}^{\mathsf T}\mathsf{A}^{-1}\mathbf{b}_{c}$
+is negative when $\mathsf A$ is positive definite: a positive centrifugal
+potential $(r/a)^{2}$ pulls inward. A table that lacks the axial numbers
+(as read from an older file) has them undefined, and the sea level solver then
+sets the deformation terms of the axial feedback to zero.
+
+\subsection{The table}
+
+\code{LoveNumbers} holds the twelve numbers by degree, the five axial numbers,
+and the body $(a,g,G)$, in the units of a given scale system. It is computed by
+\code{LoveNumbers.from\_model} from any \texttt{planetmodel} model whose
+surface is solid, or read from a plain-text file in SI units whose header
+records the columns, the body and the axial numbers. A model frozen at a
+frequency $\omega$, whose moduli are complex, yields complex numbers for
+frequency-domain viscoelastic work; the sea level solver accepts only real
+tables.
+
+%======================================================================
+\section{The radial problem at degree \texorpdfstring{$\ell$}{l}}
+\label{sec:radial}
+%======================================================================
+
+\subsection{The bilinear form}
+
+The Love numbers are surface values of the solution of the linearised,
+quasi-static, self-gravitating elastic loading problem on a spherically
+symmetric, non-rotating, transversely isotropic earth, reduced by the expansion
+\eqref{eq:spheroidal}. The weak form is eq.~(D76) of
+\citet{AlAttarTromp2014}, whose isotropic elastic block we write for a
+transversely isotropic medium with Love's moduli $A,C,F,L,N$. Define, for the
+radial scalars of \eqref{eq:spheroidal},
+\begin{equation}
+X = r\partial_{r}U,\qquad
+Y = 2U - k^{2}V,\qquad
+S = U + r\partial_{r}V - V,
+\label{eq:XYS}
+\end{equation}
+and similarly $\hat X,\hat Y,\hat S$ for test functions
+$\hat w = (\hat U,\hat V,\hat\phi)$. In solid regions $I_{S}$ the integrand is
+\begin{equation}
+\begin{aligned}
+\mathcal{E}_{S}(w,\hat w) ={}& C X\hat X + (A-N)\,Y\hat Y + F\,(X\hat Y+Y\hat X)
+ + k^{2}L\,S\hat S + k^{2}(k^{2}-2)\,N\,V\hat V\\
+&+ 4\rho\,(\pi G\rho r - g)\,r\,U\hat U
+ + k^{2}\rho g r\,(U\hat V + V\hat U)\\
+&+ \rho r^{2}\,(\hat U\,\partial_{r}\phi + U\,\partial_{r}\hat\phi)
+ + k^{2}\rho r\,(V\hat\phi + \phi\hat V)
+ + \frac{1}{4\pi G}\big(r^{2}\,\partial_{r}\phi\,\partial_{r}\hat\phi + k^{2}\phi\hat\phi\big),
+\end{aligned}
+\label{eq:solidform}
+\end{equation}
+with $\rho(r)$ the density and $g(r)$ the gravity of the reference model. Under
+$A=C=\kappa+\tfrac43\mu$, $F=\kappa-\tfrac23\mu$ and $L=N=\mu$ the elastic
+block becomes
+\begin{equation}
+\kappa\,(X+Y)(\hat X+\hat Y)
++ \tfrac43\mu\,\big(X-\tfrac12 Y\big)\big(\hat X-\tfrac12\hat Y\big)
++ k^{2}\mu\,S\hat S + k^{2}(k^{2}-2)\,\mu\,V\hat V,
+\label{eq:isotropic}
+\end{equation}
+which is the form of \citet{AlAttarTromp2014}: $X+Y$ is $r$ times the
+dilatation, and $X-\tfrac12Y$, $S$ and $V$ are the three deviatoric
+strain scalars of the spheroidal field.
+
+In fluid regions $I_{F}$, above degree zero, the quasi-static problem does not
+determine the displacement: equilibrium requires only that the perturbed
+level surfaces of pressure, density and potential coincide. An equipotential
+is displaced radially by $-\phi/g$, so the Eulerian density perturbation is
+$\rho_{1} = (\partial_{r}\rho/g)\,\phi$ and the fluid enters through the
+potential alone, with integrand
+\begin{equation}
+\mathcal{E}_{F}(\phi,\hat\phi) = \frac{1}{4\pi G}\big(r^{2}\,\partial_{r}\phi\,\partial_{r}\hat\phi
+ + k^{2}\phi\hat\phi\big) + \frac{r^{2}\,\partial_{r}\rho}{g}\,\phi\hat\phi.
+\label{eq:fluidform}
+\end{equation}
+The stratification term is taken as zero where $g=0$. At each fluid--solid
+boundary $r=d$ the integration by parts leaves the point term
+\begin{equation}
+\pm\,\rho_{f}\,d^{2}\big(g\,U\hat U + \phi\,\hat U + U\hat\phi\big)\big|_{r=d},
+\label{eq:interface}
+\end{equation}
+where $\rho_{f}$ is the fluid density at the boundary and the sign is positive
+when the fluid lies below (as at the core--mantle boundary) and negative when
+it lies above (as at the inner-core boundary), $U$ being the value on the
+solid side.
+
+The gravitational field outside the domain is eliminated by Dirichlet-to-Neumann
+maps. Outside $r=a$ the potential is $\phi(a)(a/r)^{\ell+1}$, whose energy
+$\frac{1}{4\pi G}\int_{a}^{\infty}(r^{2}\phi'^{2}+k^{2}\phi^{2})\dd r$ is
+$\frac{(\ell+1)a}{4\pi G}\phi(a)^{2}$. When the domain is truncated below at
+$r_{0}>0$ (Section~\ref{sec:submesh}), the potential below is continued as the
+regular harmonic $\phi(r_{0})(r/r_{0})^{\ell}$, with energy
+$\frac{\ell r_{0}}{4\pi G}\phi(r_{0})^{2}$. The full form is therefore
+\begin{equation}
+\begin{aligned}
+\Ad(w,\hat w) ={}& \int_{I_{S}}\mathcal{E}_{S}\,\dd r + \int_{I_{F}}\mathcal{E}_{F}\,\dd r
+ + \sum_{d}(\pm)\rho_{f}d^{2}\big(gU\hat U+\phi\hat U+U\hat\phi\big)\\
+&+ \frac{(\ell+1)a}{4\pi G}\phi(a)\hat\phi(a)
+ + \frac{\ell r_{0}}{4\pi G}\phi(r_{0})\hat\phi(r_{0}),
+\end{aligned}
+\label{eq:fullform}
+\end{equation}
+symmetric in its two arguments. The problem for a forcing $\mathcal{F}$ is to
+find $w$ with $\Ad(w,\hat w)=\mathcal{F}(\hat w)$ for all admissible $\hat w$.
+
+\subsection{Forcings}
+\label{sec:forcings}
+
+The three load channels are the functionals \eqref{eq:loadfunctionals} per unit
+amplitude; a true surface load is the sum of the first two,
+$-a^{2}\,[g\hat U(a)+\hat\phi(a)]$, which is eq.~(D79) of
+\citet{AlAttarTromp2014}. An external potential $\psi(r)\Ylm$ is moved to the
+right-hand side term by term: wherever $\phi$ couples to the displacement or to
+the fluid density perturbation in \eqref{eq:solidform}, \eqref{eq:fluidform}
+and \eqref{eq:interface} it is replaced by the total potential $\phi+\psi$, the
+self-gravitation term $(4\pi G)^{-1}|\grad\phi|^{2}$ being unchanged. This gives
+\begin{equation}
+\mathcal{F}_{\psi}(\hat w) =
+-\int_{I_{S}}\rho\big(r^{2}\,\partial_{r}\psi\,\hat U + k^{2}r\,\psi\,\hat V\big)\dd r
+-\int_{I_{F}}\frac{r^{2}\,\partial_{r}\rho}{g}\,\psi\,\hat\phi\,\dd r
+-\sum_{d}(\pm)\rho_{f}d^{2}\,\psi(d)\,\hat U(d).
+\label{eq:tideforce}
+\end{equation}
+The harmonic tide is $\psi=(r/a)^{\ell}$. The only non-harmonic case used is
+$\psi=(r/a)^{2}$ at $\ell=0$, the spherical mean of the centrifugal potential
+of a change in spin rate, which gives $h_{c}$, $k_{c}$ and $m_{c}$. The
+constant potential, $\psi=1$, gives zero force.
+
+\subsection{Degrees zero and one}
+
+At $\ell=1$ the surface potential degree of freedom is removed, imposing
+$\phi(a)=0$ and with it the centre-of-mass frame; the exterior Dirichlet-to-Neumann
+term goes with it. No forcing then acts through the potential source
+channel, whose functional is $-a^{2}\hat\phi(a)$.
+
+At $\ell=0$ there is no tangential degree of freedom, and the fluid regions are
+treated as elastic media with $\mu=0$ rather than through
+\eqref{eq:fluidform}: for a purely radial deformation the fluid's displacement
+is determined by its compressibility, and \eqref{eq:isotropic} with $k^{2}=0$
+reduces to $\kappa(r\partial_{r}U+2U)^{2}$, the energy of radial compression.
+The condition $U(0)=0$ is imposed at the centre.
+
+\subsection{Discretisation}
+
+The radial interval is divided into spectral elements whose edges include every
+discontinuity of the model. On each element the unknowns are Lagrange
+polynomials on $n$ GLL nodes (\code{ngll}, by default five, so quartic
+elements), and all integrals are evaluated by the GLL quadrature on the same
+nodes. Radial derivatives are $\partial_{r}=J^{-1}\mathsf{D}$, with
+$\mathsf{D}$ the GLL differentiation matrix on the reference element and $J$
+the element Jacobian. Solid nodes carry $(U,V,\phi)$, fluid nodes $\phi$ alone,
+with $U$ and $V$ at a fluid--solid boundary belonging to the solid side; the
+degrees of freedom are numbered node by node, so the global matrix is banded
+with half-bandwidth $k_{d}=3(n-1)+2$. Moduli, density and gravity are sampled
+at the nodes element by element, so that a node shared by two layers carries
+both one-sided values.
+
+The matrix is real symmetric for real moduli and complex symmetric otherwise,
+and is stored as an upper band. It is first scaled symmetrically by its
+diagonal, $\tilde{\mathsf A}=\mathsf{D}_{A}^{-1/2}\mathsf{A}\mathsf{D}_{A}^{-1/2}$,
+which equalises the very different units of the displacement and potential
+unknowns. A real system is then factorised by banded Cholesky; the gravitational
+terms and the fluid stratification term mean that positive definiteness is not
+guaranteed, and the code falls back to banded LU when the factorisation fails.
+A complex system is solved by banded LU. For each degree one factorisation
+serves all forcings: the three load channels and the tide, and at $\ell=0$ the
+centrifugal potential.
+
+\subsection{Sub-mesh and graded mesh}
+\label{sec:submesh}
+
+At high degree the solution decays rapidly with depth, roughly as
+$(r/a)^{\ell+1}$, and is below a fraction $\varepsilon$ (\code{eps}, by default
+$10^{-8}$) of its surface value deeper than
+$D_{\ell}=a\,(1-\varepsilon^{1/(\ell+1)})$. Each degree $\ell>0$ is therefore
+solved on the sub-mesh of elements above this depth, closed below by the
+interior Dirichlet-to-Neumann term of \eqref{eq:fullform}; the displacement and
+potential below are set to zero.
+
+A uniform mesh adequate for degree $\ell$ has elements no wider than
+$0.1a/(\ell+1)$. At depth $d$ below the surface the highest degree whose
+solution reaches that depth satisfies $\ell+1 = \ln\varepsilon/\ln(1-d/a)$, so
+an element there need be no narrower than $0.1a\,\ln(1-d/a)/\ln\varepsilon$.
+The graded mesh used by default for a table to degree $L$ has element width
+\begin{equation}
+w(r) = \max\Big(\frac{0.1\,a}{L+1},\ \frac{0.1\,a\,\ln(1-d/a)}{\ln\varepsilon}\Big),
+\qquad d=a-r,
+\label{eq:graded}
+\end{equation}
+about $d/184$ at depth for $\varepsilon=10^{-8}$. Elements are laid down from the
+top of each layer of the model downwards; the last span above a discontinuity
+is divided into one or two equal elements, none wider than $w$ at its top.
+Every degree thereby sees at least the resolution the uniform rule would give
+it throughout its own sub-mesh, while the whole mesh has a few hundred elements
+rather than the $10(L+1)$ of the uniform rule at $L$.
+
+%======================================================================
+\section{The sea level equation}
+\label{sec:sle}
+%======================================================================
+
+\subsection{The linear equation}
+
+Let $C$ be the ocean function of the background state, one over the oceans and
+zero elsewhere, $\mathcal{A}_{o}=\int C\,\dd S$ the ocean area, and $\zeta_{d}$ a
+prescribed direct load, for example $\rho_{i}\,\Delta I$ for a change $\Delta I$
+in grounded ice thickness. With the shorelines held fixed the ocean responds
+with a water load $\rho_{w}C\xi$, so the total load is
+\begin{equation}
+\zeta = \zeta_{d} + \rho_{w}\,C\,\xi.
+\label{eq:totalload}
+\end{equation}
+The sea surface remains an equipotential of the gravitational and centrifugal
+potentials, so its height changes by $-(\phi+\psi)/g$ plus a constant, and the
+relative sea level change, the change in the height of the sea surface above
+the solid surface, is
+\begin{equation}
+\xi = -u - \frac{\phi+\psi}{g} + c,
+\label{eq:sle}
+\end{equation}
+where $u_{\ell m}=h_{\ell}\zeta_{\ell m}$ and $\phi_{\ell m}=k_{\ell}\zeta_{\ell m}$
+apart from the rotational terms of Section~\ref{sec:rotation}, and $c$ is a
+spatial constant. The constant is fixed by conservation of mass, the water added
+to the oceans being the mass removed from the direct load,
+\begin{equation}
+\rho_{w}\int C\,\xi\,\dd S = -\int\zeta_{d}\,\dd S
+\quad\Longrightarrow\quad
+c = \bar\xi_{E} - \frac{1}{\mathcal{A}_{o}}\int C\,\tilde\xi\,\dd S,
+\qquad \bar\xi_{E} = -\frac{1}{\rho_{w}\mathcal{A}_{o}}\int\zeta_{d}\,\dd S,
+\label{eq:masscons}
+\end{equation}
+where $\tilde\xi=-u-(\phi+\psi)/g$ and $\bar\xi_{E}$ is the eustatic (barystatic)
+sea level change. Equations \eqref{eq:totalload}--\eqref{eq:masscons} are the
+linear sea level equation of \citet{FarrellClark1976}, with the rotational terms
+of \citet{MilneMitrovica1998}.
+
+\subsection{Fixed-point structure}
+
+Combining \eqref{eq:totalload} and \eqref{eq:sle}, the equation is a fixed point
+for the load,
+\begin{equation}
+\zeta = \mathcal{G}(\zeta) \equiv \zeta_{d} + \rho_{w}\,C\,\mathcal{P}\big[\mathcal{S}\zeta\big],
+\qquad
+(\mathcal{S}\zeta)_{\ell m} = -\Big(h_{\ell}+\frac{k_{\ell}}{g}\Big)\zeta_{\ell m}
++ (\text{rotation}),
+\label{eq:fixedpoint}
+\end{equation}
+where $\mathcal{P}$ adds the constant \eqref{eq:masscons}. The iteration works
+on the coefficients of the load. Each evaluation of $\mathcal{G}$ multiplies
+the load coefficients by the combined factor $-(h_{\ell}+k_{\ell}/g)$, replaces
+the degree-2 coefficients of orders 0 and 1 by those of
+Section~\ref{sec:rotation}, synthesises $\tilde\xi$ on the grid with one inverse
+transform, applies the mass-conservation shift using the grid quadrature,
+multiplies by $\rho_{w}C$, adds $\zeta_{d}$, and returns to coefficients with
+one forward transform. The displacement and potential are synthesised only
+once, from the converged load. The starting load is the eustatic one,
+$\zeta^{(0)} = \zeta_{d}+\rho_{w}C\,\bar\xi_{E}$.
+
+By \eqref{eq:slcfactor} the linear part of $\mathcal{G}$ is the product of
+multiplication by $C$, with norm one on $L^{2}$, and a spherical harmonic
+multiplier of size $3\rho_{w}(1+k'_{\ell}-h'_{\ell})/[(2\ell+1)\bar\rho]$, with
+the degree-zero part removed by the mass constraint. Since
+$\rho_{w}/\bar\rho\approx0.18$ and the multiplier decays as $1/(2\ell+1)$,
+the plain Picard iteration contracts, most slowly at the lowest degrees.
+
+\subsection{Anderson acceleration}
+
+The iteration is accelerated by Anderson mixing \citep{WalkerNi2011}. With $x_{k}$ the current
+vector of load coefficients, $f_{k}=\mathcal{G}(x_{k})-x_{k}$ its residual, and
+the last $p$ differences $\Delta x_{i}=x_{i+1}-x_{i}$, $\Delta f_{i}=f_{i+1}-f_{i}$
+gathered as the columns of $\Delta X_{k}$ and $\Delta F_{k}$, the update is
+\begin{equation}
+\gamma_{k} = \arg\min_{\gamma}\big\|f_{k}-\Delta F_{k}\gamma\big\|_{2},\qquad
+x_{k+1} = \mathcal{G}(x_{k}) - \big(\Delta X_{k}+\Delta F_{k}\big)\gamma_{k}.
+\label{eq:anderson}
+\end{equation}
+The least-squares problem is solved through its normal equations
+$(\Delta F_{k}^{\mathsf T}\Delta F_{k})\gamma_{k}=\Delta F_{k}^{\mathsf T}f_{k}$,
+the $p\times p$ Gram matrix being updated by one row and column per iteration
+from ring buffers of the differences, with a minimum-norm least-squares solve
+guarding against rank deficiency. The default memory is $p=5$; $p=0$ recovers
+the Picard iteration. The iteration stops when the change of the ocean sea level
+between iterates satisfies
+\begin{equation}
+\frac{\max|C\xi^{(k)}-C\xi^{(k-1)}|}{\max|C\xi^{(k)}|}\le\texttt{rtol},
+\end{equation}
+with $\texttt{rtol}=10^{-9}$ by default.
+
+\subsection{The generalised equation and the adjoint}
+\label{sec:generalised}
+
+The generalised sea level equation adds three forcings to the direct load: a
+displacement load $\zeta^{u}$ acting through the traction channel, a potential
+load $\zeta^{\phi}$ acting through the source channel, and an angular momentum
+forcing $\mathbf{L}$ in the rotational equations. The first two contribute static
+terms independent of the iteration,
+\begin{equation}
+u^{s}_{\ell m} = h^{u}_{\ell}\zeta^{u}_{\ell m} + h^{\phi}_{\ell}\zeta^{\phi}_{\ell m},\qquad
+\phi^{s}_{\ell m} = k^{u}_{\ell}\zeta^{u}_{\ell m} + k^{\phi}_{\ell}\zeta^{\phi}_{\ell m},
+\end{equation}
+which are added to $u$ and $\phi$, so that
+$\tilde\xi_{\ell m}$ gains $-(u^{s}_{\ell m}+\phi^{s}_{\ell m}/g)$; their
+degree-2 and degree-0 coefficients also enter the rotational feedback
+(Section~\ref{sec:rotation}). Mass conservation \eqref{eq:masscons} involves
+$\zeta_{d}$ alone.
+
+The reason for these channels is the adjoint. The fingerprint operator
+$\mathcal{F}:\zeta_{d}\mapsto(\xi,u,\phi,\bm{\omega})$, with the $L^{2}$ inner
+product on the sphere of radius $b$ for the fields and the Euclidean one for
+$\bm{\omega}$, has an adjoint that is again a solution of the generalised equation
+\citep{AlAttarEtAl2024}. Its adjoint applied to
+$(\xi^{\dagger},u^{\dagger},\phi^{\dagger},\bm{\omega}^{\dagger})$ is the
+relative sea level change of the generalised equation with
+\begin{equation}
+\zeta_{d} = \xi^{\dagger},\qquad
+\zeta^{u} = -u^{\dagger},\qquad
+\zeta^{\phi} = -g\,\phi^{\dagger},\qquad
+\mathbf{L} = -g\big(\bm{\omega}^{\dagger}-\Psi^{*}\phi^{\dagger}\big),
+\label{eq:adjoint}
+\end{equation}
+where $\Psi:\bm{\omega}\mapsto\psi$ is the centrifugal potential map of
+\eqref{eq:centrifugal} below and
+\begin{equation}
+\Psi^{*}f = b^{2}\big(R_{\perp}f^{c}_{21},\ R_{\perp}f^{s}_{21},\ R_{z}f_{20}+R_{0}f_{00}\big)
+\end{equation}
+its adjoint. This identity is exact only when the solver uses the reciprocal
+numbers of a single table and the body $(a,g,G)$ of that table, which is why
+\code{EarthModel} adopts the body from the table.
+
+\subsection{The nonlinear equation with migrating shorelines}
+
+For large changes of ice the ocean function itself changes, and the background
+must be carried as fields: the ice thickness $I$ and the sea level $S$, the
+height of the sea surface above the solid surface (ocean depth where positive,
+minus the topography on land). The ocean function is set by flotation,
+\begin{equation}
+C = H\big(\rho_{w}S - \rho_{i}I\big),
+\label{eq:flotation}
+\end{equation}
+with $H$ the Heaviside function, so that ice thinner than the water depth that
+would float it is part of the ocean, and only grounded ice loads the earth as
+ice. Optionally a closed basin (the Caspian) is excluded from $C$. Given an
+initial state $(I_{0},S_{0},C_{0})$, an ice thickness change $\Delta I$, a
+sediment thickness change $\Delta H_{s}$ of density $\rho_{s}$ (2300\,kg\,m$^{-3}$
+by default) and a dynamic sea level change $\xi_{\mathrm{dyn}}$, the final ice
+is $I=I_{0}+\Delta I$ and the solver iterates on $(S_{n},C_{n})$ from
+$(S_{0},C_{0})$. Each iteration forms the load
+\begin{equation}
+\zeta_{n} = \rho_{i}\big[(1-C_{n})I - (1-C_{0})I_{0}\big]
+ + \rho_{w}\big(C_{n}S_{n} - C_{0}S_{0}\big) + \rho_{s}\Delta H_{s},
+\end{equation}
+computes $\tilde\xi_{n}=\mathcal{S}\zeta_{n}$ as in \eqref{eq:fixedpoint},
+including the rotational terms but without the constant, and the provisional sea
+level $\hat S = S_{0}+\tilde\xi_{n}-\Delta H_{s}+\xi_{\mathrm{dyn}}$, sediment
+raising the solid surface. The constant is a eustatic shift that conserves the
+total of water, grounded ice and sediment over the current ocean,
+\begin{gather}
+\Delta_{n} = \frac{M_{n} - \rho_{w}\int C_{n}\hat S\,\dd S}{\rho_{w}\int C_{n}\,\dd S},\\
+M_{n} = \rho_{w}\!\int C_{0}S_{0}\,\dd S
+ - \int\rho_{i}\big[(1-C_{n})I-(1-C_{0})I_{0}\big]\dd S
+ - \int\rho_{s}\Delta H_{s}\,\dd S,
+\end{gather}
+after which
+\begin{equation}
+\xi_{n+1} = \tilde\xi_{n}+\Delta_{n},\qquad
+S_{n+1} = \hat S + \Delta_{n},\qquad
+C_{n+1} = H\big(\rho_{w}S_{n+1}-\rho_{i}I\big).
+\end{equation}
+This is the formulation of \citet{KendallEtAl2005}. The iteration is plain
+Picard, stopped when $\max|\xi_{n+1}-\xi_{n}|\le\texttt{rtol}\,\max|\xi_{n}|$;
+the error is measured on the whole grid, not only over the ocean. The result is a new state
+$(I,S_{n+1})$ together with $\xi$, $u$, $\phi$ and $\bm{\omega}$, the last three
+synthesised from the load of the final iteration.
+
+%======================================================================
+\section{Rotational feedback}
+\label{sec:rotation}
+%======================================================================
+
+\subsection{Centrifugal potential}
+
+Let the angular velocity be $\Omega\hat{\mathbf z}+\bm{\omega}$. To first order
+the centrifugal potential changes by
+\begin{equation}
+\psi = -\Omega\omega_{z}r^{2} + \Omega z\,(\bm{\omega}\cdot\x)
+= \Omega r^{2}\Big[\sin\theta\cos\theta\,(\omega_{x}\cos\varphi+\omega_{y}\sin\varphi)
++ \omega_{z}\big(\cos^{2}\theta-\tfrac13\big) - \tfrac23\,\omega_{z}\Big].
+\end{equation}
+With \eqref{eq:Y2}, its coefficients on the surface $r=b$ are
+\begin{equation}
+\psi^{c}_{21} = R_{\perp}\,\omega_{x},\qquad
+\psi^{s}_{21} = R_{\perp}\,\omega_{y},\qquad
+\psi_{20} = R_{z}\,\omega_{z},\qquad
+\psi_{00} = R_{0}\,\omega_{z},
+\label{eq:centrifugal}
+\end{equation}
+with the factors \eqref{eq:rotfactors}. The degree-2 parts are of the form
+$(r/b)^{2}Y_{2m}$, harmonic, and act on the earth through the tidal Love numbers
+$h^{t}_{2}$, $k^{t}_{2}$. The degree-0 part is $\psi_{00}(r/b)^{2}Y_{00}$, not
+harmonic, and acts through the axial numbers $h_{c}$, $k_{c}$ and $m_{c}$.
+The \emph{transverse} components $\omega_{x},\omega_{y}$ (true polar wander)
+therefore couple to degree 2, order 1, and the \emph{axial} component
+$\omega_{z}$ (change in length of day) to degree 2, order 0, and degree 0.
+
+\subsection{Liouville equation and MacCullagh's formula}
+
+On the time scales of loading the Chandler wobble is not excited and the
+linearised Liouville equation reduces to its quasi-static balance. With
+$\Delta\mathbf{I}$ the perturbation of the inertia tensor and $\mathbf{h}$ a
+relative angular momentum, it reads
+\begin{equation}
+(C-A)\,\omega_{x} = \Omega\,\Delta I_{xz} + h_{x},\qquad
+(C-A)\,\omega_{y} = \Omega\,\Delta I_{yz} + h_{y},\qquad
+C\,\omega_{z} = -\Omega\,\Delta I_{zz} - h_{z}.
+\label{eq:liouville}
+\end{equation}
+The inertia perturbation is read from the degree-2 potential by MacCullagh's
+formula. Expanding $-G\int\rho/|\x-\x'|$ to second order outside the mass and
+writing $\Delta\mathbf{I}$ with $\Delta T=\operatorname{tr}\Delta\mathbf{I}$,
+\begin{equation}
+\phi^{c}_{21} = \frac{3G}{b^{3}}\sqrt{\frac{4\pi}{15}}\,\Delta I_{xz},\qquad
+\phi^{s}_{21} = \frac{3G}{b^{3}}\sqrt{\frac{4\pi}{15}}\,\Delta I_{yz},\qquad
+\phi_{20} = \frac{G}{b^{3}}\sqrt{\frac{\pi}{5}}\,\big(3\Delta I_{zz}-\Delta T\big).
+\label{eq:maccullagh}
+\end{equation}
+Eliminating $\Delta\mathbf{I}$ between \eqref{eq:liouville} and
+\eqref{eq:maccullagh} gives, with the factors \eqref{eq:inertiafactors},
+\begin{equation}
+\omega_{x,y} = I_{\perp}\,\phi^{c,s}_{21} + \frac{h_{x,y}}{C-A},\qquad
+\omega_{z} = -I_{z}\,\phi_{20} - \frac{\Omega}{3C}\,\Delta T - \frac{h_{z}}{C}.
+\label{eq:omega}
+\end{equation}
+The transverse equations involve only the degree-2 potential. The axial
+equation also involves the trace $\Delta T$, which the exterior potential does
+not see. The angular momentum forcing of the generalised equation enters as
+$\mathbf{h}=-\mathbf{L}$; that is, $\mathbf{L}$ adds
+$-\mathbf{L}_{x,y}/(C-A)$ to $\omega_{x,y}$ and $+L_{z}/C$ to $\omega_{z}$.
+
+\subsection{The trace}
+
+The change in trace has two sources. A surface mass layer $\sigma$ on the
+sphere of radius $b$ contributes $2b^{2}\int\sigma\,\dd S = 2\sqrt{4\pi}\,b^{4}\sigma_{00}$,
+and the mass-like sources are the true load and the potential load, so
+$\sigma_{00}=\zeta_{00}+\zeta^{\phi}_{00}$; the displacement load is a traction
+and carries no mass. The deformation contributes $4m$, with $m$ the moment
+\eqref{eq:moment} of the degree-0 displacement, which by
+Section~\ref{sec:axial} is
+\begin{equation}
+m = (m_{u}+m_{\phi})\,\zeta_{00} + m_{u}\,\zeta^{u}_{00} + m_{\phi}\,\zeta^{\phi}_{00} + m_{c}\,\psi_{00}.
+\end{equation}
+Hence
+\begin{equation}
+\frac{\Omega}{3C}\,\Delta T
+= \frac{4\Omega}{3C}\,m + \frac{2\Omega\sqrt{4\pi}\,b^{4}}{3C}\,\big(\zeta_{00}+\zeta^{\phi}_{00}\big).
+\end{equation}
+
+\subsection{Closed-form fixed points}
+
+The potential in \eqref{eq:omega} contains the response to the centrifugal
+potential, $\phi_{2m}=\phi^{L}_{2m}+k^{t}_{2}\psi_{2m}$, where
+$\phi^{L}_{2m} = k_{2}\zeta_{2m}+\phi^{s}_{2m}$ is the potential of the loads.
+Likewise the moment depends on $\psi_{00}=R_{0}\omega_{z}$. Since
+\eqref{eq:centrifugal} is linear in $\bm{\omega}$, each component is a scalar
+fixed point, solved in closed form:
+\begin{gather}
+\omega_{x,y} = \frac{I_{\perp}\,\phi^{L,c/s}_{21} - L_{x,y}/(C-A)}
+{1 - I_{\perp}\,k^{t}_{2}\,R_{\perp}},
+\label{eq:transverse}\\[4pt]
+\omega_{z} = \frac{-I_{z}\,\phi^{L}_{20}
+ - \dfrac{4\Omega}{3C}\big[(m_{u}+m_{\phi})\zeta_{00}+m_{u}\zeta^{u}_{00}+m_{\phi}\zeta^{\phi}_{00}\big]
+ - \dfrac{2\Omega\sqrt{4\pi}\,b^{4}}{3C}\big(\zeta_{00}+\zeta^{\phi}_{00}\big)
+ + L_{z}/C}
+{1 + I_{z}\,k^{t}_{2}\,R_{z} + \dfrac{4\Omega}{3C}\,m_{c}\,R_{0}}.
+\label{eq:axialomega}
+\end{gather}
+In the axial denominator both corrections are positive ($k^{t}_{2}>0$, and
+$m_{c}<0$, $R_{0}<0$), so the feedback of the axial deformation on the spin
+rate is stabilising. In the linear equation $\zeta_{00}$ vanishes at convergence
+by mass conservation, so the degree-0 terms in $\zeta$ matter chiefly for the
+generalised equation and for loads that do not conserve mass.
+
+Given $\bm{\omega}$, the rotational contributions to the fields are
+\begin{equation}
+u_{2m} \mathrel{+}= h^{t}_{2}\psi_{2m},\quad
+\phi_{2m} \mathrel{+}= k^{t}_{2}\psi_{2m},\quad
+u_{00} \mathrel{+}= h_{c}\psi_{00},\quad
+\phi_{00} \mathrel{+}= k_{c}\psi_{00},
+\end{equation}
+for the degree-2 coefficients of orders 0 and 1 and the degree-0 coefficient,
+and the relative sea level coefficients become
+\begin{equation}
+\tilde\xi_{2m} = -\Big(u_{2m}+\frac{\phi_{2m}+\psi_{2m}}{g}\Big),\qquad
+\tilde\xi_{00} \mathrel{-}= \Big(h_{c}+\frac{k_{c}+1}{g}\Big)\psi_{00}.
+\end{equation}
+The last is uniform and is absorbed by the mass-conservation constant; it is
+kept so that $\tilde\xi$ is the complete local response. The returned potential
+$\phi$ is the gravitational perturbation without $\psi$.
+
+Because the rotational fixed point is solved exactly inside every evaluation of
+$\mathcal{G}$, the angular velocity, displacement and potential returned are all
+consistent with the same load, and the outer iteration has only the ocean
+loading to converge.
+
+\subsection{Rotational stability and the choice of moments}
+
+The equilibrium moments of inertia in \eqref{eq:transverse} and
+\eqref{eq:axialomega} are specified quantities: they cannot be computed from
+the spherically symmetric model in which the elastic problem is solved, whose
+inertia tensor is isotropic \citep{YuEtAl2025}. The transverse denominator
+$1-I_{\perp}k^{t}_{2}R_{\perp}$ equals $1-k^{t}_{2}/k_{\mathrm{sus}}$, with
+$k_{\mathrm{sus}}=3G(C-A)/(\Omega^{2}b^{5})$ the oblateness the specified
+moments sustain, and it must remain positive for every tidal response the
+model can produce. The largest such response is the hydrostatic fluid limit
+$k_{\mathrm{hyd}}$, the degree-2 tidal number of the model with its rigidity
+set to zero, which depends only on the density profile (Kelvin's
+$3/(2(\ell-1))$ for a homogeneous body); the library computes it directly as
+the zero-rigidity solid rather than as the $s\to0$ limit of a viscoelastic
+$k^{t}_{2}(s)$, which degrades numerically \citep{MitrovicaEtAl2005}. For the
+Earth the observed moments satisfy $k_{\mathrm{hyd}}<k_{\mathrm{sus}}$, the
+excess being the non-hydrostatic part of the figure, and the specified
+observed values are the correct default. For any other body the moments may
+instead be constructed from the model itself in the manner of
+\citet{MitrovicaEtAl2005}: $C-A=(1+\delta)\,k_{\mathrm{hyd}}\Omega^{2}b^{5}/(3G)$
+with $\delta$ a prescribed non-hydrostatic fraction ($0.8$ per cent for the
+Earth), which makes the margin $\delta/(1+\delta)$ whatever the rheology.
+A configuration with $k_{\mathrm{hyd}}\ge k_{\mathrm{sus}}$ has a transverse
+feedback on the wrong side of the secular resonance and is refused by the
+time-domain solvers; the axial feedback is unconditionally stable, both
+denominator corrections in \eqref{eq:axialomega} being positive, and may be
+retained alone.
+
+%======================================================================
+\section{Viscoelastic extension (in development)}
+\label{sec:visco}
+%======================================================================
+
+This section describes a formulation being implemented in
+\texttt{pyslfp.gia}; its interface is not yet stable.
+
+\subsection{Rheology and internal variables}
+
+The extension treats a generalised Maxwell body with branches
+$k=1,\dots,K$ of shear modulus $\mu_{k}$ and relaxation time $\tau_{k}$, and a
+long-term shear modulus $\mu_{\infty}$, in the internal-variable formulation of
+\citet{AlAttarTromp2014} (see also \citealp{CrawfordEtAl2017}). The same
+formulation underlies the time-domain treatment of glacial isostatic adjustment,
+and of its sensitivity kernels by the adjoint method, in laterally
+heterogeneous earth models by \citet{CrawfordEtAl2018}; here the earth is
+spherically symmetric and each degree decouples. With $d$ the
+deviatoric strain, each branch carries a trace-free symmetric internal variable
+$m_{k}$, and
+\begin{equation}
+\mathbf{T} = \kappa\,(\operatorname{tr}\bm{\varepsilon})\,\mathbf{1}
+ + 2\mu_{\infty}d + \sum_{k}2\mu_{k}\,(d-m_{k}),\qquad
+\dot m_{k} = \frac{d-m_{k}}{\tau_{k}}.
+\label{eq:maxwell}
+\end{equation}
+The unrelaxed shear modulus is $\mu_{U}=\mu_{\infty}+\sum_{k}\mu_{k}$, which is
+the elastic modulus of the material. The classical Maxwell body is one branch
+with $\mu_{\infty}=0$ and $\tau=\eta/\mu$. The viscosity may be prescribed
+directly, or through the relaxation time $\tau(r)$, in which case
+$\eta=\mu\tau$ inherits its depth dependence from the shear modulus. Bulk
+relaxation is not modelled, fluid regions carry no branches, and branches
+require an isotropic material.
+
+\subsection{The degree-basis scalars}
+
+For spheroidal forcing the internal variable of each branch reduces, at each
+$(\ell,m)$, to three radial scalars \citep[eqs D68--D73]{AlAttarTromp2014}: $M$,
+the purely tangential component, $R$, the radial--radial component, and $S$,
+the radial--tangential component; the toroidal components remain zero. They are
+driven by the deviatoric strain scalars of \eqref{eq:isotropic},
+\begin{equation}
+e_{M} = V,\qquad
+e_{R} = r\partial_{r}U - U + \tfrac12 k^{2}V = X-\tfrac12 Y,\qquad
+e_{S} = r\partial_{r}V - V + U = S,
+\end{equation}
+branch by branch,
+\begin{equation}
+\dot M_{k} = \frac{e_{M}-M_{k}}{\tau_{k}},\qquad
+\dot R_{k} = \frac{e_{R}-R_{k}}{\tau_{k}},\qquad
+\dot S_{k} = \frac{e_{S}-S_{k}}{\tau_{k}},
+\end{equation}
+the strain scalars being evaluated at the GLL nodes by collocation. The weights
+with which they enter the $\mu$-part of \eqref{eq:isotropic} are $\tfrac43$,
+$k^{2}$ and $k^{2}(k^{2}-2)$ for $R$, $S$ and $M$.
+
+\subsection{Quasi-static equilibrium and the memory force}
+
+At fixed internal variables the displacement and potential satisfy the elastic
+problem with the unrelaxed moduli, forced by the loads and by a memory force:
+\begin{gather}
+\Ad^{U}(w,\hat w) = \mathcal{F}(\hat w) + b_{\mathrm{mem}}(\hat w),\\
+b_{\mathrm{mem}}(\hat w) = \sum_{k}\int\mu_{k}\Big[\tfrac43 R_{k}\,e_{R}(\hat w)
+ + k^{2}S_{k}\,e_{S}(\hat w) + k^{2}(k^{2}-2)\,M_{k}\hat V\Big]\dd r,
+\end{gather}
+where $\Ad^{U}$ is \eqref{eq:fullform} assembled with $\mu_{U}$. This is
+the one-sided form of the $\mu$-part of \eqref{eq:isotropic} applied to the
+internal variables, and it follows from \eqref{eq:maxwell} by moving the
+$-2\mu_{k}m_{k}$ stress to the right-hand side. At $\ell=0$ only the $R$ term
+survives; at $\ell=1$ the $M$ term vanishes although $M$ still evolves. The
+state of the system is the internal variables alone: the displacement,
+potential and, once coupled, the sea level are slaved to them through degree
+solves, each a banded back-substitution with the orders as right-hand-side
+columns.
+
+\subsection{Time stepping}
+
+With $h_{k}=\Delta t/\tau_{k}$, each scheme eliminates the new internal variable
+in favour of the new strain, which leaves an elastic solve with an effective
+shear modulus and a memory force built from known quantities.
+\begin{itemize}
+\item[] \emph{Backward Euler}: $m^{n+1}=(m^{n}+h\,d^{n+1})/(1+h)$, so that
+\begin{equation}
+\mu_{\mathrm{eff}} = \mu_{\infty}+\sum_{k}\frac{\mu_{k}}{1+h_{k}},\qquad
+\tilde m_{k} = \frac{m_{k}^{n}}{1+h_{k}}.
+\end{equation}
+\item[] \emph{Exponential trapezoid}: with $e=\exp(-h)$, $\varphi_{1}=(1-e)/h$,
+$\alpha=\varphi_{1}-e$ and $\beta=1-\varphi_{1}$, the exact update for a strain
+linear in time over the step is $m^{n+1}=e\,m^{n}+\alpha\,d^{n}+\beta\,d^{n+1}$,
+so that
+\begin{equation}
+\mu_{\mathrm{eff}} = \mu_{\infty}+\sum_{k}\varphi_{1,k}\,\mu_{k},\qquad
+\tilde m_{k} = e_{k}\,m_{k}^{n}+\alpha_{k}\,d^{n};
+\end{equation}
+$\varphi_{1}$ is evaluated by its Taylor series for small $h$.
+\item[] \emph{Exponential Euler}: $m^{n+1}=e\,m^{n}+(1-e)\,d^{n}$, explicit, the
+solve at $t^{n}$ using the unrelaxed moduli and $b_{\mathrm{mem}}(m^{n})$.
+\end{itemize}
+In each case the step's equilibrium is $\Ad^{\mathrm{eff}}(w,\hat w)=\mathcal{F}(\hat w)
++b_{\mathrm{mem}}(\tilde m)$, after which $m^{n+1}$ follows from the update
+formula. An elastic region is the limit $\tau\to\infty$: $h=0$, $e=1$,
+$\alpha=\beta=0$, $\varphi_{1}=1$, and $m$ remains zero. Backward Euler is first
+order and the exponential trapezoid second order; the exponential schemes are
+exact for relaxation under strain prescribed piecewise constant (exponential
+Euler) or piecewise linear (trapezoid) in time, for any $\Delta t$. One
+factorisation per degree and per $(\text{scheme},\Delta t)$ serves every step.
+
+\subsection{Coupling to the sea level equation}
+
+With the effective moduli the instantaneous response of a step to a surface
+load is described by per-step effective Love numbers, computed by the elastic
+machinery of Section~\ref{sec:radial} on the effective material, together with a
+memory field, the surface response $(U,\phi)$ to $b_{\mathrm{mem}}(\tilde m)$
+under zero load. The step's sea level equation is then the generalised linear
+equation of Section~\ref{sec:sle} with the effective numbers in place of
+$h_{\ell},k_{\ell}$ and the memory field as a static term, closed by the same
+iteration for the ocean and rotational feedbacks. The converged load gives
+$d^{n+1}$ at the nodes and completes the update of the internal variables. In
+the limit $\tau_{k}\to\infty$ for every branch the formulation reduces to the
+elastic one. The same body can also be treated in the frequency domain, through
+the complex moduli of a model frozen at a frequency
+(Section~\ref{sec:love}); by the correspondence principle
+\citep{WuPeltier1982} the two descriptions are related by a Laplace
+transform, which provides an independent check of the time stepping.
+
+\bibliographystyle{plainnat}
+\bibliography{pyslfp_theory}
+
+\end{document}

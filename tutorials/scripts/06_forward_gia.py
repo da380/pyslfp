@@ -55,14 +55,7 @@ operator = ViscoelasticOperator(rheology, LMAX)
 
 earth_model = sl.EarthModel.from_planet_model(model, LMAX, mesh=mesh)
 ice_model = IceNG(length_scale=earth_model.parameters.length_scale)
-ice_thickness, sea_level = ice_model.get_ice_thickness_and_sea_level(
-    0.0,
-    LMAX,
-    grid=earth_model.grid_name,
-    sampling=earth_model.sampling,
-    extend=earth_model.extend,
-)
-state = sl.EarthState(ice_thickness, sea_level, earth_model)
+state = sl.EarthState.from_ice_model(ice_model, 0.0, earth_model)
 
 # ----------------------------------------------------------------------
 # The ice history.  A cap of 1500 m of ice, ten degrees across, melts

@@ -162,13 +162,10 @@ class SeaLevelEvolution:
         `with_hydrostatic_moments` construction makes it delta / (1 +
         delta) for any rheology."""
         if self._fluid_margin is None:
-            k_hyd = fluid_tidal_number(
-                self.operator.material, 2, eps=self.operator.eps
-            )
+            k_hyd = fluid_tidal_number(self.operator.material, 2, eps=self.operator.eps)
             parameters = self.model.parameters
             self._fluid_margin = (
-                1.0
-                - parameters.inertia_factor * parameters.rotation_factor * k_hyd
+                1.0 - parameters.inertia_factor * parameters.rotation_factor * k_hyd
             )
         if self._fluid_margin <= 0.0:
             raise ValueError(
@@ -266,11 +263,7 @@ class SeaLevelEvolution:
         sigma = self.model.expand_field(
             SHGrid.from_array(total, grid=self.model.grid, copy=False)
         ).coeffs
-        psi = (
-            self._centrifugal(omega)
-            if rotational_feedbacks
-            else np.zeros_like(sigma)
-        )
+        psi = self._centrifugal(omega) if rotational_feedbacks else np.zeros_like(sigma)
         snapshots = [SeaLevelSnapshot(float(times[0]), slc, disp, potential, omega)]
 
         for t0, t1 in zip(times[:-1], times[1:]):
@@ -284,9 +277,7 @@ class SeaLevelEvolution:
             )
             sle = self._sle_for(dt)
             memory_u = self._coeffs(step.memory_surface("U"), self._to_nd_length)
-            memory_phi = self._coeffs(
-                step.memory_surface("phi"), self._to_nd_potential
-            )
+            memory_phi = self._coeffs(step.memory_surface("phi"), self._to_nd_potential)
             moment = step.inertia_moment()[0] * self._to_nd_moment
             load_grid = ice_load(t1)
             slc, disp, potential, omega = sle.solve_generalised_equation(
@@ -312,9 +303,7 @@ class SeaLevelEvolution:
                 load=self._columns(sigma, self._to_mat_density),
                 tide=self._columns(psi, self._to_mat_potential),
             )
-            snapshots.append(
-                SeaLevelSnapshot(float(t1), slc, disp, potential, omega)
-            )
+            snapshots.append(SeaLevelSnapshot(float(t1), slc, disp, potential, omega))
         return snapshots, vstate
 
     def run_ice_history(
@@ -375,9 +364,7 @@ class SeaLevelEvolution:
             rtol=rtol,
             verbose=verbose,
         )
-        snapshots = [
-            replace(snap, date=date0 - snap.t / kyr) for snap in snapshots
-        ]
+        snapshots = [replace(snap, date=date0 - snap.t / kyr) for snap in snapshots]
         return snapshots, vstate
 
 

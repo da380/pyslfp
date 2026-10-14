@@ -450,10 +450,10 @@ class ViscoelasticOperator:
         """Opens an implicit or trapezoid step before the loads at the
         end time are known: the sea-level driver reads the step's
         memory responses, closes its equilibrium with the matching
-        effective Love numbers, and `finish`es the step with the
-        converged loads.  The load channels given here are those at
-        the START time, needed by the trapezoid's d^n (and ignored
-        when the state carries a consistent strain cache)."""
+        effective Love numbers, and completes the step with `finish`
+        under the converged loads.  The load channels given here are
+        those at the START time, needed by the trapezoid's d^n (and
+        ignored when the state carries a consistent strain cache)."""
         if scheme not in ("exponential_trapezoid", "backward_euler"):
             raise ValueError(
                 "a two-phase step is implicit: scheme must be "
@@ -574,8 +574,7 @@ class ViscoelasticStep:
         through the effective systems, cached."""
         if self._memory_solutions is None:
             self._memory_solutions = {
-                l: self._system(l).solve(self._memory_force(l))
-                for l in self.degrees
+                l: self._system(l).solve(self._memory_force(l)) for l in self.degrees
             }
         return self._memory_solutions
 

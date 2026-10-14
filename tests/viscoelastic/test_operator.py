@@ -63,9 +63,7 @@ def test_relaxed_limit_is_the_long_term_solid(material):
     backward Euler and trapezoid updates is exactly m = d, so the
     time-stepped limit matches the long-term solve to solver precision."""
     shape = material.moduli.shape
-    rheo = Rheology(
-        material, [(np.full(shape, 0.5 * MU), np.full(shape, 1.0 / TAU))]
-    )
+    rheo = Rheology(material, [(np.full(shape, 0.5 * MU), np.full(shape, 1.0 / TAU))])
     op = ViscoelasticOperator(rheo, 2, degrees=[2])
     want = solve_degree(rheo.long_term_material(), 2).surface
     for scheme in ("exponential_trapezoid", "backward_euler"):

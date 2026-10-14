@@ -69,9 +69,7 @@ parameters = earth_model.parameters
 metre = parameters.length_scale
 kyr = 1.0e3 * 365.25 * 86400.0 / parameters.scales.factor(units.TIME)
 
-cap = state.disk_load(
-    10.0, 60.0, -85.0, parameters.ice_density * 1500.0 / metre
-)
+cap = state.disk_load(10.0, 60.0, -85.0, parameters.ice_density * 1500.0 / metre)
 # soften the cap's edge in degree space: a sharp disc rings at a finite
 # truncation, and the taper leaves degree 0, hence the mass, untouched
 taper = np.exp(-((np.arange(LMAX + 1) / 32.0) ** 4))

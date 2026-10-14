@@ -251,9 +251,7 @@ class Rheology:
             raise ValueError(
                 f"expected {self.num_branches} weight arrays, got {len(weights)}"
             )
-        delta = sum(
-            (w - 1.0) * mu_k for w, mu_k in zip(weights, self.mu)
-        )
+        delta = sum((w - 1.0) * mu_k for w, mu_k in zip(weights, self.mu))
         m = self.material.moduli
         return NodalModuli(
             m.A + (4.0 / 3.0) * delta,

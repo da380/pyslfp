@@ -854,5 +854,3 @@ class SeaLevelEquation:
             SHGrid.from_array(self._synthesise(potential_lm), grid=grid, copy=False),
             angular_velocity_change,
         )
-
-

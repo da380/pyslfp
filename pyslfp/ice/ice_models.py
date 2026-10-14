@@ -94,7 +94,6 @@ class BaseIceModel(ABC):
         """
         pass
 
-
     def animate(
         self,
         output_file: str,

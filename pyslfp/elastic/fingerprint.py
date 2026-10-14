@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Optional, Tuple
 
 import numpy as np
-from pyshtools import SHGrid
+from pyshtools import SHCoeffs, SHGrid
 
 from ..core import EarthState, SeaLevelEquation
 

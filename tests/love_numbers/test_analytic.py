@@ -16,7 +16,6 @@ compressible, so the gate runs at kappa / mu = 1600 and the tolerance
 is the measured compressibility residual, well below the leading
 mu / kappa correction's room."""
 
-import numpy as np
 import pytest
 
 from planetmodel import LayeredIsotropicElastic, RadialMesh
@@ -29,9 +28,7 @@ LMAX = 8
 
 @pytest.fixture(scope="module")
 def love():
-    model = LayeredIsotropicElastic(
-        [0.0, RADIUS], rho=[RHO], vp=[2.0e5], vs=[VS]
-    )
+    model = LayeredIsotropicElastic([0.0, RADIUS], rho=[RHO], vp=[2.0e5], vs=[VS])
     material = Material(RadialMesh(model, ngll=5, lmax=LMAX), model)
     return love_numbers(material, LMAX), material.surface_gravity
 

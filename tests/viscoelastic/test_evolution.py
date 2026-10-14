@@ -46,9 +46,7 @@ def setting():
     lats = state.model.lats()[:, None] * np.ones_like(state.model.lons())[None, :]
     thickness = 100.0 / earth.parameters.length_scale
     cap = np.where(lats > 45.0, earth.parameters.ice_density * thickness, 0.0)
-    load = SHGrid.from_array(
-        cap * np.ones_like(ice.data), grid=earth.grid, copy=False
-    )
+    load = SHGrid.from_array(cap * np.ones_like(ice.data), grid=earth.grid, copy=False)
     # band-limit the sharp cap so every solver sees the same field
     load = state.model.expand_coefficient(state.model.expand_field(load))
     tau_nd = TAU_SI / earth.parameters.scales.factor(
@@ -58,9 +56,7 @@ def setting():
 
 
 def _maxwell_operator(material):
-    return ViscoelasticOperator(
-        Rheology.maxwell(material, MU * TAU_SI), LMAX
-    )
+    return ViscoelasticOperator(Rheology.maxwell(material, MU * TAU_SI), LMAX)
 
 
 def test_elastic_fingerprint_is_recovered(setting):
@@ -128,9 +124,7 @@ class _MeltingCap(BaseIceModel):
     START = 10.0  # ka
     THICKNESS = 5000.0  # m
 
-    def get_ice_thickness(
-        self, date, lmax, /, *, grid="DH", sampling=1, extend=True
-    ):
+    def get_ice_thickness(self, date, lmax, /, *, grid="DH", sampling=1, extend=True):
         grid, sampling = self.resolve_grid(grid, sampling)
         cap = SHGrid.from_cap(
             15.0, 60.0, -85.0, lmax=lmax, grid=grid, sampling=sampling, extend=extend
@@ -159,9 +153,10 @@ def test_ice_history_run(setting):
     assert np.allclose([snap.date for snap in snapshots], dates)
     assert snapshots[0].t == 0.0
     # melting grounded ice raises the ocean mean
-    mean = earth.integrate(
-        snapshots[-1].sea_level_change * state.ocean_function
-    ) / state.ocean_area
+    mean = (
+        earth.integrate(snapshots[-1].sea_level_change * state.ocean_function)
+        / state.ocean_area
+    )
     assert mean * earth.parameters.length_scale > 1.0
     with pytest.raises(ValueError, match="decreasing"):
         evo.run_ice_history(dates[::-1], ice_model)
@@ -175,9 +170,7 @@ def test_inconsistent_moments_are_refused(setting):
     with a pointer at the remedies, and the axial-only mode runs."""
     material, earth, _, _, _ = setting
     model = material.model
-    raw_earth = EarthModel.from_planet_model(
-        model, LMAX, mesh=material.mesh
-    )
+    raw_earth = EarthModel.from_planet_model(model, LMAX, mesh=material.mesh)
     ice_model, _ = _history_state(material, raw_earth)
     ice = ice_model.get_ice_thickness(
         _MeltingCap.START, LMAX, grid=raw_earth.grid_name, extend=raw_earth.extend
@@ -202,9 +195,7 @@ def test_initial_sea_level_calibration(setting):
     ice_model, truth = _history_state(material, earth)
     operator = _maxwell_operator(material)
     dates = np.linspace(10.0, 0.0, 6)
-    snapshots, _ = SeaLevelEvolution(operator, truth).run_ice_history(
-        dates, ice_model
-    )
+    snapshots, _ = SeaLevelEvolution(operator, truth).run_ice_history(dates, ice_model)
     observed = SHGrid.from_array(
         truth.sea_level.data + snapshots[-1].sea_level_change.data, grid=earth.grid
     )

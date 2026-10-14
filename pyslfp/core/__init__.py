@@ -8,7 +8,22 @@ table of a viscoelastic evolution.  Nothing in the engine is elastic
 but the table it is handed.
 """
 
-from .model import EarthModel, EarthModelParameters
+from .model import (
+    EQUATORIAL_MOMENT_OF_INERTIA,
+    EQUATORIAL_RADIUS,
+    GRAVITATIONAL_ACCELERATION,
+    GRAVITATIONAL_CONSTANT,
+    ICE_DENSITY,
+    MASS,
+    MEAN_RADIUS,
+    MEAN_SEA_FLOOR_RADIUS,
+    POLAR_MOMENT_OF_INERTIA,
+    POLAR_RADIUS,
+    ROTATION_FREQUENCY,
+    WATER_DENSITY,
+    EarthModel,
+    EarthModelParameters,
+)
 from .sea_level import SeaLevelEquation
 from .state import EarthState
 
@@ -17,4 +32,16 @@ __all__ = [
     "EarthModelParameters",
     "EarthState",
     "SeaLevelEquation",
+    "EQUATORIAL_RADIUS",
+    "POLAR_RADIUS",
+    "MEAN_RADIUS",
+    "MEAN_SEA_FLOOR_RADIUS",
+    "MASS",
+    "GRAVITATIONAL_ACCELERATION",
+    "GRAVITATIONAL_CONSTANT",
+    "EQUATORIAL_MOMENT_OF_INERTIA",
+    "POLAR_MOMENT_OF_INERTIA",
+    "ROTATION_FREQUENCY",
+    "WATER_DENSITY",
+    "ICE_DENSITY",
 ]

@@ -6,7 +6,7 @@ import pytest
 import numpy as np
 import pygeoinf as inf
 
-from pyslfp.state import EarthState
+from pyslfp.core import EarthState
 from pyslfp.linear_operators.physics import FingerPrintOperator
 from pyslfp.linear_operators.altimetry import (
     ocean_altimetry_points,

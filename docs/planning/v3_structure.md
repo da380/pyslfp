@@ -2,7 +2,9 @@
 
 Decisions settled with David on 14 October 2026; this records the
 target and the reasoning so the restructuring commit needs no
-narrative.
+narrative.  Executed the same day: the moves are `git mv` (history
+preserved), the full suite and every tutorial script pass, and the
+theory note's overview names the new layout.
 
 ## The shape
 

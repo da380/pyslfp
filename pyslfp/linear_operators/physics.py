@@ -22,8 +22,8 @@ from pygeoinf import (
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
 from pyslfp.core import EarthModelParameters, EarthModel
-from pyslfp.physics import LinearSeaLevelEquation
-from pyslfp.state import EarthState
+from pyslfp.elastic import LinearSeaLevelEquation
+from pyslfp.core import EarthState
 
 from pyslfp.linear_operators.utils import underlying_space
 

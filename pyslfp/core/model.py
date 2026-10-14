@@ -18,7 +18,7 @@ from pyshtools.utils import DHaj
 from planetmodel import units
 from planetmodel.units import Scales
 
-from pyslfp.love_numbers.table import LoveNumbers
+from ..love_numbers.table import LoveNumbers
 
 # =====================================================================
 # Default Earth Model Physical Parameters (PREM and standard values)

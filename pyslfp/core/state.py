@@ -16,10 +16,10 @@ from pyshtools import SHGrid
 from cartopy.mpl.geoaxes import GeoAxes
 
 
-from .core import EarthModel
-from .regions import Regions
-from .ice import AnalyticalIceModel, BaseIceSeaLevelModel, IceNG
-from .plot import plot_coastline
+from .model import EarthModel
+from ..regions import Regions
+from ..ice import AnalyticalIceModel, BaseIceSeaLevelModel, IceNG
+from ..plot import plot_coastline
 
 
 class EarthState(Regions):
@@ -93,7 +93,7 @@ class EarthState(Regions):
         Only a model carrying a sea level history (an inversion product
         such as ICE-NG) can supply a state directly; for a
         thickness-only model the initial sea level is found separately,
-        e.g. by `pyslfp.gia.calibrate_initial_sea_level`.
+        e.g. by `pyslfp.viscoelastic.calibrate_initial_sea_level`.
 
         Args:
             ice_model (BaseIceSeaLevelModel): The ice and sea level model,

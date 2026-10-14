@@ -7,7 +7,7 @@ import pytest
 
 from planetmodel import LayeredIsotropicElastic, RadialMesh
 from pyslfp.love_numbers import Material, solve_degree
-from pyslfp.gia import Rheology, ViscoelasticOperator
+from pyslfp.viscoelastic import Rheology, ViscoelasticOperator
 
 RHO, VS, RADIUS = 5510.0, 5000.0, 6.371e6
 MU = RHO * VS * VS

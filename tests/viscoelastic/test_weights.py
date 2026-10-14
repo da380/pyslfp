@@ -3,7 +3,7 @@ prescribed-strain exactness properties the steppers rely on."""
 
 import numpy as np
 
-from pyslfp.gia import backward_euler_weight, exponential_trapezoid_weights
+from pyslfp.viscoelastic import backward_euler_weight, exponential_trapezoid_weights
 
 
 def test_limits_and_bounds():

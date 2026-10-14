@@ -9,7 +9,8 @@ from pyshtools import SHGrid, SHCoeffs
 
 from planetmodel import units
 
-from pyslfp.core import EarthModelParameters, LoveNumbers, EarthModel
+from pyslfp.core import EarthModelParameters, EarthModel
+from pyslfp.love_numbers import LoveNumbers
 from pyslfp.core import (
     MEAN_RADIUS,
     MEAN_SEA_FLOOR_RADIUS,

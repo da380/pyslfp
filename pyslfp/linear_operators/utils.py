@@ -30,7 +30,7 @@ from pygeoinf import (
 )
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
-from pyslfp.state import EarthState
+from pyslfp.core import EarthState
 
 
 def underlying_space(space: HilbertSpace, /) -> HilbertSpace:

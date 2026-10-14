@@ -13,7 +13,7 @@ from pyshtools import SHGrid
 from pygeoinf import LinearOperator, CholeskySolver
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
-from pyslfp.state import EarthState
+from pyslfp.core import EarthState
 from pyslfp.linear_operators.utils import (
     underlying_space,
     averaging_operator,

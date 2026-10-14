@@ -9,10 +9,10 @@ from pyshtools import SHGrid
 
 from pyslfp.core import EarthModel
 from pyslfp.ice import BaseIceModel
-from pyslfp.physics import SeaLevelEquation
-from pyslfp.state import EarthState
+from pyslfp.core import SeaLevelEquation
+from pyslfp.core import EarthState
 from pyslfp.love_numbers import Material, fluid_tidal_number, love_numbers
-from pyslfp.gia import (
+from pyslfp.viscoelastic import (
     Rheology,
     SeaLevelEvolution,
     ViscoelasticOperator,

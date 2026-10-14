@@ -5,7 +5,7 @@ Test suite for mass load conversions and composite domain operators.
 import pytest
 import pygeoinf as inf
 
-from pyslfp.state import EarthState
+from pyslfp.core import EarthState
 from pyslfp.linear_operators.physics import lebesgue_load_space, sobolev_load_space
 from pyslfp.linear_operators.loads import (
     ice_thickness_change_to_load_operator,

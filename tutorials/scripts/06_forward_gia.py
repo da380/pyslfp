@@ -19,7 +19,7 @@ import numpy as np
 from planetmodel import PREM, units
 
 import pyslfp as sl
-from pyslfp.gia import Rheology, SeaLevelEvolution, ViscoelasticOperator
+from pyslfp.viscoelastic import Rheology, SeaLevelEvolution, ViscoelasticOperator
 from pyslfp.ice import IceNG
 from pyslfp.love_numbers import Material, graded_mesh
 

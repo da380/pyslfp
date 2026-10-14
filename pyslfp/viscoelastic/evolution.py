@@ -31,8 +31,8 @@ from planetmodel import units
 from ..core import EarthModel
 from ..ice import BaseIceModel
 from ..love_numbers import fluid_tidal_number
-from ..physics import SeaLevelEquation
-from ..state import EarthState
+from ..core import SeaLevelEquation
+from ..core import EarthState
 from .operator import ViscoelasticOperator, ViscoelasticState
 
 __all__ = [

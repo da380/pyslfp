@@ -1,9 +1,14 @@
 """
-Core physics solvers for the pyslfp library.
+The sea level engine.
 
-This module contains the SeaLevelEquation class, which acts as the primary
-engine for calculating gravitationally consistent sea-level fingerprints,
-handling rotational feedbacks, and computing non-linear shoreline migration.
+This module contains the SeaLevelEquation class, which solves the
+gravitationally consistent sea level equation -- linear, generalised or
+nonlinear with shoreline migration, with the rotational feedbacks -- for
+whatever Love numbers its Earth model carries.  The elastic fingerprint
+driver (`pyslfp.elastic`) hands it the elastic table once; the
+viscoelastic evolution (`pyslfp.viscoelastic`) hands it a per-step
+effective table and the memory responses through the generalised
+channels.
 
 Numerical scheme
 ----------------
@@ -39,7 +44,7 @@ import warnings
 import numpy as np
 from pyshtools import SHCoeffs, SHGrid
 
-from .core import EarthModel
+from .model import EarthModel
 from .state import EarthState
 
 

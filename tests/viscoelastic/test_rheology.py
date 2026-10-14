@@ -6,7 +6,7 @@ import pytest
 
 from planetmodel import PREM, LayeredIsotropicElastic, RadialMesh, constant_field
 from pyslfp.love_numbers import Material
-from pyslfp.gia import Rheology
+from pyslfp.viscoelastic import Rheology
 
 RHO, VS, VP = 5510.0, 5000.0, 12000.0
 RADIUS = 6.371e6

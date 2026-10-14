@@ -80,11 +80,14 @@ quasi-static, self-gravitating loading problem of such a model at each degree
 $\ell$ (Section~\ref{sec:radial}), and returns a table of generalised Love
 numbers (Section~\ref{sec:love}). A default table for PREM without its ocean
 layer, for degrees $0\le\ell\le 4096$, is distributed with the library.
-\item The sea level solvers in \texttt{pyslfp.physics} work entirely in the
+\item The sea level solvers in \texttt{pyslfp.core} work entirely in the
 spherical harmonic domain on the surface: given the Love numbers they solve
 the sea level equation by fixed-point iteration, with the rotational feedback
 eliminated exactly within each iteration (Sections~\ref{sec:sle}
-and~\ref{sec:rotation}).
+and~\ref{sec:rotation}). Two thin drivers sit over this shared engine:
+\texttt{pyslfp.elastic}, for which a fingerprint is a single equilibrium
+solve, and \texttt{pyslfp.viscoelastic}, whose time stepping drives the same
+engine with per-step effective Love numbers (Section~\ref{sec:visco}).
 \end{enumerate}
 The class \code{EarthModel} binds a Love number table to a set of
 non-dimensional scales and spherical harmonic conventions; it adopts the body

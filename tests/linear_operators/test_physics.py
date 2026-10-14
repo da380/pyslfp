@@ -5,7 +5,7 @@ Test suite for the FingerPrintOperator and core physical mappings.
 import pytest
 import pygeoinf as inf
 
-from pyslfp.state import EarthState
+from pyslfp.core import EarthState
 from pyslfp.linear_operators.physics import (
     FingerPrintOperator,
     centrifugal_potential_operator,

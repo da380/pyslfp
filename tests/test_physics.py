@@ -8,8 +8,9 @@ from pyshtools import SHGrid
 
 from pyslfp.core import EarthModel
 from pyslfp.ice import AnalyticalIceModel
-from pyslfp.state import EarthState
-from pyslfp.physics import SeaLevelEquation, LinearSeaLevelEquation
+from pyslfp.core import EarthState
+from pyslfp.core import SeaLevelEquation
+from pyslfp.elastic import LinearSeaLevelEquation
 
 
 # ==================================================================== #

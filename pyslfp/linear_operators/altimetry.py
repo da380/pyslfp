@@ -25,7 +25,7 @@ from pygeoinf import (
 )
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
-from pyslfp.state import EarthState
+from pyslfp.core import EarthState
 from pyslfp.linear_operators.utils import check_response_space
 from pyslfp.linear_operators.physics import (
     FingerPrintOperator,

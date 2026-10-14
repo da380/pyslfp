@@ -8,7 +8,7 @@ import numpy as np
 import pygeoinf as inf
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
-from pyslfp.state import EarthState
+from pyslfp.core import EarthState
 from pyslfp.linear_operators.utils import (
     underlying_space,
     check_load_space,

@@ -27,7 +27,7 @@ import numpy as np
 from planetmodel import PREM
 
 import pyslfp as sl
-from pyslfp.gia import Rheology, SeaLevelEvolution, ViscoelasticOperator
+from pyslfp.viscoelastic import Rheology, SeaLevelEvolution, ViscoelasticOperator
 from pyslfp.ice import IceNG
 from pyslfp.love_numbers import Material, graded_mesh
 
@@ -57,7 +57,7 @@ operator = ViscoelasticOperator(Rheology.maxwell(material, viscosity), LMAX)
 # product of an inversion, it carries a sea level history alongside
 # the ice, so the state can be read straight off it.  A thickness-only
 # ice model would instead need its initial sea level found by
-# iteration against the present day (pyslfp.gia.
+# iteration against the present day (pyslfp.viscoelastic.
 # calibrate_initial_sea_level).
 # ----------------------------------------------------------------------
 

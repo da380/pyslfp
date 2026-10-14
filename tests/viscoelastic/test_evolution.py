@@ -327,3 +327,194 @@ def test_rotation_feeds_back_and_evolves(setting):
         np.abs(off[-1].sea_level_change.data - snapshots[-1].sea_level_change.data)
     )
     assert difference > 1e-6 * np.max(np.abs(snapshots[-1].sea_level_change.data))
+
+
+def test_discrete_adjoint_gradient_identity(setting):
+    """The discrete adjoint's kernels predict the change of a sea-level
+    functional under ANY ice perturbation exactly (frozen shorelines:
+    the forward map is linear), feedbacks on and axial-only."""
+    material, earth, _, _, _ = setting
+    ice_model, state = _history_state(material, earth)
+    operator = _maxwell_operator(material)
+    evo = SeaLevelEvolution(operator, state)
+    dates = np.linspace(10.0, 0.0, 4)
+    rng = np.random.default_rng(11)
+    scale = earth.parameters.length_scale
+
+    def smooth_grid(amplitude):
+        c = rng.normal(size=(2, LMAX + 1, LMAX + 1))
+        for degree in range(LMAX + 1):
+            c[:, degree, degree + 1 :] = 0.0
+        c[1, :, 0] = 0.0
+        from pyshtools import SHCoeffs
+
+        return amplitude * earth.expand_coefficient(
+            SHCoeffs.from_array(
+                c, normalization=earth.normalization, csphase=earth.csphase
+            )
+        )
+
+    deltas = {float(d): smooth_grid(10.0 / scale) for d in dates}
+
+    class _Perturbed(BaseIceModel):
+        def get_ice_thickness(
+            self, date, lmax, /, *, grid="DH", sampling=1, extend=True
+        ):
+            base = ice_model.get_ice_thickness(
+                date, lmax, grid=grid, sampling=sampling, extend=extend
+            )
+            return SHGrid.from_array(
+                base.data + deltas[float(date)].data, grid=base.grid
+            )
+
+    perturbed = _Perturbed(length_scale=scale)
+    measurement = {
+        float(dates[-1]): smooth_grid(1.0),
+        float(dates[1]): smooth_grid(0.5),
+    }
+
+    for mode in (True, "axial"):
+
+        def functional(model_in):
+            snapshots, _ = evo.run_ice_history(
+                dates, model_in, rotational_feedbacks=mode, rtol=1e-12
+            )
+            total = 0.0
+            for snap in snapshots:
+                for key, g in measurement.items():
+                    if np.isclose(snap.date, key):
+                        total += earth.integrate(
+                            SHGrid.from_array(
+                                g.data * snap.sea_level_change.data, grid=earth.grid
+                            )
+                        )
+            return total
+
+        exact = functional(perturbed) - functional(ice_model)
+        kernels = evo.adjoint_ice_history(
+            dates, measurement, rotational_feedbacks=mode, rtol=1e-12
+        )
+        predicted = sum(
+            earth.integrate(
+                SHGrid.from_array(
+                    kernels.thickness[n].data * deltas[float(dates[n])].data,
+                    grid=earth.grid,
+                )
+            )
+            for n in range(dates.size)
+        )
+        assert abs(predicted - exact) < 1e-6 * abs(exact), (mode, exact, predicted)
+
+
+def test_kernel_singular_parts_are_separated(setting):
+    """The distributional view of the ice kernels (Yu et al. 2025,
+    Section 3.7): under date-grid refinement the continuous density
+    converges, the raw node duals merely scale with the time weights,
+    and the delta amplitudes (the instantaneous lumps and the t0
+    baseline) are grid-independent."""
+    from pyshtools import SHCoeffs
+
+    material, earth, _, _, _ = setting
+    ice_model, state = _history_state(material, earth)
+    evo = SeaLevelEvolution(_maxwell_operator(material), state)
+    rng = np.random.default_rng(2)
+    c = rng.normal(size=(2, LMAX + 1, LMAX + 1))
+    for degree in range(LMAX + 1):
+        c[:, degree, degree + 1 :] = 0.0
+    c[1, :, 0] = 0.0
+    g = earth.expand_coefficient(
+        SHCoeffs.from_array(c, normalization=earth.normalization, csphase=earth.csphase)
+    )
+    measurement = {0.0: g}
+    coarse = evo.adjoint_ice_history(np.linspace(10.0, 0.0, 5), measurement, rtol=1e-11)
+    fine = evo.adjoint_ice_history(np.linspace(10.0, 0.0, 9), measurement, rtol=1e-11)
+    # the shared date 5.0 ka sits at index 2 (coarse) and 4 (fine)
+    scale = np.max(np.abs(fine.density[4].data))
+    assert np.max(np.abs(coarse.density[2].data - fine.density[4].data)) < 0.12 * scale
+    ratio = np.max(np.abs(fine.thickness[4].data)) / np.max(
+        np.abs(coarse.thickness[2].data)
+    )
+    assert 0.4 < ratio < 0.6  # the raw node dual scales with the weight
+    lump = np.max(np.abs(fine.instantaneous[0.0].data))
+    assert (
+        np.max(np.abs(coarse.instantaneous[0.0].data - fine.instantaneous[0.0].data))
+        < 1e-12 * lump
+    )
+    top = np.max(np.abs(fine.baseline.data))
+    assert np.max(np.abs(coarse.baseline.data - fine.baseline.data)) < 0.05 * top
+
+
+def test_quelled_rate_kernels(setting):
+    """Backus quelling: the kernels with respect to the thickness RATE
+    are the cumulative tails of the node duals -- bounded, convergent
+    under refinement, exact against rate perturbations (which generate
+    thickness histories continuous in time), and blind to a uniform
+    thickness shift."""
+    from pyshtools import SHCoeffs
+
+    material, earth, _, _, _ = setting
+    ice_model, state = _history_state(material, earth)
+    evo = SeaLevelEvolution(_maxwell_operator(material), state)
+    rng = np.random.default_rng(13)
+    scale = earth.parameters.length_scale
+    dates = np.linspace(10.0, 0.0, 5)
+
+    def smooth(amplitude):
+        c = rng.normal(size=(2, LMAX + 1, LMAX + 1))
+        for degree in range(LMAX + 1):
+            c[:, degree, degree + 1 :] = 0.0
+        c[1, :, 0] = 0.0
+        return amplitude * earth.expand_coefficient(
+            SHCoeffs.from_array(
+                c, normalization=earth.normalization, csphase=earth.csphase
+            )
+        )
+
+    measurement = {0.0: smooth(1.0)}
+    kernels = evo.adjoint_ice_history(dates, measurement, rtol=1e-12)
+
+    # blind to a uniform shift: the node duals sum to zero exactly
+    total = sum(t.data for t in kernels.thickness)
+    assert np.max(np.abs(total)) <= 1e-12 * np.max(np.abs(kernels.thickness[-1].data))
+
+    # exact against per-interval rate perturbations
+    h = dates[:-1] - dates[1:]
+    rates = [smooth(2.0 / scale) for _ in range(h.size)]
+    cumulative = [np.zeros_like(rates[0].data)]
+    for k in range(h.size):
+        cumulative.append(cumulative[-1] + h[k] * rates[k].data)
+
+    class _RatePerturbed(BaseIceModel):
+        def get_ice_thickness(
+            self, date, lmax, /, *, grid="DH", sampling=1, extend=True
+        ):
+            base = ice_model.get_ice_thickness(
+                date, lmax, grid=grid, sampling=sampling, extend=extend
+            )
+            node = int(np.flatnonzero(np.isclose(dates, date))[0])
+            return SHGrid.from_array(base.data + cumulative[node], grid=base.grid)
+
+    def functional(model_in):
+        snapshots, _ = evo.run_ice_history(dates, model_in, rtol=1e-12)
+        g = measurement[0.0]
+        return earth.integrate(
+            SHGrid.from_array(
+                g.data * snapshots[-1].sea_level_change.data, grid=earth.grid
+            )
+        )
+
+    exact = functional(_RatePerturbed(length_scale=scale)) - functional(ice_model)
+    predicted = sum(
+        h[k]
+        * earth.integrate(
+            SHGrid.from_array(kernels.rate[k].data * rates[k].data, grid=earth.grid)
+        )
+        for k in range(h.size)
+    )
+    assert abs(predicted - exact) < 1e-6 * abs(exact), (exact, predicted)
+
+    # refinement: a coarse interval's value is the mean of its halves
+    fine = evo.adjoint_ice_history(np.linspace(10.0, 0.0, 9), measurement, rtol=1e-12)
+    pair_mean = 0.5 * (fine.rate[2].data + fine.rate[3].data)
+    top = np.max(np.abs(pair_mean))
+    assert np.max(np.abs(kernels.rate[1].data - pair_mean)) < 0.05 * top

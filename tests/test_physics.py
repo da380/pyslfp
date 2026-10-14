@@ -582,3 +582,75 @@ def test_solvers_on_dh2_grid():
         state, ice_thickness_change=ice_change
     )
     assert new_state.model.grid_name == "DH2"
+
+
+def test_adjoint_generalised_solve_dot_product():
+    """<g, G p> = <G^T g, p> over random inputs and duals: the transpose
+    of the generalised solve's step channels is exact to the solvers'
+    tolerance, in every rotation mode."""
+    from pyshtools import SHCoeffs, SHGrid
+
+    state = EarthState.for_testing(16)
+    model = state.model
+    sle = SeaLevelEquation(model)
+    rng = np.random.default_rng(7)
+
+    def random_coeffs():
+        c = rng.normal(size=(2, model.lmax + 1, model.lmax + 1))
+        for degree in range(model.lmax + 1):
+            c[:, degree, degree + 1 :] = 0.0
+        c[1, :, 0] = 0.0
+        return c
+
+    def to_grid(c):
+        return model.expand_coefficient(
+            SHCoeffs.from_array(
+                c, normalization=model.normalization, csphase=model.csphase
+            )
+        )
+
+    def pair_grid(a, b):
+        return model.integrate(SHGrid.from_array(a.data * b.data, grid=model.grid))
+
+    for mode in (True, "axial", False):
+        load = to_grid(random_coeffs())
+        s_u = random_coeffs()
+        s_phi = random_coeffs()
+        j = float(rng.normal())
+        xi, u, phi, omega = sle.solve_generalised_equation(
+            state,
+            direct_load=load,
+            displacement_response=SHCoeffs.from_array(
+                s_u, normalization=model.normalization, csphase=model.csphase
+            ),
+            gravitational_potential_response=SHCoeffs.from_array(
+                s_phi, normalization=model.normalization, csphase=model.csphase
+            ),
+            inertia_moment_change=j,
+            rotational_feedbacks=mode,
+            rtol=1e-13,
+        )
+        g_xi, g_u, g_phi = (to_grid(random_coeffs()) for _ in range(3))
+        g_omega = rng.normal(size=3)
+        forward = (
+            pair_grid(g_xi, xi)
+            + pair_grid(g_u, u)
+            + pair_grid(g_phi, phi)
+            + float(g_omega @ omega)
+        )
+        f_dual, su_dual, sphi_dual, j_dual = sle.adjoint_generalised_solve(
+            state,
+            sea_level_dual=g_xi,
+            displacement_dual=g_u,
+            potential_dual=g_phi,
+            angular_velocity_dual=g_omega,
+            rotational_feedbacks=mode,
+            rtol=1e-13,
+        )
+        backward = (
+            pair_grid(f_dual, load)
+            + float(np.sum(su_dual.coeffs * s_u))
+            + float(np.sum(sphi_dual.coeffs * s_phi))
+            + j_dual * j
+        )
+        assert abs(forward - backward) < 1e-9 * abs(forward), (mode, forward, backward)

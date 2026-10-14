@@ -301,6 +301,63 @@ earlier or repeats cycles.
   engine in core) as discussed on 14 Oct; nothing written today
   fights it.
 
+## The adjoint step: the discrete transpose
+
+The reverse-mode of one viscoelastic step, derived from the code's own
+update equations; the dot-product gate <F x, y> = <x, F^T y> at machine
+precision is the arbiter of every factor below.
+
+### The radial pieces
+
+Per degree, with K the (symmetric) effective or unrelaxed system, D the
+strain map, W the nodal weight diag(mu_k wq w_c) with w_c in
+(k^2(k^2-2), 4/3, k^2), E/A/B the diagonal scheme weights, P the
+surface-value rows and q the l = 0 inertia-moment row:
+
+    forward:  m~ = E m + A d-,   x_m = K^{-1} D^T W m~,
+              (U_m, phi_m, J0) = (P x_m, q . x_m),
+              x = x_m + x_sigma sigma^T + x_psi psi^T,
+              d+ = D x,   m+ = m~ + B d+.
+
+    reverse:  x-dagger   = D^T (B m+^dagger + d+^dagger),
+              sigma-dagger = x_sigma . x-dagger,  psi-dagger = x_psi . x-dagger,
+              x_m-dagger = x-dagger + P^T (U_m, phi_m)-dagger + q J0-dagger,
+              m~-dagger  = m+^dagger + W D K^{-1} x_m-dagger,
+              m-dagger   = E m~-dagger,   d-^dagger = A m~-dagger.
+
+One symmetric solve per degree per reverse step.  D^T is the
+memory-force assembly with unit weights (M = D^T W exactly, same GLL
+quadrature); P^T places the dual values at the surface dofs; the unit
+solutions x_sigma, x_psi are the flavour cache's.
+
+### The sea-level piece
+
+The engine's generalised solve (frozen C) is, symbolically, the load
+fixed point l = A[f + rho_w C S xi(l)] with, per evaluation,
+
+    xi_raw = -(H + K/g) l - (s_u + s_phi/g),
+    the rotation block (explicit scalars at degrees 0 and 2),
+    the conservation projection x -> x + (mean - <C, x>/A_O),
+
+and the outputs u = H l + s_u, phi = K l + s_phi with their degree-2/0
+rotational replacements.  Every piece is one of: a diagonal Love
+multiplication (self-transposed per degree), a multiplication by the
+fixed ocean function (self-transposed in the grid pairing), the
+synthesis/analysis pair (mutual transposes up to the quadrature
+weights), a rank-one projection, and the closed-form rotation scalars
+(transposed directly).  The adjoint is therefore implemented as the
+exact reverse-mode of the same code path -- a transposed fixed point in
+the load dual, run through the same Anderson mixer -- returning the
+duals of ALL the step's inputs: the direct load, the two response
+channels, and the inertia moment.  The house channel-swap realisation
+(linear_operators) exposes only the direct-load dual, which is why the
+engine grows an explicit adjoint method instead.
+
+Under migrating shorelines the forward per-step map is the nonlinear
+solver; its linearisation about the converged state has the same
+structure with C(t) read from the stored history, which is why the
+adjoint stays linear (Yu et al. 2025, Section 3.3).
+
 ## Storage
 
 State per branch: three scalars x (l, m) pairs x radial nodes, real

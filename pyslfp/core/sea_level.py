@@ -652,6 +652,210 @@ class SeaLevelEquation:
             angular_velocity_change,
         )
 
+    def adjoint_generalised_solve(
+        self,
+        state: EarthState,
+        /,
+        *,
+        sea_level_dual: Optional[SHGrid] = None,
+        displacement_dual: Optional[SHGrid] = None,
+        potential_dual: Optional[SHGrid] = None,
+        angular_velocity_dual: Optional[np.ndarray] = None,
+        rotational_feedbacks: bool = True,
+        rtol: float = 1e-9,
+        max_iterations: Optional[int] = None,
+        verbose: bool = False,
+    ) -> Tuple[SHGrid, SHCoeffs, SHCoeffs, float]:
+        """The exact transpose of the generalised solve's input channels.
+
+        Consider the linear map of `solve_generalised_equation` (frozen
+        shorelines) from the inputs (direct_load, displacement_response,
+        gravitational_potential_response, inertia_moment_change) to the
+        outputs (sea level change, displacement, potential, angular
+        velocity), and a linear functional of the outputs
+
+            J = int g_xi xi dS + int g_u u dS + int g_phi phi dS
+                + g_omega . omega.
+
+        This method returns the four input duals (f, s_u, s_phi, j) with
+
+            J = int f delta_zeta dS + sum s_u : delta_r_u
+                + sum s_phi : delta_r_phi + j delta_moment,
+
+        the response-channel duals paired coefficient-wise.  It is the
+        reverse-mode of the forward code path -- the transposed load
+        fixed point, run through the same Anderson mixer -- so the
+        identity holds to the solvers' tolerance; a viscoelastic adjoint
+        step chains it with the transposed radial updates.  The load
+        channels zeta^u, zeta^phi and the angular momentum input are not
+        carried (the time stepping does not use them); the elastic
+        fingerprint adjoint in `pyslfp.linear_operators` covers them.
+
+        Args:
+            state (EarthState): The background state, as in the forward.
+            sea_level_dual (Optional[SHGrid]): g_xi, a density paired
+                with the sea level change by the surface integral.
+            displacement_dual (Optional[SHGrid]): g_u, likewise.
+            potential_dual (Optional[SHGrid]): g_phi, likewise.
+            angular_velocity_dual (Optional[np.ndarray]): g_omega, [x, y, z].
+            rotational_feedbacks (bool | str): As in the forward; must
+                match the forward solve being transposed.
+            rtol, max_iterations, verbose: As in the forward.
+
+        Returns:
+            Tuple[SHGrid, SHCoeffs, SHCoeffs, float]: The duals of the
+            direct load (a grid), the two response channels (coefficient
+            arrays) and the inertia moment.
+        """
+        if rotational_feedbacks not in (True, False, "axial"):
+            raise ValueError(
+                "rotational_feedbacks must be True, False or 'axial', "
+                f"got {rotational_feedbacks!r}"
+            )
+        transverse = rotational_feedbacks is True
+        model = self._model
+        g = self._g
+        water_density = self._water_density
+        ocean_function = state.ocean_function.data
+        ocean_area = state.ocean_area
+        r2 = self._radius**2
+
+        def coeffs(x: np.ndarray) -> SHCoeffs:
+            return SHCoeffs.from_array(
+                x, normalization=model.normalization, csphase=model.csphase
+            )
+
+        zero_c = np.zeros((2, model.lmax + 1, model.lmax + 1))
+        g_xi = np.zeros_like(ocean_function)
+        if sea_level_dual is not None:
+            model.check_field(sea_level_dual)
+            g_xi = g_xi + sea_level_dual.data
+        lam_u = zero_c.copy()
+        if displacement_dual is not None:
+            model.check_field(displacement_dual)
+            lam_u = r2 * self._expand(displacement_dual.data)
+        lam_phi = zero_c.copy()
+        if potential_dual is not None:
+            model.check_field(potential_dual)
+            lam_phi = r2 * self._expand(potential_dual.data)
+        g_omega = np.zeros(3)
+        if angular_velocity_dual is not None:
+            g_omega = np.asarray(angular_velocity_dual, dtype=float)
+
+        # duals the synthesised outputs contribute outside the fixed point
+        if rotational_feedbacks:
+            lam_u_base = lam_u.copy()
+            lam_u_base[:, 2, :2] = 0.0
+            lam_phi_base = lam_phi.copy()
+            lam_phi_base[:, 2, :2] = 0.0
+            du2_out = lam_u[:, 2, :2]
+            dphi2_out = lam_phi[:, 2, :2]
+            dpsi0_out = self._hc * lam_u[0, 0, 0] + self._kc * lam_phi[0, 0, 0]
+        else:
+            lam_u_base = lam_u
+            lam_phi_base = lam_phi
+        r_out = self._h * lam_u_base + self._k * lam_phi_base
+        hkc = self._hc + (self._kc + 1.0) / g
+
+        def reverse_once(lam: np.ndarray):
+            """One application of the transposed per-iteration map, plus
+            the stashed input-dual reads at this dual load."""
+            xi_dual = g_xi + water_density * ocean_function * (
+                self._synthesise(lam) / r2
+            )
+            mean_dual = model._integrate_data(xi_dual)
+            xg_dual = xi_dual - ocean_function * (mean_dual / ocean_area)
+            z_dual = r2 * self._expand(xg_dual)
+            new = r_out.copy()
+            stash = {"mean_dual": mean_dual, "j": 0.0}
+            if rotational_feedbacks:
+                # duals of the FULL degree-2 objects disp_2 and grav_2
+                # (forcing plus tidal response), then of the centrifugal
+                # potential, the angular velocity, and the forcings
+                z2 = z_dual[:, 2, :2].copy()
+                z_base = z_dual.copy()
+                z_base[:, 2, :2] = 0.0
+                d_disp2 = du2_out - z2
+                d_grav2 = dphi2_out - z2 / g
+                d_psi2 = -z2 / g + self._ht2 * d_disp2 + self._kt2 * d_grav2
+                d_psi0 = dpsi0_out - hkc * z_dual[0, 0, 0]
+                d_disp_forcing = d_disp2
+                d_grav_forcing = d_grav2.copy()
+                domega = g_omega.copy()
+                domega[:2] += self._rotation_factor * d_psi2[:, 1]
+                domega[2] += (
+                    self._axial_rotation_factor * d_psi2[0, 0]
+                    + self._uniform_rotation_factor * d_psi0
+                )
+                if transverse:
+                    d_grav_forcing[:, 1] += (
+                        self._inertia_factor * domega[:2] / self._rotation_denominator
+                    )
+                axial = domega[2] / self._axial_rotation_denominator
+                d_grav_forcing[0, 0] += -self._axial_inertia_factor * axial
+                dl0 = (
+                    -(self._trace_factor * (self._mu + self._mphi) + self._shell_factor)
+                    * axial
+                )
+                stash["j"] = -self._trace_factor * axial
+                new += self._slc_factor * z_base
+                new[:, 2, :2] += self._k2 * d_grav_forcing + self._h2 * d_disp_forcing
+                new[0, 0, 0] += dl0
+                stash["z_base"] = z_base
+                stash["ds_u2"] = d_disp_forcing
+                stash["ds_phi2"] = d_grav_forcing
+            else:
+                new += self._slc_factor * z_dual
+                stash["z_base"] = z_dual
+            return new, stash
+
+        if (
+            np.max(np.abs(g_xi)) == 0.0
+            and np.max(np.abs(lam_u)) == 0.0
+            and np.max(np.abs(lam_phi)) == 0.0
+            and np.max(np.abs(g_omega)) == 0.0
+        ):
+            return model.zero_grid(), coeffs(zero_c), coeffs(zero_c.copy()), 0.0
+
+        self._solver_counter += 1
+        mixer = _AndersonMixer(self.anderson_memory)
+        iter_limit = max_iterations if max_iterations is not None else 1000
+        lam = np.zeros_like(zero_c)
+        err = np.inf
+        converged = False
+        count = 0
+        while count < iter_limit:
+            new, stash = reverse_once(lam)
+            scale = np.max(np.abs(new))
+            err = np.max(np.abs(new - lam)) / scale if scale > 0 else 0.0
+            if verbose:
+                print(f"Adjoint iteration = {count}, relative error = {err:6.4e}")
+            if err <= rtol:
+                converged = True
+                lam = new
+                break
+            lam = mixer.update(lam, new)
+            count += 1
+        if not converged:
+            self._warn_not_converged("Adjoint sea level solver", err, count)
+
+        # the input duals, read at the converged dual load
+        _, stash = reverse_once(lam)
+        direct_dual = self._synthesise(lam) / r2 - stash["mean_dual"] / (
+            water_density * ocean_area
+        )
+        s_u = -stash["z_base"] + lam_u_base
+        s_phi = -stash["z_base"] / g + lam_phi_base
+        if rotational_feedbacks:
+            s_u[:, 2, :2] += stash["ds_u2"]
+            s_phi[:, 2, :2] += stash["ds_phi2"]
+        return (
+            SHGrid.from_array(direct_dual, grid=model.grid, copy=False),
+            coeffs(s_u),
+            coeffs(s_phi),
+            float(stash["j"]),
+        )
+
     def solve_nonlinear_equation(
         self,
         initial_state: EarthState,

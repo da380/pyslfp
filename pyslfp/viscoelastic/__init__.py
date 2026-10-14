@@ -8,6 +8,7 @@ and gia_notes.md.
 """
 
 from .evolution import (
+    IceKernels,
     SeaLevelEvolution,
     SeaLevelSnapshot,
     calibrate_initial_sea_level,
@@ -24,6 +25,7 @@ from .weights import backward_euler_weight, exponential_trapezoid_weights
 __all__ = [
     "SCHEMES",
     "Rheology",
+    "IceKernels",
     "SeaLevelEvolution",
     "calibrate_initial_sea_level",
     "SeaLevelSnapshot",

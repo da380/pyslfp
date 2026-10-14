@@ -50,6 +50,62 @@ MOMENT = units.MASS * units.LENGTH**2
 
 
 @dataclass(frozen=True)
+class IceKernels:
+    """Sensitivity kernels of one objective functional with respect to
+    the ice history, from an adjoint calculation, in the Earth model's
+    units.
+
+    Two views of the same object are carried.  The DISCRETE view:
+    `load_duals[n]` is the dual of the direct ice-load grid at date
+    node n, and `thickness[n]` the dual of the ice thickness there,
+    the grounding factor applied and the initial-thickness dependence
+    folded into node 0; these satisfy the gradient identity exactly
+    for perturbations on the date grid, but their values lump the
+    kernel's singular parts in with the continuous part, so they do
+    not converge pointwise under grid refinement.
+
+    The DISTRIBUTIONAL view separates the parts (Yu et al. 2025,
+    Section 3.7 and eq. 81): the kernel is
+
+        K_I(x, t) = density(x, t)
+                    + sum_i instantaneous_i(x) delta(t - t_i)
+                    + baseline(x) delta(t - t0),
+
+    with a delta at each observation time t_i, whose amplitude is the
+    generalised (instantaneous, unrelaxed) fingerprint adjoint of that
+    measurement and is independent of the date grid; the delta at the
+    initial time from the thickness baseline; and a continuous
+    `density` (per kiloyear) that converges under grid refinement.
+    The QUELLED view (Backus; see the discussion in Yu et al. 2025)
+    removes the singularities altogether by the conjugate change of
+    variable: with the history written as I(t) = I(t0) + int di/dt,
+    the kernel with respect to the RATE of thickness change is the
+    cumulative time integral of K_I, which turns each delta into a
+    finite jump: `rate[k]` is that kernel on the interval between
+    dates[k-1] and dates[k] -- bounded, piecewise continuous in time
+    with finite jumps at the observation dates only, and pairing with
+    rate perturbations that generate thickness changes CONTINUOUS in
+    time:
+
+        delta J = sum_k h_k int rate[k] (dI/dt)_k dS,
+
+    h_k the interval length in kiloyears and the rate constant on the
+    interval.  In this parameterisation the dual of the initial
+    thickness vanishes identically under frozen shorelines (a uniform
+    thickness shift loads nothing), which the calculation satisfies by
+    construction.  Any remaining inversion-side smoothing -- Sobolev
+    duals in the manner of pygeoinf -- acts on these views."""
+
+    dates: np.ndarray
+    load_duals: list[SHGrid] = field(repr=False)
+    thickness: list[SHGrid] = field(repr=False)
+    baseline: SHGrid = field(repr=False)
+    instantaneous: dict[float, SHGrid] = field(repr=False)
+    density: list[SHGrid] = field(repr=False)
+    rate: list[SHGrid] = field(repr=False)
+
+
+@dataclass(frozen=True)
 class SeaLevelSnapshot:
     """The surface fields at one time of an evolution, in the Earth
     model's non-dimensional units: the sea level change, vertical
@@ -511,6 +567,231 @@ class SeaLevelEvolution:
                 )
             )
         return snapshots, vstate
+
+    def adjoint_ice_history(
+        self,
+        dates: Sequence[float],
+        measurement: dict[float, SHGrid],
+        *,
+        rotational_feedbacks: bool = True,
+        rtol: float = 1e-9,
+    ) -> IceKernels:
+        """Ice-history sensitivity kernels by the discrete adjoint.
+
+        For the frozen-shoreline forward run over `dates` (an ice
+        history enters linearly, so no forward run is needed), and an
+        objective J = sum_i int g_i xi(date_i) dS given by the
+        `measurement` duals g_i keyed by their dates (which must lie on
+        the date grid), this computes the exact transpose of the
+        time-stepped forward map: the kernels satisfy
+
+            delta J = sum_n int load_duals[n] delta f_n dS
+                    = sum_n int thickness[n] delta I(date_n) dS
+
+        to the solvers' tolerance, for ANY perturbation on the date
+        grid.  One reversed sweep: per step, the transposed radial
+        update (one symmetric solve per degree) chained with the
+        engine's `adjoint_generalised_solve`.  Sea-level measurements
+        only, for now; displacement, potential and rotation
+        measurements need the split radial load channels.
+        """
+        dates = np.asarray(dates, dtype=float)
+        if dates.ndim != 1 or dates.size < 2 or np.any(np.diff(dates) >= 0.0):
+            raise ValueError(
+                "dates must be decreasing (kiloyears before present, the "
+                "past first), with at least two entries"
+            )
+        duals = {}
+        for key, grid in measurement.items():
+            matches = np.flatnonzero(np.isclose(dates, key))
+            if matches.size != 1:
+                raise ValueError(f"measurement date {key} is not on the date grid")
+            self.model.check_field(grid)
+            duals[int(matches[0])] = grid.data
+        op = self.operator
+        model = self.model
+        parameters = model.parameters
+        if rotational_feedbacks is True:
+            self._assert_transverse_stable()
+        kyr = KYR / parameters.scales.factor(units.TIME)
+        scheme = self.scheme
+        implicit = scheme == "backward_euler"
+        C = self.state.ocean_function.data
+        water_density = parameters.water_density
+        r2 = parameters.mean_sea_floor_radius**2
+        lmax = model.lmax
+        zero_grid = np.zeros_like(C)
+        ngll = op.material.mesh.ngll
+        K = op.rheology.num_branches
+
+        mdual = {}
+        ddual = {}
+        for l in op.degrees:
+            deg = op.degree(l)
+            ncols = 2 * (l + 1)
+            mdual[l] = np.zeros((K, 3, deg.ne, ngll, ncols))
+            ddual[l] = np.zeros((3, deg.ne, ngll, ncols))
+
+        def synth(coeffs: np.ndarray) -> np.ndarray:
+            return model.expand_coefficient(
+                SHCoeffs.from_array(
+                    coeffs,
+                    normalization=model.normalization,
+                    csphase=model.csphase,
+                )
+            ).data
+
+        def pack(values: dict[int, np.ndarray], factor: float) -> np.ndarray:
+            out = np.zeros((2, lmax + 1, lmax + 1))
+            for l, cols in values.items():
+                out[0, l, : l + 1] = cols[: l + 1]
+                out[1, l, : l + 1] = cols[l + 1 :]
+            return factor * out
+
+        def sle_dual_inputs(sigma_dual, psi_dual, node):
+            """The engine-adjoint inputs carried by the duals of the
+            step's converged load and centrifugal coefficients."""
+            g_xi = duals.get(node, zero_grid) + water_density * C * (
+                synth(sigma_dual) / r2
+            )
+            g_omega = np.array(
+                [
+                    parameters.rotation_factor * psi_dual[0, 2, 1],
+                    parameters.rotation_factor * psi_dual[1, 2, 1],
+                    parameters.axial_rotation_factor * psi_dual[0, 2, 0]
+                    + parameters.uniform_rotation_factor * psi_dual[0, 0, 0],
+                ]
+            )
+            return g_xi, g_omega
+
+        load_duals = [None] * dates.size
+        for n in range(dates.size - 1, 0, -1):
+            dt = (dates[n - 1] - dates[n]) * kyr * self._to_mat_time
+            weights = op.scheme_weights(scheme, dt)
+            x_duals = {}
+            sig_cols = {}
+            psi_cols = {}
+            for l in op.degrees:
+                deg = op.degree(l)
+                summed = ddual[l].copy()
+                for k, wk in enumerate(weights):
+                    b = 1.0 - wk[0][deg.e0 :] if implicit else wk[2][deg.e0 :]
+                    summed += b[None, :, :, None] * mdual[l][k]
+                xd = deg.strain_transpose(summed)
+                x_duals[l] = xd
+                units_lv = op.unit_responses(scheme, dt, l)
+                sig_cols[l] = units_lv[:, 0] @ xd
+                psi_cols[l] = units_lv[:, 1] @ xd
+            sigma_dual = pack(sig_cols, self._to_mat_density)
+            psi_dual = pack(psi_cols, self._to_mat_potential)
+            g_xi, g_omega = sle_dual_inputs(sigma_dual, psi_dual, n)
+            sle = self._sle_for(dt)
+            f_dual, su_dual, sphi_dual, j_dual = sle.adjoint_generalised_solve(
+                self.state,
+                sea_level_dual=SHGrid.from_array(g_xi, grid=model.grid, copy=False),
+                angular_velocity_dual=g_omega,
+                rotational_feedbacks=rotational_feedbacks,
+                rtol=rtol,
+            )
+            load_duals[n] = f_dual.data + synth(sigma_dual) / r2
+            su_cols = self._columns(su_dual.coeffs, self._to_nd_length)
+            sphi_cols = self._columns(sphi_dual.coeffs, self._to_nd_potential)
+            for l in op.degrees:
+                deg = op.degree(l)
+                rhs = (
+                    x_duals[l]
+                    + deg.surface_dual("U", su_cols(l, 0.0))
+                    + deg.surface_dual("phi", sphi_cols(l, 0.0))
+                )
+                if l == 0:
+                    rhs[:, 0] += deg.moment_row * (j_dual * self._to_nd_moment)
+                y = op.effective_system(scheme, dt, l).solve(rhs)
+                mtilde_dual = mdual[l] + deg.apply_weights(deg.strain(y))
+                for k, wk in enumerate(weights):
+                    if implicit:
+                        w = wk[0][deg.e0 :][None, :, :, None]
+                        mdual[l][k] = w * mtilde_dual[k]
+                    else:
+                        e = wk[0][deg.e0 :][None, :, :, None]
+                        mdual[l][k] = e * mtilde_dual[k]
+                if implicit:
+                    ddual[l] = np.zeros_like(ddual[l])
+                else:
+                    ddual[l] = sum(
+                        wk[1][deg.e0 :][None, :, :, None] * mtilde_dual[k]
+                        for k, wk in enumerate(weights)
+                    )
+        # the start: the instantaneous elastic solve at dates[0]
+        sig_cols = {}
+        psi_cols = {}
+        for l in op.degrees:
+            deg = op.degree(l)
+            xd = deg.strain_transpose(ddual[l])
+            units_lv = op.unit_responses(None, 0.0, l)
+            sig_cols[l] = units_lv[:, 0] @ xd
+            psi_cols[l] = units_lv[:, 1] @ xd
+        sigma_dual = pack(sig_cols, self._to_mat_density)
+        psi_dual = pack(psi_cols, self._to_mat_potential)
+        g_xi, g_omega = sle_dual_inputs(sigma_dual, psi_dual, 0)
+        f_dual, _, _, _ = self._sle_elastic().adjoint_generalised_solve(
+            self.state,
+            sea_level_dual=SHGrid.from_array(g_xi, grid=model.grid, copy=False),
+            angular_velocity_dual=g_omega,
+            rotational_feedbacks=rotational_feedbacks,
+            rtol=rtol,
+        )
+        load_duals[0] = f_dual.data + synth(sigma_dual) / r2
+
+        grounded = parameters.ice_density * (1.0 - C)
+        raw = [grounded * ld for ld in load_duals]
+        baseline = -sum(raw)
+        thickness = list(raw)
+        thickness[0] = thickness[0] + baseline
+
+        # the distributional view: the delta amplitude at each
+        # observation time is the instantaneous (unrelaxed) fingerprint
+        # adjoint of that measurement, independent of the date grid
+        instantaneous = {}
+        elastic_sle = self._sle_elastic()
+        lumps = {}
+        for node, g in duals.items():
+            f_dual, _, _, _ = elastic_sle.adjoint_generalised_solve(
+                self.state,
+                sea_level_dual=SHGrid.from_array(g, grid=model.grid, copy=False),
+                rotational_feedbacks=rotational_feedbacks,
+                rtol=rtol,
+            )
+            lumps[node] = grounded * f_dual.data
+            instantaneous[float(dates[node])] = SHGrid.from_array(
+                lumps[node], grid=model.grid
+            )
+        # trapezoidal time weights of the date grid, in kiloyears
+        w = np.empty(dates.size)
+        w[0] = 0.5 * (dates[0] - dates[1])
+        w[-1] = 0.5 * (dates[-2] - dates[-1])
+        w[1:-1] = 0.5 * (dates[:-2] - dates[2:])
+        density = [(raw[n] - lumps.get(n, 0.0)) / w[n] for n in range(dates.size)]
+
+        # the quelled kernel: with respect to the thickness RATE, the
+        # cumulative tail of the node duals -- the deltas integrate to
+        # finite jumps, and the initial-thickness dual vanishes
+        # identically (sum of all node duals plus the baseline is zero)
+        rate = []
+        tail = np.zeros_like(C)
+        for n in range(dates.size - 1, 0, -1):
+            tail = tail + raw[n]
+            rate.append(tail.copy())
+        rate.reverse()
+
+        return IceKernels(
+            dates,
+            [SHGrid.from_array(ld, grid=model.grid) for ld in load_duals],
+            [SHGrid.from_array(th, grid=model.grid) for th in thickness],
+            SHGrid.from_array(baseline, grid=model.grid),
+            instantaneous,
+            [SHGrid.from_array(d, grid=model.grid) for d in density],
+            [SHGrid.from_array(r, grid=model.grid) for r in rate],
+        )
 
 
 def calibrate_initial_sea_level(

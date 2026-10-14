@@ -135,6 +135,7 @@ class _Degree:
         self.itau = [a[e0:] for a in rheology.itau]
         self._load_vec: np.ndarray | None = None
         self._tide_vec: np.ndarray | None = None
+        self._moment_row: np.ndarray | None = None
         # the dof-assembly of nodal force values, [U-block; V-block]
         # flattened, as one sparse product: shared nodes accumulate
         nn = self.ne * mesh.ngll
@@ -183,24 +184,76 @@ class _Degree:
         d[1] = np.einsum("eqi,eic->eqc", self.B, U) - U + 0.5 * self.k2 * V
         return d
 
+    def dual_from_scalars(
+        self, cM: np.ndarray, cR: np.ndarray, cS: np.ndarray
+    ) -> np.ndarray:
+        """The dual vector pairing nodal scalar coefficients with the
+        strain operators of the test functions: the transpose of
+        `strain` under the plain nodal pairing when the coefficients
+        carry no weights, and the memory force when they carry the
+        branch moduli and quadrature."""
+        ncols = cR.shape[-1]
+        k2 = self.k2
+        bU = np.einsum("eqi,eqc->eic", self.B, cR) - cR + cS
+        bV = 0.5 * k2 * cR + np.einsum("eqi,eqc->eic", self.B, cS) - cS + cM
+        nn = cR.shape[0] * cR.shape[1]
+        stacked = np.concatenate((bU.reshape(nn, ncols), bV.reshape(nn, ncols)))
+        return self._scatter @ stacked
+
+    def apply_weights(self, field: np.ndarray) -> np.ndarray:
+        """The nodal weight W of the memory pairing, per branch: the
+        branch modulus, the quadrature and the scalar weights
+        (k^2 (k^2 - 2), 4/3, k^2) in the order `SCALARS`.  `field` has
+        shape (3, ne, ngll, ncols), one set shared by every branch, or
+        (K, 3, ne, ngll, ncols); the result always carries the branch
+        axis."""
+        k2 = self.k2
+        w_c = np.array([k2 * (k2 - 2.0), 4.0 / 3.0, k2])
+        out = np.empty((len(self.mu),) + field.shape[-4:])
+        for k, mu_k in enumerate(self.mu):
+            base = field if field.ndim == 4 else field[k]
+            out[k] = w_c[:, None, None, None] * (mu_k * self.Wq)[:, :, None] * base
+        return out
+
     def memory_force(self, mem: np.ndarray) -> np.ndarray:
         """The force of the branch states `mem`, shape (K, 3, ne, ngll,
         ncols), on the degree system: b of shape (ndof, ncols)."""
-        ncols = mem.shape[-1]
-        k2 = self.k2
-        shape = (self.ne, self.Wq.shape[1], ncols)
-        bU = np.zeros(shape)
-        bV = np.zeros(shape)
-        for k, mu_k in enumerate(self.mu):
-            w = (mu_k * self.Wq)[:, :, None]
-            cM = (k2 * (k2 - 2.0)) * w * mem[k, 0]
-            cR = (4.0 / 3.0) * w * mem[k, 1]
-            cS = k2 * w * mem[k, 2]
-            bU += np.einsum("eqi,eqc->eic", self.B, cR) - cR + cS
-            bV += 0.5 * k2 * cR + np.einsum("eqi,eqc->eic", self.B, cS) - cS + cM
-        nn = shape[0] * shape[1]
-        stacked = np.concatenate((bU.reshape(nn, ncols), bV.reshape(nn, ncols)))
-        return self._scatter @ stacked
+        weighted = self.apply_weights(mem).sum(axis=0)
+        return self.dual_from_scalars(weighted[0], weighted[1], weighted[2])
+
+    def strain_transpose(self, y: np.ndarray) -> np.ndarray:
+        """The plain transpose of `strain`: y of shape (3, ne, ngll,
+        ncols) to a dual vector of shape (ndof, ncols)."""
+        return self.dual_from_scalars(y[0], y[1], y[2])
+
+    def surface_dual(self, component: str, values: np.ndarray) -> np.ndarray:
+        """The dual vector of the surface-value read: `values` of shape
+        (ncols,) placed at the component's surface dof; zero when the
+        component has none."""
+        b = np.zeros((self.system.ndof, values.shape[-1]))
+        i = self.system.surface_dof(component)
+        if i >= 0:
+            b[i] = values
+        return b
+
+    @property
+    def moment_row(self) -> np.ndarray:
+        """The inertia-moment functional as a vector over the degree's
+        dofs (degree 0): q with q . x = sqrt(4 pi) int rho U r^3 dr."""
+        if self._moment_row is None:
+            material = self.system.material
+            mesh = material.mesh
+            weights = (
+                np.sqrt(4.0 * np.pi)
+                * mesh.w[None, :]
+                * mesh.jac[:, None]
+                * material.rho
+                * mesh.r**3
+            )[self.e0 :]
+            q = np.zeros(self.system.ndof)
+            np.add.at(q, self.Udof[self.Umask], weights[self.Umask])
+            self._moment_row = q
+        return self._moment_row
 
 
 class ViscoelasticOperator:
@@ -503,6 +556,34 @@ class ViscoelasticOperator:
     def min_relaxation_time(self) -> float:
         """The explicit stability scale of the rheology."""
         return self.rheology.min_relaxation_time()
+
+    # -- the transposes' surface: what an adjoint driver reads ------------
+
+    def degree(self, l: int) -> _Degree:
+        """The degree workspace: the strain map and its transpose, the
+        memory force, the weight application, the surface and moment
+        dual rows.  Advanced use; the adjoint driver is the consumer."""
+        return self._deg(l)
+
+    def effective_system(self, scheme: str, dt: float, l: int) -> DegreeSystem:
+        """The factorised effective system of a flavour and degree."""
+        return self._effective_system(scheme, dt, l)
+
+    def unit_responses(self, scheme: str | None, dt: float, l: int) -> np.ndarray:
+        """The flavour's solutions of the unit load and unit tide of one
+        degree, as the two columns; `scheme=None` gives the unrelaxed
+        flavour's."""
+        deg = self._deg(l)
+        if scheme is None:
+            return self._unit_solutions(("unrelaxed", 0.0), deg.system, deg)
+        return self._unit_solutions(
+            (scheme, float(dt)), self._effective_system(scheme, dt, l), deg
+        )
+
+    def scheme_weights(self, scheme: str, dt: float) -> list[tuple[np.ndarray, ...]]:
+        """The per-branch nodal weight arrays of a flavour: (w,) for
+        backward Euler, (e, alpha, beta) for the exponential schemes."""
+        return self._scheme_weights(scheme, dt)
 
     def __repr__(self) -> str:
         return (

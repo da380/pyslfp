@@ -55,12 +55,39 @@ masks): that history is all the adjoint needs of the trajectory.
    diagonal; the surface extraction transposes to point forcings at
    the surface dofs, which are the cached unit solutions' RHS.
 
-## The approach: the discrete transpose
+## The approach: both adjoints (David, 14 Oct)
 
-The DISCRETE adjoint, the exact transpose of the time-stepped forward
-map, not a discretisation of the continuous adjoint equations -- the
-house style (the elastic adjoint is discrete-exact; AdGIA's strain
-projection exists to make the step's adjoint the transposed step).
+Two implementations, deliberately:
+
+1. **The discrete transpose** -- the exact transpose of the
+   time-stepped forward map.  Machine-exact gradients for the discrete
+   model, gateable by dot-product tests; but tied to the specific
+   numerics (change the stepper and it must be re-derived).
+2. **The continuous adjoint, then discretised** -- David's preferred
+   formulation: the adjoint equations of Yu et al. have the SAME form
+   as the forward problem with more general forces, so the adjoint run
+   IS the forward machinery in reversed time, stepper-agnostic by
+   construction.  The commute error (discretise-then-transpose vs
+   transpose-then-discretise) is second order for the trapezoid and,
+   for this weakly nonlinear problem, expected minimal; MEASURE it by
+   comparing the two implementations' gradients -- that comparison is
+   itself a deliverable.
+
+The engine-level piece is shared: `SeaLevelEquation.
+adjoint_generalised_solve`, the exact reverse-mode of the generalised
+solve returning duals of all four step channels (direct load, the two
+response channels, the inertia moment), gated by a dot-product
+identity at machine precision in all three rotation modes (DONE,
+14 Oct; the rotation-block transpose must dualise the FULL degree-2
+objects disp_2/grav_2, not the forcings -- the first attempt's bug).
+
+First rung of measurements: SEA LEVEL functionals only (the dominant
+GIA observable); D_u, D_phi and D_omega measurements need two further
+radial forcing channels (the split load vectors, `load(part=...)`)
+and come after.  Point-in-time measurements enter the discrete
+transpose naturally at their time node; the continuous realisation of
+the same (impulsive adjoint forces, the jump conditions of AT14
+D81-D82) is informed by it.
 
 Forward step (exponential trapezoid; backward Euler analogous), as a
 linear map with state (m^n, d^n):
@@ -112,6 +139,58 @@ that identity as a gate in the frozen limit rather than assume it.
   the adjoint fields if wanted.
 - No pygeoinf coupling at the outset (David, 14 Oct): kernels are
   plain grids; the operator wrapping waits for pygeoinf v2.
+
+## Status (14 Oct, late)
+
+DONE: the discrete transpose, end to end, frozen shorelines,
+sea-level measurements:
+
+- `SeaLevelEquation.adjoint_generalised_solve` -- the engine
+  transpose; dot-product gate at machine precision, all three
+  rotation modes.
+- The operator's transpose surface: `strain_transpose` (D^T, sharing
+  the memory-force assembly), `apply_weights` (W), `surface_dual`
+  (P^T), `moment_row` (q), and public accessors for the degree
+  workspaces, effective systems, unit responses and scheme weights.
+- `SeaLevelEvolution.adjoint_ice_history(dates, measurement)` -- the
+  reversed sweep; needs NO forward run (linearity).  Returns
+  `IceKernels`: per-date load duals and thickness kernels with the
+  baseline (delta at t0) term folded in.
+- Gradient identity gate: arbitrary per-node ice perturbations, J
+  recovered to 8e-13 (trapezoid) and 2e-13 (backward Euler) relative,
+  rotational feedbacks on.
+
+ALSO DONE: the singular structure of the ice kernels (David, 14 Oct;
+Yu et al. Section 3.7 and eq. 81).  `IceKernels` carries two views:
+the exact DISCRETE per-node duals (which satisfy the gradient
+identity but lump the singular parts in with the continuous one),
+and the DISTRIBUTIONAL decomposition stored separately -- the
+continuous density per kiloyear; one delta amplitude per observation
+time, computed as the instantaneous (unrelaxed) fingerprint adjoint
+of that measurement, grid-independent by construction (their
+"generalised fingerprint problem"); and the t0 baseline delta.
+Gated by grid refinement: the density and baseline converge, the
+lumps are identical to all digits, the raw node duals merely scale
+with the time weights.
+
+AND the QUELLED view (David, 14 Oct): the kernel with respect to the
+thickness RATE -- the cumulative tails of the node duals, Backus's
+device -- is bounded with finite jumps at the observation times only,
+pairs with thickness histories continuous in time, and makes the
+initial-thickness dual vanish identically under frozen shorelines (a
+uniform shift loads nothing; the node duals sum to zero exactly).
+Gates: exact against per-interval rate perturbations (1e-6 relative,
+full feedbacks); refinement consistency (a coarse interval's value is
+the mean of its halves to 1.3 per cent); the uniform-shift identity
+to round-off.  Remaining inversion-side smoothing (Sobolev duals in
+the manner of pygeoinf, needing specialisation) acts on these views.
+
+TO DO: the continuous-adjoint variant (the reversed forward run,
+stepping m-dagger between observation times with the jump condition
+of their eq. 80 at each) and the accuracy comparison; the
+migrating-shoreline kernels with the stored C(t); measurements of
+displacement, potential and rotation (the split radial channels);
+kernel outputs at the ice model's dates for inversion use.
 
 ## Gates
 

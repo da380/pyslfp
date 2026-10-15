@@ -39,6 +39,7 @@ Everything is in the material's units; times and dt likewise.
 from __future__ import annotations
 
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Callable, Iterable
 from typing import Optional
 
@@ -291,6 +292,13 @@ class ViscoelasticOperator:
     effective systems are factorised once and reused.  `degrees` fixes
     which spherical-harmonic degrees are carried (all of 0..lmax by
     default).
+
+    `threads` runs the degree loops of the steps and slaved solves in
+    a thread pool, with identical results to the serial path.  The
+    per-degree work is banded solves and broadcast arithmetic, which
+    are memory-bandwidth bound, so the gain is modest where cores
+    outnumber memory channels -- of order fifteen per cent at degree
+    256 on a sixteen-core desktop -- and None (serial) is the default.
     """
 
     def __init__(
@@ -300,11 +308,16 @@ class ViscoelasticOperator:
         *,
         degrees: Iterable[int] | None = None,
         eps: float = 1e-8,
+        threads: int | None = None,
     ) -> None:
         if not isinstance(rheology, Rheology):
             raise TypeError(f"expected a Rheology, got {type(rheology).__name__}")
         if lmax < 0:
             raise ValueError("lmax must be non-negative")
+        if threads is not None and threads < 1:
+            raise ValueError("threads must be a positive count, or None")
+        self.threads = threads
+        self._pool: ThreadPoolExecutor | None = None
         self.rheology = rheology
         self.material = rheology.material
         self.lmax = int(lmax)
@@ -330,6 +343,19 @@ class ViscoelasticOperator:
         self._unit: dict[tuple[str, float], dict[int, np.ndarray]] = {}
 
     # -- machinery ---------------------------------------------------------
+
+    def _map_degrees(self, fn, degrees) -> dict[int, object]:
+        """Applies fn(l) over the degrees, in the operator's thread pool
+        when one is configured; results are identical to the serial
+        loop.  The per-degree work releases the GIL but is memory-
+        bandwidth bound, so the scaling is set by the machine's memory
+        channels rather than its core count."""
+        if self.threads is None or len(degrees) < 2:
+            return {l: fn(l) for l in degrees}
+        if self._pool is None:
+            self._pool = ThreadPoolExecutor(max_workers=self.threads)
+        futures = {l: self._pool.submit(fn, l) for l in degrees}
+        return {l: future.result() for l, future in futures.items()}
 
     def _deg(self, l: int) -> _Degree:
         if l not in self._degree:
@@ -364,7 +390,10 @@ class ViscoelasticOperator:
             w = [1.0 - wk[2] for wk in weights]
         return self.material.with_moduli(self.rheology.effective_moduli(w))
 
-    def _effective_system(self, scheme: str, dt: float, l: int) -> DegreeSystem:
+    def _flavour_systems(self, scheme: str, dt: float) -> dict[int, DegreeSystem]:
+        """The flavour's per-degree system dictionary, with the cache
+        bookkeeping (insertion, recency, eviction) done here in the
+        calling thread so the per-degree assembly can run in workers."""
         key = (scheme, float(dt))
         if key not in self._effective:
             while len(self._effective) >= _FLAVOUR_CACHE:
@@ -372,7 +401,26 @@ class ViscoelasticOperator:
                 self._unit.pop(evicted, None)
             self._effective[key] = {}
         self._effective.move_to_end(key)
-        systems = self._effective[key]
+        return self._effective[key]
+
+    def _ensure_systems(
+        self, scheme: str, dt: float, degrees
+    ) -> dict[int, DegreeSystem]:
+        """Builds the flavour's missing degree systems, in parallel when
+        the operator has threads: assembly and factorisation dominate a
+        fresh step size's cost."""
+        systems = self._flavour_systems(scheme, dt)
+        missing = [l for l in degrees if l not in systems]
+        if missing:
+            material = self.effective_material(scheme, dt)
+            built = self._map_degrees(
+                lambda l: DegreeSystem(material, l, eps=self.eps), missing
+            )
+            systems.update(built)
+        return systems
+
+    def _effective_system(self, scheme: str, dt: float, l: int) -> DegreeSystem:
+        systems = self._flavour_systems(scheme, dt)
         if l not in systems:
             systems[l] = DegreeSystem(
                 self.effective_material(scheme, dt), l, eps=self.eps
@@ -441,14 +489,15 @@ class ViscoelasticOperator:
         unrelaxed systems forced by the loads at `state.t` and the
         memory force of m.  Returns the solution array per degree;
         `surface` reads off values, `DegreeSystem.expand` the fields."""
-        out = {}
-        for l in state.degrees:
+
+        def solve_one(l: int) -> np.ndarray:
             deg = self._deg(l)
             x = deg.system.solve(deg.memory_force(state.m[l]))
-            out[l] = self._add_channels(
+            return self._add_channels(
                 x, deg, ("unrelaxed", 0.0), deg.system, state.t, load, tide
             )
-        return out
+
+        return self._map_degrees(solve_one, state.degrees)
 
     def strain(self, solutions: dict[int, np.ndarray]) -> dict[int, np.ndarray]:
         """The driving strain scalars of degree solutions: per degree an
@@ -898,9 +947,11 @@ class ViscoelasticStep:
         self._mem: dict[int, np.ndarray] = {}
         self._bmem: dict[int, np.ndarray] = {}
         self._memory_solutions: dict[int, np.ndarray] | None = None
+        operator._ensure_systems(scheme, dt, self.degrees)
         if scheme == "exponential_trapezoid":
             d_start, _ = operator._start_strain(state, load, tide)
-        for l in self.degrees:
+
+        def build_memory(l: int) -> np.ndarray:
             deg = operator._deg(l)
             mem = np.empty_like(state.m[l])
             for k, wk in enumerate(self._weights):
@@ -911,7 +962,9 @@ class ViscoelasticStep:
                     e = wk[0][deg.e0 :][None, :, :, None]
                     alpha = wk[1][deg.e0 :][None, :, :, None]
                     mem[k] = e * state.m[l][k] + alpha * d_start[l]
-            self._mem[l] = mem
+            return mem
+
+        self._mem = operator._map_degrees(build_memory, self.degrees)
 
     def _system(self, l: int) -> DegreeSystem:
         return self.operator._effective_system(self.scheme, self.dt, l)
@@ -930,9 +983,10 @@ class ViscoelasticStep:
         """The degree solutions of the memory state alone (zero load)
         through the effective systems, cached."""
         if self._memory_solutions is None:
-            self._memory_solutions = {
-                l: self._system(l).solve(self._memory_force(l)) for l in self.degrees
-            }
+            self._memory_solutions = self.operator._map_degrees(
+                lambda l: self._system(l).solve(self._memory_force(l)),
+                self.degrees,
+            )
         return self._memory_solutions
 
     def memory_surface(self, component: str) -> dict[int, np.ndarray]:
@@ -968,10 +1022,8 @@ class ViscoelasticStep:
         are consistent with the new state."""
         op = self.operator
         memory = self.memory_solutions()
-        m_new: dict[int, np.ndarray] = {}
-        solutions: dict[int, np.ndarray] = {}
-        strains: dict[int, np.ndarray] = {}
-        for l in self.degrees:
+
+        def finish_one(l: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
             deg = op._deg(l)
             system = self._system(l)
             x = op._add_channels(
@@ -992,9 +1044,12 @@ class ViscoelasticStep:
                 else:
                     beta = wk[2][deg.e0 :][None, :, :, None]
                     mem[k] = mem[k] + beta * d1
-            m_new[l] = mem
-            solutions[l] = x
-            strains[l] = d1
+            return mem, x, d1
+
+        results = op._map_degrees(finish_one, self.degrees)
+        m_new = {l: r[0] for l, r in results.items()}
+        solutions = {l: r[1] for l, r in results.items()}
+        strains = {l: r[2] for l, r in results.items()}
         out = ViscoelasticState(m_new, self.t)
         out._strain = strains
         return out, solutions

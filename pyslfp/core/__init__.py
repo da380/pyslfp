@@ -24,6 +24,7 @@ from .model import (
     EarthModel,
     EarthModelParameters,
 )
+from .anderson import AndersonMixer
 from .sea_level import SeaLevelEquation
 from .state import EarthState
 
@@ -31,6 +32,7 @@ __all__ = [
     "EarthModel",
     "EarthModelParameters",
     "EarthState",
+    "AndersonMixer",
     "SeaLevelEquation",
     "EQUATORIAL_RADIUS",
     "POLAR_RADIUS",

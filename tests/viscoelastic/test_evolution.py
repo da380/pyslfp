@@ -261,6 +261,21 @@ def test_initial_sea_level_calibration(setting):
     worst = np.max(np.abs(calibrated.sea_level.data - truth.sea_level.data))
     scale = np.max(np.abs(truth.sea_level.data))
     assert worst < 1e-5 * scale
+    # the quasi-Newton acceleration and the plain fixed point agree
+    picard = calibrate_initial_sea_level(
+        operator,
+        ice_model,
+        dates,
+        observed,
+        earth,
+        exclude_caspian=False,
+        iterations=5,
+        rtol=1e-6,
+        anderson_memory=0,
+    )
+    assert np.max(np.abs(picard.sea_level.data - calibrated.sea_level.data)) < (
+        1e-9 * scale
+    )
 
 
 class _ThinningCap(BaseIceModel):

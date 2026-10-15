@@ -32,7 +32,7 @@ from planetmodel import units
 from ..core import EarthModel
 from ..ice import BaseIceModel
 from ..love_numbers import fluid_tidal_number
-from ..core import SeaLevelEquation
+from ..core import AndersonMixer, SeaLevelEquation
 from ..core import EarthState
 from .operator import ViscoelasticOperator, ViscoelasticState
 from .rheology import Rheology
@@ -1742,6 +1742,7 @@ def calibrate_initial_sea_level(
     exclude_caspian: bool = True,
     iterations: int = 4,
     rtol: float = 1e-3,
+    anderson_memory: int = 5,
     rotational_feedbacks: bool = True,
     verbose: bool = False,
 ) -> EarthState:
@@ -1758,8 +1759,11 @@ def calibrate_initial_sea_level(
 
     which converges quickly because xi depends on the initial state
     only through the shorelines and the grounding of the load.  The
-    ICE-NG models carry their own (inverted) initial sea level and do
-    not need this.
+    passes are accelerated by Anderson mixing -- a multisecant
+    quasi-Newton built from the iterates themselves, so no Jacobian
+    solves are needed -- which tightens the convergence where the
+    shoreline feedback is strong.  The ICE-NG models carry their own
+    (inverted) initial sea level and do not need this.
 
     Args:
         operator: The radial viscoelastic operator.
@@ -1774,6 +1778,8 @@ def calibrate_initial_sea_level(
         iterations: The most passes taken.
         rtol: Convergence, the largest update of the initial sea level
             relative to its largest value.
+        anderson_memory: The depth of the quasi-Newton acceleration;
+            0 is the plain fixed-point iteration.
         verbose: Prints each pass's update.
 
     Returns:
@@ -1787,6 +1793,7 @@ def calibrate_initial_sea_level(
         sampling=model.sampling,
         extend=model.extend,
     )
+    mixer = AndersonMixer(anderson_memory)
     initial = present_sea_level
     state = None
     for n in range(iterations):
@@ -1799,7 +1806,10 @@ def calibrate_initial_sea_level(
             verbose=verbose,
         )
         updated = SHGrid.from_array(
-            present_sea_level.data - snapshots[-1].sea_level_change.data,
+            mixer.update(
+                initial.data,
+                present_sea_level.data - snapshots[-1].sea_level_change.data,
+            ),
             grid=model.grid,
         )
         change = np.max(np.abs(updated.data - initial.data))

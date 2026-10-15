@@ -141,9 +141,7 @@ def fit_decay_time(
         def residual(q):
             a, b, s = q[:3]
             tm = q[3:]
-            return np.concatenate(
-                (wd * (a * np.exp(-s * tm) + b - y), wt * (tm - t))
-            )
+            return np.concatenate((wd * (a * np.exp(-s * tm) + b - y), wt * (tm - t)))
 
         def jacobian(q):
             a, b, s = q[:3]
@@ -178,8 +176,7 @@ def fit_decay_time(
     tm = result.x[3:] if free_times else t.copy()
     if s <= 0.0:
         raise ValueError(
-            "the window does not constrain a decay: the fitted rate "
-            "is not positive"
+            "the window does not constrain a decay: the fitted rate " "is not positive"
         )
     if s <= 0.0 or s * (t[-1] - t[0]) < 1e-2:
         # the s -> 0 ridge: a e^(-s t) + b degenerates to a line with
@@ -267,9 +264,7 @@ def decay_time_measurement(
         value_uncertainty=value_uncertainty,
     )
     measurement = {
-        float(date): SHGrid.from_array(
-            w * spatial_dual.data, grid=spatial_dual.grid
-        )
+        float(date): SHGrid.from_array(w * spatial_dual.data, grid=spatial_dual.grid)
         for date, w in zip(dates, fit.weights)
     }
     return fit, measurement

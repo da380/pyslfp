@@ -288,3 +288,27 @@ def test_step_back_inverts_a_step(material):
     fresh = op.zero_state()
     with pytest.raises(ValueError, match="strain cache"):
         op.step_back(fresh, 0.5 * TAU, load=load)
+
+
+def test_threaded_degree_loops_match_serial(material):
+    """The operator's thread pool reproduces the serial path exactly:
+    the degree tasks are independent, so the results are bit-identical
+    whatever the scheduling."""
+
+    def load(l, t):
+        return np.array([1.0])
+
+    serial = ViscoelasticOperator(Rheology.from_relaxation_time(material, TAU), 2)
+    threaded = ViscoelasticOperator(
+        Rheology.from_relaxation_time(material, TAU), 2, threads=2
+    )
+    s_state = serial.zero_state()
+    t_state = threaded.zero_state()
+    for _ in range(4):
+        s_state, s_sols = serial.step(s_state, 0.5 * TAU, load=load)
+        t_state, t_sols = threaded.step(t_state, 0.5 * TAU, load=load)
+    for l in s_state.degrees:
+        assert np.array_equal(s_state.m[l], t_state.m[l])
+        assert np.array_equal(s_sols[l], t_sols[l])
+    with pytest.raises(ValueError, match="threads"):
+        ViscoelasticOperator(Rheology.from_relaxation_time(material, TAU), 2, threads=0)

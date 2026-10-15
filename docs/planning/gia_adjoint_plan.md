@@ -339,6 +339,31 @@ COMPUTATIONAL layer those operators will wrap: keep them working and
 documented, but do not grow that surface into a public API that the
 wrappers would then displace.
 
+DONE (16 Oct): threading and the Newton calibration.
+
+Threading: `ViscoelasticOperator(threads=N)` runs the degree loops
+(slaved solves, step open/memory/finish, flavour assembly) in a
+shared thread pool via `_map_degrees`, bit-identical to serial
+(gated).  Measured at lmax 256 on a 16-core desktop: ~15% at 4
+threads, no better at 8; the isolated banded solves do not scale at
+all -- the per-degree work (pbtrs with many right-hand sides,
+broadcast arithmetic) is memory-bandwidth bound, so the core count
+is not the limit and None (serial) stays the default.  AdGIA note:
+the 3-D problem's higher arithmetic intensity should fare better
+under OpenMP; this measurement is the 1-D baseline.
+
+Newton calibration: `calibrate_initial_sea_level` gained
+`anderson_memory` (default 5) -- `pyslfp.core.AndersonMixer` (moved out of the engine and made public, 16 Oct)
+(multisecant quasi-Newton from the iterates, no Jacobian solves)
+applied to the fixed point SL0 <- obs - xi(SL0).  Measured honestly:
+at test scale the fixed point converges to machine precision in two
+passes with or without acceleration (metre-level corrections flip no
+lmax-4 shoreline cells), so the gate asserts equivalence of the two
+paths, not acceleration; the mixing earns its keep only where the
+shoreline feedback is strong.  A kernel-based Gauss-Newton on the
+mismatch would cost many runs and is not warranted while the fixed
+point behaves; K_SL0 exists if that ever changes.
+
 LATER, from David (15 Oct):
 
 - (done above) **Spherically symmetric viscosity kernels** K_eta(r).  No 3-D

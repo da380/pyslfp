@@ -13,6 +13,7 @@ from pyslfp.core import SeaLevelEquation
 from pyslfp.core import EarthState
 from pyslfp.love_numbers import Material, fluid_tidal_number, love_numbers
 from pyslfp.viscoelastic import (
+    Measurement,
     Rheology,
     SeaLevelEvolution,
     ViscoelasticOperator,
@@ -518,3 +519,334 @@ def test_quelled_rate_kernels(setting):
     pair_mean = 0.5 * (fine.rate[2].data + fine.rate[3].data)
     top = np.max(np.abs(pair_mean))
     assert np.max(np.abs(kernels.rate[1].data - pair_mean)) < 0.05 * top
+
+
+def test_continuous_adjoint_against_the_discrete(setting):
+    """The two adjoints compared (the deliverable of the comparison):
+    the discrete transpose is exact at any step; the continuous
+    adjoint, discretised, carries the commute error -- negligible and
+    high-order once the steps resolve the relaxation, first order at
+    the per-cent level when they do not.  Their delta amplitudes agree
+    although computed by different realisations (the engine transpose
+    against the forward channel mapping), cross-validating both."""
+    from pyshtools import SHCoeffs
+
+    material, earth, _, _, _ = setting
+    ice_model, state = _history_state(material, earth)
+    rng = np.random.default_rng(4)
+    scale = earth.parameters.length_scale
+
+    def smooth(amplitude):
+        c = rng.normal(size=(2, LMAX + 1, LMAX + 1))
+        for degree in range(LMAX + 1):
+            c[:, degree, degree + 1 :] = 0.0
+        c[1, :, 0] = 0.0
+        return amplitude * earth.expand_coefficient(
+            SHCoeffs.from_array(
+                c, normalization=earth.normalization, csphase=earth.csphase
+            )
+        )
+
+    measurement = {0.0: smooth(1.0), 5.0: smooth(0.5)}
+    deltas = {float(d): smooth(10.0 / scale) for d in np.linspace(10.0, 0.0, 9)}
+
+    class _Perturbed(BaseIceModel):
+        def get_ice_thickness(
+            self, date, lmax, /, *, grid="DH", sampling=1, extend=True
+        ):
+            base = ice_model.get_ice_thickness(
+                date, lmax, grid=grid, sampling=sampling, extend=extend
+            )
+            return SHGrid.from_array(
+                base.data + deltas[float(date)].data, grid=base.grid
+            )
+
+    perturbed = _Perturbed(length_scale=scale)
+
+    def gradient_errors(operator, npts):
+        evo = SeaLevelEvolution(operator, state)
+        dates = np.linspace(10.0, 0.0, npts)
+
+        def functional(model_in):
+            snapshots, _ = evo.run_ice_history(dates, model_in, rtol=1e-12)
+            total = 0.0
+            for snap in snapshots:
+                for key, g in measurement.items():
+                    if np.isclose(snap.date, key):
+                        total += earth.integrate(
+                            SHGrid.from_array(
+                                g.data * snap.sea_level_change.data, grid=earth.grid
+                            )
+                        )
+            return total
+
+        exact = functional(perturbed) - functional(ice_model)
+        errors = {}
+        kernel_sets = {}
+        for name, method in (
+            ("discrete", evo.adjoint_ice_history),
+            ("continuous", evo.continuous_adjoint_ice_history),
+        ):
+            kernels = method(dates, measurement, rtol=1e-12)
+            predicted = sum(
+                earth.integrate(
+                    SHGrid.from_array(
+                        kernels.thickness[n].data * deltas[float(dates[n])].data,
+                        grid=earth.grid,
+                    )
+                )
+                for n in range(dates.size)
+            )
+            errors[name] = abs(predicted - exact) / abs(exact)
+            kernel_sets[name] = kernels
+        return errors, kernel_sets
+
+    # the stiff regime: steps of several relaxation times
+    stiff = _maxwell_operator(material)
+    coarse, kernel_sets = gradient_errors(stiff, 5)
+    fine, _ = gradient_errors(stiff, 9)
+    assert coarse["discrete"] < 1e-9 and fine["discrete"] < 1e-9
+    assert coarse["continuous"] < 0.5
+    assert coarse["continuous"] / fine["continuous"] > 1.8  # converging
+
+    # the delta amplitudes cross-validate the two realisations
+    for key in measurement:
+        a = kernel_sets["discrete"].instantaneous[key].data
+        b = kernel_sets["continuous"].instantaneous[key].data
+        assert np.max(np.abs(a - b)) < 1e-8 * np.max(np.abs(a)), key
+
+    # the resolved regime: relaxation ten times slower
+    slow = ViscoelasticOperator(Rheology.maxwell(material, MU * 10.0 * TAU_SI), LMAX)
+    resolved, _ = gradient_errors(slow, 5)
+    assert resolved["discrete"] < 1e-9
+    assert resolved["continuous"] < 2e-3
+
+
+def test_migrating_trajectory_kernels(setting):
+    """Kernels about a migrating-shoreline trajectory: the adjoint
+    reads the stored C(t) (Yu et al. 2025, Section 3.3) and stays
+    linear.  With a constant history both methods reduce exactly to
+    the frozen kernels; about the moving trajectory the discrete
+    transpose matches central differences to solver precision (the
+    forward is the linearised map while no cell flips), and the
+    continuous method converges at second order once the rheology is
+    resolved -- their disagreement on an under-resolved run is the
+    resolution diagnostic, not an error of either."""
+    from pyshtools import SHCoeffs
+
+    material, earth, _, _, _ = setting
+    ice_model, state = _history_state(material, earth)
+    rng = np.random.default_rng(6)
+    scale = earth.parameters.length_scale
+
+    def smooth(amplitude):
+        c = rng.normal(size=(2, LMAX + 1, LMAX + 1))
+        for degree in range(LMAX + 1):
+            c[:, degree, degree + 1 :] = 0.0
+        c[1, :, 0] = 0.0
+        return amplitude * earth.expand_coefficient(
+            SHCoeffs.from_array(
+                c, normalization=earth.normalization, csphase=earth.csphase
+            )
+        )
+
+    measurement = {0.0: smooth(1.0)}
+    dates = np.linspace(10.0, 0.0, 5)
+    stiff = SeaLevelEvolution(_maxwell_operator(material), state)
+
+    # a constant ocean-function history is the frozen calculation
+    frozen = stiff.adjoint_ice_history(dates, measurement, rtol=1e-12)
+    constant = stiff.adjoint_ice_history(
+        dates,
+        measurement,
+        ocean_functions=[state.ocean_function] * dates.size,
+        rtol=1e-12,
+    )
+    for a, b in zip(frozen.thickness, constant.thickness):
+        assert np.array_equal(a.data, b.data)
+
+    deltas = {float(d): smooth(1.0 / scale) for d in dates}
+    deltas[float(dates[0])] = 0.0 * deltas[float(dates[0])]
+
+    class _Perturbed(BaseIceModel):
+        sign = 1.0
+
+        def get_ice_thickness(
+            self, date, lmax, /, *, grid="DH", sampling=1, extend=True
+        ):
+            base = ice_model.get_ice_thickness(
+                date, lmax, grid=grid, sampling=sampling, extend=extend
+            )
+            return SHGrid.from_array(
+                base.data + _Perturbed.sign * deltas[float(date)].data,
+                grid=base.grid,
+            )
+
+    def gradient_check(evolution, npts):
+        grid_dates = np.linspace(10.0, 0.0, npts)
+        snapshots, _ = evolution.run_ice_history(
+            grid_dates, ice_model, shorelines="migrating", rtol=1e-12
+        )
+        history = [snap.ocean_function for snap in snapshots]
+
+        def functional(model_in):
+            snaps, _ = evolution.run_ice_history(
+                grid_dates, model_in, shorelines="migrating", rtol=1e-12
+            )
+            g = measurement[0.0]
+            return earth.integrate(
+                SHGrid.from_array(
+                    g.data * snaps[-1].sea_level_change.data, grid=earth.grid
+                )
+            )
+
+        _Perturbed.sign = 1.0
+        plus = functional(_Perturbed(length_scale=scale))
+        _Perturbed.sign = -1.0
+        minus = functional(_Perturbed(length_scale=scale))
+        fd = 0.5 * (plus - minus)
+        errors = {}
+        for name, method in (
+            ("discrete", evolution.adjoint_ice_history),
+            ("continuous", evolution.continuous_adjoint_ice_history),
+        ):
+            kernels = method(
+                grid_dates, measurement, ocean_functions=history, rtol=1e-12
+            )
+            predicted = sum(
+                earth.integrate(
+                    SHGrid.from_array(
+                        kernels.thickness[n].data * deltas[float(grid_dates[n])].data,
+                        grid=earth.grid,
+                    )
+                )
+                for n in range(grid_dates.size)
+            )
+            errors[name] = abs(predicted - fd) / abs(fd)
+        return errors
+
+    # deltas exist only on the coarse date set; reuse them on refinement
+    for d in np.linspace(10.0, 0.0, 9):
+        deltas.setdefault(float(d), 0.0 * deltas[float(dates[1])])
+
+    stiff_errors = gradient_check(stiff, 5)
+    assert stiff_errors["discrete"] < 1e-8
+
+    slow = SeaLevelEvolution(
+        ViscoelasticOperator(Rheology.maxwell(material, MU * 10.0 * TAU_SI), LMAX),
+        state,
+    )
+    coarse = gradient_check(slow, 5)
+    fine = gradient_check(slow, 9)
+    assert coarse["discrete"] < 1e-8 and fine["discrete"] < 1e-8
+    assert coarse["continuous"] < 3e-2
+    assert coarse["continuous"] / fine["continuous"] > 2.0
+
+
+def test_full_measurement_kernels(setting):
+    """Measurements of all four outputs -- sea level, displacement,
+    potential and rotation -- drive both adjoints: the discrete
+    transpose is exact (the engine adjoint carries the duals; no new
+    radial channels), and the continuous method's jump realises the
+    channel mapping of the elastic adjoint with the split radial load
+    responses, converging in the resolved regime."""
+    from pyshtools import SHCoeffs
+
+    material, earth, _, _, _ = setting
+    ice_model, state = _history_state(material, earth)
+    rng = np.random.default_rng(9)
+    scale = earth.parameters.length_scale
+
+    def smooth(amplitude):
+        c = rng.normal(size=(2, LMAX + 1, LMAX + 1))
+        for degree in range(LMAX + 1):
+            c[:, degree, degree + 1 :] = 0.0
+        c[1, :, 0] = 0.0
+        return amplitude * earth.expand_coefficient(
+            SHCoeffs.from_array(
+                c, normalization=earth.normalization, csphase=earth.csphase
+            )
+        )
+
+    measurement = {
+        0.0: Measurement(
+            sea_level=smooth(1.0),
+            displacement=smooth(0.7),
+            gravity_potential=smooth(0.4),
+            angular_velocity=rng.normal(size=3) * 1e3,
+        ),
+        5.0: smooth(0.5),
+    }
+    deltas = {float(d): smooth(10.0 / scale) for d in np.linspace(10.0, 0.0, 5)}
+
+    class _Perturbed(BaseIceModel):
+        def get_ice_thickness(
+            self, date, lmax, /, *, grid="DH", sampling=1, extend=True
+        ):
+            base = ice_model.get_ice_thickness(
+                date, lmax, grid=grid, sampling=sampling, extend=extend
+            )
+            return SHGrid.from_array(
+                base.data + deltas[float(date)].data, grid=base.grid
+            )
+
+    def objective(snapshots):
+        total = 0.0
+        for snap in snapshots:
+            for key, m in measurement.items():
+                if not np.isclose(snap.date, key):
+                    continue
+                if not isinstance(m, Measurement):
+                    m = Measurement(sea_level=m)
+                pairs = (
+                    (m.sea_level, snap.sea_level_change),
+                    (m.displacement, snap.displacement),
+                    (m.gravity_potential, snap.gravity_potential_change),
+                )
+                for dual, field_grid in pairs:
+                    if dual is not None:
+                        total += earth.integrate(
+                            SHGrid.from_array(
+                                dual.data * field_grid.data, grid=earth.grid
+                            )
+                        )
+                if m.angular_velocity is not None:
+                    total += float(
+                        np.asarray(m.angular_velocity) @ snap.angular_velocity_change
+                    )
+        return total
+
+    dates = np.linspace(10.0, 0.0, 5)
+    for operator, continuous_bound in (
+        (_maxwell_operator(material), None),
+        (
+            ViscoelasticOperator(Rheology.maxwell(material, MU * 10.0 * TAU_SI), LMAX),
+            2e-3,
+        ),
+    ):
+        evo = SeaLevelEvolution(operator, state)
+
+        def functional(model_in):
+            snaps, _ = evo.run_ice_history(dates, model_in, rtol=1e-12)
+            return objective(snaps)
+
+        exact = functional(_Perturbed(length_scale=scale)) - functional(ice_model)
+        for name, method in (
+            ("discrete", evo.adjoint_ice_history),
+            ("continuous", evo.continuous_adjoint_ice_history),
+        ):
+            kernels = method(dates, measurement, rtol=1e-12)
+            predicted = sum(
+                earth.integrate(
+                    SHGrid.from_array(
+                        kernels.thickness[n].data * deltas[float(dates[n])].data,
+                        grid=earth.grid,
+                    )
+                )
+                for n in range(dates.size)
+            )
+            error = abs(predicted - exact) / abs(exact)
+            if name == "discrete":
+                assert error < 1e-8, error
+            elif continuous_bound is not None:
+                assert error < continuous_bound, error

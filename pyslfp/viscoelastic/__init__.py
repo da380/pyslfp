@@ -9,6 +9,7 @@ and gia_notes.md.
 
 from .evolution import (
     IceKernels,
+    Measurement,
     SeaLevelEvolution,
     SeaLevelSnapshot,
     calibrate_initial_sea_level,
@@ -26,6 +27,7 @@ __all__ = [
     "SCHEMES",
     "Rheology",
     "IceKernels",
+    "Measurement",
     "SeaLevelEvolution",
     "calibrate_initial_sea_level",
     "SeaLevelSnapshot",

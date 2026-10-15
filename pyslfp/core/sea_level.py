@@ -413,6 +413,7 @@ class SeaLevelEquation:
         gravitational_potential_response: Optional[SHCoeffs] = None,
         inertia_moment_change: float = 0.0,
         angular_momentum_change: Optional[np.ndarray] = None,
+        ocean_function: Optional[SHGrid] = None,
         rotational_feedbacks: bool = True,
         rtol: float = 1e-9,
         max_iterations: Optional[int] = None,
@@ -537,8 +538,15 @@ class SeaLevelEquation:
 
         self._solver_counter += 1
 
-        ocean_function = state.ocean_function.data
-        ocean_area = state.ocean_area
+        if ocean_function is not None:
+            model.check_field(ocean_function)
+            ocean_function = ocean_function.data
+            ocean_area = model.integrate(
+                SHGrid.from_array(ocean_function, grid=model.grid, copy=False)
+            )
+        else:
+            ocean_function = state.ocean_function.data
+            ocean_area = state.ocean_area
 
         if direct_load is not None:
             direct_data = direct_load.data
@@ -661,6 +669,7 @@ class SeaLevelEquation:
         displacement_dual: Optional[SHGrid] = None,
         potential_dual: Optional[SHGrid] = None,
         angular_velocity_dual: Optional[np.ndarray] = None,
+        ocean_function: Optional[SHGrid] = None,
         rotational_feedbacks: bool = True,
         rtol: float = 1e-9,
         max_iterations: Optional[int] = None,
@@ -716,8 +725,15 @@ class SeaLevelEquation:
         model = self._model
         g = self._g
         water_density = self._water_density
-        ocean_function = state.ocean_function.data
-        ocean_area = state.ocean_area
+        if ocean_function is not None:
+            model.check_field(ocean_function)
+            ocean_function = ocean_function.data
+            ocean_area = self._model.integrate(
+                SHGrid.from_array(ocean_function, grid=self._model.grid, copy=False)
+            )
+        else:
+            ocean_function = state.ocean_function.data
+            ocean_area = state.ocean_area
         r2 = self._radius**2
 
         def coeffs(x: np.ndarray) -> SHCoeffs:

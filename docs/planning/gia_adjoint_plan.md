@@ -185,12 +185,102 @@ the mean of its halves to 1.3 per cent); the uniform-shift identity
 to round-off.  Remaining inversion-side smoothing (Sobolev duals in
 the manner of pygeoinf, needing specialisation) acts on these views.
 
-TO DO: the continuous-adjoint variant (the reversed forward run,
-stepping m-dagger between observation times with the jump condition
-of their eq. 80 at each) and the accuracy comparison; the
-migrating-shoreline kernels with the stored C(t); measurements of
-displacement, potential and rotation (the split radial channels);
-kernel outputs at the ice model's dates for inversion use.
+DONE (15 Oct): the continuous adjoint
+(`continuous_adjoint_ice_history`) -- the reversed forward run, free
+evolution between observations by the unchanged step machinery, the
+eq.-(80) jump m-dagger += d-tilde-dagger / tau at each observation
+from the instantaneous fingerprint problem, and the node quadrature
+split across the density's finite jumps.  THE COMPARISON (the point
+of doing both): on a stiff configuration (steps of several relaxation
+times) the continuous gradients carry 19 -> 5 -> 2 per cent error
+under refinement while the discrete transpose stays at ~1e-13; once
+the steps resolve the relaxation the continuous error is 5e-4 falling
+super-quadratically to 1e-5.  The doctrine (David, 15 Oct): a discrete
+adjoint is always accurate, but can be accurate for the WRONG
+problem -- it is exactly faithful to the discretised functional,
+which in an under-resolved run is a poor stand-in for the continuum
+one.  The continuous and discrete gradients differ exactly when the
+calculation is not accurate enough, so their DISAGREEMENT is a
+resolution diagnostic: when it is large, refine the forward run
+rather than prefer either gradient.  The discrete transpose remains
+what an optimiser of the discrete model needs (its exactness makes
+the optimisation loop consistent); the continuous formulation is the
+stepper-agnostic statement of the continuum problem.  The two methods' delta amplitudes, computed
+by different realisations (the engine transpose against the forward
+channel mapping), agree to 1e-8, cross-validating both.  Two faults
+the comparison caught in the continuous driver: the smooth adjoint
+fields are densities per MATERIAL time (the jump divides by tau in
+material units) and must be converted before the date quadrature; and
+a measurement's legacy lives in the jumped internal variables, not in
+a persistent load.
+
+DONE (15 Oct): the migrating-shoreline kernels.  Both drivers take
+`ocean_functions` -- the C(t) history off a migrating forward run's
+snapshots -- and the engine's forward and adjoint solves take an
+`ocean_function` override; the adjoint is the linearisation about the
+trajectory, linear with time-dependent coefficients, the grounding
+factors following C(t).  Gates: a constant history reproduces the
+frozen kernels exactly; the discrete transpose matches central
+differences about the moving trajectory to 1e-10 (the forward is
+precisely the linearised map while no flotation cell flips); the
+continuous method converges at second order once the rheology is
+resolved (1.2 -> 0.3 per cent), and on the stiff under-resolved body
+the two disagree by tens of per cent -- the resolution diagnostic
+doing its job, not a defect of either.  The t0 node's kernel under a
+perturbed INITIAL thickness needs the initial state rebuilt (its
+flotation changes); that piece is deferred with the initial-sea-level
+kernels.
+
+DONE (15 Oct): measurements of all four outputs.  For the discrete
+transpose no new radial machinery was needed -- the engine adjoint
+already carries the u, phi and omega duals, and the radial reverse
+consumes only its returned input-duals; gradient identity exact with
+all four dual types.  The continuous jump realises the elastic
+adjoint's channel mapping (zeta^u = -g_u, zeta^phi = -g g_phi,
+L = -g (g_omega - Psi* g_phi)) with the SPLIT radial load responses
+(the force-only and attraction-only unit solutions); 6e-4 in the
+resolved regime.  A `Measurement` carries the four duals; a bare
+grid remains a sea-level dual.
+
+TO DO, in order:
+
+1. Initial-state kernels (David, 15 Oct): K_SL0 of Yu's eq. (65),
+   with the (C - C0) term live under migrating shorelines, together
+   with the deferred t0-thickness piece (both involve the initial
+   state's flotation).  Application: turning
+   `calibrate_initial_sea_level`'s fixed-point iteration into a
+   Newton-type update constraining the initial sea level from the
+   present day, with quantified sensitivity.
+2. Kernel outputs at the ice model's dates for inversion use.
+3. The adaptive exponential trapezoid (David, 15 Oct; AdGIA's
+   embedded ETD1 estimate, nodal-only cost radially).  In the coupled
+   loop each fresh dt costs new effective systems, a Love table and
+   an SLE instance, so consider QUANTISING the step ladder (factor-of
+   -two changes) to keep the flavour cache reused; the estimate is
+   conservative, per AdGIA's own notes.  Variable steps already
+   compose with both adjoints: the accepted dates become the kernel
+   grid.
+
+LATER, from David (15 Oct):
+
+- **Spherically symmetric viscosity kernels** K_eta(r).  No 3-D
+  viscosity kernels here (no generalised spherical harmonics in
+  Python, and the cost is sl3d/AdGIA territory); but the 1-D
+  reduction of Yu's eq. (61) collapses degree by degree -- the
+  contraction is our (4/3, k^2, k^2(k^2-2)) scalar pairing, AT14
+  (D41)-(D50) -- and accumulates during the reverse sweep.  Needs the
+  forward trajectory (d - m)(t) stored (in memory at test scales,
+  checkpointed at production).  The discrete variant differentiates
+  the scheme weights in tau; the resolution diagnostic applies.
+- **Decay-time functionals** (Hudson Bay and the like, usually
+  finite-differenced in the literature): the decay time is defined by
+  a nonlinear least-squares fit to a sea level curve; differentiate
+  the fit's stationarity conditions locally to get the decay time's
+  derivative with respect to its data, which maps to time-dependent
+  weights on sea-level measurements -- then any of the kernel
+  machinery applies.  An appendix of AT14 works the idea in a simpler
+  case; the construction is not unique and could be done differently.
+  Build once the basic kernel machinery (above) is in.
 
 ## Gates
 
@@ -220,3 +310,8 @@ kernel outputs at the ice model's dates for inversion use.
    is suppressed; the elastic nonlinear solver recovered when every
    tau is infinite).
 3. The adjoint, as above, landing beside the evolution.
+
+Also queued (David, 15 Oct): a review of ALL docstrings across the
+library for correctness and house style -- detailed, no development
+narrative, every argument documented Google-style except trivial
+arguments self-described by the function's statement of purpose.

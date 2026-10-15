@@ -21,6 +21,7 @@ driver converts at the boundary between the two.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from typing import Optional
 from dataclasses import dataclass, field, replace
 
 import numpy as np
@@ -47,6 +48,23 @@ KYR = 1.0e3 * 365.25 * 86400.0
 POTENTIAL = units.LENGTH**2 * units.TIME**-2
 SURFACE_DENSITY = units.DENSITY * units.LENGTH
 MOMENT = units.MASS * units.LENGTH**2
+
+
+@dataclass(frozen=True)
+class Measurement:
+    """The duals of one observation time: the objective gains
+
+        int g_xi xi dS + int g_u u dS + int g_phi phi dS
+        + g_omega . omega
+
+    at that date, with the grids paired by the surface integral.  A
+    bare SHGrid given as a measurement is shorthand for a sea-level
+    dual alone."""
+
+    sea_level: Optional[SHGrid] = None
+    displacement: Optional[SHGrid] = None
+    gravity_potential: Optional[SHGrid] = None
+    angular_velocity: Optional[np.ndarray] = None
 
 
 @dataclass(frozen=True)
@@ -123,6 +141,27 @@ class SeaLevelSnapshot:
     #: the shorelines are frozen at the background state's): the C(t)
     #: record an adjoint calculation reads back.
     ocean_function: SHGrid | None = field(default=None, repr=False)
+
+
+def _normalise_measurement(
+    measurement: dict[float, SHGrid | Measurement],
+    dates: np.ndarray,
+    model: EarthModel,
+) -> dict[int, Measurement]:
+    """Measurement duals keyed by date, checked and re-keyed by node
+    index; a bare grid means a sea-level dual."""
+    duals: dict[int, Measurement] = {}
+    for key, value in measurement.items():
+        matches = np.flatnonzero(np.isclose(dates, key))
+        if matches.size != 1:
+            raise ValueError(f"measurement date {key} is not on the date grid")
+        if not isinstance(value, Measurement):
+            value = Measurement(sea_level=value)
+        for grid in (value.sea_level, value.displacement, value.gravity_potential):
+            if grid is not None:
+                model.check_field(grid)
+        duals[int(matches[0])] = value
+    return duals
 
 
 class SeaLevelEvolution:
@@ -568,11 +607,327 @@ class SeaLevelEvolution:
             )
         return snapshots, vstate
 
+    def continuous_adjoint_ice_history(
+        self,
+        dates: Sequence[float],
+        measurement: dict[float, SHGrid],
+        *,
+        ocean_functions: Optional[Sequence[SHGrid]] = None,
+        rotational_feedbacks: bool = True,
+        rtol: float = 1e-9,
+    ) -> IceKernels:
+        """Ice-history kernels by the continuous adjoint, discretised.
+
+        The adjoint equations have the same form as the forward problem
+        (Yu et al. 2025, Section 3.3), so between observation times the
+        adjoint state is stepped by the SAME machinery as a forward run
+        with no load, in reversed time; at each observation time the
+        instantaneous (unrelaxed) fingerprint problem supplies the
+        delta amplitudes and the adjoint internal variables take the
+        finite jump of their eq. (80),
+
+            m-dagger += (1 / tau_k) d-tilde-dagger,
+
+        with d-tilde-dagger the strain of the instantaneous adjoint
+        solution.  Unlike `adjoint_ice_history` (the exact discrete
+        transpose) this formulation never sees the time stepper's
+        internals, so it survives a change of scheme.  The two differ
+        by the discretise/transpose commute error, which vanishes as
+        the run resolves its rheology: a discrete adjoint is exactly
+        faithful to the discretised functional, which in an
+        under-resolved run is a poor stand-in for the continuum one,
+        so DISAGREEMENT between the two gradients is a resolution
+        diagnostic for the forward calculation itself.  Returns the
+        same `IceKernels` views, the node duals assembled from the
+        density and the lumps, so the two methods run the same gates.
+        """
+        dates = np.asarray(dates, dtype=float)
+        if dates.ndim != 1 or dates.size < 2 or np.any(np.diff(dates) >= 0.0):
+            raise ValueError(
+                "dates must be decreasing (kiloyears before present, the "
+                "past first), with at least two entries"
+            )
+        duals = _normalise_measurement(measurement, dates, self.model)
+        op = self.operator
+        model = self.model
+        parameters = model.parameters
+        if rotational_feedbacks is True:
+            self._assert_transverse_stable()
+        kyr = KYR / parameters.scales.factor(units.TIME)
+        C = self.state.ocean_function.data
+        water_density = parameters.water_density
+        g_surface = parameters.gravitational_acceleration
+        r2 = parameters.mean_sea_floor_radius**2
+        if ocean_functions is not None:
+            if len(ocean_functions) != dates.size:
+                raise ValueError("ocean_functions must give one grid per date node")
+            for grid in ocean_functions:
+                model.check_field(grid)
+
+        def C_at(node: int) -> np.ndarray:
+            return ocean_functions[node].data if ocean_functions is not None else C
+
+        def C_grid(node: int) -> Optional[SHGrid]:
+            return ocean_functions[node] if ocean_functions is not None else None
+
+        def grounded_at(node: int) -> np.ndarray:
+            return parameters.ice_density * (1.0 - C_at(node))
+
+        elastic_sle = self._sle_elastic()
+
+        def psi_star(potential_dual: SHGrid) -> np.ndarray:
+            """The adjoint of the centrifugal potential operator: a
+            potential dual to angular velocity space (the formula of
+            `pyslfp.linear_operators.centrifugal_potential_operator`)."""
+            coeffs = model.expand_field(potential_dual).coeffs
+            return r2 * np.array(
+                [
+                    parameters.rotation_factor * coeffs[0, 2, 1],
+                    parameters.rotation_factor * coeffs[1, 2, 1],
+                    parameters.axial_rotation_factor * coeffs[0, 2, 0]
+                    + parameters.uniform_rotation_factor * coeffs[0, 0, 0],
+                ]
+            )
+
+        def jump(m: Measurement, node: int):
+            """The instantaneous adjoint fingerprint of a measurement,
+            through the forward channel mapping of the elastic adjoint
+            (zeta_d = g_xi, zeta^u = -g_u, zeta^phi = -g g_phi,
+            L = -g (g_omega - Psi* g_phi)): its sea level (the delta
+            amplitude and the kernel lump), and the converged channel
+            coefficients that drive the radial jump."""
+            avc = None
+            if rotational_feedbacks:
+                avc = np.zeros(3)
+                if m.angular_velocity is not None:
+                    avc = avc - g_surface * np.asarray(m.angular_velocity, float)
+                if m.gravity_potential is not None:
+                    avc = avc + g_surface * psi_star(m.gravity_potential)
+            zeta_u = None if m.displacement is None else -1.0 * m.displacement
+            zeta_phi = (
+                None
+                if m.gravity_potential is None
+                else -g_surface * m.gravity_potential
+            )
+            xi_a, _, _, omega_a = elastic_sle.solve_generalised_equation(
+                self.state,
+                direct_load=m.sea_level,
+                displacement_load=zeta_u,
+                gravitational_potential_load=zeta_phi,
+                angular_momentum_change=avc,
+                ocean_function=C_grid(node),
+                rotational_feedbacks=rotational_feedbacks,
+                rtol=rtol,
+            )
+            direct = m.sea_level.data if m.sea_level is not None else np.zeros_like(C)
+            lam = model.expand_field(
+                SHGrid.from_array(
+                    direct + water_density * C_at(node) * xi_a.data,
+                    grid=model.grid,
+                    copy=False,
+                )
+            ).coeffs
+            psi_a = (
+                self._centrifugal(omega_a)
+                if rotational_feedbacks
+                else np.zeros_like(lam)
+            )
+            zu = None if zeta_u is None else model.expand_field(zeta_u).coeffs
+            zphi = None if zeta_phi is None else model.expand_field(zeta_phi).coeffs
+            return xi_a, lam, psi_a, zu, zphi
+
+        def apply_jump(vstate: ViscoelasticState, lam, psi_a, zu, zphi) -> None:
+            """Yu et al. eq. (80): the strain of the instantaneous
+            adjoint solution, over the relaxation time, jumps the
+            adjoint internal variables; elastic branches do not move.
+            The split load channels carry displacement and potential
+            measurements into the radial field."""
+            lam_cols = self._columns(lam, self._to_mat_density)
+            psi_cols = self._columns(psi_a, self._to_mat_potential)
+            zu_cols = None if zu is None else self._columns(zu, self._to_mat_density)
+            zphi_cols = (
+                None if zphi is None else self._columns(zphi, self._to_mat_density)
+            )
+            for l in vstate.degrees:
+                deg = op.degree(l)
+                units_lv = op.unit_responses(None, 0.0, l)
+                x = (
+                    units_lv[:, 0][:, None] * lam_cols(l, 0.0)[None, :]
+                    + units_lv[:, 1][:, None] * psi_cols(l, 0.0)[None, :]
+                )
+                if zu_cols is not None or zphi_cols is not None:
+                    split = op.split_unit_responses(None, 0.0, l)
+                    if zu_cols is not None:
+                        x = x + split[:, 0][:, None] * zu_cols(l, 0.0)[None, :]
+                    if zphi_cols is not None:
+                        x = x + split[:, 1][:, None] * zphi_cols(l, 0.0)[None, :]
+                d_tilde = deg.strain(x)
+                for k, itau in enumerate(deg.itau):
+                    vstate.m[l][k] += itau[None, :, :, None] * d_tilde
+            vstate.invalidate()
+
+        vstate = op.zero_state(ncols=lambda l: 2 * (l + 1))
+        sigma_c = np.zeros((2, model.lmax + 1, model.lmax + 1))
+        psi_c = np.zeros_like(sigma_c)
+        N = dates.size - 1
+        lump_load: dict[int, np.ndarray] = {}
+        instantaneous: dict[float, SHGrid] = {}
+        # the density is discontinuous at each observation (a finite
+        # jump), so both one-sided values are kept: 'late' is the side
+        # towards the present, 'early' the side towards t0
+        density_late = [np.zeros_like(C) for _ in range(dates.size)]
+        density_early = [None] * dates.size
+
+        def smooth_equilibrium(node: int):
+            """The memory-only adjoint equilibrium of the current state:
+            its sea level (the smooth kernel density) and the load and
+            centrifugal coefficients the next reversed step starts
+            from.  Between steps the instantaneous response is the
+            unrelaxed one, with the node's shorelines."""
+            solutions = op.solve_elastic(vstate)
+            memory_u = self._coeffs(op.surface(solutions, "U"), self._to_nd_length)
+            memory_phi = self._coeffs(
+                op.surface(solutions, "phi"), self._to_nd_potential
+            )
+            moment = (
+                float(op.degree(0).moment_row @ solutions[0][:, 0]) * self._to_nd_moment
+            )
+            xi, _, _, omega = elastic_sle.solve_generalised_equation(
+                self.state,
+                displacement_response=memory_u,
+                gravitational_potential_response=memory_phi,
+                inertia_moment_change=moment,
+                ocean_function=C_grid(node),
+                rotational_feedbacks=rotational_feedbacks,
+                rtol=rtol,
+            )
+            sig = model.expand_field(
+                SHGrid.from_array(
+                    water_density * C_at(node) * xi.data, grid=model.grid, copy=False
+                )
+            ).coeffs
+            psi_new = (
+                self._centrifugal(omega) if rotational_feedbacks else np.zeros_like(sig)
+            )
+            return xi.data, sig, psi_new
+
+        def observe(node: int) -> None:
+            """Any measurement jump at a reversed node; the smooth
+            density is then re-read on the side the sweep continues
+            from, since the measurement's legacy lives entirely in the
+            jumped internal variables, not in a persistent load."""
+            nonlocal sigma_c, psi_c
+            if node in duals:
+                xi_a, lam, psi_a, zu, zphi = jump(duals[node], node)
+                lump_load[node] = xi_a.data
+                instantaneous[float(dates[node])] = SHGrid.from_array(
+                    grounded_at(node) * xi_a.data, grid=model.grid
+                )
+                apply_jump(vstate, lam, psi_a, zu, zphi)
+                early, sigma_c, psi_c = smooth_equilibrium(node)
+                if node > 0:
+                    density_early[node] = early
+
+        # the reversed sweep, nodes N (the latest date) down to 0; the
+        # state starts undisturbed, so an unmeasured terminal node has
+        # zero density
+        observe(N)
+        for n in range(N, 0, -1):
+            dt = (dates[n - 1] - dates[n]) * kyr * self._to_mat_time
+            step = op.start_step(
+                vstate,
+                dt,
+                scheme=self.scheme,
+                load=self._columns(sigma_c, self._to_mat_density),
+                tide=self._columns(psi_c, self._to_mat_potential),
+            )
+            sle = self._sle_for(dt)
+            memory_u = self._coeffs(step.memory_surface("U"), self._to_nd_length)
+            memory_phi = self._coeffs(step.memory_surface("phi"), self._to_nd_potential)
+            moment = step.inertia_moment()[0] * self._to_nd_moment
+            xi, _, _, omega = sle.solve_generalised_equation(
+                self.state,
+                displacement_response=memory_u,
+                gravitational_potential_response=memory_phi,
+                inertia_moment_change=moment,
+                ocean_function=C_grid(n - 1),
+                rotational_feedbacks=rotational_feedbacks,
+                rtol=rtol,
+            )
+            density_late[n - 1] = xi.data
+            sigma_c = model.expand_field(
+                SHGrid.from_array(
+                    water_density * C_at(n - 1) * xi.data, grid=model.grid, copy=False
+                )
+            ).coeffs
+            psi_c = (
+                self._centrifugal(omega)
+                if rotational_feedbacks
+                else np.zeros_like(sigma_c)
+            )
+            vstate, _ = step.finish(
+                load=self._columns(sigma_c, self._to_mat_density),
+                tide=self._columns(psi_c, self._to_mat_potential),
+            )
+            observe(n - 1)
+
+        # assemble the discrete-equivalent node duals from the density
+        # and the lumps, so every gate runs on both methods alike.  The
+        # jumps divide by relaxation times in the MATERIAL's units, so
+        # the smooth fields are densities per material time; the date
+        # quadrature converts them to per kiloyear, and at an
+        # observation node the weight splits across the discontinuity:
+        # the half-interval towards the present pairs with the late
+        # side, the half-interval towards t0 with the early side
+        per_ka = kyr * self._to_mat_time
+        density_late = [d * per_ka for d in density_late]
+        density_early = [None if d is None else d * per_ka for d in density_early]
+        w_early = np.zeros(dates.size)
+        w_late = np.zeros(dates.size)
+        w_early[1:] = 0.5 * (dates[:-1] - dates[1:])
+        w_late[:-1] = 0.5 * (dates[:-1] - dates[1:])
+        load_duals = []
+        density_load = []
+        for n in range(dates.size):
+            early = (
+                density_early[n] if density_early[n] is not None else density_late[n]
+            )
+            load_duals.append(
+                w_early[n] * early + w_late[n] * density_late[n] + lump_load.get(n, 0.0)
+            )
+            total_w = w_early[n] + w_late[n]
+            density_load.append(
+                (w_early[n] * early + w_late[n] * density_late[n]) / total_w
+            )
+        raw = [grounded_at(n) * load_duals[n] for n in range(dates.size)]
+        baseline = -sum(raw)
+        thickness = list(raw)
+        thickness[0] = thickness[0] + baseline
+        rate = []
+        tail = np.zeros_like(C)
+        for n in range(dates.size - 1, 0, -1):
+            tail = tail + raw[n]
+            rate.append(tail.copy())
+        rate.reverse()
+        return IceKernels(
+            dates,
+            [SHGrid.from_array(ld, grid=model.grid) for ld in load_duals],
+            [SHGrid.from_array(t, grid=model.grid) for t in thickness],
+            SHGrid.from_array(baseline, grid=model.grid),
+            instantaneous,
+            [
+                SHGrid.from_array(grounded_at(n) * density_load[n], grid=model.grid)
+                for n in range(dates.size)
+            ],
+            [SHGrid.from_array(r, grid=model.grid) for r in rate],
+        )
+
     def adjoint_ice_history(
         self,
         dates: Sequence[float],
         measurement: dict[float, SHGrid],
         *,
+        ocean_functions: Optional[Sequence[SHGrid]] = None,
         rotational_feedbacks: bool = True,
         rtol: float = 1e-9,
     ) -> IceKernels:
@@ -591,9 +946,18 @@ class SeaLevelEvolution:
         to the solvers' tolerance, for ANY perturbation on the date
         grid.  One reversed sweep: per step, the transposed radial
         update (one symmetric solve per degree) chained with the
-        engine's `adjoint_generalised_solve`.  Sea-level measurements
-        only, for now; displacement, potential and rotation
-        measurements need the split radial load channels.
+        engine's `adjoint_generalised_solve`.
+
+        With `ocean_functions` -- one grid per date node, read off a
+        migrating-shoreline forward run's snapshots -- the kernels are
+        instead the linearisation about that trajectory: the adjoint
+        stays linear with the time-reversed C(t) as its coefficients
+        (Yu et al. 2025, Section 3.3; the shoreline-motion singular
+        terms cancel), and the grounding factors follow C(t).  The
+        gradient identity then holds in the linearised sense.
+
+        A measurement is a sea-level dual grid, or a `Measurement`
+        carrying duals of any of the four outputs.
         """
         dates = np.asarray(dates, dtype=float)
         if dates.ndim != 1 or dates.size < 2 or np.any(np.diff(dates) >= 0.0):
@@ -601,13 +965,7 @@ class SeaLevelEvolution:
                 "dates must be decreasing (kiloyears before present, the "
                 "past first), with at least two entries"
             )
-        duals = {}
-        for key, grid in measurement.items():
-            matches = np.flatnonzero(np.isclose(dates, key))
-            if matches.size != 1:
-                raise ValueError(f"measurement date {key} is not on the date grid")
-            self.model.check_field(grid)
-            duals[int(matches[0])] = grid.data
+        duals = _normalise_measurement(measurement, dates, self.model)
         op = self.operator
         model = self.model
         parameters = model.parameters
@@ -617,6 +975,18 @@ class SeaLevelEvolution:
         scheme = self.scheme
         implicit = scheme == "backward_euler"
         C = self.state.ocean_function.data
+        if ocean_functions is not None:
+            if len(ocean_functions) != dates.size:
+                raise ValueError("ocean_functions must give one grid per date node")
+            for grid in ocean_functions:
+                model.check_field(grid)
+
+        def C_at(node: int) -> np.ndarray:
+            return ocean_functions[node].data if ocean_functions is not None else C
+
+        def C_grid(node: int) -> Optional[SHGrid]:
+            return ocean_functions[node] if ocean_functions is not None else None
+
         water_density = parameters.water_density
         r2 = parameters.mean_sea_floor_radius**2
         lmax = model.lmax
@@ -649,11 +1019,15 @@ class SeaLevelEvolution:
             return factor * out
 
         def sle_dual_inputs(sigma_dual, psi_dual, node):
-            """The engine-adjoint inputs carried by the duals of the
-            step's converged load and centrifugal coefficients."""
-            g_xi = duals.get(node, zero_grid) + water_density * C * (
-                synth(sigma_dual) / r2
-            )
+            """The engine-adjoint inputs at a node: the measurement's
+            duals plus those carried by the step's converged load and
+            centrifugal coefficients."""
+            m = duals.get(node)
+            g_xi = (
+                m.sea_level.data
+                if m is not None and m.sea_level is not None
+                else zero_grid
+            ) + water_density * C_at(node) * (synth(sigma_dual) / r2)
             g_omega = np.array(
                 [
                     parameters.rotation_factor * psi_dual[0, 2, 1],
@@ -662,7 +1036,13 @@ class SeaLevelEvolution:
                     + parameters.uniform_rotation_factor * psi_dual[0, 0, 0],
                 ]
             )
-            return g_xi, g_omega
+            if m is not None and m.angular_velocity is not None:
+                g_omega = g_omega + np.asarray(m.angular_velocity, dtype=float)
+            extra = {}
+            if m is not None:
+                extra["displacement_dual"] = m.displacement
+                extra["potential_dual"] = m.gravity_potential
+            return g_xi, g_omega, extra
 
         load_duals = [None] * dates.size
         for n in range(dates.size - 1, 0, -1):
@@ -684,14 +1064,16 @@ class SeaLevelEvolution:
                 psi_cols[l] = units_lv[:, 1] @ xd
             sigma_dual = pack(sig_cols, self._to_mat_density)
             psi_dual = pack(psi_cols, self._to_mat_potential)
-            g_xi, g_omega = sle_dual_inputs(sigma_dual, psi_dual, n)
+            g_xi, g_omega, extra = sle_dual_inputs(sigma_dual, psi_dual, n)
             sle = self._sle_for(dt)
             f_dual, su_dual, sphi_dual, j_dual = sle.adjoint_generalised_solve(
                 self.state,
                 sea_level_dual=SHGrid.from_array(g_xi, grid=model.grid, copy=False),
                 angular_velocity_dual=g_omega,
+                ocean_function=C_grid(n),
                 rotational_feedbacks=rotational_feedbacks,
                 rtol=rtol,
+                **extra,
             )
             load_duals[n] = f_dual.data + synth(sigma_dual) / r2
             su_cols = self._columns(su_dual.coeffs, self._to_nd_length)
@@ -732,18 +1114,23 @@ class SeaLevelEvolution:
             psi_cols[l] = units_lv[:, 1] @ xd
         sigma_dual = pack(sig_cols, self._to_mat_density)
         psi_dual = pack(psi_cols, self._to_mat_potential)
-        g_xi, g_omega = sle_dual_inputs(sigma_dual, psi_dual, 0)
+        g_xi, g_omega, extra = sle_dual_inputs(sigma_dual, psi_dual, 0)
         f_dual, _, _, _ = self._sle_elastic().adjoint_generalised_solve(
             self.state,
             sea_level_dual=SHGrid.from_array(g_xi, grid=model.grid, copy=False),
             angular_velocity_dual=g_omega,
+            ocean_function=C_grid(0),
             rotational_feedbacks=rotational_feedbacks,
             rtol=rtol,
+            **extra,
         )
         load_duals[0] = f_dual.data + synth(sigma_dual) / r2
 
-        grounded = parameters.ice_density * (1.0 - C)
-        raw = [grounded * ld for ld in load_duals]
+        # the grounding factor follows the trajectory's shorelines
+        raw = [
+            parameters.ice_density * (1.0 - C_at(n)) * load_duals[n]
+            for n in range(dates.size)
+        ]
         baseline = -sum(raw)
         thickness = list(raw)
         thickness[0] = thickness[0] + baseline
@@ -754,14 +1141,18 @@ class SeaLevelEvolution:
         instantaneous = {}
         elastic_sle = self._sle_elastic()
         lumps = {}
-        for node, g in duals.items():
+        for node, m in duals.items():
             f_dual, _, _, _ = elastic_sle.adjoint_generalised_solve(
                 self.state,
-                sea_level_dual=SHGrid.from_array(g, grid=model.grid, copy=False),
+                sea_level_dual=m.sea_level,
+                displacement_dual=m.displacement,
+                potential_dual=m.gravity_potential,
+                angular_velocity_dual=m.angular_velocity,
+                ocean_function=C_grid(node),
                 rotational_feedbacks=rotational_feedbacks,
                 rtol=rtol,
             )
-            lumps[node] = grounded * f_dual.data
+            lumps[node] = parameters.ice_density * (1.0 - C_at(node)) * f_dual.data
             instantaneous[float(dates[node])] = SHGrid.from_array(
                 lumps[node], grid=model.grid
             )

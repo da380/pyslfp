@@ -135,6 +135,8 @@ class _Degree:
         self.itau = [a[e0:] for a in rheology.itau]
         self._load_vec: np.ndarray | None = None
         self._tide_vec: np.ndarray | None = None
+        self._load_force_vec: np.ndarray | None = None
+        self._load_potential_vec: np.ndarray | None = None
         self._moment_row: np.ndarray | None = None
         # the dof-assembly of nodal force values, [U-block; V-block]
         # flattened, as one sparse product: shared nodes accumulate
@@ -164,6 +166,22 @@ class _Degree:
         if self._tide_vec is None:
             self._tide_vec = self.system.tide(power=2 if self.l == 0 else None)
         return self._tide_vec
+
+    @property
+    def load_force_vec(self) -> np.ndarray:
+        """The traction-only piece of the unit surface load: the
+        zeta^u channel of the generalised Love numbers."""
+        if self._load_force_vec is None:
+            self._load_force_vec = self.system.load(part="force")
+        return self._load_force_vec
+
+    @property
+    def load_potential_vec(self) -> np.ndarray:
+        """The attraction-only piece of the unit surface load: the
+        zeta^phi channel."""
+        if self._load_potential_vec is None:
+            self._load_potential_vec = self.system.load(part="potential")
+        return self._load_potential_vec
 
     def _gather(self, x: np.ndarray, dofs: np.ndarray, mask: np.ndarray) -> np.ndarray:
         """Nodal values (ne, ngll, ncols) of one component, zero where absent."""
@@ -579,6 +597,28 @@ class ViscoelasticOperator:
         return self._unit_solutions(
             (scheme, float(dt)), self._effective_system(scheme, dt, l), deg
         )
+
+    def split_unit_responses(self, scheme: str | None, dt: float, l: int) -> np.ndarray:
+        """The flavour's solutions of the SPLIT unit load channels of
+        one degree, as two columns: the traction-only (zeta^u) and
+        attraction-only (zeta^phi) pieces, which the continuous
+        adjoint's jump needs for displacement and potential
+        measurements; `scheme=None` gives the unrelaxed flavour's."""
+        deg = self._deg(l)
+        key = (
+            ("unrelaxed-split", 0.0)
+            if scheme is None
+            else (f"{scheme}-split", float(dt))
+        )
+        per_degree = self._unit.setdefault(key, {})
+        if l not in per_degree:
+            system = (
+                deg.system if scheme is None else self._effective_system(scheme, dt, l)
+            )
+            per_degree[l] = system.solve(
+                np.column_stack((deg.load_force_vec, deg.load_potential_vec))
+            )
+        return per_degree[l]
 
     def scheme_weights(self, scheme: str, dt: float) -> list[tuple[np.ndarray, ...]]:
         """The per-branch nodal weight arrays of a flavour: (w,) for

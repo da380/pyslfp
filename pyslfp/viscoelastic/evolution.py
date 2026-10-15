@@ -118,6 +118,52 @@ class IceKernels:
     load_duals: list[SHGrid] = field(repr=False)
     thickness: list[SHGrid] = field(repr=False)
     baseline: SHGrid = field(repr=False)
+
+    def at_dates(self, model_dates: "Sequence[float]") -> list[SHGrid]:
+        """The thickness duals re-expressed on an ice model's own dates.
+
+        An ice model interpolates linearly between its slices (the
+        `BaseIceModel` contract), so a run-grid node value is a convex
+        combination of the two bracketing slices; this applies the
+        transpose of that interpolation, returning one dual grid per
+        model date with
+
+            delta J = sum_j int at_dates[j] delta I(T_j) dS
+
+        exact whenever the forward run read its thicknesses through
+        the same linear interpolation.  `model_dates` are kiloyears
+        before present, decreasing, and must bracket the run's dates.
+        """
+        model_dates = np.asarray(model_dates, dtype=float)
+        if (
+            model_dates.ndim != 1
+            or model_dates.size < 2
+            or np.any(np.diff(model_dates) >= 0.0)
+        ):
+            raise ValueError("model dates must be decreasing")
+        if (
+            self.dates[0] > model_dates[0] + 1e-9
+            or self.dates[-1] < model_dates[-1] - 1e-9
+        ):
+            raise ValueError("model dates must bracket the run's dates")
+        out = [np.zeros_like(self.thickness[0].data) for _ in model_dates]
+        for n, t in enumerate(self.dates):
+            j = int(np.searchsorted(-model_dates, -t, side="right")) - 1
+            j = min(max(j, 0), model_dates.size - 2)
+            span = model_dates[j] - model_dates[j + 1]
+            lam = (model_dates[j] - t) / span
+            out[j] += (1.0 - lam) * self.thickness[n].data
+            out[j + 1] += lam * self.thickness[n].data
+        grid = self.thickness[0].grid
+        return [SHGrid.from_array(o, grid=grid) for o in out]
+
+    #: The kernel with respect to the INITIAL sea level: under a
+    #: migrating trajectory, rho_w sum_n (C_n - C0) load_duals[n] (the
+    #: discrete analogue of Yu et al. 2025, eq. 65), for objectives on
+    #: the sea level CHANGE; identically zero under frozen shorelines.
+    #: An objective on absolute sea level adds the sum of its sea-level
+    #: duals.
+    initial_sea_level: SHGrid = field(repr=False)
     instantaneous: dict[float, SHGrid] = field(repr=False)
     density: list[SHGrid] = field(repr=False)
     rate: list[SHGrid] = field(repr=False)
@@ -403,6 +449,169 @@ class SeaLevelEvolution:
                 tide=self._columns(psi, self._to_mat_potential),
             )
             snapshots.append(SeaLevelSnapshot(float(t1), slc, disp, potential, omega))
+        return snapshots, vstate
+
+    def run_adaptive(
+        self,
+        t_start: float,
+        t_final: float,
+        ice_load: Callable[[float], SHGrid],
+        *,
+        dt_initial: float,
+        rtol_step: float = 1e-4,
+        atol_step: float | None = None,
+        quantise: bool = True,
+        rotational_feedbacks: bool = True,
+        rtol: float = 1e-9,
+        max_steps: int = 10000,
+    ) -> tuple[list[SeaLevelSnapshot], ViscoelasticState]:
+        """The coupled loop under the adaptive exponential trapezoid.
+
+        As `run`, but the step size follows the embedded ETD1 error
+        estimate of the radial state: small through transients, striding
+        when the response is quiet.  Each accepted step emits a
+        snapshot at its landing time.  Every fresh step size costs new
+        effective systems, a Love-number table and a sea level solver,
+        so by default the proposed steps snap DOWN onto the ladder
+        dt_initial 2^n (`quantise`), holding those costs to a handful
+        of flavours; the estimate is the first-order companion's and
+        hence conservative.  Times are in the Earth model's units;
+        `ice_load(t)` must be continuous.
+        """
+        if t_final <= t_start:
+            raise ValueError("t_final must lie beyond t_start")
+        if dt_initial <= 0.0:
+            raise ValueError("dt_initial must be positive")
+        op = self.operator
+        model = self.model
+        parameters = model.parameters
+        if rotational_feedbacks is True:
+            self._assert_transverse_stable()
+        ocean = self.state.ocean_function.data
+        water_density = parameters.water_density
+        scheme = self.scheme
+        if scheme != "exponential_trapezoid":
+            raise ValueError("the adaptive loop is the exponential trapezoid's")
+
+        vstate = op.zero_state(ncols=lambda l: 2 * (l + 1))
+        vstate.t = t_start * self._to_mat_time
+
+        # the right limit at the start, as in `run`
+        load_grid = ice_load(t_start)
+        start_sle = self._sle_elastic()
+        slc, disp, potential, omega = start_sle.solve_generalised_equation(
+            self.state,
+            direct_load=load_grid,
+            rotational_feedbacks=rotational_feedbacks,
+            rtol=rtol,
+        )
+        total = load_grid.data + water_density * ocean * slc.data
+        sigma = model.expand_field(
+            SHGrid.from_array(total, grid=model.grid, copy=False)
+        ).coeffs
+        psi = self._centrifugal(omega) if rotational_feedbacks else np.zeros_like(sigma)
+        snapshots = [SeaLevelSnapshot(float(t_start), slc, disp, potential, omega)]
+
+        def load_cb(coeffs):
+            return self._columns(coeffs, self._to_mat_density)
+
+        def tide_cb(coeffs):
+            return self._columns(coeffs, self._to_mat_potential)
+
+        dt = dt_initial * self._to_mat_time
+        base = dt
+        accepted = 0
+        same_rung = 0
+        for _ in range(max_steps):
+            t_now = vstate.t / self._to_mat_time
+            remaining = (t_final - t_now) * self._to_mat_time
+            if remaining <= 1e-12 * self._to_mat_time * max(abs(t_final), 1.0):
+                break
+            trial = min(dt, remaining)
+            d_start = op.prime_strain(vstate, load=load_cb(sigma), tide=tide_cb(psi))
+            step = op.start_step(
+                vstate,
+                trial,
+                scheme=scheme,
+                load=load_cb(sigma),
+                tide=tide_cb(psi),
+            )
+            sle = self._sle_for(trial)
+            memory_u = self._coeffs(step.memory_surface("U"), self._to_nd_length)
+            memory_phi = self._coeffs(step.memory_surface("phi"), self._to_nd_potential)
+            moment = step.inertia_moment()[0] * self._to_nd_moment
+            t1 = t_now + trial / self._to_mat_time
+            grid1 = ice_load(t1)
+            slc, disp, potential, omega = sle.solve_generalised_equation(
+                self.state,
+                direct_load=grid1,
+                displacement_response=memory_u,
+                gravitational_potential_response=memory_phi,
+                inertia_moment_change=moment,
+                rotational_feedbacks=rotational_feedbacks,
+                rtol=rtol,
+            )
+            total = grid1.data + water_density * ocean * slc.data
+            sigma_new = model.expand_field(
+                SHGrid.from_array(total, grid=model.grid, copy=False)
+            ).coeffs
+            psi_new = (
+                self._centrifugal(omega)
+                if rotational_feedbacks
+                else np.zeros_like(sigma_new)
+            )
+            candidate, _ = step.finish(load=load_cb(sigma_new), tide=tide_cb(psi_new))
+            # the embedded ETD1 estimate on the radial state
+            weights = op.scheme_weights(scheme, trial)
+            if atol_step is None:
+                top = max(
+                    (float(np.max(np.abs(candidate.m[l]))) for l in vstate.degrees),
+                    default=0.0,
+                )
+                floor = 1e-6 * rtol_step * top if top > 0.0 else 1e-300
+            else:
+                floor = atol_step
+            total_sq = 0.0
+            count = 0
+            for l in vstate.degrees:
+                deg = op.degree(l)
+                for k, (e, _, _) in enumerate(weights):
+                    ek = e[deg.e0 :][None, :, :, None]
+                    companion = ek * vstate.m[l][k] + (1.0 - ek) * d_start[l]
+                    scale = floor + rtol_step * np.maximum(
+                        np.abs(vstate.m[l][k]), np.abs(candidate.m[l][k])
+                    )
+                    ratio = (candidate.m[l][k] - companion) / scale
+                    total_sq += float(np.sum(ratio * ratio))
+                    count += ratio.size
+            err = np.sqrt(total_sq / count) if count else 0.0
+            factor = 4.0 if err == 0.0 else 0.9 / np.sqrt(err)
+            dt_next = trial * float(np.clip(factor, 0.2, 4.0))
+            raw = dt_next
+            if quantise and dt_next < remaining:
+                # floor for ladder stability, with a stagnation promoter
+                # climbing a rung after eight healthy accepts
+                dt_next = base * 2.0 ** np.floor(np.log2(dt_next / base))
+            if err > 1.0:
+                same_rung = 0
+                dt = dt_next
+                continue
+            vstate = candidate
+            sigma = sigma_new
+            psi = psi_new
+            accepted += 1
+            snapshots.append(SeaLevelSnapshot(float(t1), slc, disp, potential, omega))
+            if quantise:
+                if dt_next == dt and raw > 1.5 * dt:
+                    same_rung += 1
+                    if same_rung >= 8:
+                        dt_next = 2.0 * dt
+                        same_rung = 0
+                else:
+                    same_rung = 0
+            dt = dt_next
+        else:
+            raise RuntimeError("adaptive integration exceeded max_steps")
         return snapshots, vstate
 
     def run_ice_history(
@@ -900,9 +1109,12 @@ class SeaLevelEvolution:
                 (w_early[n] * early + w_late[n] * density_late[n]) / total_w
             )
         raw = [grounded_at(n) * load_duals[n] for n in range(dates.size)]
-        baseline = -sum(raw)
+        baseline = -parameters.ice_density * (1.0 - C) * sum(load_duals)
         thickness = list(raw)
         thickness[0] = thickness[0] + baseline
+        initial_sea_level = water_density * sum(
+            (C_at(n) - C) * load_duals[n] for n in range(dates.size)
+        )
         rate = []
         tail = np.zeros_like(C)
         for n in range(dates.size - 1, 0, -1):
@@ -914,6 +1126,7 @@ class SeaLevelEvolution:
             [SHGrid.from_array(ld, grid=model.grid) for ld in load_duals],
             [SHGrid.from_array(t, grid=model.grid) for t in thickness],
             SHGrid.from_array(baseline, grid=model.grid),
+            SHGrid.from_array(initial_sea_level, grid=model.grid),
             instantaneous,
             [
                 SHGrid.from_array(grounded_at(n) * density_load[n], grid=model.grid)
@@ -1126,14 +1339,22 @@ class SeaLevelEvolution:
         )
         load_duals[0] = f_dual.data + synth(sigma_dual) / r2
 
-        # the grounding factor follows the trajectory's shorelines
+        # the grounding factor follows the trajectory's shorelines; the
+        # BASELINE grounds with the initial C0, since every load depends
+        # on the initial thickness through rho_i (1 - C0) I0
         raw = [
             parameters.ice_density * (1.0 - C_at(n)) * load_duals[n]
             for n in range(dates.size)
         ]
-        baseline = -sum(raw)
+        baseline = -parameters.ice_density * (1.0 - C) * sum(load_duals)
         thickness = list(raw)
         thickness[0] = thickness[0] + baseline
+        # the initial sea level enters each step's load as
+        # rho_w (C_n - C0) delta SL0 -- the discrete analogue of Yu et
+        # al.'s eq. (65); identically zero under frozen shorelines
+        initial_sea_level = water_density * sum(
+            (C_at(n) - C) * load_duals[n] for n in range(dates.size)
+        )
 
         # the distributional view: the delta amplitude at each
         # observation time is the instantaneous (unrelaxed) fingerprint
@@ -1179,6 +1400,7 @@ class SeaLevelEvolution:
             [SHGrid.from_array(ld, grid=model.grid) for ld in load_duals],
             [SHGrid.from_array(th, grid=model.grid) for th in thickness],
             SHGrid.from_array(baseline, grid=model.grid),
+            SHGrid.from_array(initial_sea_level, grid=model.grid),
             instantaneous,
             [SHGrid.from_array(d, grid=model.grid) for d in density],
             [SHGrid.from_array(r, grid=model.grid) for r in rate],

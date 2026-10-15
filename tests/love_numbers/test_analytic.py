@@ -16,28 +16,45 @@ compressible, so the gate runs at kappa / mu = 1600 and the tolerance
 is the measured compressibility residual, well below the leading
 mu / kappa correction's room."""
 
+import numpy as np
 import pytest
 
-from planetmodel import LayeredIsotropicElastic, RadialMesh
+from planetmodel import LayeredIsotropicElastic, RadialMesh, units
 from pyslfp.love_numbers import Material, love_numbers
 
-RHO, VS, RADIUS = 5510.0, 5000.0, 6.371e6
-MU = RHO * VS * VS
+# the test body lives in the geophysical non-dimensionalisation: unit
+# radius, near-reference density, Earth-like rigidity, G equal to one
+SCALES = units.Scales.geophysical(6.371e6)
+RHO, VS = 1.0, 1.3
 LMAX = 8
+
+
+def _kelvin_mu_l(material, l):
+    """The Kelvin modulus ratio mu_l, from the material's own fields
+    so the expression holds in any unit system."""
+    mu = float(np.max(np.asarray(material.moduli.kappa_mu()[1]).real))
+    rho = float(np.max(np.asarray(material.rho).real))
+    return (
+        (2.0 * l * l + 4.0 * l + 3.0)
+        * mu
+        / (l * rho * material.surface_gravity * material.radius)
+    )
 
 
 @pytest.fixture(scope="module")
 def love():
-    model = LayeredIsotropicElastic([0.0, RADIUS], rho=[RHO], vp=[2.0e5], vs=[VS])
+    model = LayeredIsotropicElastic(
+        [0.0, 1.0], rho=[RHO], vp=[52.0], vs=[VS], scales=SCALES
+    )
     material = Material(RadialMesh(model, ngll=5, lmax=LMAX), model)
-    return love_numbers(material, LMAX), material.surface_gravity
+    return love_numbers(material, LMAX), material
 
 
 def test_load_numbers_match_the_kelvin_sphere(love):
-    table, g = love
+    table, material = love
     conventional = table.conventional()
     for l in range(2, LMAX + 1):
-        mu_l = (2.0 * l * l + 4.0 * l + 3.0) * MU / (l * RHO * g * RADIUS)
+        mu_l = _kelvin_mu_l(material, l)
         want_h = -(2.0 * l + 1.0) / (3.0 * (1.0 + mu_l))
         want_k = -1.0 / (1.0 + mu_l)
         assert abs(conventional["h"][l] / want_h - 1.0) < 2e-3, l
@@ -45,10 +62,10 @@ def test_load_numbers_match_the_kelvin_sphere(love):
 
 
 def test_tidal_numbers_match_the_kelvin_sphere(love):
-    table, g = love
+    table, material = love
     tidal = table.tidal()
     for l in range(2, LMAX + 1):
-        mu_l = (2.0 * l * l + 4.0 * l + 3.0) * MU / (l * RHO * g * RADIUS)
+        mu_l = _kelvin_mu_l(material, l)
         want_h = (2.0 * l + 1.0) / (2.0 * (l - 1.0) * (1.0 + mu_l))
         want_k = 3.0 / (2.0 * (l - 1.0) * (1.0 + mu_l))
         assert abs(tidal["h"][l] / want_h - 1.0) < 2e-3, l
@@ -63,13 +80,15 @@ def test_fluid_tidal_number_is_kelvins():
     from planetmodel import PREM
     from pyslfp.love_numbers import fluid_tidal_number
 
-    for vp in (2.0e5, 12000.0):
-        model = LayeredIsotropicElastic([0.0, RADIUS], rho=[RHO], vp=[vp], vs=[VS])
+    for vp in (52.0, 3.1):
+        model = LayeredIsotropicElastic(
+            [0.0, 1.0], rho=[RHO], vp=[vp], vs=[VS], scales=SCALES
+        )
         material = Material(RadialMesh(model, ngll=5, lmax=3), model)
         for l in (2, 3):
             want = 3.0 / (2.0 * (l - 1.0))
             assert abs(fluid_tidal_number(material, l) / want - 1.0) < 1e-8, (vp, l)
-    prem = PREM(ocean=False).isotropic()
+    prem = PREM(ocean=False).isotropic().nondimensionalised()
     k_hyd = fluid_tidal_number(prem, 2)
     assert 0.90 < k_hyd < 0.96
 
@@ -77,7 +96,7 @@ def test_fluid_tidal_number_is_kelvins():
 def test_fluid_limits_as_the_rigidity_vanishes():
     """With mu 10^6 times smaller the numbers sit on the fluid limits."""
     model = LayeredIsotropicElastic(
-        [0.0, RADIUS], rho=[RHO], vp=[2.0e5], vs=[VS * 1e-3]
+        [0.0, 1.0], rho=[RHO], vp=[52.0], vs=[VS * 1e-3], scales=SCALES
     )
     material = Material(RadialMesh(model, ngll=5, lmax=4), model)
     table = love_numbers(material, 4)

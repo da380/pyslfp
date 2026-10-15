@@ -575,6 +575,160 @@ class ViscoelasticOperator:
         """The explicit stability scale of the rheology."""
         return self.rheology.min_relaxation_time()
 
+    def prime_strain(
+        self,
+        state: ViscoelasticState,
+        *,
+        load: LoadCallable | None = None,
+        tide: LoadCallable | None = None,
+    ) -> dict[int, np.ndarray]:
+        """Ensures the state carries a strain cache consistent with
+        (m, t) under the given loads, solving once if it does not, and
+        returns the cached strains; an adaptive driver needs them for
+        the embedded error estimate."""
+        strains, _ = self._start_strain(state, load, tide)
+        if state._strain is None:
+            state._strain = strains
+        return strains
+
+    # -- adaptive stepping --------------------------------------------------
+
+    def adaptive_step(
+        self,
+        state: ViscoelasticState,
+        dt: float,
+        *,
+        rtol: float = 1e-4,
+        atol: float | None = None,
+        load: LoadCallable | None = None,
+        tide: LoadCallable | None = None,
+        min_factor: float = 0.2,
+        max_factor: float = 4.0,
+        safety: float = 0.9,
+    ):
+        """One trial exponential-trapezoid step with its embedded ETD1
+        error estimate (nodal work only, no extra solve)::
+
+            err = RMS of (m - m_hat) / (atol + rtol max(abs m, abs m_new)),
+            dt_next = dt clamp(safety err^(-1/2), min_factor, max_factor),
+
+        the step accepted when err <= 1.  The estimate is the
+        first-order companion's, so it is conservative for the
+        second-order solution that is propagated; choose rtol
+        accordingly.  Returns (new_state, solutions, err, dt_next),
+        the first two None on rejection.
+        """
+        if dt <= 0.0:
+            raise ValueError("dt must be positive")
+        d_start, _ = self._start_strain(state, load, tide)
+        if state._strain is None:
+            state._strain = d_start  # the trial shares the start solve
+        weights = self._scheme_weights("exponential_trapezoid", dt)
+        new_state, solutions = self.step(
+            state, dt, scheme="exponential_trapezoid", load=load, tide=tide
+        )
+        if atol is None:
+            # the internal variables carry the degree-basis scalars'
+            # units, so the absolute floor must follow the state's own
+            # magnitude: components a millionth of the largest do not
+            # steer the step
+            top = max(
+                (float(np.max(np.abs(new_state.m[l]))) for l in state.degrees),
+                default=0.0,
+            )
+            atol = 1e-6 * rtol * top if top > 0.0 else 1e-300
+        total = 0.0
+        count = 0
+        for l in state.degrees:
+            deg = self._deg(l)
+            for k, (e, _, _) in enumerate(weights):
+                ek = e[deg.e0 :][None, :, :, None]
+                companion = ek * state.m[l][k] + (1.0 - ek) * d_start[l]
+                scale = atol + rtol * np.maximum(
+                    np.abs(state.m[l][k]), np.abs(new_state.m[l][k])
+                )
+                ratio = (new_state.m[l][k] - companion) / scale
+                total += float(np.sum(ratio * ratio))
+                count += ratio.size
+        err = np.sqrt(total / count) if count else 0.0
+        factor = max_factor if err == 0.0 else safety / np.sqrt(err)
+        dt_next = dt * float(np.clip(factor, min_factor, max_factor))
+        if err <= 1.0:
+            return new_state, solutions, err, dt_next
+        return None, None, err, dt_next
+
+    def integrate(
+        self,
+        state: ViscoelasticState,
+        t_final: float,
+        dt: float,
+        *,
+        rtol: float = 1e-4,
+        atol: float | None = None,
+        load: LoadCallable | None = None,
+        tide: LoadCallable | None = None,
+        quantise: bool = False,
+        max_steps: int = 10000,
+    ):
+        """Integrates to `t_final` with the adaptive trapezoid, hitting
+        the end exactly.  With `quantise` the proposed steps snap down
+        to dt 2^n, so the flavour cache's factorisations are reused
+        instead of re-assembled at every acceptance -- the economy of
+        a per-step effective operator is the reason to prefer it here.
+        Returns (state, solutions, info) with the last accepted step's
+        solutions and the counters and step history in `info`.
+        """
+        if t_final <= state.t:
+            raise ValueError("t_final must lie beyond the state's time")
+        base = dt
+        accepted = 0
+        rejected = 0
+        history: list[float] = []
+        solutions = None
+        same_rung = 0
+        for _ in range(max_steps):
+            remaining = t_final - state.t
+            if remaining <= 0.0:
+                break
+            trial = min(dt, remaining)
+            new_state, sols, err, dt_next = self.adaptive_step(
+                state,
+                trial,
+                rtol=rtol,
+                atol=atol,
+                load=load,
+                tide=tide,
+            )
+            raw = dt_next
+            if quantise and dt_next < remaining:
+                # the floor keeps the ladder stable, and a stagnation
+                # promoter climbs a rung after eight healthy accepts,
+                # since the controller equilibrates below the factor of
+                # two the floor alone would need
+                dt_next = base * 2.0 ** np.floor(np.log2(dt_next / base))
+            if new_state is None:
+                rejected += 1
+                same_rung = 0
+                dt = dt_next
+                continue
+            state = new_state
+            solutions = sols
+            accepted += 1
+            history.append(trial)
+            if quantise:
+                if dt_next == dt and raw > 1.5 * dt:
+                    same_rung += 1
+                    if same_rung >= 8:
+                        dt_next = 2.0 * dt
+                        same_rung = 0
+                else:
+                    same_rung = 0
+            dt = dt_next
+        else:
+            raise RuntimeError("adaptive integration exceeded max_steps")
+        info = {"accepted": accepted, "rejected": rejected, "steps": history}
+        return state, solutions, info
+
     # -- the transposes' surface: what an adjoint driver reads ------------
 
     def degree(self, l: int) -> _Degree:

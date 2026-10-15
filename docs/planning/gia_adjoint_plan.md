@@ -242,24 +242,46 @@ L = -g (g_omega - Psi* g_phi)) with the SPLIT radial load responses
 resolved regime.  A `Measurement` carries the four duals; a bare
 grid remains a sea-level dual.
 
-TO DO, in order:
+DONE (15 Oct): the initial-state kernels.  Deriving eq. (65)
+discretely showed K_SL0 assembles from the ALREADY-COMPUTED per-node
+load duals -- the initial sea level enters each step's load as
+rho_w (C_n - C0) delta SL0 -- at zero extra cost, identically zero
+under frozen shorelines; `IceKernels.initial_sea_level` carries it
+(for objectives on the sea level CHANGE; absolute-sea-level
+objectives add the sum of their own duals).  The derivation also
+caught a factor fault: the t0 baseline must ground with the INITIAL
+(1 - C0), not the per-node grounding (the frozen case masked it).
+Both initial-state duals are gated by central differences with
+rebuilt initial states: SL0 to 1e-10 and I0 to 1e-13, step-size
+independent.  The Newton-type present-day calibration of SL0 now has
+its gradient available; wiring it into
+`calibrate_initial_sea_level` is an application-layer follow-up.
 
-1. Initial-state kernels (David, 15 Oct): K_SL0 of Yu's eq. (65),
-   with the (C - C0) term live under migrating shorelines, together
-   with the deferred t0-thickness piece (both involve the initial
-   state's flotation).  Application: turning
-   `calibrate_initial_sea_level`'s fixed-point iteration into a
-   Newton-type update constraining the initial sea level from the
-   present day, with quantified sensitivity.
-2. Kernel outputs at the ice model's dates for inversion use.
-3. The adaptive exponential trapezoid (David, 15 Oct; AdGIA's
-   embedded ETD1 estimate, nodal-only cost radially).  In the coupled
-   loop each fresh dt costs new effective systems, a Love table and
-   an SLE instance, so consider QUANTISING the step ladder (factor-of
-   -two changes) to keep the flavour cache reused; the estimate is
-   conservative, per AdGIA's own notes.  Variable steps already
-   compose with both adjoints: the accepted dates become the kernel
-   grid.
+DONE (15 Oct): kernel outputs at the ice model's dates.
+`IceKernels.at_dates(model_dates)` applies the transpose of the
+model's linear interpolation, mapping the run-grid duals onto the
+model's own slices; gated exactly (1e-9) against slice perturbations
+under a finer run grid.  Pure post-processing, no driver changes.
+
+DONE (15 Oct): the adaptive exponential trapezoid, radial and
+coupled.  `ViscoelasticOperator.adaptive_step`/`integrate` and
+`SeaLevelEvolution.run_adaptive`; the embedded ETD1 companion costs
+nodal work only (err = RMS of (m - m_hat)/(atol + rtol max|m|),
+dt_next = dt clamp(0.9 err^{-1/2}, 0.2, 4)).  Lessons that matter:
+the atol default must follow the state's own magnitude (the internal
+variables carry the degree-basis scalars' units), so atol=None means
+1e-6 rtol max|m|; the quantised ladder uses FLOOR plus a stagnation
+promoter (climb a rung after eight healthy accepts) -- rounding to
+the nearest rung thrashes, flooring alone freezes; and the estimate
+is the FIRST-ORDER companion's, so rtol_step is conservative for the
+propagated second-order solution by two to three orders (measured:
+rtol_step 1e-1 -> 3e-4 global, 1e-2 -> 7e-6).  Gated radially
+(tolerance ordering, striding, ladder, elastic striding) and coupled
+(ordering vs fixed reference, ladder <= 12, striding).  Variable
+steps compose with both adjoints: the accepted dates become the
+kernel grid.
+
+TO DO, in order: (exhausted -- see LATER)
 
 LATER, from David (15 Oct):
 
@@ -315,3 +337,13 @@ Also queued (David, 15 Oct): a review of ALL docstrings across the
 library for correctness and house style -- detailed, no development
 narrative, every argument documented Google-style except trivial
 arguments self-described by the function's statement of purpose.
+
+Design note, recorded (David, 15 Oct): continuous-in-time
+measurements are a SEPARATE kind from the point-in-time ones (as in
+AdGIA) -- a density-flagged measurement whose duals are per unit
+time; the discrete driver folds quadrature-weighted duals into the
+nodes but excludes them from lump extraction (a density produces no
+deltas), and the continuous driver carries them as in-step forcings
+with no eq.-(80) jump.  Not built: such measurements are not made in
+practice, and the decay-time functionals are fits to discrete
+samples; the point type covers the known uses.

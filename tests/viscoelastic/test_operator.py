@@ -5,29 +5,38 @@ consistency of the slaved solve."""
 import numpy as np
 import pytest
 
-from planetmodel import LayeredIsotropicElastic, RadialMesh
+from planetmodel import LayeredIsotropicElastic, RadialMesh, units
 from pyslfp.love_numbers import Material, solve_degree
 from pyslfp.viscoelastic import Rheology, ViscoelasticOperator
 
-RHO, VS, RADIUS = 5510.0, 5000.0, 6.371e6
-MU = RHO * VS * VS
-TAU = 1.0  # the Maxwell time of every test body, in seconds
+# the test body lives in the geophysical non-dimensionalisation: unit
+# radius, near-reference density, Earth-like moduli, G equal to one
+SCALES = units.Scales.geophysical(6.371e6)
+RHO, VS = 1.0, 1.3
+TAU = 1.0  # the Maxwell time of every test body, in the model's units
 
 
 def _material(vp: float) -> Material:
-    model = LayeredIsotropicElastic([0.0, RADIUS], rho=[RHO], vp=[vp], vs=[VS])
+    model = LayeredIsotropicElastic(
+        [0.0, 1.0], rho=[RHO], vp=[vp], vs=[VS], scales=SCALES
+    )
     return Material(RadialMesh(model, ngll=5, lmax=2), model)
+
+
+def _mu(material) -> np.ndarray:
+    """The material's nodal shear modulus, in its own units."""
+    return np.asarray(material.moduli.kappa_mu()[1]).real
 
 
 @pytest.fixture(scope="module")
 def material():
-    return _material(12000.0)
+    return _material(3.1)
 
 
 @pytest.fixture(scope="module")
 def stiff_material():
     """Near-incompressible (kappa / mu = 1600), the Wu-Peltier regime."""
-    return _material(2.0e5)
+    return _material(52.0)
 
 
 def _unit_load(l, t):
@@ -38,7 +47,7 @@ def test_elastic_limit(material):
     """A branch with an infinite relaxation time never moves: every
     scheme reproduces the elastic response to full precision."""
     shape = material.moduli.shape
-    rheo = Rheology(material, [(np.full(shape, MU), np.zeros(shape))])
+    rheo = Rheology(material, [(_mu(material), np.zeros(shape))])
     op = ViscoelasticOperator(rheo, 2)
     for scheme in ("exponential_trapezoid", "backward_euler", "exponential_euler"):
         state = op.zero_state()
@@ -63,7 +72,7 @@ def test_relaxed_limit_is_the_long_term_solid(material):
     backward Euler and trapezoid updates is exactly m = d, so the
     time-stepped limit matches the long-term solve to solver precision."""
     shape = material.moduli.shape
-    rheo = Rheology(material, [(np.full(shape, 0.5 * MU), np.full(shape, 1.0 / TAU))])
+    rheo = Rheology(material, [(0.5 * _mu(material), np.full(shape, 1.0 / TAU))])
     op = ViscoelasticOperator(rheo, 2, degrees=[2])
     want = solve_degree(rheo.long_term_material(), 2).surface
     for scheme in ("exponential_trapezoid", "backward_euler"):
@@ -85,10 +94,12 @@ def test_wu_peltier_correspondence(stiff_material):
     and the ratio U(t) / U(0+) carries no normalisation convention.
     The tolerance is set by the finite kappa / mu = 1600."""
     l = 2
-    rheo = Rheology.maxwell(stiff_material, MU * TAU)
+    rheo = Rheology.from_relaxation_time(stiff_material, TAU)
     op = ViscoelasticOperator(rheo, l, degrees=[l])
     g = stiff_material.surface_gravity
-    mu_l = (2.0 * l * l + 4.0 * l + 3.0) * MU / (l * RHO * g * RADIUS)
+    mu0 = float(np.max(_mu(stiff_material)))
+    rho0 = float(np.max(np.asarray(stiff_material.rho).real))
+    mu_l = (2.0 * l * l + 4.0 * l + 3.0) * mu0 / (l * rho0 * g * stiff_material.radius)
     tau_l = (1.0 + mu_l) * TAU
     A = mu_l / (1.0 + mu_l)
 
@@ -108,7 +119,7 @@ def test_wu_peltier_correspondence(stiff_material):
 def test_scheme_convergence_orders(material):
     """Under a smooth load history the exponential trapezoid is second
     order and backward and exponential Euler first order in dt."""
-    rheo = Rheology.maxwell(material, MU * TAU)
+    rheo = Rheology.from_relaxation_time(material, TAU)
     op = ViscoelasticOperator(rheo, 2, degrees=[2])
     T = 2.0 * TAU
 
@@ -142,7 +153,7 @@ def test_slaved_solve_is_consistent_after_a_step(material):
     displacement equals the unrelaxed solve at the new state: the
     discrete elimination is exact, so the cached strain matches a
     fresh solve to round-off."""
-    rheo = Rheology.maxwell(material, MU * TAU)
+    rheo = Rheology.from_relaxation_time(material, TAU)
     op = ViscoelasticOperator(rheo, 2, degrees=[2])
     for scheme in ("exponential_trapezoid", "backward_euler"):
         state = op.zero_state()
@@ -157,7 +168,7 @@ def test_slaved_solve_is_consistent_after_a_step(material):
 def test_load_jump_needs_invalidate(material):
     """A load jump at a step boundary changes the start-of-step strain;
     the cached strain must be dropped to see the new left limit."""
-    rheo = Rheology.maxwell(material, MU * TAU)
+    rheo = Rheology.from_relaxation_time(material, TAU)
     op = ViscoelasticOperator(rheo, 2, degrees=[2])
 
     def jumped(l, t):
@@ -182,7 +193,7 @@ def test_load_jump_needs_invalidate(material):
 
 def test_columns_are_independent_and_linear(material):
     """Several coefficient columns step together and scale linearly."""
-    rheo = Rheology.maxwell(material, MU * TAU)
+    rheo = Rheology.from_relaxation_time(material, TAU)
     op = ViscoelasticOperator(rheo, 2, degrees=[2])
 
     def load(l, t):
@@ -194,3 +205,56 @@ def test_columns_are_independent_and_linear(material):
     U = op.surface(solutions, "U")[2]
     assert abs(U[1] - 2.0 * U[0]) < 1e-12 * abs(U[0])
     assert abs(U[2] + 3.0 * U[0]) < 1e-12 * abs(U[0])
+
+
+def test_adaptive_trapezoid(material):
+    """The adaptive exponential trapezoid: the embedded ETD1 estimate
+    accepts and strides through a Heaviside relaxation, tighter
+    tolerances give more steps and smaller errors (the estimate is the
+    first-order companion's, hence conservative), quantisation holds
+    the step ladder to a handful of flavours, and a purely elastic
+    body strides at the growth limit on a zero estimate."""
+    rheo = Rheology.from_relaxation_time(material, TAU)
+    op = ViscoelasticOperator(rheo, 2, degrees=[2])
+
+    def load(l, t):
+        return np.array([1.0])
+
+    T = 20.0 * TAU
+    reference_state = op.zero_state()
+    for _ in range(2000):
+        reference_state, reference = op.step(reference_state, T / 2000, load=load)
+    U_ref = op.surface(reference, "U")[2][0]
+
+    results = {}
+    for rtol in (1e-3, 1e-5):
+        state, solutions, info = op.integrate(
+            op.zero_state(), T, 0.05 * TAU, rtol=rtol, load=load
+        )
+        U = op.surface(solutions, "U")[2][0]
+        results[rtol] = (abs(U - U_ref) / abs(U_ref), info)
+        assert abs(state.t - T) < 1e-9 * T
+    # the steps stride as the transient quietens (judged at the loose
+    # tolerance; the final step is clipped to land on t_final)
+    strides = results[1e-3][1]["steps"]
+    assert max(strides) > 10.0 * strides[0]
+    assert results[1e-3][0] < 1e-3 and results[1e-5][0] < 1e-5
+    assert results[1e-5][0] < 0.1 * results[1e-3][0]
+    assert results[1e-5][1]["accepted"] > 3 * results[1e-3][1]["accepted"]
+
+    _, solutions, info = op.integrate(
+        op.zero_state(), T, 0.05 * TAU, rtol=1e-4, load=load, quantise=True
+    )
+    distinct = len(set(np.round(info["steps"], 12)))
+    assert distinct <= 10
+    U = op.surface(solutions, "U")[2][0]
+    assert abs(U - U_ref) / abs(U_ref) < 1e-4
+
+    shape = material.moduli.shape
+    elastic = ViscoelasticOperator(
+        Rheology(material, [(_mu(material), np.zeros(shape))]), 2, degrees=[2]
+    )
+    _, _, info = elastic.integrate(
+        elastic.zero_state(), T, 0.05 * TAU, rtol=1e-4, load=load
+    )
+    assert info["accepted"] <= 8 and info["rejected"] == 0

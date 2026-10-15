@@ -1,10 +1,6 @@
-"""
-State containers and spatial masking for the pyslfp library.
-
-This module defines the EarthState class, which represents a snapshot of the
-Earth's surface (ice thickness and sea level) and handles all geographic
-projections, masking, and point-generation logic.
-"""
+"""The Earth's surface state: a snapshot of ice thickness and sea
+level, the ocean function the flotation condition implies, and the
+geographic projections and standard loads built on them."""
 
 from __future__ import annotations
 from functools import cached_property
@@ -41,7 +37,7 @@ class EarthState(Regions):
         exclude_caspian: bool = True,
     ) -> None:
         """
-        Initializes an EarthState container.
+        Initialises an EarthState container.
 
         Args:
             ice_thickness (SHGrid): The non-dimensional ice thickness grid.
@@ -67,8 +63,8 @@ class EarthState(Regions):
     @staticmethod
     def from_defaults(*, lmax: int = 256) -> EarthState:
         """
-        Returns the default EarthState, which is based on PREM with the
-        standard non-dimensionalisation and Ice-7g at present day.
+        Returns the default EarthState: PREM with the standard
+        non-dimensionalisation and ICE-7G at the present day.
 
         Args:
             lmax (int): Truncation degree for the model discretisation. Defaults to 256.
@@ -346,7 +342,7 @@ class EarthState(Regions):
             self.model.parameters.water_density * self.ocean_function * sea_level_change
         )
 
-    def direct_load_from_ocean_ocean_density_change(
+    def direct_load_from_ocean_density_change(
         self, ocean_density_change: SHGrid, /
     ) -> SHGrid:
         """Converts an ocean density change into the associated surface mass load."""
@@ -359,7 +355,14 @@ class EarthState(Regions):
     def disk_load(
         self, delta: float, latitude: float, longitude: float, amplitude: float, /
     ) -> SHGrid:
-        """Returns a circular disk load."""
+        """A uniform circular disc load, band-limited at the model's lmax.
+
+        Args:
+            delta: The disc's angular radius in degrees.
+            latitude: The centre's latitude in degrees.
+            longitude: The centre's longitude in degrees.
+            amplitude: The load value on the disc.
+        """
         return amplitude * SHGrid.from_cap(
             delta,
             latitude,

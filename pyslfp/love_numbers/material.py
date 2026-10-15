@@ -79,10 +79,12 @@ class NodalModuli:
 
     @property
     def shape(self) -> tuple[int, int]:
+        """The nodal array shape (elements, nodes per element)."""
         return self.A.shape
 
     @property
     def is_complex(self) -> bool:
+        """True for moduli frozen at a frequency."""
         return self.A.dtype.kind == "c"
 
     def kappa_mu(self) -> tuple[np.ndarray, np.ndarray]:

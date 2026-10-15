@@ -67,7 +67,15 @@ def ocean_altimetry_points(
     latitude_min: float = -66.0,
     latitude_max: float = 66.0,
 ) -> List[Tuple[float, float]]:
-    """Generates a regular grid of points returning only those in valid oceans."""
+    """A regular grid of observation points over the open ocean.
+
+    Args:
+        state: The Earth state whose ocean function and ice mask filter
+            the points.
+        spacing: The grid spacing in degrees.
+        latitude_min: The southern limit of the altimetry coverage.
+        latitude_max: The northern limit.
+    """
     lats = np.arange(latitude_min, latitude_max + 1e-9, spacing)
     lons = np.arange(0.0, 360.0, spacing)
     lat_mesh, lon_mesh = np.meshgrid(lats, lons, indexing="ij")
@@ -87,7 +95,14 @@ def ice_altimetry_points(
     exclude_ice_shelves: bool = False,
     exclude_glaciers: bool = True,
 ) -> List[Tuple[float, float]]:
-    """Generates a regular grid of points returning only those over ice sheets."""
+    """A regular grid of observation points over the ice sheets.
+
+    Args:
+        state: The Earth state whose ice mask filters the points.
+        spacing: The grid spacing in degrees.
+        exclude_ice_shelves: Whether floating shelves are excluded.
+        exclude_glaciers: Whether mountain glaciers are excluded.
+    """
     lats = np.arange(-90.0, 90.0 + 1e-9, spacing)
     lons = np.arange(0.0, 360.0, spacing)
     lat_mesh, lon_mesh = np.meshgrid(lats, lons, indexing="ij")
@@ -297,14 +312,17 @@ class JointAltimetryObservationModel:
 
     @property
     def fingerprint_operator(self) -> FingerPrintOperator:
+        """The underlying fingerprint operator."""
         return self._fingerprint_operator
 
     @property
     def points(self) -> List[Tuple[float, float]]:
+        """The observation points as (latitude, longitude) pairs."""
         return self._points
 
     @property
     def forward_operator(self) -> LinearOperator:
+        """The composed operator from model space to the observations."""
         return self._forward_operator
 
     @property
@@ -365,16 +383,20 @@ class AltimetryObservationModel:
 
     @property
     def fingerprint_operator(self) -> FingerPrintOperator:
+        """The underlying fingerprint operator."""
         return self._fingerprint_operator
 
     @property
     def points(self) -> List[Tuple[float, float]]:
+        """The observation points as (latitude, longitude) pairs."""
         return self._points
 
     @property
     def response_to_data_operator(self) -> LinearOperator:
+        """The operator reading the observable off the response fields."""
         return self._response_to_data_operator
 
     @property
     def forward_operator(self) -> LinearOperator:
+        """The composed operator from model space to the observations."""
         return self._forward_operator

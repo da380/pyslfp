@@ -230,6 +230,7 @@ class Rheology:
 
     @property
     def num_branches(self) -> int:
+        """The number of relaxation branches."""
         return len(self.mu)
 
     def min_relaxation_time(self) -> float:

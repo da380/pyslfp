@@ -282,6 +282,7 @@ class _TrajectoryCursor:
         self._state = trajectory.states[-1]
 
     def state(self, node: int) -> ViscoelasticState:
+        """The forward state at a date node, reconstructing as needed."""
         if node > self._node:
             raise ValueError("the trajectory cursor moves backwards")
         while self._node > node:

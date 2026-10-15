@@ -27,10 +27,11 @@ class LinearSeaLevelEquation:
 
     def __init__(self, state: EarthState, /) -> None:
         """
-        Initializes the linear Sea Level Equation solver.
+        Initialises the linear sea level equation solver.
 
         Args:
-            state (Earthstate): The initial state for the earth model.
+            state (EarthState): The background state the fingerprints
+                perturb.
         """
 
         self._state = state
@@ -39,9 +40,9 @@ class LinearSeaLevelEquation:
     @staticmethod
     def from_defaults(*, lmax: int = 256) -> LinearSeaLevelEquation:
         """
-        Sets up the linear solver using the default parameters.
-        The Earth model is PREM with standard non-dimensionalisations,
-        while the initial state is present-day Ice-7g.
+        Sets up the linear solver with the default parameters: PREM
+        with the standard non-dimensionalisation, and present-day
+        ICE-7G as the background state.
 
         Args:
             lmax (int): Truncation degree for the discretisation. Defaults to 256.
@@ -52,9 +53,9 @@ class LinearSeaLevelEquation:
     @staticmethod
     def for_testing(lmax: int) -> LinearSeaLevelEquation:
         """
-        Sets up the linear solver using the testing state.
-        The Earth model is PREM weith standard non-dimensionalisartion,
-        while the initial state takes a simple analytical form.
+        Sets up the linear solver on the analytical testing state:
+        PREM with the standard non-dimensionalisation, and the simple
+        analytical geometry of `EarthState.for_testing`.
         """
         state = EarthState.for_testing(lmax)
         return LinearSeaLevelEquation(state)
@@ -77,11 +78,12 @@ class LinearSeaLevelEquation:
         verbose: bool = False,
     ) -> Tuple[SHGrid, SHGrid, SHGrid, np.ndarray]:
         """
-        Solves the standard linear Sea Level Equation for a surface mass load.
+        Solves the standard linear sea level equation for a surface mass load.
 
         Args:
             direct_load (SHGrid): The mass redistribution forcing the system.
-            rotational_feedbacks (bool): Whether to calculate polar wander effects.
+            rotational_feedbacks (bool | str): True for the full feedback,
+                "axial" for the axial component alone, False for none.
             rtol (float): The relative tolerance for convergence.
             max_iterations (Optional[int]): Hard limit on iteration count.
             verbose (bool): If True, prints iteration metrics.
@@ -119,16 +121,25 @@ class LinearSeaLevelEquation:
         verbose: bool = False,
     ) -> Tuple[SHGrid, SHGrid, SHGrid, np.ndarray]:
         """
-        Solves the generalized linear SLE for an arbitrary combination of forcings.
-
-        Useful for adjoint calculations or complex, multi-physical inversions.
+        Solves the generalised linear sea level equation for an
+        arbitrary combination of forcings, on the construction's
+        background state; see
+        `SeaLevelEquation.solve_generalised_equation` for the engine.
 
         Args:
             direct_load (Optional[SHGrid]): Standard surface mass forcing.
             displacement_load (Optional[SHGrid]): External vertical surface displacement forcing.
             gravitational_potential_load (Optional[SHGrid]): External gravitational potential forcing.
+            displacement_response (Optional[SHCoeffs]): A ready displacement
+                response in coefficient form, joined to the static terms
+                with no Love number applied.
+            gravitational_potential_response (Optional[SHCoeffs]): The
+                matching ready potential response.
+            inertia_moment_change (float): The inertia-moment change
+                accompanying the responses, for the axial feedback.
             angular_momentum_change (Optional[np.ndarray]): External angular momentum perturbation, [x, y, z].
-            rotational_feedbacks (bool): Whether to calculate polar wander effects.
+            rotational_feedbacks (bool | str): True for the full feedback,
+                "axial" for the axial component alone, False for none.
             rtol (float): The relative tolerance for convergence.
             max_iterations (Optional[int]): Hard limit on iteration count.
             verbose (bool): If True, prints iteration metrics.

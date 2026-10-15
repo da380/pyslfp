@@ -31,9 +31,13 @@ def ice_thickness_change_to_load_operator(
     ice_space: Union[Lebesgue, Sobolev],
     load_space: Union[Lebesgue, Sobolev],
 ) -> LinearOperator:
-    """
-    Maps an ice thickness change to the corresponding surface mass load.
-    Automatically masks out the oceans.
+    """Maps an ice thickness change to its surface mass load,
+    rho_ice (1 - C) delta I: grounded ice only.
+
+    Args:
+        state: The Earth state supplying the ocean function.
+        ice_space: The operator's domain, Lebesgue or Sobolev.
+        load_space: The operator's codomain.
     """
     check_load_space(ice_space)
     check_load_space(load_space)
@@ -57,9 +61,13 @@ def sea_level_change_to_load_operator(
     sea_level_space: Union[Lebesgue, Sobolev],
     load_space: Union[Lebesgue, Sobolev],
 ) -> LinearOperator:
-    """
-    Maps a sea level change (or ocean dynamic topography) to the corresponding
-    surface mass load. Automatically masks out the land.
+    """Maps a sea level change (or ocean dynamic topography) to its
+    surface mass load, rho_w C delta xi: ocean only.
+
+    Args:
+        state: The Earth state supplying the ocean function.
+        sea_level_space: The operator's domain, Lebesgue or Sobolev.
+        load_space: The operator's codomain.
     """
     check_load_space(sea_level_space)
     check_load_space(load_space)
@@ -83,8 +91,13 @@ def ocean_density_change_to_load_operator(
     density_space: Union[Lebesgue, Sobolev],
     load_space: Union[Lebesgue, Sobolev],
 ) -> LinearOperator:
-    """
-    Maps an ocean density change to the corresponding surface mass load.
+    """Maps an ocean density change to its surface mass load,
+    C SL delta rho: the water column's depth times the change.
+
+    Args:
+        state: The Earth state supplying the ocean function and sea level.
+        density_space: The operator's domain, Lebesgue or Sobolev.
+        load_space: The operator's codomain.
     """
     check_load_space(density_space)
     check_load_space(load_space)

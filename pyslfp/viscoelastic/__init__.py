@@ -1,12 +1,21 @@
-"""Forward GIA modelling: viscoelastic loading of a spherically
-symmetric earth, coupled to the sea level equation.
+"""Glacial isostatic adjustment: viscoelastic loading of a spherically
+symmetric earth coupled to the sea level equation, its sensitivity
+kernels by discrete and continuous adjoints, and the functionals
+built on them.
 
-The theory basis is Al-Attar & Tromp (2014), internal variables in the
-degree basis; the time-stepping algebra is shared with the AdGIA
-library for reciprocal benchmarking.  See docs/planning/gia_plan.md
-and gia_notes.md.
+The formulation follows Al-Attar & Tromp (2014), internal variables
+in the degree basis; the time-stepping algebra is shared with the
+AdGIA library so the two can benchmark one another.  The kernel
+drivers here are the computational layer: as the sea level engine
+sits beneath `pyslfp.linear_operators` on the elastic side, these are
+what inversion-facing operator wrappers build on.
 """
 
+from .functionals import (
+    DecayTimeFit,
+    decay_time_measurement,
+    fit_decay_time,
+)
 from .evolution import (
     ForwardTrajectory,
     IceKernels,
@@ -25,6 +34,9 @@ from .rheology import Rheology
 from .weights import backward_euler_weight, exponential_trapezoid_weights
 
 __all__ = [
+    "DecayTimeFit",
+    "decay_time_measurement",
+    "fit_decay_time",
     "ForwardTrajectory",
     "SCHEMES",
     "Rheology",

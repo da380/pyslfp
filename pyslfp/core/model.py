@@ -1,10 +1,7 @@
-"""
-Core physics definitions for the pyslfp library.
-
-This module contains the fundamental Earth parameters, non-dimensionalization
-schemes, and elastic Love numbers required for gravitationally consistent
-sea-level fingerprinting.
-"""
+"""The Earth model: physical parameters, their non-dimensionalisation,
+and the elastic Love numbers, shared by every solver so that the
+fingerprints, the viscoelastic evolution and their adjoints all work
+from one consistent body."""
 
 from __future__ import annotations
 from dataclasses import dataclass, field, replace
@@ -45,7 +42,7 @@ GRAVITATIONAL_CONSTANT: float = units.G_SI
 @dataclass(frozen=True, kw_only=True)
 class EarthModelParameters:
     """
-    Stores Earth model parameters and handles non-dimensionalization.
+    Stores Earth model parameters and handles their non-dimensionalisation.
 
     This is a frozen dataclass; all properties are strictly immutable
     to ensure physical consistency across the solver lifecycle.
@@ -60,14 +57,14 @@ class EarthModelParameters:
     adjoint is exact only when the two agree.
 
     Attributes:
-        length_scale (float): The length scale used for non-dimensionalization. Default is 1.0.
-        density_scale (float): The density scale used for non-dimensionalization. Default is 1.0.
-        time_scale (float): The time scale used for non-dimensionalization. Default is 1.0.
+        length_scale (float): The length scale of the non-dimensionalisation. Default is 1.0.
+        density_scale (float): The density scale of the non-dimensionalisation. Default is 1.0.
+        time_scale (float): The time scale of the non-dimensionalisation. Default is 1.0.
         scales (Scales): The planetmodel scales the three define.
-        raw_equatorial_radius (float): Earth's equatorial radius in meters.
-        raw_polar_radius (float): Earth's polar radius in meters.
-        raw_mean_radius (float): Earth's mean radius in meters.
-        raw_mean_sea_floor_radius (float): Mean radius of the solid Earth surface in meters.
+        raw_equatorial_radius (float): Earth's equatorial radius in metres.
+        raw_polar_radius (float): Earth's polar radius in metres.
+        raw_mean_radius (float): Earth's mean radius in metres.
+        raw_mean_sea_floor_radius (float): Mean radius of the solid Earth surface in metres.
         raw_mass (float): Total mass of the Earth in kilograms.
         raw_gravitational_acceleration (float): Surface gravity in m/s^2.
         raw_gravitational_constant (float): G in m^3 kg^-1 s^-2. Defaults to
@@ -282,10 +279,11 @@ class EarthModel:
     """
     The unified physics configuration object for the library.
 
-    This object encapsulates the non-dimensionalized Earth parameters and
-    the corresponding Love numbers, ensuring physical consistency across
-    all calculations and solvers. Also sets values for SH transforms
-    and provides a range of utility methods.
+    Holds the non-dimensionalised Earth parameters and the matching
+    Love numbers, so every calculation and solver works from one
+    consistent body, together with the spherical harmonic conventions
+    (grid, normalisation, truncation) and the transforms and surface
+    integrals defined by them.
     """
 
     def __init__(
@@ -300,12 +298,12 @@ class EarthModel:
         extend: bool = True,
     ) -> None:
         """
-        Initializes an EarthModel configuration.
+        Initialises an EarthModel configuration.
 
         Args:
             lmax (int): The maximum spherical harmonic degree.
             parameters (Optional[EarthModelParameters]): The Earth's physical scales.
-                If None, standard non-dimensionalized parameters are generated.
+                If None, standard non-dimensionalised parameters are generated.
                 The sea-floor radius, surface gravity and G are then taken from
                 the Love numbers, see `EarthModelParameters.with_body`.
             love_numbers (Optional[LoveNumbers | str | Path]): The Love numbers,
@@ -359,7 +357,7 @@ class EarthModel:
     @staticmethod
     def from_defaults(*, lmax: int = 256) -> EarthModel:
         """
-        Returns the default Earth model, based on PREM with standard non-dimensionalisations.
+        Returns the default Earth model: PREM Love numbers with the standard non-dimensionalisation.
 
         Args:
             lmax (int): Truncation degree for discretisation. Defaults to 256.
@@ -449,7 +447,7 @@ class EarthModel:
 
     @property
     def parameters(self) -> EarthModelParameters:
-        """The fundamental, non-dimensionalized Earth parameters."""
+        """The fundamental, non-dimensionalised Earth parameters."""
         return self._parameters
 
     @property
@@ -480,7 +478,7 @@ class EarthModel:
         )
         if not is_compatible:
             raise ValueError(
-                "Provided SHGrid object is not compatible with FingerPrint settings."
+                "the SHGrid is not compatible with the EarthModel's grid settings"
             )
         return True
 
@@ -493,7 +491,7 @@ class EarthModel:
         )
         if not is_compatible:
             raise ValueError(
-                "Provided SHCoeffs object is not compatible with FingerPrint settings."
+                "the SHCoeffs are not compatible with the EarthModel's conventions"
             )
         return True
 

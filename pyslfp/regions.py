@@ -36,7 +36,7 @@ class Regions:
     # ==================================================================== #
 
     def __init__(self) -> None:
-        """Initializes the Regions mixin with built-in AR6 region definitions."""
+        """Initialises the Regions mixin with built-in AR6 region definitions."""
         self._ar6_regions = regionmask.defined_regions.ar6.all
 
         # Placeholders for custom datasets (lazy loaded via properties)

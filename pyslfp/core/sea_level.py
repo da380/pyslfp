@@ -121,7 +121,7 @@ class SeaLevelEquation:
 
     def __init__(self, model: EarthModel, /) -> None:
         """
-        Initializes the Sea Level Equation solver.
+        Initialises the sea level equation solver.
 
         Args:
             model (EarthModel): The physical configuration of the Earth,
@@ -420,12 +420,15 @@ class SeaLevelEquation:
         verbose: bool = False,
     ) -> Tuple[SHGrid, SHGrid, SHGrid, np.ndarray]:
         """
-        Solves the generalized linear SLE for an arbitrary combination of forcings.
-
-        Useful for adjoint calculations or complex, multi-physical inversions.
+        Solves the generalised linear sea level equation for an
+        arbitrary combination of forcings: the engine behind the
+        elastic drivers, the viscoelastic steps and their adjoints.
 
         Args:
             state (EarthState): The unperturbed background Earth state.
+            ocean_function (Optional[SHGrid]): An override of the state's
+                ocean function, used when linearising about a
+                migrating-shoreline trajectory; None keeps the state's.
             direct_load (Optional[SHGrid]): Standard surface mass forcing.
             displacement_load (Optional[SHGrid]): External vertical surface displacement forcing.
             gravitational_potential_load (Optional[SHGrid]): External gravitational potential forcing.
@@ -702,6 +705,9 @@ class SeaLevelEquation:
 
         Args:
             state (EarthState): The background state, as in the forward.
+            ocean_function (Optional[SHGrid]): An override of the state's
+                ocean function, matching the forward solve being transposed;
+                None keeps the state's.
             sea_level_dual (Optional[SHGrid]): g_xi, a density paired
                 with the sea level change by the surface integral.
             displacement_dual (Optional[SHGrid]): g_u, likewise.

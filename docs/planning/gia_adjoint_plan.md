@@ -329,6 +329,16 @@ unit gate inverts a step to 1e-11.  Works for frozen and migrating
 trajectories; the adjoints accept snapshots directly, a
 ForwardTrajectory, or a full state list as before.
 
+Structural decision (David, 16 Oct): the viscoelastic adjoints
+follow the elastic pattern -- the public, inversion-facing surface
+will be pygeoinf linear/nonlinear operators (as linear_operators/
+wraps the elastic adjoint), built when pygeoinf v2 lands.  The kernel
+drivers (adjoint_ice_history, continuous_adjoint_ice_history,
+IceKernels, Measurement, ForwardTrajectory, the functionals) are the
+COMPUTATIONAL layer those operators will wrap: keep them working and
+documented, but do not grow that surface into a public API that the
+wrappers would then displace.
+
 LATER, from David (15 Oct):
 
 - (done above) **Spherically symmetric viscosity kernels** K_eta(r).  No 3-D
@@ -340,7 +350,45 @@ LATER, from David (15 Oct):
   forward trajectory (d - m)(t) stored (in memory at test scales,
   checkpointed at production).  The discrete variant differentiates
   the scheme weights in tau; the resolution diagnostic applies.
-- **Decay-time functionals** (Hudson Bay and the like, usually
+- DONE (16 Oct): **decay-time functionals**.
+  `pyslfp/viscoelastic/functionals.py`: `fit_decay_time` fits
+  a e^(-s t) + b with the model times free parameters penalised
+  towards the nominal ones (AT14 Appendix C's treatment of timing
+  errors; Mitrovica & Peltier 1993) -- BOTH uncertainties are required
+  arguments since only their ratio matters and a value uncertainty far
+  from the series' scale drowns one misfit term (unit-trap found the
+  hard way: nd series ~1e-9 vs default 1.0 stalled the optimiser).
+  Variable-projection seed + trust-region Gauss-Newton replaces the
+  paper's damped Newton; the s -> 0 ridge (fit degenerating to a line
+  with huge compensating amplitude/offset) is refused, and a
+  stationarity guard raises if the optimiser stalls.  Weights
+  d tau_d / d data by implicit differentiation with the FULL Hessian;
+  `decay_time_measurement` folds them onto a spatial dual as a
+  multi-date Measurement.  Validity domain in the module docstring:
+  near-field site (under the former ice centre), window strictly
+  post-melt (David, 16 Oct).  Gated: fit recovers exact data both
+  branches; weight FD second order; the two timing branches give
+  genuinely different weights (150% in norm); full chain (rerun +
+  refit vs kernels.itau) second order with Richardson to 1e-5.
+
+- Example scripts DONE (16 Oct): tutorials/scripts/08_gia_kernels.py
+  (ice-history kernels: instantaneous lump, density, quelled rate,
+  no-forward-run point, resolution diagnostic 0.84% at 0.5 ka steps;
+  ~30 s) and 09_decay_time_viscosity.py (decay time 1.17 kyr of a
+  Hudson Bay cap's emergence; per-element d tau_d/d ln eta profile,
+  upper/lower mantle opposite signs; checkpointed recording record=5;
+  ~70 s).  Figures reviewed on screen (16 Oct): measurement patches
+  must be degree-tapered like any sharp disc, or their ringing
+  dominates the kernel densities; time-series points must sit on land
+  (thickness kernels vanish over ocean by grounding); and the
+  viscosity kernel is plotted as the CONTINUOUS density k(r) -- nodal
+  values divided by the quadrature measure, d tau = int k d(ln eta)
+  dr -- not per-element lumps.  After tapering: decay time 2.84 kyr,
+  diagnostic 4.7%.  Both non-dimensional with SI converted at
+  the boundary; both pass the slow harness.  NOTE: tutorials 06/07
+  still construct in SI -- converting them is a pending decision.
+
+- (superseded by the above) **Decay-time functionals** (Hudson Bay and the like, usually
   finite-differenced in the literature): the decay time is defined by
   a nonlinear least-squares fit to a sea level curve; differentiate
   the fit's stationarity conditions locally to get the decay time's
@@ -379,10 +427,21 @@ LATER, from David (15 Oct):
    tau is infinite).
 3. The adjoint, as above, landing beside the evolution.
 
-Also queued (David, 15 Oct): a review of ALL docstrings across the
-library for correctness and house style -- detailed, no development
-narrative, every argument documented Google-style except trivial
-arguments self-described by the function's statement of purpose.
+DONE (16 Oct): the library-wide docstring review.  An AST audit
+(missing docstrings, missing Args, undocumented kwargs) drove
+targeted fixes: the engine solvers' missing `ocean_function` kwargs
+documented; fingerprint.py typos and stale wording; -ize/-meters
+spellings; stale "FingerPrint" error messages; the narrative
+paragraph in linear_operators/utils.py; property one-liners across
+viscoelastic, love_numbers, altimetry and grace; Args on the loads
+factories, the altimetry point generators, disk_load and the ice
+contract; plot.py framed as the pygeoinf delegation it is; module
+docstrings for core.model, core.state, plot and the viscoelastic
+package (the latter carrying the computational-layer framing).  One
+API typo fixed: EarthState.direct_load_from_ocean_ocean_density_change
+-> direct_load_from_ocean_density_change (used nowhere).  The big
+viscoelastic drivers keep their prose arg descriptions under the
+self-described clause.  Suite, hooks and -W docs green throughout.
 
 Design note, recorded (David, 15 Oct): continuous-in-time
 measurements are a SEPARATE kind from the point-in-time ones (as in

@@ -1397,3 +1397,139 @@ def test_checkpointed_viscosity_kernels(setting):
             ocean_functions=oceans,
             internal_states=[snap.internal_state for snap in sparse],
         )
+
+
+def test_decay_time_fit_and_weights():
+    """The decay-time fit recovers exact data in both branches, its
+    weights are the exact data derivative (FD residual second order),
+    and freeing the model times changes the weights -- the timing
+    treatment is a modelling choice the caller makes explicitly."""
+    from pyslfp.viscoelastic import fit_decay_time
+
+    rng = np.random.default_rng(3)
+    t = np.linspace(0.0, 6.0, 9)
+    a, b, tau = 2.5, -0.7, 1.8
+    clean = a * np.exp(-t / tau) + b
+    noisy = clean + 0.01 * rng.normal(size=t.size)
+    dy = rng.normal(size=t.size)
+
+    branch_weights = {}
+    for sig_t in (0.0, 0.15):
+        fit = fit_decay_time(t, clean, time_uncertainty=sig_t, value_uncertainty=0.02)
+        assert abs(fit.decay_time - tau) < 1e-8
+        assert abs(fit.amplitude - a) < 1e-7 and abs(fit.offset - b) < 1e-8
+        assert np.max(np.abs(fit.model_times - t)) < 1e-10
+
+        fit = fit_decay_time(t, noisy, time_uncertainty=sig_t, value_uncertainty=0.02)
+        predicted = float(fit.weights @ dy)
+        branch_weights[sig_t] = fit.weights
+        resid = {}
+        for eps in (1e-3, 5e-4):
+            plus = fit_decay_time(
+                t, noisy + eps * dy, time_uncertainty=sig_t, value_uncertainty=0.02
+            )
+            minus = fit_decay_time(
+                t, noisy - eps * dy, time_uncertainty=sig_t, value_uncertainty=0.02
+            )
+            fd = (plus.decay_time - minus.decay_time) / (2.0 * eps)
+            resid[eps] = abs(fd - predicted)
+            assert abs(fd - predicted) < 1e-4 * abs(predicted)
+        assert resid[1e-3] / resid[5e-4] > 3.0
+    difference = np.linalg.norm(branch_weights[0.0] - branch_weights[0.15])
+    assert difference > 0.5 * np.linalg.norm(branch_weights[0.0])
+
+    with pytest.raises(ValueError, match="decay"):
+        fit_decay_time(t, clean[::-1], time_uncertainty=0.0, value_uncertainty=0.02)
+
+
+def test_decay_time_viscosity_kernels(setting):
+    """The decay time of a near-field site's post-melt emergence curve
+    as an objective: the fit's implicit derivative becomes multi-date
+    measurement weights, the adjoint turns those into viscosity
+    kernels, and central FD of the whole chain (rerun, refit) falls at
+    second order onto the kernel's prediction."""
+    from pyslfp.viscoelastic import decay_time_measurement
+
+    material, earth, _, _, _ = setting
+    mesh = material.mesh
+    analytic_model, state = _history_state(material, earth)
+
+    class _SteppedMelt(BaseIceModel):
+        """The analytical ice losing a quarter between 10 and 9 ka and
+        holding after: the site's curve then decays freely."""
+
+        def get_ice_thickness(
+            self, date, lmax, /, *, grid="DH", sampling=1, extend=True
+        ):
+            full = analytic_model.get_ice_thickness(
+                10.0, lmax, grid=grid, sampling=sampling, extend=extend
+            )
+            fraction = 1.0 - 0.25 * np.clip(10.0 - date, 0.0, 1.0)
+            return SHGrid.from_array(
+                fraction * full.data, grid=self.resolve_grid(grid, sampling)[0]
+            )
+
+    ice_model = _SteppedMelt(length_scale=earth.parameters.length_scale)
+    # the site: a disc average under the centre of the melted sheet
+    cap = SHGrid.from_cap(
+        15.0,
+        45.0,
+        90.0,
+        lmax=LMAX,
+        grid=earth.grid_name,
+        sampling=earth.sampling,
+        extend=earth.extend,
+    )
+    g = SHGrid.from_array(cap.data / earth.integrate(cap), grid=earth.grid)
+
+    dates = np.linspace(10.0, 0.0, 41)
+    window = dates[12:]  # strictly after the melt
+    op = _maxwell_operator(material)
+    evo = SeaLevelEvolution(op, state)
+
+    def series_of(evolution):
+        snaps, _ = evolution.run_ice_history(dates, ice_model)
+        return np.array(
+            [
+                earth.integrate(
+                    SHGrid.from_array(
+                        g.data * snap.sea_level_change.data, grid=earth.grid
+                    )
+                )
+                for snap in snaps[12:]
+            ]
+        )
+
+    base_series = series_of(evo)
+    sig_d = 0.01 * np.ptp(base_series)
+    fit, measurement = decay_time_measurement(
+        window, base_series, g, time_uncertainty=0.05, value_uncertainty=sig_d
+    )
+    assert 0.0 < fit.decay_time < window[0] - window[-1]
+
+    snapshots, _ = evo.run_ice_history(dates, ice_model, record=4)
+    kernels = evo.adjoint_ice_history(dates, measurement, internal_states=snapshots)
+    ditau = (0.3 + 0.7 * (mesh.r / mesh.r.max()) ** 2) / TAU
+    predicted = float(np.sum(kernels.itau[0] * ditau))
+
+    def functional(eps):
+        rheology = Rheology(
+            material, [(op.rheology.mu[0], op.rheology.itau[0] + eps * ditau)]
+        )
+        evolution = SeaLevelEvolution(ViscoelasticOperator(rheology, LMAX), state)
+        refit, _ = decay_time_measurement(
+            window,
+            series_of(evolution),
+            g,
+            time_uncertainty=0.05,
+            value_uncertainty=sig_d,
+        )
+        return refit.decay_time
+
+    fd = {
+        eps: (functional(eps) - functional(-eps)) / (2.0 * eps) for eps in (0.02, 0.01)
+    }
+    resid = {eps: abs(f - predicted) for eps, f in fd.items()}
+    assert 3.0 < resid[0.02] / resid[0.01] < 5.0
+    richardson = (4.0 * fd[0.01] - fd[0.02]) / 3.0
+    assert abs(richardson - predicted) < 1e-5 * abs(predicted)

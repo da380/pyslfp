@@ -71,6 +71,7 @@ class DegreeSolution:
 
     @property
     def surface(self) -> tuple[complex, complex, complex]:
+        """(U, V, phi) at the outer boundary."""
         return (self.U[-1, -1].item(), self.V[-1, -1].item(), self.phi[-1, -1].item())
 
     def evaluate(self, radii: ArrayLike) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -178,7 +179,9 @@ def solve_degree(
     channels, its traction-like or attraction piece alone, a unit
     tangential traction, a unit external potential (r/a)^l, or the
     centrifugal potential (r/a)^2.  Given a model, the mesh is built
-    with the `lmax=l` rule unless supplied."""
+    with the `lmax=l` rule unless supplied, with `ngll` nodes per
+    element; `eps` is the relative level below which the degree's
+    solution is truncated with depth."""
     if forcing not in FORCINGS:
         raise ValueError(f"forcing must be one of {FORCINGS}, got {forcing!r}")
     material = _material(model_or_material, mesh=mesh, ngll=ngll, lmax=l, eps=eps)
@@ -219,7 +222,8 @@ def fluid_tidal_number(
     2005; Mitrovica & Wahr 2011).  See
     `EarthModelParameters.with_hydrostatic_moments`.
 
-    The fluid limit is solved as the zero-rigidity solid: the shear
+    The mesh arguments are `solve_degree`'s.  The fluid limit is
+    solved as the zero-rigidity solid: the shear
     moduli are set exactly to zero and the degree system falls back to
     its LU path, which handles the semi-definite elastic block.  Only
     the density profile then matters -- a homogeneous body gives

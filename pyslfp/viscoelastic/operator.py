@@ -93,9 +93,11 @@ class ViscoelasticState:
 
     @property
     def degrees(self) -> list[int]:
+        """The spherical harmonic degrees the state carries."""
         return sorted(self.m)
 
     def ncols(self, l: int) -> int:
+        """The number of load columns carried at degree l."""
         return self.m[l].shape[-1]
 
     @property
@@ -112,6 +114,8 @@ class ViscoelasticState:
         self._strain = None
 
     def copy(self) -> ViscoelasticState:
+        """An independent copy of the internal variables, without the
+        strain cache."""
         out = ViscoelasticState({l: a.copy() for l, a in self.m.items()}, self.t)
         return out
 

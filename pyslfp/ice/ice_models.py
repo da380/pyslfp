@@ -38,17 +38,17 @@ class BaseIceModel(ABC):
 
     def __init__(self, /, *, length_scale: float = 1.0) -> None:
         """
-        Initializes the base ice model.
+        Initialises the base ice model.
 
         Args:
-            length_scale (float): The scaling factor to non-dimensionalize
-                the spatial outputs. Defaults to 1.0 (returns raw meters).
+            length_scale (float): The scaling factor that non-dimensionalises
+                the spatial outputs. Defaults to 1.0 (raw metres).
         """
         self._length_scale = length_scale
 
     @property
     def length_scale(self) -> float:
-        """The scaling factor used to non-dimensionalize output grids."""
+        """The scaling factor that non-dimensionalises output grids."""
         return self._length_scale
 
     @staticmethod
@@ -218,7 +218,8 @@ class BaseIceSeaLevelModel(BaseIceModel):
         sampling: int = 1,
         extend: bool = True,
     ) -> SHGrid:
-        """Returns the scaled ice thickness for a given date."""
+        """The scaled ice thickness at a date; arguments as
+        `get_ice_thickness_and_sea_level`."""
         ice_thickness, _ = self.get_ice_thickness_and_sea_level(
             date, lmax, grid=grid, sampling=sampling, extend=extend
         )
@@ -234,7 +235,8 @@ class BaseIceSeaLevelModel(BaseIceModel):
         sampling: int = 1,
         extend: bool = True,
     ) -> SHGrid:
-        """Returns the scaled sea level for a given date."""
+        """The scaled sea level at a date; arguments as
+        `get_ice_thickness_and_sea_level`."""
         _, sea_level = self.get_ice_thickness_and_sea_level(
             date, lmax, grid=grid, sampling=sampling, extend=extend
         )

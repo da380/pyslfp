@@ -46,9 +46,9 @@ _SERIES_SWITCH = 1e-3
 
 
 def _phi1(h: np.ndarray, e: np.ndarray) -> np.ndarray:
-    """(1 - exp(-h)) / h, by the quotient above the switch and by the
-    alternating series below it, exact at h = 0."""
-    small = h < _SERIES_SWITCH
+    """(1 - exp(-h)) / h, by the quotient away from zero and by the
+    alternating series below the switch, exact at h = 0."""
+    small = np.abs(h) < _SERIES_SWITCH
     hs = np.where(small, h, 1.0)  # keep the series arguments benign
     series = 1.0 - hs / 2.0 + hs**2 / 6.0 - hs**3 / 24.0 + hs**4 / 120.0
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -60,11 +60,13 @@ def exponential_trapezoid_weights(
     h: ArrayLike,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """(e, alpha, beta) of the exponential trapezoid update for
-    h = dt / tau >= 0, elementwise: e = exp(-h), alpha = phi1 - e,
-    beta = 1 - phi1.  The effective-modulus weight is 1 - beta = phi1."""
+    h = dt / tau, elementwise: e = exp(-h), alpha = phi1 - e,
+    beta = 1 - phi1.  The effective-modulus weight is 1 - beta = phi1.
+    Negative h gives the weights of the EXACT inverse step: the update
+    at -dt with the start and end strains swapped, which is how a
+    checkpointing driver reconstructs the forward trajectory during a
+    reverse sweep; dissipation then amplifies roundoff by exp(abs h)."""
     h = np.asarray(h, dtype=float)
-    if np.any(h < 0.0):
-        raise ValueError("h = dt / tau must be non-negative")
     e = np.exp(-h)
     phi1 = _phi1(h, e)
     return e, phi1 - e, 1.0 - phi1
@@ -83,7 +85,7 @@ def backward_euler_weight(h: ArrayLike) -> np.ndarray:
 def _dphi1(h: np.ndarray, e: np.ndarray, phi1: np.ndarray) -> np.ndarray:
     """d phi1 / dh = (e - phi1) / h, by the quotient above the switch
     and by the alternating series below it, exact at h = 0."""
-    small = h < _SERIES_SWITCH
+    small = np.abs(h) < _SERIES_SWITCH
     hs = np.where(small, h, 1.0)
     series = -0.5 + hs / 3.0 - hs**2 / 8.0 + hs**3 / 30.0 - hs**4 / 144.0
     with np.errstate(divide="ignore", invalid="ignore"):

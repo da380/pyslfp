@@ -494,6 +494,57 @@ class ViscoelasticOperator:
             return self._step_exponential_euler(state, dt, load, tide)
         return self._step_exponential_trapezoid(state, dt, load, tide)
 
+    def step_back(
+        self,
+        state: ViscoelasticState,
+        dt: float,
+        *,
+        scheme: str = "exponential_trapezoid",
+        load: LoadCallable | None = None,
+        tide: LoadCallable | None = None,
+    ) -> tuple[ViscoelasticState, dict[int, np.ndarray]]:
+        """The exact algebraic inverse of `step`: the state one step of
+        `dt` EARLIER, with the degree solutions at that earlier time
+        and a consistent strain cache, so inversions chain.  The load
+        channels given are the EARLIER time's; the state itself must
+        carry its strain cache (a step, or a recording run, leaves
+        one).  For the exponential trapezoid the inverse is the same
+        update evaluated at -dt with the start and end strains
+        swapped; backward Euler inverts explicitly.  Dissipation runs
+        the other way in time, so roundoff is amplified by exp(h) per
+        branch and node: a checkpointing driver budgets the
+        accumulated h between stored states.
+        """
+        if scheme not in ("exponential_trapezoid", "backward_euler"):
+            raise ValueError(
+                "a step inverts for scheme 'exponential_trapezoid' or "
+                f"'backward_euler', got {scheme!r}"
+            )
+        if dt <= 0.0:
+            raise ValueError("dt must be positive")
+        if state._strain is None:
+            raise ValueError(
+                "the state must carry its strain cache; reconstruct from "
+                "a recorded state or a completed step"
+            )
+        if scheme == "exponential_trapezoid":
+            return ViscoelasticStep(self, state, -dt, scheme, None, None).finish(
+                load=load, tide=tide
+            )
+        d1 = state._strain
+        m_prev: dict[int, np.ndarray] = {}
+        for l in state.degrees:
+            deg = self._deg(l)
+            m = np.empty_like(state.m[l])
+            for k, itau in enumerate(deg.itau):
+                hk = (dt * itau)[None, :, :, None]
+                m[k] = (1.0 + hk) * state.m[l][k] - hk * d1[l]
+            m_prev[l] = m
+        prev = ViscoelasticState(m_prev, state.t - dt)
+        solutions = self.solve_elastic(prev, load=load, tide=tide)
+        prev._strain = {l: self._deg(l).strain(x) for l, x in solutions.items()}
+        return prev, solutions
+
     def _start_strain(
         self,
         state: ViscoelasticState,

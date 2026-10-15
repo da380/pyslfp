@@ -1330,3 +1330,70 @@ def test_migrating_viscosity_kernels(setting):
     assert coarse < 3e-3
     assert fine < 1e-3
     assert 3.0 < coarse / fine < 5.5
+
+
+def test_checkpointed_viscosity_kernels(setting):
+    """A strided recording reproduces the full-record viscosity
+    kernels through exact backward reconstruction, the residual at the
+    exp(sum h) roundoff budget of the gaps; migrating trajectories
+    reconstruct too, and a bare state list with gaps is refused."""
+    material, earth, _, _, _ = setting
+    ice_model, state = _history_state(material, earth)
+    rng = np.random.default_rng(7)
+    c = rng.normal(size=(2, LMAX + 1, LMAX + 1))
+    for degree in range(LMAX + 1):
+        c[:, degree, degree + 1 :] = 0.0
+    c[1, :, 0] = 0.0
+    g = earth.expand_coefficient(
+        SHCoeffs.from_array(c, normalization=earth.normalization, csphase=earth.csphase)
+    )
+    measurement = {0.0: g}
+    dates = np.linspace(10.0, 0.0, 11)
+
+    # resolved: tiny amplification; stiff: exp(6.4) per gap, still fine
+    for tau_factor, stride, tol in ((10.0, 3, 1e-10), (1.0, 2, 1e-9)):
+        op = ViscoelasticOperator(
+            Rheology.from_relaxation_time(material, tau_factor * TAU), LMAX
+        )
+        evo = SeaLevelEvolution(op, state)
+        full, _ = evo.run_ice_history(dates, ice_model, record=True)
+        sparse, _ = evo.run_ice_history(dates, ice_model, record=stride)
+        kept = sum(1 for snap in sparse if snap.internal_state is not None)
+        assert kept < len(sparse)
+        for adjoint in (evo.adjoint_ice_history, evo.continuous_adjoint_ice_history):
+            reference = adjoint(dates, measurement, internal_states=full).itau[0]
+            kernels = adjoint(dates, measurement, internal_states=sparse).itau[0]
+            assert np.linalg.norm(kernels - reference) < tol * np.linalg.norm(
+                reference
+            ), (tau_factor, adjoint.__name__)
+
+    # a migrating trajectory reconstructs the same way
+    marine_model, marine_state = _marine_history_state(material, earth)
+    evo = SeaLevelEvolution(
+        ViscoelasticOperator(Rheology.from_relaxation_time(material, 10.0 * TAU), LMAX),
+        marine_state,
+    )
+    marine_dates = np.linspace(_MeltingCap.START, 0.0, 11)
+    full, _ = evo.run_ice_history(
+        marine_dates, marine_model, shorelines="migrating", record=True
+    )
+    sparse, _ = evo.run_ice_history(
+        marine_dates, marine_model, shorelines="migrating", record=3
+    )
+    oceans = [snap.ocean_function for snap in full]
+    reference = evo.adjoint_ice_history(
+        marine_dates, measurement, ocean_functions=oceans, internal_states=full
+    ).itau[0]
+    kernels = evo.adjoint_ice_history(
+        marine_dates, measurement, ocean_functions=oceans, internal_states=sparse
+    ).itau[0]
+    assert np.linalg.norm(kernels - reference) < 1e-10 * np.linalg.norm(reference)
+
+    # a bare state list with gaps carries no loads to reconstruct from
+    with pytest.raises(ValueError, match="checkpointed trajectory"):
+        evo.adjoint_ice_history(
+            marine_dates,
+            measurement,
+            ocean_functions=oceans,
+            internal_states=[snap.internal_state for snap in sparse],
+        )

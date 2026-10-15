@@ -258,3 +258,33 @@ def test_adaptive_trapezoid(material):
         elastic.zero_state(), T, 0.05 * TAU, rtol=1e-4, load=load
     )
     assert info["accepted"] <= 8 and info["rejected"] == 0
+
+
+def test_step_back_inverts_a_step(material):
+    """`step_back` is the exact algebraic inverse of `step` for both
+    implicit schemes, chaining through the strain caches, with the
+    roundoff amplified by no more than exp(h)."""
+    rheo = Rheology.from_relaxation_time(material, TAU)
+    op = ViscoelasticOperator(rheo, 2, degrees=[2])
+
+    def load(l, t):
+        return np.array([1.0])
+
+    for scheme in ("exponential_trapezoid", "backward_euler"):
+        state = op.zero_state()
+        for _ in range(3):
+            state, _ = op.step(state, 0.7 * TAU, scheme=scheme, load=load)
+        middle = state.copy()
+        after, _ = op.step(state, 0.7 * TAU, scheme=scheme, load=load)
+        back, _ = op.step_back(after, 0.7 * TAU, scheme=scheme, load=load)
+        for l in state.degrees:
+            scale = np.max(np.abs(middle.m[l]))
+            assert np.max(np.abs(back.m[l] - middle.m[l])) < 1e-11 * scale, scheme
+        assert abs(back.t - middle.t) < 1e-12
+        # the cache chains: a second inversion needs no fresh solve
+        twice, _ = op.step_back(back, 0.7 * TAU, scheme=scheme, load=load)
+        assert twice.cached_strain is not None
+
+    fresh = op.zero_state()
+    with pytest.raises(ValueError, match="strain cache"):
+        op.step_back(fresh, 0.5 * TAU, load=load)

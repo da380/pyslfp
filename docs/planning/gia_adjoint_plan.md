@@ -310,8 +310,24 @@ records on request (the start state's cache is the zero solve's), and
 both kernel variants gate about the marine trajectory -- discrete FD
 residual second order with Richardson landing on the kernel to 1e-5,
 continuous converging to discrete at second order (1e-3 -> 2.3e-4).
-Production note: at scale the recorded trajectory wants
-checkpointing; not built.
+Checkpointing (16 Oct, built as the trial for AdGIA's 3-D
+problem): the exact inverse of an exponential-trapezoid step is the
+same update at -dt with the strain roles swapped (alpha(-h) =
+-beta(h)/e(h) and conversely), so `ViscoelasticOperator.step_back`
+reuses the two-phase machinery with a negative-dt flavour (its
+effective-modulus weight phi1(-h) > 1 stays positive definite);
+backward Euler inverts explicitly, m = (1+h) m' - h d'.  Recording
+takes a stride: `record=M` keeps internal states every M nodes (and
+the last) while the per-node load and centrifugal coefficients are
+always kept (surface-sized), and `ForwardTrajectory`/_TrajectoryCursor
+reconstruct the gaps during the reverse sweep in lockstep with the
+adjoint.  Dissipation backwards amplifies roundoff by exp(h) per
+branch-node, so the accumulated h = dt/tau across a gap is the digit
+budget -- measured: resolved gaps 1e-12 agreement with full
+recording, stiff gaps (sum h = 6.4, amplification ~600) 3e-11; the
+unit gate inverts a step to 1e-11.  Works for frozen and migrating
+trajectories; the adjoints accept snapshots directly, a
+ForwardTrajectory, or a full state list as before.
 
 LATER, from David (15 Oct):
 

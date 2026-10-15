@@ -207,9 +207,103 @@ class SeaLevelSnapshot:
     #: record an adjoint calculation reads back.
     ocean_function: SHGrid | None = field(default=None, repr=False)
     #: The radial internal state at this time, recorded on request
-    #: (`record=True`): the forward trajectory a viscosity-kernel
-    #: adjoint pairs its duals with.
+    #: (`record`): the forward trajectory a viscosity-kernel adjoint
+    #: pairs its duals with.  Under a checkpointing stride only the
+    #: kept nodes carry one.
     internal_state: "ViscoelasticState | None" = field(default=None, repr=False)
+    #: The converged surface load and centrifugal coefficients of this
+    #: node, kept by every recording run: with these a reverse sweep
+    #: reconstructs the states between checkpoints by exact backward
+    #: steps.
+    load_coefficients: np.ndarray | None = field(default=None, repr=False)
+    tide_coefficients: np.ndarray | None = field(default=None, repr=False)
+
+
+def _record_stride(record: bool | int) -> int:
+    """The recording stride: 0 for no recording, 1 for every node
+    (record=True), or the given checkpoint stride -- internal states
+    kept every `record` nodes (and at the last), the per-node load
+    and centrifugal coefficients always kept, and the gaps
+    reconstructed by exact backward steps during a reverse sweep.
+    Backwards the dissipation amplifies roundoff by exp(h) per
+    branch and node, so the accumulated h = dt / tau across a gap
+    is the digits spent."""
+    if record is True:
+        return 1
+    if record is False:
+        return 0
+    stride = int(record)
+    if stride < 1:
+        raise ValueError("record must be True, False, or a stride >= 1")
+    return stride
+
+
+@dataclass(frozen=True)
+class ForwardTrajectory:
+    """A recorded forward trajectory for the viscosity-kernel adjoints:
+    the internal states, at every node or at sparse checkpoints, and
+    the per-node surface load and centrifugal coefficients that let a
+    reverse sweep reconstruct the gaps by exact backward steps.  The
+    reconstruction amplifies roundoff by exp(h) per branch and node
+    across a gap, so the recording stride buys memory at the price of
+    trailing digits; see `SeaLevelEvolution.run`."""
+
+    states: list[ViscoelasticState | None]
+    loads: Optional[list[np.ndarray]] = None
+    tides: Optional[list[np.ndarray]] = None
+
+    @classmethod
+    def from_snapshots(cls, snapshots: Sequence[SeaLevelSnapshot]) -> ForwardTrajectory:
+        """The trajectory a recording run's snapshots carry."""
+        states = [snap.internal_state for snap in snapshots]
+        loads = [snap.load_coefficients for snap in snapshots]
+        tides = [snap.tide_coefficients for snap in snapshots]
+        if any(ld is None for ld in loads) or any(td is None for td in tides):
+            if all(st is not None for st in states):
+                return cls(states)
+            raise ValueError(
+                "the snapshots do not carry the recorded loads: run with record"
+            )
+        return cls(states, loads, tides)
+
+
+class _TrajectoryCursor:
+    """Serves the forward internal states to a reverse sweep, strictly
+    backwards: stored states where the recording kept them, exact
+    backward steps under the recorded loads between."""
+
+    def __init__(self, evolution, trajectory, dates, scheme) -> None:
+        self._evolution = evolution
+        self._trajectory = trajectory
+        kyr = KYR / evolution.model.parameters.scales.factor(units.TIME)
+        self._dt = (dates[:-1] - dates[1:]) * kyr * evolution._to_mat_time
+        self._scheme = scheme
+        self._node = len(trajectory.states) - 1
+        self._state = trajectory.states[-1]
+
+    def state(self, node: int) -> ViscoelasticState:
+        if node > self._node:
+            raise ValueError("the trajectory cursor moves backwards")
+        while self._node > node:
+            target = self._node - 1
+            stored = self._trajectory.states[target]
+            if stored is not None:
+                self._state = stored
+            else:
+                evolution = self._evolution
+                self._state, _ = evolution.operator.step_back(
+                    self._state,
+                    float(self._dt[target]),
+                    scheme=self._scheme,
+                    load=evolution._columns(
+                        self._trajectory.loads[target], evolution._to_mat_density
+                    ),
+                    tide=evolution._columns(
+                        self._trajectory.tides[target], evolution._to_mat_potential
+                    ),
+                )
+            self._node = target
+        return self._state
 
 
 def _normalise_measurement(
@@ -389,7 +483,7 @@ class SeaLevelEvolution:
         rotational_feedbacks: bool = True,
         rtol: float = 1e-9,
         verbose: bool = False,
-        record: bool = False,
+        record: bool | int = False,
     ) -> tuple[list[SeaLevelSnapshot], ViscoelasticState]:
         """Integrates from times[0] over the given grid, which should
         include any breakpoints of the ice history; `ice_load(t)` is
@@ -407,10 +501,22 @@ class SeaLevelEvolution:
         model's hydrostatic fluid limit -- specified observed values
         for an Earth-like body, or the construction of
         `EarthModelParameters.with_hydrostatic_moments` for any other
-        -- and is refused otherwise."""
+        -- and is refused otherwise.
+
+        `record` keeps what a viscosity-kernel adjoint needs of the
+        trajectory: True attaches every node's internal state to its
+        snapshot; an integer stride keeps the states every that many
+        nodes (and at the last), with the per-node load and centrifugal
+        coefficients always kept so a reverse sweep reconstructs the
+        gaps by exact backward steps.  The reconstruction amplifies
+        roundoff by exp(h) per branch and node across a gap, so the
+        stride spends trailing digits for memory; the accumulated
+        h = dt / tau between checkpoints is the budget."""
         times = np.asarray(times, dtype=float)
         if times.ndim != 1 or times.size < 2 or np.any(np.diff(times) <= 0.0):
             raise ValueError("times must be increasing, with at least two entries")
+        stride = _record_stride(record)
+        last_node = times.size - 1
         op = self.operator
         ocean = self.state.ocean_function.data
 
@@ -433,7 +539,7 @@ class SeaLevelEvolution:
             SHGrid.from_array(total, grid=self.model.grid, copy=False)
         ).coeffs
         psi = self._centrifugal(omega) if rotational_feedbacks else np.zeros_like(sigma)
-        if record:
+        if stride:
             op.prime_strain(
                 vstate,
                 load=self._columns(sigma, self._to_mat_density),
@@ -446,11 +552,13 @@ class SeaLevelEvolution:
                 disp,
                 potential,
                 omega,
-                internal_state=vstate if record else None,
+                internal_state=vstate if stride else None,
+                load_coefficients=sigma if stride else None,
+                tide_coefficients=psi if stride else None,
             )
         ]
 
-        for t0, t1 in zip(times[:-1], times[1:]):
+        for node, (t0, t1) in enumerate(zip(times[:-1], times[1:]), start=1):
             dt = (t1 - t0) * self._to_mat_time
             step = op.start_step(
                 vstate,
@@ -487,6 +595,7 @@ class SeaLevelEvolution:
                 load=self._columns(sigma, self._to_mat_density),
                 tide=self._columns(psi, self._to_mat_potential),
             )
+            keep = bool(stride) and (node % stride == 0 or node == last_node)
             snapshots.append(
                 SeaLevelSnapshot(
                     float(t1),
@@ -494,7 +603,9 @@ class SeaLevelEvolution:
                     disp,
                     potential,
                     omega,
-                    internal_state=vstate if record else None,
+                    internal_state=vstate if keep else None,
+                    load_coefficients=sigma if stride else None,
+                    tide_coefficients=psi if stride else None,
                 )
             )
         return snapshots, vstate
@@ -671,7 +782,7 @@ class SeaLevelEvolution:
         rotational_feedbacks: bool = True,
         rtol: float = 1e-9,
         verbose: bool = False,
-        record: bool = False,
+        record: bool | int = False,
     ) -> tuple[list[SeaLevelSnapshot], ViscoelasticState]:
         """Integrates an ice history given by any ice model.
 
@@ -690,6 +801,9 @@ class SeaLevelEvolution:
         function -- the C(t) history an adjoint calculation reads
         back.  The background state must then be the state at the
         first date, whose ice thickness is the history's.
+
+        `record` keeps the internal states for a viscosity-kernel
+        adjoint, every node or on a checkpoint stride; see `run`.
         """
         if shorelines not in ("frozen", "migrating"):
             raise ValueError(
@@ -801,10 +915,12 @@ class SeaLevelEvolution:
                 "at the first date; build the state at dates[0]"
             )
 
+        stride = _record_stride(record)
+        last_node = len(dates) - 1
         vstate = op.zero_state(ncols=lambda l: 2 * (l + 1))
         sigma = np.zeros((2, model.lmax + 1, model.lmax + 1))
         psi = np.zeros_like(sigma)
-        if record:
+        if stride:
             # the start is the undisturbed background, so the cache is
             # the zero solve's
             op.prime_strain(
@@ -822,10 +938,12 @@ class SeaLevelEvolution:
                 np.zeros(3),
                 date=date0,
                 ocean_function=self.state.ocean_function,
-                internal_state=vstate if record else None,
+                internal_state=vstate if stride else None,
+                load_coefficients=sigma if stride else None,
+                tide_coefficients=psi if stride else None,
             )
         ]
-        for a, b in zip(dates[:-1], dates[1:]):
+        for node, (a, b) in enumerate(zip(dates[:-1], dates[1:]), start=1):
             # the step grid is in dates; the operator works in the
             # material's units
             dt = (a - b) * kyr * self._to_mat_time
@@ -865,6 +983,7 @@ class SeaLevelEvolution:
                 load=self._columns(sigma, self._to_mat_density),
                 tide=self._columns(psi, self._to_mat_potential),
             )
+            keep = bool(stride) and (node % stride == 0 or node == last_node)
             snapshots.append(
                 SeaLevelSnapshot(
                     float(vstate.t / self._to_mat_time),
@@ -874,10 +993,45 @@ class SeaLevelEvolution:
                     omega,
                     date=float(b),
                     ocean_function=final_state.ocean_function,
-                    internal_state=vstate if record else None,
+                    internal_state=vstate if keep else None,
+                    load_coefficients=sigma if stride else None,
+                    tide_coefficients=psi if stride else None,
                 )
             )
         return snapshots, vstate
+
+    def _as_trajectory(self, internal_states, dates) -> ForwardTrajectory:
+        """Normalises the recorded forward trajectory an adjoint was
+        given: a ForwardTrajectory, a recording run's snapshots, or a
+        plain sequence of states when every node was kept."""
+        if isinstance(internal_states, ForwardTrajectory):
+            trajectory = internal_states
+        else:
+            seq = list(internal_states)
+            if seq and isinstance(seq[0], SeaLevelSnapshot):
+                trajectory = ForwardTrajectory.from_snapshots(seq)
+            else:
+                trajectory = ForwardTrajectory(seq)
+        states = trajectory.states
+        if len(states) != dates.size:
+            raise ValueError("internal_states must give one entry per date node")
+        last = states[-1]
+        if last is None or last.cached_strain is None:
+            raise ValueError(
+                "internal_states must be recorded forward states " "(a run with record)"
+            )
+        if any(st is None for st in states):
+            if trajectory.loads is None or trajectory.tides is None:
+                raise ValueError(
+                    "a checkpointed trajectory needs the recorded load and "
+                    "centrifugal coefficients: pass the recording run's "
+                    "snapshots or a ForwardTrajectory"
+                )
+        elif any(st.cached_strain is None for st in states):
+            raise ValueError(
+                "internal_states must be recorded forward states " "(a run with record)"
+            )
+        return trajectory
 
     def continuous_adjoint_ice_history(
         self,
@@ -1067,14 +1221,10 @@ class SeaLevelEvolution:
         per_ka = kyr * self._to_mat_time
 
         itau_kernel = None
+        cursor = None
         if internal_states is not None:
-            if len(internal_states) != dates.size:
-                raise ValueError("internal_states must give one state per date node")
-            if any(st is None or st.cached_strain is None for st in internal_states):
-                raise ValueError(
-                    "internal_states must be recorded forward states "
-                    "(a run with record=True)"
-                )
+            trajectory = self._as_trajectory(internal_states, dates)
+            cursor = _TrajectoryCursor(self, trajectory, dates, self.scheme)
             ngll = op.material.mesh.ngll
             K = op.rheology.num_branches
             itau_kernel = [np.zeros((op.material.mesh.nspec, ngll)) for _ in range(K)]
@@ -1090,7 +1240,7 @@ class SeaLevelEvolution:
             if itau_kernel is None or weight == 0.0:
                 return
             g_mat = op.material.surface_gravity
-            fwd = internal_states[node]
+            fwd = cursor.state(node)
             for l in vstate.degrees:
                 deg = op.degree(l)
                 dm = fwd.cached_strain[l][None] - fwd.m[l]
@@ -1351,14 +1501,10 @@ class SeaLevelEvolution:
             ddual[l] = np.zeros((3, deg.ne, ngll, ncols))
 
         itau_kernel = None
+        cursor = None
         if internal_states is not None:
-            if len(internal_states) != dates.size:
-                raise ValueError("internal_states must give one state per date node")
-            if any(st is None or st.cached_strain is None for st in internal_states):
-                raise ValueError(
-                    "internal_states must be recorded forward states "
-                    "(a run with record=True)"
-                )
+            trajectory = self._as_trajectory(internal_states, dates)
+            cursor = _TrajectoryCursor(self, trajectory, dates, scheme)
             itau_kernel = [np.zeros((op.material.mesh.nspec, ngll)) for _ in range(K)]
 
         def synth(coeffs: np.ndarray) -> np.ndarray:
@@ -1410,6 +1556,10 @@ class SeaLevelEvolution:
             x_duals = {}
             sig_cols = {}
             psi_cols = {}
+            if itau_kernel is not None:
+                fwd_n = cursor.state(n)
+                fwd_prev = cursor.state(n - 1)
+                dweights = op.scheme_weight_derivatives(scheme, dt)
             for l in op.degrees:
                 deg = op.degree(l)
                 summed = ddual[l].copy()
@@ -1450,10 +1600,9 @@ class SeaLevelEvolution:
                 sy = deg.strain(y)
                 mtilde_dual = mdual[l] + deg.apply_weights(sy)
                 if itau_kernel is not None:
-                    dweights = op.scheme_weight_derivatives(scheme, dt)
-                    m_prev = internal_states[n - 1].m[l]
-                    d0 = internal_states[n - 1].cached_strain[l]
-                    d1 = internal_states[n].cached_strain[l]
+                    m_prev = fwd_prev.m[l]
+                    d0 = fwd_prev.cached_strain[l]
+                    d1 = fwd_n.cached_strain[l]
                     Wd1 = deg.apply_weights(d1)
                     for k, dwk in enumerate(dweights):
                         if implicit:

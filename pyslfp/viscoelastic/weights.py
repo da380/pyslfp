@@ -38,6 +38,8 @@ from numpy.typing import ArrayLike
 __all__ = [
     "exponential_trapezoid_weights",
     "backward_euler_weight",
+    "exponential_trapezoid_weight_derivatives",
+    "backward_euler_weight_derivative",
 ]
 
 _SERIES_SWITCH = 1e-3
@@ -76,3 +78,39 @@ def backward_euler_weight(h: ArrayLike) -> np.ndarray:
     if np.any(h < 0.0):
         raise ValueError("h = dt / tau must be non-negative")
     return 1.0 / (1.0 + h)
+
+
+def _dphi1(h: np.ndarray, e: np.ndarray, phi1: np.ndarray) -> np.ndarray:
+    """d phi1 / dh = (e - phi1) / h, by the quotient above the switch
+    and by the alternating series below it, exact at h = 0."""
+    small = h < _SERIES_SWITCH
+    hs = np.where(small, h, 1.0)
+    series = -0.5 + hs / 3.0 - hs**2 / 8.0 + hs**3 / 30.0 - hs**4 / 144.0
+    with np.errstate(divide="ignore", invalid="ignore"):
+        quotient = (e - phi1) / np.where(small, 1.0, h)
+    return np.where(small, series, quotient)
+
+
+def exponential_trapezoid_weight_derivatives(
+    h: ArrayLike,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(de, dalpha, dbeta), the h-derivatives of the exponential
+    trapezoid weights, elementwise for h = dt / tau >= 0: de = -e,
+    dalpha = dphi1 - de and dbeta = -dphi1, so the effective-modulus
+    weight's derivative is dphi1 = -dbeta.  A viscosity sensitivity
+    needs these at fixed dt, where dh = dt d(1/tau)."""
+    h = np.asarray(h, dtype=float)
+    if np.any(h < 0.0):
+        raise ValueError("h = dt / tau must be non-negative")
+    e = np.exp(-h)
+    phi1 = _phi1(h, e)
+    dphi1 = _dphi1(h, e, phi1)
+    return -e, dphi1 + e, -dphi1
+
+
+def backward_euler_weight_derivative(h: ArrayLike) -> np.ndarray:
+    """d/dh of the backward Euler weight: -1 / (1 + h)^2."""
+    h = np.asarray(h, dtype=float)
+    if np.any(h < 0.0):
+        raise ValueError("h = dt / tau must be non-negative")
+    return -1.0 / (1.0 + h) ** 2

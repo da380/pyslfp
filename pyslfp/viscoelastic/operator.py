@@ -50,7 +50,12 @@ from ..love_numbers.material import Material
 from ..love_numbers.solver import inertia_moment, love_numbers
 from ..love_numbers.table import LoveNumbers
 from .rheology import Rheology
-from .weights import backward_euler_weight, exponential_trapezoid_weights
+from .weights import (
+    backward_euler_weight,
+    backward_euler_weight_derivative,
+    exponential_trapezoid_weight_derivatives,
+    exponential_trapezoid_weights,
+)
 
 __all__ = [
     "SCHEMES",
@@ -310,6 +315,9 @@ class ViscoelasticOperator:
             OrderedDict()
         )
         self._weights: dict[tuple[str, float], list[tuple[np.ndarray, ...]]] = {}
+        self._weight_derivatives: dict[
+            tuple[str, float], list[tuple[np.ndarray, ...]]
+        ] = {}
         self._effective_love: dict[tuple[str, float], LoveNumbers] = {}
         # per flavour and degree, the solutions of the unit load and unit
         # tide forcings: the channel right-hand sides are rank one, so a
@@ -773,6 +781,25 @@ class ViscoelasticOperator:
                 np.column_stack((deg.load_force_vec, deg.load_potential_vec))
             )
         return per_degree[l]
+
+    def scheme_weight_derivatives(
+        self, scheme: str, dt: float
+    ) -> list[tuple[np.ndarray, ...]]:
+        """The h-derivatives of the per-branch scheme weights at this
+        step size, full-mesh nodal arrays: (dw,) for backward Euler and
+        (de, dalpha, dbeta) for the exponential trapezoid.  A viscosity
+        sensitivity pairs them with dh = dt d(1/tau)."""
+        key = (scheme, float(dt))
+        if key not in self._weight_derivatives:
+            out = []
+            for itau in self.rheology.itau:
+                h = dt * itau
+                if scheme == "backward_euler":
+                    out.append((backward_euler_weight_derivative(h),))
+                else:
+                    out.append(exponential_trapezoid_weight_derivatives(h))
+            self._weight_derivatives[key] = out
+        return self._weight_derivatives[key]
 
     def scheme_weights(self, scheme: str, dt: float) -> list[tuple[np.ndarray, ...]]:
         """The per-branch nodal weight arrays of a flavour: (w,) for

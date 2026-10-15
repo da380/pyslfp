@@ -35,6 +35,7 @@ from ..love_numbers import fluid_tidal_number
 from ..core import SeaLevelEquation
 from ..core import EarthState
 from .operator import ViscoelasticOperator, ViscoelasticState
+from .rheology import Rheology
 
 __all__ = [
     "SeaLevelSnapshot",
@@ -167,6 +168,24 @@ class IceKernels:
     instantaneous: dict[float, SHGrid] = field(repr=False)
     density: list[SHGrid] = field(repr=False)
     rate: list[SHGrid] = field(repr=False)
+    #: The inverse-relaxation-time kernels dJ / d itau(r) per branch,
+    #: nodal (nspec, ngll) arrays over the material's mesh in its
+    #: units, when the adjoint was given the forward trajectory
+    #: (`internal_states`); None otherwise.
+    itau: Optional[list[np.ndarray]] = field(default=None, repr=False)
+
+    def viscosity(self, rheology: Rheology) -> list[np.ndarray]:
+        """The viscosity kernels dJ / d eta(r), nodal per branch, from
+        the inverse-relaxation-time kernels: itau = mu / eta gives
+        d itau / d eta = -itau^2 / mu, so an elastic branch (itau = 0)
+        has no viscosity sensitivity in this parameterisation."""
+        if self.itau is None:
+            raise ValueError("no itau kernels: run the adjoint with internal_states")
+        out = []
+        for kernel, mu_k, itau_k in zip(self.itau, rheology.mu, rheology.itau):
+            safe = np.where(mu_k > 0.0, mu_k, 1.0)
+            out.append(np.where(mu_k > 0.0, -(itau_k**2) / safe, 0.0) * kernel)
+        return out
 
 
 @dataclass(frozen=True)
@@ -187,6 +206,10 @@ class SeaLevelSnapshot:
     #: the shorelines are frozen at the background state's): the C(t)
     #: record an adjoint calculation reads back.
     ocean_function: SHGrid | None = field(default=None, repr=False)
+    #: The radial internal state at this time, recorded on request
+    #: (`record=True`): the forward trajectory a viscosity-kernel
+    #: adjoint pairs its duals with.
+    internal_state: "ViscoelasticState | None" = field(default=None, repr=False)
 
 
 def _normalise_measurement(
@@ -366,6 +389,7 @@ class SeaLevelEvolution:
         rotational_feedbacks: bool = True,
         rtol: float = 1e-9,
         verbose: bool = False,
+        record: bool = False,
     ) -> tuple[list[SeaLevelSnapshot], ViscoelasticState]:
         """Integrates from times[0] over the given grid, which should
         include any breakpoints of the ice history; `ice_load(t)` is
@@ -409,7 +433,22 @@ class SeaLevelEvolution:
             SHGrid.from_array(total, grid=self.model.grid, copy=False)
         ).coeffs
         psi = self._centrifugal(omega) if rotational_feedbacks else np.zeros_like(sigma)
-        snapshots = [SeaLevelSnapshot(float(times[0]), slc, disp, potential, omega)]
+        if record:
+            op.prime_strain(
+                vstate,
+                load=self._columns(sigma, self._to_mat_density),
+                tide=self._columns(psi, self._to_mat_potential),
+            )
+        snapshots = [
+            SeaLevelSnapshot(
+                float(times[0]),
+                slc,
+                disp,
+                potential,
+                omega,
+                internal_state=vstate if record else None,
+            )
+        ]
 
         for t0, t1 in zip(times[:-1], times[1:]):
             dt = (t1 - t0) * self._to_mat_time
@@ -448,7 +487,16 @@ class SeaLevelEvolution:
                 load=self._columns(sigma, self._to_mat_density),
                 tide=self._columns(psi, self._to_mat_potential),
             )
-            snapshots.append(SeaLevelSnapshot(float(t1), slc, disp, potential, omega))
+            snapshots.append(
+                SeaLevelSnapshot(
+                    float(t1),
+                    slc,
+                    disp,
+                    potential,
+                    omega,
+                    internal_state=vstate if record else None,
+                )
+            )
         return snapshots, vstate
 
     def run_adaptive(
@@ -623,6 +671,7 @@ class SeaLevelEvolution:
         rotational_feedbacks: bool = True,
         rtol: float = 1e-9,
         verbose: bool = False,
+        record: bool = False,
     ) -> tuple[list[SeaLevelSnapshot], ViscoelasticState]:
         """Integrates an ice history given by any ice model.
 
@@ -664,6 +713,7 @@ class SeaLevelEvolution:
                 rotational_feedbacks=rotational_feedbacks,
                 rtol=rtol,
                 verbose=verbose,
+                record=record,
             )
         kyr = KYR / parameters.scales.factor(units.TIME)
         date0 = float(dates[0])
@@ -693,6 +743,7 @@ class SeaLevelEvolution:
             rotational_feedbacks=rotational_feedbacks,
             rtol=rtol,
             verbose=verbose,
+            record=record,
         )
         snapshots = [replace(snap, date=date0 - snap.t / kyr) for snap in snapshots]
         return snapshots, vstate
@@ -725,7 +776,9 @@ class SeaLevelEvolution:
             SHGrid.from_array(grounded + ocean, grid=self.model.grid, copy=False)
         ).coeffs
 
-    def _run_migrating(self, dates, ice_model, *, rotational_feedbacks, rtol, verbose):
+    def _run_migrating(
+        self, dates, ice_model, *, rotational_feedbacks, rtol, verbose, record=False
+    ):
         """The migrating-shoreline loop: each step's equilibrium is the
         nonlinear equation, with the memory field through the response
         channels, and the converged state's load finishes the radial
@@ -751,6 +804,14 @@ class SeaLevelEvolution:
         vstate = op.zero_state(ncols=lambda l: 2 * (l + 1))
         sigma = np.zeros((2, model.lmax + 1, model.lmax + 1))
         psi = np.zeros_like(sigma)
+        if record:
+            # the start is the undisturbed background, so the cache is
+            # the zero solve's
+            op.prime_strain(
+                vstate,
+                load=self._columns(sigma, self._to_mat_density),
+                tide=self._columns(psi, self._to_mat_potential),
+            )
         zero = model.zero_grid()
         snapshots = [
             SeaLevelSnapshot(
@@ -761,6 +822,7 @@ class SeaLevelEvolution:
                 np.zeros(3),
                 date=date0,
                 ocean_function=self.state.ocean_function,
+                internal_state=vstate if record else None,
             )
         ]
         for a, b in zip(dates[:-1], dates[1:]):
@@ -812,6 +874,7 @@ class SeaLevelEvolution:
                     omega,
                     date=float(b),
                     ocean_function=final_state.ocean_function,
+                    internal_state=vstate if record else None,
                 )
             )
         return snapshots, vstate
@@ -822,6 +885,7 @@ class SeaLevelEvolution:
         measurement: dict[float, SHGrid],
         *,
         ocean_functions: Optional[Sequence[SHGrid]] = None,
+        internal_states: Optional[Sequence[ViscoelasticState]] = None,
         rotational_feedbacks: bool = True,
         rtol: float = 1e-9,
     ) -> IceKernels:
@@ -849,6 +913,20 @@ class SeaLevelEvolution:
         diagnostic for the forward calculation itself.  Returns the
         same `IceKernels` views, the node duals assembled from the
         density and the lumps, so the two methods run the same gates.
+
+        With `internal_states` -- the recorded forward trajectory, from
+        a run with `record=True` (frozen, or migrating together with
+        its `ocean_functions`) -- the kernels also carry the
+        continuous sensitivity to the branch inverse relaxation times:
+        the multiplier of the internal-variable dynamics is the
+        branch-weighted adjoint state over itau, so
+
+            dJ / d itau(r) = int W_k m-dagger / itau (d - m) dt,
+
+        accumulated over the reversed nodes with the density's split
+        trapezoid (the adjoint state jumps at observations; the forward
+        integrand is continuous).  As with the ice kernels, the result
+        converges to the discrete one as the run resolves its rheology.
         """
         dates = np.asarray(dates, dtype=float)
         if dates.ndim != 1 or dates.size < 2 or np.any(np.diff(dates) >= 0.0):
@@ -979,6 +1057,51 @@ class SeaLevelEvolution:
         sigma_c = np.zeros((2, model.lmax + 1, model.lmax + 1))
         psi_c = np.zeros_like(sigma_c)
         N = dates.size - 1
+        # the node weights of the date quadrature, split across the
+        # observation discontinuities: 'late' towards the present,
+        # 'early' towards t0, in kiloyears
+        w_early = np.zeros(dates.size)
+        w_late = np.zeros(dates.size)
+        w_early[1:] = 0.5 * (dates[:-1] - dates[1:])
+        w_late[:-1] = 0.5 * (dates[:-1] - dates[1:])
+        per_ka = kyr * self._to_mat_time
+
+        itau_kernel = None
+        if internal_states is not None:
+            if len(internal_states) != dates.size:
+                raise ValueError("internal_states must give one state per date node")
+            if any(st is None or st.cached_strain is None for st in internal_states):
+                raise ValueError(
+                    "internal_states must be recorded forward states "
+                    "(a run with record=True)"
+                )
+            ngll = op.material.mesh.ngll
+            K = op.rheology.num_branches
+            itau_kernel = [np.zeros((op.material.mesh.nspec, ngll)) for _ in range(K)]
+
+        def accumulate_itau(node: int, weight: float) -> None:
+            """One side's contribution at a node: the branch-weighted
+            adjoint state over itau paired with the forward d - m.  The
+            self-adjoint channel mapping poses the adjoint problem in
+            the g-weighted energy form of the sea level equation, so
+            the radial state carried here is the surface gravity times
+            the true multiplier of the internal-variable dynamics --
+            hence the division, with g in the material's units."""
+            if itau_kernel is None or weight == 0.0:
+                return
+            g_mat = op.material.surface_gravity
+            fwd = internal_states[node]
+            for l in vstate.degrees:
+                deg = op.degree(l)
+                dm = fwd.cached_strain[l][None] - fwd.m[l]
+                weighted = deg.apply_weights(vstate.m[l])
+                for k in range(K):
+                    itau_k = deg.itau[k]
+                    inv = np.where(itau_k > 0.0, itau_k, 1.0) * g_mat
+                    g = (weighted[k] * dm[k]).sum(axis=(0, 3))
+                    g = np.where(itau_k > 0.0, g / inv, 0.0)
+                    itau_kernel[k][deg.e0 :] += weight * g
+
         lump_load: dict[int, np.ndarray] = {}
         instantaneous: dict[float, SHGrid] = {}
         # the density is discontinuous at each observation (a finite
@@ -1041,6 +1164,7 @@ class SeaLevelEvolution:
         # state starts undisturbed, so an unmeasured terminal node has
         # zero density
         observe(N)
+        accumulate_itau(N, per_ka * w_early[N])
         for n in range(N, 0, -1):
             dt = (dates[n - 1] - dates[n]) * kyr * self._to_mat_time
             step = op.start_step(
@@ -1078,7 +1202,9 @@ class SeaLevelEvolution:
                 load=self._columns(sigma_c, self._to_mat_density),
                 tide=self._columns(psi_c, self._to_mat_potential),
             )
+            accumulate_itau(n - 1, per_ka * w_late[n - 1])
             observe(n - 1)
+            accumulate_itau(n - 1, per_ka * w_early[n - 1])
 
         # assemble the discrete-equivalent node duals from the density
         # and the lumps, so every gate runs on both methods alike.  The
@@ -1088,13 +1214,8 @@ class SeaLevelEvolution:
         # observation node the weight splits across the discontinuity:
         # the half-interval towards the present pairs with the late
         # side, the half-interval towards t0 with the early side
-        per_ka = kyr * self._to_mat_time
         density_late = [d * per_ka for d in density_late]
         density_early = [None if d is None else d * per_ka for d in density_early]
-        w_early = np.zeros(dates.size)
-        w_late = np.zeros(dates.size)
-        w_early[1:] = 0.5 * (dates[:-1] - dates[1:])
-        w_late[:-1] = 0.5 * (dates[:-1] - dates[1:])
         load_duals = []
         density_load = []
         for n in range(dates.size):
@@ -1133,6 +1254,7 @@ class SeaLevelEvolution:
                 for n in range(dates.size)
             ],
             [SHGrid.from_array(r, grid=model.grid) for r in rate],
+            itau_kernel,
         )
 
     def adjoint_ice_history(
@@ -1141,6 +1263,7 @@ class SeaLevelEvolution:
         measurement: dict[float, SHGrid],
         *,
         ocean_functions: Optional[Sequence[SHGrid]] = None,
+        internal_states: Optional[Sequence[ViscoelasticState]] = None,
         rotational_feedbacks: bool = True,
         rtol: float = 1e-9,
     ) -> IceKernels:
@@ -1171,6 +1294,18 @@ class SeaLevelEvolution:
 
         A measurement is a sea-level dual grid, or a `Measurement`
         carrying duals of any of the four outputs.
+
+        With `internal_states` -- the recorded forward trajectory, one
+        state per date node from a run with `record=True` (frozen, or
+        migrating together with its `ocean_functions`), under the same
+        scheme and feedbacks -- the kernels also carry the
+        exact discrete sensitivity to the branch inverse relaxation
+        times, dJ / d itau(r): per step the derivative of the scheme
+        weights in h = dt itau pairs the reverse sweep's duals with the
+        forward internal variables and strains, and the effective
+        moduli's dependence pairs the transposed and forward solutions
+        through the branch bilinear.  `viscosity` maps the result to
+        dJ / d eta(r).
         """
         dates = np.asarray(dates, dtype=float)
         if dates.ndim != 1 or dates.size < 2 or np.any(np.diff(dates) >= 0.0):
@@ -1214,6 +1349,17 @@ class SeaLevelEvolution:
             ncols = 2 * (l + 1)
             mdual[l] = np.zeros((K, 3, deg.ne, ngll, ncols))
             ddual[l] = np.zeros((3, deg.ne, ngll, ncols))
+
+        itau_kernel = None
+        if internal_states is not None:
+            if len(internal_states) != dates.size:
+                raise ValueError("internal_states must give one state per date node")
+            if any(st is None or st.cached_strain is None for st in internal_states):
+                raise ValueError(
+                    "internal_states must be recorded forward states "
+                    "(a run with record=True)"
+                )
+            itau_kernel = [np.zeros((op.material.mesh.nspec, ngll)) for _ in range(K)]
 
         def synth(coeffs: np.ndarray) -> np.ndarray:
             return model.expand_coefficient(
@@ -1301,7 +1447,34 @@ class SeaLevelEvolution:
                 if l == 0:
                     rhs[:, 0] += deg.moment_row * (j_dual * self._to_nd_moment)
                 y = op.effective_system(scheme, dt, l).solve(rhs)
-                mtilde_dual = mdual[l] + deg.apply_weights(deg.strain(y))
+                sy = deg.strain(y)
+                mtilde_dual = mdual[l] + deg.apply_weights(sy)
+                if itau_kernel is not None:
+                    dweights = op.scheme_weight_derivatives(scheme, dt)
+                    m_prev = internal_states[n - 1].m[l]
+                    d0 = internal_states[n - 1].cached_strain[l]
+                    d1 = internal_states[n].cached_strain[l]
+                    Wd1 = deg.apply_weights(d1)
+                    for k, dwk in enumerate(dweights):
+                        if implicit:
+                            dw = dwk[0][deg.e0 :][None, :, :, None]
+                            g = (
+                                (
+                                    mtilde_dual[k] * m_prev[k]
+                                    - mdual[l][k] * d1
+                                    - Wd1[k] * sy
+                                )
+                                * dw
+                            ).sum(axis=(0, 3))
+                        else:
+                            de = dwk[0][deg.e0 :][None, :, :, None]
+                            dalpha = dwk[1][deg.e0 :][None, :, :, None]
+                            dbeta = dwk[2][deg.e0 :][None, :, :, None]
+                            g = (
+                                mtilde_dual[k] * (de * m_prev[k] + dalpha * d0)
+                                + (mdual[l][k] * d1 + Wd1[k] * sy) * dbeta
+                            ).sum(axis=(0, 3))
+                        itau_kernel[k][deg.e0 :] += dt * g
                 for k, wk in enumerate(weights):
                     if implicit:
                         w = wk[0][deg.e0 :][None, :, :, None]
@@ -1404,6 +1577,7 @@ class SeaLevelEvolution:
             instantaneous,
             [SHGrid.from_array(d, grid=model.grid) for d in density],
             [SHGrid.from_array(r, grid=model.grid) for r in rate],
+            itau_kernel,
         )
 
 

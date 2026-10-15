@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from planetmodel import LayeredIsotropicElastic, RadialMesh, units
-from pyshtools import SHGrid
+from pyshtools import SHCoeffs, SHGrid
 
 from pyslfp.core import EarthModel
 from pyslfp.ice import AnalyticalIceModel, BaseIceModel
@@ -1140,3 +1140,193 @@ def test_coupled_adaptive_trapezoid(setting):
     assert errors[1e-1] < 2e-3
     assert errors[1e-2] < 1e-4
     assert errors[1e-2] < 0.1 * errors[1e-1]
+
+
+def test_viscosity_kernels(setting):
+    """The discrete inverse-relaxation-time kernels: a reverse sweep
+    given the recorded forward trajectory pairs the scheme-weight
+    derivatives with the duals, and the FD residual against a smooth
+    nodal itau perturbation falls at second order in the step -- the
+    kernel itself is exact.  Both implicit schemes, and the viscosity
+    mapping -itau^2 / mu."""
+    material, earth, _, _, _ = setting
+    ice_model, state = _history_state(material, earth)
+    mesh = material.mesh
+    rng = np.random.default_rng(7)
+    c = rng.normal(size=(2, LMAX + 1, LMAX + 1))
+    for degree in range(LMAX + 1):
+        c[:, degree, degree + 1 :] = 0.0
+    c[1, :, 0] = 0.0
+    g = earth.expand_coefficient(
+        SHCoeffs.from_array(c, normalization=earth.normalization, csphase=earth.csphase)
+    )
+    dates = np.linspace(10.0, 0.0, 6)
+    measurement = {0.0: g}
+    ditau = (0.3 + 0.7 * (mesh.r / mesh.r.max()) ** 2) / TAU
+
+    for scheme, tol in (("exponential_trapezoid", 1e-6), ("backward_euler", 1e-6)):
+        op = _maxwell_operator(material)
+        evo = SeaLevelEvolution(op, state, scheme=scheme)
+        snapshots, _ = evo.run_ice_history(dates, ice_model, record=True)
+        kernels = evo.adjoint_ice_history(
+            dates,
+            measurement,
+            internal_states=[snap.internal_state for snap in snapshots],
+        )
+        predicted = float(np.sum(kernels.itau[0] * ditau))
+
+        def functional(eps):
+            rheology = Rheology(
+                material, [(op.rheology.mu[0], op.rheology.itau[0] + eps * ditau)]
+            )
+            evolution = SeaLevelEvolution(
+                ViscoelasticOperator(rheology, LMAX), state, scheme=scheme
+            )
+            snaps, _ = evolution.run_ice_history(dates, ice_model)
+            return earth.integrate(
+                SHGrid.from_array(
+                    g.data * snaps[-1].sea_level_change.data, grid=earth.grid
+                )
+            )
+
+        fd = {
+            eps: (functional(eps) - functional(-eps)) / (2.0 * eps)
+            for eps in (0.02, 0.01)
+        }
+        # second-order truncation, and Richardson extrapolation lands
+        # on the kernel's prediction to solver precision
+        resid = {eps: abs(f - predicted) for eps, f in fd.items()}
+        assert 3.0 < resid[0.02] / resid[0.01] < 5.0, scheme
+        richardson = (4.0 * fd[0.01] - fd[0.02]) / 3.0
+        assert abs(richardson - predicted) < tol * abs(predicted), scheme
+
+        # the viscosity mapping, and the refusal without the trajectory
+        eta = kernels.viscosity(op.rheology)
+        want = -(op.rheology.itau[0] ** 2) / op.rheology.mu[0] * kernels.itau[0]
+        assert np.allclose(eta[0], want)
+    bare = evo.adjoint_ice_history(dates, measurement)
+    assert bare.itau is None
+    with pytest.raises(ValueError, match="internal_states"):
+        bare.viscosity(op.rheology)
+
+
+def test_continuous_viscosity_kernels(setting):
+    """The continuous-adjoint viscosity kernels converge to the exact
+    discrete ones at second order as the run resolves its rheology,
+    and the disagreement on a stiff body is the resolution diagnostic
+    firing -- the two-method doctrine applied to dJ / d itau."""
+    material, earth, _, _, _ = setting
+    ice_model, state = _history_state(material, earth)
+    rng = np.random.default_rng(7)
+    c = rng.normal(size=(2, LMAX + 1, LMAX + 1))
+    for degree in range(LMAX + 1):
+        c[:, degree, degree + 1 :] = 0.0
+    c[1, :, 0] = 0.0
+    g = earth.expand_coefficient(
+        SHCoeffs.from_array(c, normalization=earth.normalization, csphase=earth.csphase)
+    )
+    measurement = {0.0: g}
+
+    def disagreement(op, nsteps):
+        evo = SeaLevelEvolution(op, state)
+        dates = np.linspace(10.0, 0.0, nsteps)
+        snapshots, _ = evo.run_ice_history(dates, ice_model, record=True)
+        states = [snap.internal_state for snap in snapshots]
+        discrete = evo.adjoint_ice_history(
+            dates, measurement, internal_states=states
+        ).itau[0]
+        continuous = evo.continuous_adjoint_ice_history(
+            dates, measurement, internal_states=states
+        ).itau[0]
+        return np.linalg.norm(continuous - discrete) / np.linalg.norm(discrete)
+
+    slow = ViscoelasticOperator(
+        Rheology.from_relaxation_time(material, 10.0 * TAU), LMAX
+    )
+    coarse = disagreement(slow, 11)
+    fine = disagreement(slow, 21)
+    assert coarse < 1e-2
+    assert fine < 3e-3
+    assert 3.0 < coarse / fine < 5.0
+
+    stiff = disagreement(_maxwell_operator(material), 6)
+    assert stiff > 0.2
+
+
+def test_migrating_viscosity_kernels(setting):
+    """Viscosity kernels about a migrating-shoreline trajectory: the
+    discrete linearisation matches central FD of the full nonlinear
+    forward at second order in the perturbation (Richardson lands on
+    the kernel), and the continuous kernels converge to the discrete
+    at second order when resolved."""
+    material, earth, _, _, _ = setting
+    mesh = material.mesh
+    ice_model, state = _marine_history_state(material, earth)
+    rng = np.random.default_rng(7)
+    c = rng.normal(size=(2, LMAX + 1, LMAX + 1))
+    for degree in range(LMAX + 1):
+        c[:, degree, degree + 1 :] = 0.0
+    c[1, :, 0] = 0.0
+    g = earth.expand_coefficient(
+        SHCoeffs.from_array(c, normalization=earth.normalization, csphase=earth.csphase)
+    )
+    dates = np.linspace(_MeltingCap.START, 0.0, 6)
+    measurement = {0.0: g}
+    ditau = (0.3 + 0.7 * (mesh.r / mesh.r.max()) ** 2) / TAU
+
+    op = _maxwell_operator(material)
+    evo = SeaLevelEvolution(op, state)
+    snapshots, _ = evo.run_ice_history(
+        dates, ice_model, shorelines="migrating", record=True
+    )
+    oceans = [snap.ocean_function for snap in snapshots]
+    states = [snap.internal_state for snap in snapshots]
+    kernels = evo.adjoint_ice_history(
+        dates, measurement, ocean_functions=oceans, internal_states=states
+    )
+    predicted = float(np.sum(kernels.itau[0] * ditau))
+
+    def functional(eps):
+        rheology = Rheology(
+            material, [(op.rheology.mu[0], op.rheology.itau[0] + eps * ditau)]
+        )
+        evolution = SeaLevelEvolution(ViscoelasticOperator(rheology, LMAX), state)
+        snaps, _ = evolution.run_ice_history(dates, ice_model, shorelines="migrating")
+        return earth.integrate(
+            SHGrid.from_array(g.data * snaps[-1].sea_level_change.data, grid=earth.grid)
+        )
+
+    fd = {
+        eps: (functional(eps) - functional(-eps)) / (2.0 * eps) for eps in (0.02, 0.01)
+    }
+    resid = {eps: abs(f - predicted) for eps, f in fd.items()}
+    assert 3.0 < resid[0.02] / resid[0.01] < 5.0
+    richardson = (4.0 * fd[0.01] - fd[0.02]) / 3.0
+    assert abs(richardson - predicted) < 1e-5 * abs(predicted)
+
+    # the continuous kernels, in the resolved regime
+    slow = ViscoelasticOperator(
+        Rheology.from_relaxation_time(material, 10.0 * TAU), LMAX
+    )
+    evolution = SeaLevelEvolution(slow, state)
+
+    def disagreement(nsteps):
+        grid_dates = np.linspace(_MeltingCap.START, 0.0, nsteps)
+        snaps, _ = evolution.run_ice_history(
+            grid_dates, ice_model, shorelines="migrating", record=True
+        )
+        oc = [snap.ocean_function for snap in snaps]
+        st = [snap.internal_state for snap in snaps]
+        discrete = evolution.adjoint_ice_history(
+            grid_dates, measurement, ocean_functions=oc, internal_states=st
+        ).itau[0]
+        continuous = evolution.continuous_adjoint_ice_history(
+            grid_dates, measurement, ocean_functions=oc, internal_states=st
+        ).itau[0]
+        return np.linalg.norm(continuous - discrete) / np.linalg.norm(discrete)
+
+    coarse = disagreement(11)
+    fine = disagreement(21)
+    assert coarse < 3e-3
+    assert fine < 1e-3
+    assert 3.0 < coarse / fine < 5.5

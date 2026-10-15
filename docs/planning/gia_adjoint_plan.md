@@ -283,9 +283,39 @@ kernel grid.
 
 TO DO, in order: (exhausted -- see LATER)
 
+DONE (16 Oct): spherically symmetric viscosity kernels, both
+methods.  The forward records its trajectory on request (`record=True`
+attaches the internal states to the snapshots); `adjoint_ice_history`
+given `internal_states` accumulates the EXACT DISCRETE dJ/d itau(r)
+per branch -- per step the scheme-weight derivatives in h = dt itau
+(weights.py grew them, series-switched like the weights) pair the
+sweep's duals with the forward variables: mtilde-dual with
+(de m + dalpha d0), the entry m-dual with dbeta d1, and the effective
+moduli's dependence as dbeta <strain(y), W_k d1> through the branch
+bilinear (backward Euler analogous via dw).  Gated: FD residual falls
+at exactly second order in eps and Richardson lands on the kernel to
+1e-6, both schemes.  `continuous_adjoint_ice_history` with
+`internal_states` accumulates int W_k m-dagger / (g itau) (d - m) dt
+over the reversed nodes with the density's split trapezoid: the
+multiplier of the m-dynamics is lambda_k = W_k m-dagger / (g itau),
+the g (material units) because the self-adjoint channel mapping poses
+the adjoint in the g-weighted energy form -- pinned down empirically
+by the rho-dependence of the mismatch constant (4 pi rho / 3).
+Gated: converges to the discrete kernel at second order when
+resolved (1.8% -> 0.46% -> 0.11%), disagrees at 38% on the stiff
+body (the resolution diagnostic).  `IceKernels.itau` per branch,
+nodal; `IceKernels.viscosity(rheology)` maps by -itau^2/mu.
+Migrating trajectories are covered too (16 Oct): `_run_migrating`
+records on request (the start state's cache is the zero solve's), and
+both kernel variants gate about the marine trajectory -- discrete FD
+residual second order with Richardson landing on the kernel to 1e-5,
+continuous converging to discrete at second order (1e-3 -> 2.3e-4).
+Production note: at scale the recorded trajectory wants
+checkpointing; not built.
+
 LATER, from David (15 Oct):
 
-- **Spherically symmetric viscosity kernels** K_eta(r).  No 3-D
+- (done above) **Spherically symmetric viscosity kernels** K_eta(r).  No 3-D
   viscosity kernels here (no generalised spherical harmonics in
   Python, and the cost is sl3d/AdGIA territory); but the 1-D
   reduction of Yu's eq. (61) collapses degree by degree -- the

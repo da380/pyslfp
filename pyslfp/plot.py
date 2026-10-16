@@ -1,6 +1,6 @@
-"""
-Module for plotting functions using matplotlib and cartopy.
-"""
+"""Map plotting: thin wrappers over pygeoinf's spherical plotting
+with pyslfp's defaults (Robinson projection, coastlines, an active
+colour bar), so figures look the same across both libraries."""
 
 from typing import Tuple, Optional, List, Any
 
@@ -8,7 +8,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pyshtools import SHGrid
 
-# Directly import the fully-featured corner plot from pygeoinf
 from pygeoinf.symmetric_space import sphere
 
 import cartopy.crs as ccrs
@@ -84,9 +83,10 @@ def plot(
     """
     Plots a pyshtools SHGrid object on a map.
 
-    This acts as a transparent wrapper around pygeoinf.sphere.plot. It shares
-    the exact same API signature, but injects pyslfp's preferred defaults
-    (Robinson projection, enabled coastlines, and an active colorbar).
+    A transparent wrapper around `pygeoinf.symmetric_space.sphere.plot`,
+    sharing its signature -- see there for the parameters -- with
+    pyslfp's defaults: a Robinson projection, coastlines, and an
+    active colour bar.
     """
     if projection is None and ax is None:
         projection = ccrs.Robinson()
@@ -136,11 +136,13 @@ def plot_points(
     **kwargs,
 ) -> Tuple[GeoAxes, Any]:
     """
-    Plots discrete observation points (e.g., tide gauges or altimetry tracks) on a map.
+    Plots discrete observation points (tide gauges, altimetry tracks)
+    on a map.
 
-    This acts as a transparent wrapper around pygeoinf.sphere.plot_points. It shares
-    the exact same API signature, but injects pyslfp's preferred defaults
-    (Robinson projection, enabled coastlines).
+    A transparent wrapper around
+    `pygeoinf.symmetric_space.sphere.plot_points`, sharing its
+    signature -- see there for the parameters -- with pyslfp's
+    defaults: a Robinson projection and coastlines.
     """
     if projection is None and ax is None:
         projection = ccrs.Robinson()

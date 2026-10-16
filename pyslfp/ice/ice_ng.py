@@ -13,14 +13,14 @@ from scipy.interpolate import RegularGridInterpolator
 from pyshtools import SHGrid
 
 from pyslfp.data import DATADIR, ensure_data
-from .ice_models import BaseIceModel
+from .ice_models import BaseIceSeaLevelModel
 
 
 # Define the literal type for valid model versions
 IceNGVersion = Literal["ICE5G", "ICE6G", "ICE7G"]
 
 
-class IceNG(BaseIceModel):
+class IceNG(BaseIceSeaLevelModel):
     """
     A data loader for the ICE-5G, ICE-6G, and ICE-7G glacial isostatic
     adjustment models.
@@ -33,11 +33,11 @@ class IceNG(BaseIceModel):
         self, /, *, version: IceNGVersion = "ICE7G", length_scale: float = 1.0
     ) -> None:
         """
-        Initializes the ICE-NG data loader.
+        Initialises the ICE-NG data loader.
 
         Args:
             version (IceNGVersion): The ice model version to use. Defaults to "ICE7G".
-            length_scale (float): The scaling factor to non-dimensionalize
+            length_scale (float): The scaling factor that non-dimensionalises
                 the spatial outputs. Defaults to 1.0 (returns raw meters).
         """
         super().__init__(length_scale=length_scale)
@@ -146,9 +146,8 @@ class IceNG(BaseIceModel):
         sampling: int = 1,
         extend: bool = True,
     ) -> Tuple[SHGrid, SHGrid]:
-        """
-        Returns the scaled ice thickness and topography for a given date.
-        """
+        """The scaled ice thickness and topography at a date; arguments as
+        `BaseIceModel.get_ice_thickness_and_sea_level`."""
         file1, file2, fraction = self._find_files(date)
         if file1 == file2:
             ice_thickness, topography = self._get_time_slice(
@@ -176,9 +175,9 @@ class IceNG(BaseIceModel):
         sampling: int = 1,
         extend: bool = True,
     ) -> Tuple[SHGrid, SHGrid]:
-        """
-        Returns the scaled ice thickness and sea level for a given date.
-        """
+        """The scaled ice thickness and sea level at a date, interpolated
+        linearly between the model's slices; arguments as
+        `BaseIceModel.get_ice_thickness_and_sea_level`."""
         grid, sampling = self.resolve_grid(grid, sampling)
         ice_thickness, topography = self.get_ice_thickness_and_topography(
             date, lmax, grid=grid, sampling=sampling, extend=extend

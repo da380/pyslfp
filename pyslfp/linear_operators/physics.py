@@ -2,8 +2,10 @@
 Physical operator wrappers for the pyslfp library.
 
 This module bridges the core SeaLevelEquation solver with the pygeoinf
-functional analysis library, providing mathematically rigorous LinearOperators
-for Bayesian inversions and adjoint calculations.
+functional-analysis library: the solver's forward and adjoint solves
+become LinearOperators on the appropriate Hilbert spaces, the form an
+inversion consumes.  The same pattern is intended for the viscoelastic
+solvers in due course.
 """
 
 from __future__ import annotations
@@ -22,8 +24,8 @@ from pygeoinf import (
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
 from pyslfp.core import EarthModelParameters, EarthModel
-from pyslfp.physics import LinearSeaLevelEquation
-from pyslfp.state import EarthState
+from pyslfp.elastic import LinearSeaLevelEquation
+from pyslfp.core import EarthState
 
 from pyslfp.linear_operators.utils import underlying_space
 

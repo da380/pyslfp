@@ -17,7 +17,8 @@ from pygeoinf import (
 )
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
-from pyslfp.state import EarthState
+from pyslfp.core import EarthState
+from pyslfp.linear_operators.spatial import ocean_average_operator
 from pyslfp.linear_operators.utils import underlying_space, check_load_space
 
 
@@ -31,9 +32,13 @@ def ice_thickness_change_to_load_operator(
     ice_space: Union[Lebesgue, Sobolev],
     load_space: Union[Lebesgue, Sobolev],
 ) -> LinearOperator:
-    """
-    Maps an ice thickness change to the corresponding surface mass load.
-    Automatically masks out the oceans.
+    """Maps an ice thickness change to its surface mass load,
+    rho_ice (1 - C) delta I: grounded ice only.
+
+    Args:
+        state: The Earth state supplying the ocean function.
+        ice_space: The operator's domain, Lebesgue or Sobolev.
+        load_space: The operator's codomain.
     """
     check_load_space(ice_space)
     check_load_space(load_space)
@@ -57,9 +62,13 @@ def sea_level_change_to_load_operator(
     sea_level_space: Union[Lebesgue, Sobolev],
     load_space: Union[Lebesgue, Sobolev],
 ) -> LinearOperator:
-    """
-    Maps a sea level change (or ocean dynamic topography) to the corresponding
-    surface mass load. Automatically masks out the land.
+    """Maps a sea level change (or ocean dynamic topography) to its
+    surface mass load, rho_w C delta xi: ocean only.
+
+    Args:
+        state: The Earth state supplying the ocean function.
+        sea_level_space: The operator's domain, Lebesgue or Sobolev.
+        load_space: The operator's codomain.
     """
     check_load_space(sea_level_space)
     check_load_space(load_space)
@@ -83,8 +92,13 @@ def ocean_density_change_to_load_operator(
     density_space: Union[Lebesgue, Sobolev],
     load_space: Union[Lebesgue, Sobolev],
 ) -> LinearOperator:
-    """
-    Maps an ocean density change to the corresponding surface mass load.
+    """Maps an ocean density change to its surface mass load,
+    C SL delta rho: the water column's depth times the change.
+
+    Args:
+        state: The Earth state supplying the ocean function and sea level.
+        density_space: The operator's domain, Lebesgue or Sobolev.
+        load_space: The operator's codomain.
     """
     check_load_space(density_space)
     check_load_space(load_space)
@@ -101,6 +115,75 @@ def ocean_density_change_to_load_operator(
         l2_density_space, l2_load_space, mapping, adjoint_mapping=mapping
     )
     return LinearOperator.from_formal_adjoint(density_space, load_space, l2_operator)
+
+
+# ================================================================ #
+#              Steric Response and Mass Conservation               #
+# ================================================================ #
+
+
+def steric_sea_level_operator(
+    state: EarthState,
+    density_space: Union[Lebesgue, Sobolev],
+    sea_level_space: Union[Lebesgue, Sobolev],
+) -> LinearOperator:
+    """Maps a vertically averaged ocean density change to the steric
+    sea level change it produces,
+
+        eta_s = -(D / rho_w) C delta rho,
+
+    with D the local ocean depth and C the ocean function. The scaling
+    leaves the mass of every water column pointwise unchanged
+    (rho_w eta_s + D delta rho = 0), so the steric part of a sea
+    surface height change loads nothing and has no induced
+    gravitational-rotational-deformation response. Used to split an
+    (eta, delta rho) model state into the standard steric /
+    ocean-dynamic decomposition.
+
+    Args:
+        state: The Earth state supplying the ocean function and depth.
+        density_space: The operator's domain, Lebesgue or Sobolev.
+        sea_level_space: The operator's codomain.
+    """
+    return (
+        -1.0 / state.model.parameters.water_density
+    ) * ocean_density_change_to_load_operator(state, density_space, sea_level_space)
+
+
+def ocean_mass_conservation_operator(
+    state: EarthState,
+    sea_level_space: Union[Lebesgue, Sobolev],
+    density_space: Union[Lebesgue, Sobolev],
+) -> LinearOperator:
+    """The ocean mass change of an (eta, delta rho) pair, as a linear
+    operator whose kernel is the mass-conservation constraint
+
+        < rho_w C eta + D C delta rho >_O = 0.
+
+    A sea surface height change and a density change that carry no net
+    water mass must satisfy this; conditioning a prior on the kernel
+    (for example through an affine subspace, with the solver of the
+    caller's choosing) enforces it. The operator only states the
+    constraint; nothing about the conditioning is chosen here.
+
+    Args:
+        state: The Earth state supplying the ocean function and depth.
+        sea_level_space: The eta component's space, Lebesgue or Sobolev.
+        density_space: The delta rho component's space.
+    """
+    average = ocean_average_operator(state, sea_level_space)
+    return RowLinearOperator(
+        [
+            average
+            @ sea_level_change_to_load_operator(
+                state, sea_level_space, sea_level_space
+            ),
+            average
+            @ ocean_density_change_to_load_operator(
+                state, density_space, sea_level_space
+            ),
+        ]
+    )
 
 
 # ================================================================ #

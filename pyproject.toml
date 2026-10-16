@@ -81,8 +81,8 @@ exclude = ["work"]
 [tool.ruff.lint.per-file-ignores]
 # 'l' is the conventional name for spherical harmonic degree throughout the
 # physics and spectral code, so E741 (ambiguous variable name) is noise there.
-"pyslfp/core.py" = ["E741"]
-"pyslfp/physics.py" = ["E741"]
+"pyslfp/core/*" = ["E741"]
+"pyslfp/viscoelastic/*" = ["E741"]
 "pyslfp/linear_operators/*" = ["E741"]
 "pyslfp/love_numbers/*" = ["E741", "E743"]
 "Heathcote2026/*" = ["E741"]

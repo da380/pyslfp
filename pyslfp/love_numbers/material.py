@@ -79,10 +79,12 @@ class NodalModuli:
 
     @property
     def shape(self) -> tuple[int, int]:
+        """The nodal array shape (elements, nodes per element)."""
         return self.A.shape
 
     @property
     def is_complex(self) -> bool:
+        """True for moduli frozen at a frequency."""
         return self.A.dtype.kind == "c"
 
     def kappa_mu(self) -> tuple[np.ndarray, np.ndarray]:
@@ -175,6 +177,22 @@ class Material:
         self.omega = (
             float(model.constant("omega")) if "omega" in model.constants else None
         )
+
+    def with_moduli(self, moduli: NodalModuli, /) -> Material:
+        """The same material with the moduli replaced: density, gravity,
+        the fluid flags and the mesh are shared, only the five moduli
+        change.  The replacement must have the mesh's nodal shape."""
+        if not isinstance(moduli, NodalModuli):
+            raise TypeError(f"expected a NodalModuli, got {type(moduli).__name__}")
+        if moduli.shape != self.moduli.shape:
+            raise ValueError(
+                f"moduli have nodal shape {moduli.shape}, "
+                f"the mesh has {self.moduli.shape}"
+            )
+        other = object.__new__(Material)
+        other.__dict__.update(self.__dict__)
+        other.moduli = moduli
+        return other
 
     @property
     def is_complex(self) -> bool:

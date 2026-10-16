@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 
 from pyslfp.core import EarthModel
-from pyslfp.state import EarthState
+from pyslfp.core import EarthState
 
 
 # ==================================================================== #
@@ -188,7 +188,7 @@ def test_convenience_loads(analytical_state):
     assert isinstance(load_grl, SHGrid)
 
 
-@patch("pyslfp.state.EarthState.imbie_ant_projection")
+@patch("pyslfp.core.state.EarthState.imbie_ant_projection")
 def test_dynamic_convenience_loads(mock_imbie_proj, analytical_state):
     """Test shapefile-driven loads without triggering real shapefile parsing."""
     # Mock the region projection to return a valid grid of ones

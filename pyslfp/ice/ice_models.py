@@ -22,26 +22,33 @@ from pyslfp.plot import plot
 
 class BaseIceModel(ABC):
     """
-    Abstract base class for all spatial ice and topography models.
+    Abstract base class for ice history models.
 
-    Any custom model (e.g., ICE-7G, BedMachine, AWIC, synthetic loads) must
-    inherit from this class and implement the `get_ice_thickness_and_sea_level`
-    method to be fully compatible with the EarthState container.
+    An ice model is a provider of ice thickness at any time: histories
+    interpolate internally, so a consumer may ask for any date.  That is
+    all a forward simulation requires of the ice; the sea level it needs
+    besides belongs to the initial state, which is supplied separately
+    (and may be found by iteration against present-day observations).
+    Models that also carry a sea level history, such as the ICE-NG
+    inversion products, derive from `BaseIceSeaLevelModel` below.
     """
+
+    #: The fields `animate` can render; subclasses carrying more extend it.
+    _animatable_fields: Tuple[str, ...] = ("ice_thickness",)
 
     def __init__(self, /, *, length_scale: float = 1.0) -> None:
         """
-        Initializes the base ice model.
+        Initialises the base ice model.
 
         Args:
-            length_scale (float): The scaling factor to non-dimensionalize
-                the spatial outputs. Defaults to 1.0 (returns raw meters).
+            length_scale (float): The scaling factor that non-dimensionalises
+                the spatial outputs. Defaults to 1.0 (raw metres).
         """
         self._length_scale = length_scale
 
     @property
     def length_scale(self) -> float:
-        """The scaling factor used to non-dimensionalize output grids."""
+        """The scaling factor that non-dimensionalises output grids."""
         return self._length_scale
 
     @staticmethod
@@ -62,32 +69,6 @@ class BaseIceModel(ABC):
         return grid, sampling
 
     @abstractmethod
-    def get_ice_thickness_and_sea_level(
-        self,
-        date: float,
-        lmax: int,
-        /,
-        *,
-        grid: str = "DH",
-        sampling: int = 1,
-        extend: bool = True,
-    ) -> Tuple[SHGrid, SHGrid]:
-        """
-        Evaluates the model at a specific time and spatial resolution.
-
-        Args:
-            date (float): The time in kiloyears before present (ka).
-            lmax (int): The maximum spherical harmonic degree.
-            grid (str): The pyshtools grid format (e.g., "DH", "GLQ").
-            sampling (int): The grid sampling factor (1 for standard, 2 for oversampled).
-            extend (bool): Whether to extend the grid to include the poles.
-
-        Returns:
-            Tuple[SHGrid, SHGrid]: The (ice_thickness, sea_level) grids,
-            scaled by the model's `length_scale`.
-        """
-        pass
-
     def get_ice_thickness(
         self,
         date: float,
@@ -98,27 +79,20 @@ class BaseIceModel(ABC):
         sampling: int = 1,
         extend: bool = True,
     ) -> SHGrid:
-        """Returns the scaled ice thickness for a given date."""
-        ice_thickness, _ = self.get_ice_thickness_and_sea_level(
-            date, lmax, grid=grid, sampling=sampling, extend=extend
-        )
-        return ice_thickness
+        """
+        The ice thickness at a specific time and spatial resolution.
 
-    def get_sea_level(
-        self,
-        date: float,
-        lmax: int,
-        /,
-        *,
-        grid: str = "DH",
-        sampling: int = 1,
-        extend: bool = True,
-    ) -> SHGrid:
-        """Returns the scaled sea level for a given date."""
-        _, sea_level = self.get_ice_thickness_and_sea_level(
-            date, lmax, grid=grid, sampling=sampling, extend=extend
-        )
-        return sea_level
+        Args:
+            date (float): The time in kiloyears before present (ka).
+            lmax (int): The maximum spherical harmonic degree.
+            grid (str): The pyshtools grid format (e.g., "DH", "GLQ").
+            sampling (int): The grid sampling factor (1 for standard, 2 for oversampled).
+            extend (bool): Whether to extend the grid to include the poles.
+
+        Returns:
+            SHGrid: The ice thickness, scaled by the model's `length_scale`.
+        """
+        pass
 
     def animate(
         self,
@@ -147,7 +121,7 @@ class BaseIceModel(ABC):
             **plot_kwargs: Additional keyword arguments passed to the plot function.
         """
         print(f"Initializing animation for {self.__class__.__name__}...")
-        valid_fields = ("ice_thickness", "sea_level")
+        valid_fields = self._animatable_fields
         if field not in valid_fields:
             raise ValueError(f"Field must be one of {valid_fields}, not '{field}'.")
 
@@ -193,6 +167,80 @@ class BaseIceModel(ABC):
         ani.save(output_file, writer="ffmpeg", fps=fps, dpi=150)
         print("Done!")
         plt.close(fig)
+
+
+class BaseIceSeaLevelModel(BaseIceModel):
+    """
+    An ice model that also carries a sea level history.
+
+    The ICE-NG products are of this type: being the result of an
+    inversion, they record the sea level consistent with their ice at
+    every time, and a background `EarthState` can be read straight off
+    them.  A generic ice model provides only the thickness.
+    """
+
+    _animatable_fields: Tuple[str, ...] = ("ice_thickness", "sea_level")
+
+    @abstractmethod
+    def get_ice_thickness_and_sea_level(
+        self,
+        date: float,
+        lmax: int,
+        /,
+        *,
+        grid: str = "DH",
+        sampling: int = 1,
+        extend: bool = True,
+    ) -> Tuple[SHGrid, SHGrid]:
+        """
+        Evaluates the model at a specific time and spatial resolution.
+
+        Args:
+            date (float): The time in kiloyears before present (ka).
+            lmax (int): The maximum spherical harmonic degree.
+            grid (str): The pyshtools grid format (e.g., "DH", "GLQ").
+            sampling (int): The grid sampling factor (1 for standard, 2 for oversampled).
+            extend (bool): Whether to extend the grid to include the poles.
+
+        Returns:
+            Tuple[SHGrid, SHGrid]: The (ice_thickness, sea_level) grids,
+            scaled by the model's `length_scale`.
+        """
+        pass
+
+    def get_ice_thickness(
+        self,
+        date: float,
+        lmax: int,
+        /,
+        *,
+        grid: str = "DH",
+        sampling: int = 1,
+        extend: bool = True,
+    ) -> SHGrid:
+        """The scaled ice thickness at a date; arguments as
+        `get_ice_thickness_and_sea_level`."""
+        ice_thickness, _ = self.get_ice_thickness_and_sea_level(
+            date, lmax, grid=grid, sampling=sampling, extend=extend
+        )
+        return ice_thickness
+
+    def get_sea_level(
+        self,
+        date: float,
+        lmax: int,
+        /,
+        *,
+        grid: str = "DH",
+        sampling: int = 1,
+        extend: bool = True,
+    ) -> SHGrid:
+        """The scaled sea level at a date; arguments as
+        `get_ice_thickness_and_sea_level`."""
+        _, sea_level = self.get_ice_thickness_and_sea_level(
+            date, lmax, grid=grid, sampling=sampling, extend=extend
+        )
+        return sea_level
 
     def animate_joint(
         self,

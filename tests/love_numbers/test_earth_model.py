@@ -141,7 +141,7 @@ def test_axial_feedback_uses_the_tables_degree_zero_numbers(table):
     """
     from dataclasses import replace
 
-    from pyslfp.physics import LinearSeaLevelEquation
+    from pyslfp.elastic import LinearSeaLevelEquation
 
     assert table.has_axial
     without = replace(

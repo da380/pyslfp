@@ -1,10 +1,6 @@
-"""
-State containers and spatial masking for the pyslfp library.
-
-This module defines the EarthState class, which represents a snapshot of the
-Earth's surface (ice thickness and sea level) and handles all geographic
-projections, masking, and point-generation logic.
-"""
+"""The Earth's surface state: a snapshot of ice thickness and sea
+level, the ocean function the flotation condition implies, and the
+geographic projections and standard loads built on them."""
 
 from __future__ import annotations
 from functools import cached_property
@@ -16,10 +12,10 @@ from pyshtools import SHGrid
 from cartopy.mpl.geoaxes import GeoAxes
 
 
-from .core import EarthModel
-from .regions import Regions
-from .ice import IceNG, AnalyticalIceModel
-from .plot import plot_coastline
+from .model import EarthModel
+from ..regions import Regions
+from ..ice import AnalyticalIceModel, BaseIceSeaLevelModel, IceNG
+from ..plot import plot_coastline
 
 
 class EarthState(Regions):
@@ -41,7 +37,7 @@ class EarthState(Regions):
         exclude_caspian: bool = True,
     ) -> None:
         """
-        Initializes an EarthState container.
+        Initialises an EarthState container.
 
         Args:
             ice_thickness (SHGrid): The non-dimensional ice thickness grid.
@@ -67,8 +63,8 @@ class EarthState(Regions):
     @staticmethod
     def from_defaults(*, lmax: int = 256) -> EarthState:
         """
-        Returns the default EarthState, which is based on PREM with the
-        standard non-dimensionalisation and Ice-7g at present day.
+        Returns the default EarthState: PREM with the standard
+        non-dimensionalisation and ICE-7G at the present day.
 
         Args:
             lmax (int): Truncation degree for the model discretisation. Defaults to 256.
@@ -76,14 +72,48 @@ class EarthState(Regions):
 
         earth_model = EarthModel(lmax)
         ice_model = IceNG(length_scale=earth_model.parameters.length_scale)
+        return EarthState.from_ice_model(ice_model, 0.0, earth_model)
+
+    @staticmethod
+    def from_ice_model(
+        ice_model: BaseIceSeaLevelModel,
+        date: float,
+        model: EarthModel,
+        /,
+        *,
+        exclude_caspian: bool = True,
+    ) -> EarthState:
+        """
+        The state an ice-and-sea-level model records at a date.
+
+        Only a model carrying a sea level history (an inversion product
+        such as ICE-NG) can supply a state directly; for a
+        thickness-only model the initial sea level is found separately,
+        e.g. by `pyslfp.viscoelastic.calibrate_initial_sea_level`.
+
+        Args:
+            ice_model (BaseIceSeaLevelModel): The ice and sea level model,
+                with the Earth model's length scale.
+            date (float): The date in kiloyears before present.
+            model (EarthModel): The Earth model of the state.
+            exclude_caspian (bool): Whether the ocean function masks the
+                Caspian Sea.
+        """
+        if not isinstance(ice_model, BaseIceSeaLevelModel):
+            raise TypeError(
+                "the ice model carries no sea level history; supply the "
+                "initial sea level separately"
+            )
         ice_thickness, sea_level = ice_model.get_ice_thickness_and_sea_level(
-            0.0,
-            lmax,
-            grid=earth_model.grid_name,
-            sampling=earth_model.sampling,
-            extend=earth_model.extend,
+            date,
+            model.lmax,
+            grid=model.grid_name,
+            sampling=model.sampling,
+            extend=model.extend,
         )
-        return EarthState(ice_thickness, sea_level, earth_model)
+        return EarthState(
+            ice_thickness, sea_level, model, exclude_caspian=exclude_caspian
+        )
 
     @staticmethod
     def for_testing(lmax: int) -> EarthState:
@@ -180,6 +210,39 @@ class EarthState(Regions):
     def ocean_area(self) -> float:
         """Returns the total non-dimensional ocean area. Computed lazily."""
         return self.model.integrate(self.ocean_function)
+
+    @cached_property
+    def mean_ocean_depth(self) -> float:
+        """The ocean-average water column depth.
+
+        Over the oceans the sea level is the local water depth, so this
+        is the sea level averaged against the ocean projection. It sets
+        the magnitude of the mean steric response: a vertically averaged
+        density change delta rho produces an effective steric sea level
+        change of order -(mean_ocean_depth / rho_w) delta rho.
+        """
+        depth = self.sea_level * self.ocean_projection(value=0.0)
+        return self.model.integrate(depth) / self.ocean_area
+
+    @cached_property
+    def barystatic_gmsl_weighting(self) -> SHGrid:
+        """The weighting whose surface integral against an ice thickness
+        change gives the implied barystatic global-mean sea level change.
+
+        Global mass conservation puts the mass of melted grounded ice,
+        -rho_ice (1 - C) delta I, into the ocean as a uniform layer of
+        water over the ocean area, so the weighting is
+
+            -rho_ice (1 - C) / (rho_w A_O).
+
+        Floating ice is excluded by the (1 - C) factor, since its melt
+        does not change the ocean's mass.
+        """
+        return (
+            -self.model.parameters.ice_density
+            * self.one_minus_ocean_function
+            / (self.model.parameters.water_density * self.ocean_area)
+        )
 
     # ---------------------------------------------------------#
     #                     Spatial Utilities                    #
@@ -312,7 +375,7 @@ class EarthState(Regions):
             self.model.parameters.water_density * self.ocean_function * sea_level_change
         )
 
-    def direct_load_from_ocean_ocean_density_change(
+    def direct_load_from_ocean_density_change(
         self, ocean_density_change: SHGrid, /
     ) -> SHGrid:
         """Converts an ocean density change into the associated surface mass load."""
@@ -325,7 +388,14 @@ class EarthState(Regions):
     def disk_load(
         self, delta: float, latitude: float, longitude: float, amplitude: float, /
     ) -> SHGrid:
-        """Returns a circular disk load."""
+        """A uniform circular disc load, band-limited at the model's lmax.
+
+        Args:
+            delta: The disc's angular radius in degrees.
+            latitude: The centre's latitude in degrees.
+            longitude: The centre's longitude in degrees.
+            amplitude: The load value on the disc.
+        """
         return amplitude * SHGrid.from_cap(
             delta,
             latitude,

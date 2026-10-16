@@ -210,11 +210,11 @@ resulting sea level fingerprint:
    )
    plt.show()
 
-:class:`~pyslfp.physics.LinearSeaLevelEquation` holds the shoreline fixed, which is the
+:class:`~pyslfp.elastic.fingerprint.LinearSeaLevelEquation` holds the shoreline fixed, which is the
 usual assumption for present-day and near-future problems.
-:class:`~pyslfp.physics.SeaLevelEquation` provides the same linear solver along with
+:class:`~pyslfp.core.sea_level.SeaLevelEquation` provides the same linear solver along with
 ``solve_nonlinear_equation``, which migrates the shoreline and returns an updated
-:class:`~pyslfp.state.EarthState`, and ``solve_generalised_equation``, which accepts
+:class:`~pyslfp.core.state.EarthState`, and ``solve_generalised_equation``, which accepts
 displacement, potential and angular momentum forcings as needed in adjoint
 calculations.
 
@@ -228,7 +228,7 @@ equal to one. Results are returned in these units, and are converted back by
 multiplying by the appropriate scale from ``state.model.parameters`` —
 ``length_scale`` for sea level and displacement, ``load_scale`` for surface loads, and
 so on. The scheme itself is set by
-:class:`~pyslfp.core.EarthModelParameters`, and can be replaced if a different one
+:class:`~pyslfp.core.model.EarthModelParameters`, and can be replaced if a different one
 suits the problem better.
 
 
@@ -302,6 +302,13 @@ The datasets that ``pyslfp`` downloads are the work of others and are redistribu
 only for convenience. If you use them, please cite their original sources, which are
 recorded on the `Zenodo record <https://zenodo.org/records/22891291>`_.
 
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Conventions
+   :hidden:
+
+   units
 
 .. toctree::
    :maxdepth: 2

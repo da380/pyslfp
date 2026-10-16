@@ -6,7 +6,7 @@ import pytest
 import pygeoinf as inf
 from pygeoinf.symmetric_space.symmetric_space import InvariantGaussianMeasure
 
-from pyslfp.state import EarthState
+from pyslfp.core import EarthState
 from pyslfp.linear_operators.physics import (
     FingerPrintOperator,
     lebesgue_load_space,

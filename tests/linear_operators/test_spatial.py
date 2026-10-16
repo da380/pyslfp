@@ -6,7 +6,7 @@ import pytest
 import numpy as np
 
 import pygeoinf as inf
-from pyslfp.state import EarthState
+from pyslfp.core import EarthState
 from pyslfp.linear_operators.physics import lebesgue_load_space, sobolev_load_space
 from pyslfp.linear_operators.spatial import (
     ocean_projection_operator,

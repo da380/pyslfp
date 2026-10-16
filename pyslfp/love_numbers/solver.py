@@ -23,7 +23,7 @@ from numpy.typing import ArrayLike
 from planetmodel import RadialMesh
 from planetmodel.mesh1d.gll import lagrange_basis
 from .assembly import DegreeSystem
-from .material import Material
+from .material import Material, NodalModuli
 from .table import NAMES, LoveNumbers
 
 if TYPE_CHECKING:
@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 __all__ = [
     "FORCINGS",
     "DegreeSolution",
+    "fluid_tidal_number",
     "graded_mesh",
     "inertia_moment",
     "solve_degree",
@@ -70,6 +71,7 @@ class DegreeSolution:
 
     @property
     def surface(self) -> tuple[complex, complex, complex]:
+        """(U, V, phi) at the outer boundary."""
         return (self.U[-1, -1].item(), self.V[-1, -1].item(), self.phi[-1, -1].item())
 
     def evaluate(self, radii: ArrayLike) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -177,7 +179,9 @@ def solve_degree(
     channels, its traction-like or attraction piece alone, a unit
     tangential traction, a unit external potential (r/a)^l, or the
     centrifugal potential (r/a)^2.  Given a model, the mesh is built
-    with the `lmax=l` rule unless supplied."""
+    with the `lmax=l` rule unless supplied, with `ngll` nodes per
+    element; `eps` is the relative level below which the degree's
+    solution is truncated with depth."""
     if forcing not in FORCINGS:
         raise ValueError(f"forcing must be one of {FORCINGS}, got {forcing!r}")
     material = _material(model_or_material, mesh=mesh, ngll=ngll, lmax=l, eps=eps)
@@ -195,6 +199,47 @@ def solve_degree(
         b = system.load(part=part)
     U, V, phi = system.expand(system.solve(b))
     return DegreeSolution(int(l), forcing, material.mesh, U, V, phi)
+
+
+def fluid_tidal_number(
+    model_or_material: Model | Material,
+    l: int = 2,
+    *,
+    mesh: RadialMesh | None = None,
+    ngll: int = 5,
+    eps: float = 1e-8,
+) -> float:
+    """The degree-l tidal Love number of the model's hydrostatic fluid
+    limit: every region fluid, the response to the unit tide found from
+    the potential alone with its stratification term (the fluid
+    boundary-value problem, not the limit of a viscoelastic k_t(s),
+    which degrades numerically as s -> 0).
+
+    This is the k_hyd of the rotational-stability literature: the
+    equilibrium oblateness a body can sustain is k_hyd Omega^2 a^5 /
+    (3 G), and the moments of inertia used in the rotational feedback
+    must exceed it for the feedback to be stable (Mitrovica et al.
+    2005; Mitrovica & Wahr 2011).  See
+    `EarthModelParameters.with_hydrostatic_moments`.
+
+    The mesh arguments are `solve_degree`'s.  The fluid limit is
+    solved as the zero-rigidity solid: the shear
+    moduli are set exactly to zero and the degree system falls back to
+    its LU path, which handles the semi-definite elastic block.  Only
+    the density profile then matters -- a homogeneous body gives
+    Kelvin's 3 / (2 (l - 1)) to solver precision, compressible or not
+    -- and the potential-only treatment of flagged fluid regions is
+    unchanged.
+    """
+    material = _material(model_or_material, mesh=mesh, ngll=ngll, lmax=l, eps=eps)
+    if material.is_complex:
+        raise ValueError("the fluid limit takes a real material")
+    if l < 2:
+        raise ValueError("the fluid tidal number is defined for degree >= 2")
+    kappa, _ = material.moduli.kappa_mu()
+    kappa = np.asarray(kappa).real
+    fluid = material.with_moduli(NodalModuli.isotropic(kappa, np.zeros_like(kappa)))
+    return float(solve_degree(fluid, l, forcing="tide").surface[2].real)
 
 
 def inertia_moment(material: Material, U: np.ndarray) -> complex:

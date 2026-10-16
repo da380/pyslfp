@@ -112,10 +112,12 @@ class GraceObservationModel:
 
     @property
     def fingerprint_operator(self) -> FingerPrintOperator:
+        """The underlying fingerprint operator."""
         return self._fingerprint_operator
 
     @property
     def forward_operator(self) -> LinearOperator:
+        """The composed operator from model space to the observations."""
         return self._forward_operator
 
 

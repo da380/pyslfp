@@ -29,7 +29,7 @@ import pygeoinf as inf
 import altimetry_utils as utils
 from pyslfp.parallel import set_num_threads
 import pyslfp as sl
-from pyslfp.state import EarthState
+from pyslfp import EarthState
 from pyslfp.linear_operators import ocean_altimetry_points
 
 plt.rcParams.update(

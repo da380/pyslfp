@@ -4,14 +4,11 @@ General mathematical utilities for linear operators.
 This module provides the core machinery for resolving Hilbert space types
 and validating domain/codomain structures.
 
-The generic operator constructions previously defined here (L2 products
-against weighting functions and spatial multiplication) are now
-implemented directly on the pygeoinf symmetric-space classes as
-``space.l2_products_operator(...)`` and
-``space.spatial_multiplication_operator(...)``. The free functions of the
-same names below are retained as deprecated wrappers that delegate to
-those methods; ``averaging_operator`` remains the supported normalising
-convenience built on top of them.
+The free functions ``l2_products_operator`` and
+``spatial_multiplication_operator`` are deprecated wrappers around the
+pygeoinf symmetric-space methods of the same names;
+``averaging_operator`` is the supported normalising convenience built
+on them.
 """
 
 from __future__ import annotations
@@ -30,7 +27,7 @@ from pygeoinf import (
 )
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
-from pyslfp.state import EarthState
+from pyslfp.core import EarthState
 
 
 def underlying_space(space: HilbertSpace, /) -> HilbertSpace:

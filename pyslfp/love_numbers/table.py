@@ -282,6 +282,7 @@ class LoveNumbers:
 
     @property
     def is_complex(self) -> bool:
+        """True for a table at a frequency, with complex numbers."""
         return self.h_u.dtype.kind == "c"
 
     @property
@@ -389,6 +390,7 @@ class LoveNumbers:
         return replace(self, scales=scales, **changes)
 
     def in_si(self) -> LoveNumbers:
+        """The table converted to SI."""
         return self.converted(Scales.SI)
 
     def write(self, path: str | Path, /) -> None:
@@ -486,7 +488,8 @@ class LoveNumbers:
         n_points: int = 300,
     ) -> Tuple[Figure, np.ndarray]:
         """The Green's functions on a broken axis: the near field to
-        `split_angle` degrees on the left, the far field on the right."""
+        `split_angle` degrees on the left, the far field on the right,
+        the sums truncated at `lmax` and sampled at `n_points` angles."""
         import matplotlib.pyplot as plt
 
         calc_lmax = lmax if lmax is not None else self.lmax

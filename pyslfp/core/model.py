@@ -1,10 +1,7 @@
-"""
-Core physics definitions for the pyslfp library.
-
-This module contains the fundamental Earth parameters, non-dimensionalization
-schemes, and elastic Love numbers required for gravitationally consistent
-sea-level fingerprinting.
-"""
+"""The Earth model: physical parameters, their non-dimensionalisation,
+and the elastic Love numbers, shared by every solver so that the
+fingerprints, the viscoelastic evolution and their adjoints all work
+from one consistent body."""
 
 from __future__ import annotations
 from dataclasses import dataclass, field, replace
@@ -18,7 +15,7 @@ from pyshtools.utils import DHaj
 from planetmodel import units
 from planetmodel.units import Scales
 
-from pyslfp.love_numbers.table import LoveNumbers
+from ..love_numbers.table import LoveNumbers
 
 # =====================================================================
 # Default Earth Model Physical Parameters (PREM and standard values)
@@ -45,7 +42,7 @@ GRAVITATIONAL_CONSTANT: float = units.G_SI
 @dataclass(frozen=True, kw_only=True)
 class EarthModelParameters:
     """
-    Stores Earth model parameters and handles non-dimensionalization.
+    Stores Earth model parameters and handles their non-dimensionalisation.
 
     This is a frozen dataclass; all properties are strictly immutable
     to ensure physical consistency across the solver lifecycle.
@@ -60,14 +57,14 @@ class EarthModelParameters:
     adjoint is exact only when the two agree.
 
     Attributes:
-        length_scale (float): The length scale used for non-dimensionalization. Default is 1.0.
-        density_scale (float): The density scale used for non-dimensionalization. Default is 1.0.
-        time_scale (float): The time scale used for non-dimensionalization. Default is 1.0.
+        length_scale (float): The length scale of the non-dimensionalisation. Default is 1.0.
+        density_scale (float): The density scale of the non-dimensionalisation. Default is 1.0.
+        time_scale (float): The time scale of the non-dimensionalisation. Default is 1.0.
         scales (Scales): The planetmodel scales the three define.
-        raw_equatorial_radius (float): Earth's equatorial radius in meters.
-        raw_polar_radius (float): Earth's polar radius in meters.
-        raw_mean_radius (float): Earth's mean radius in meters.
-        raw_mean_sea_floor_radius (float): Mean radius of the solid Earth surface in meters.
+        raw_equatorial_radius (float): Earth's equatorial radius in metres.
+        raw_polar_radius (float): Earth's polar radius in metres.
+        raw_mean_radius (float): Earth's mean radius in metres.
+        raw_mean_sea_floor_radius (float): Mean radius of the solid Earth surface in metres.
         raw_mass (float): Total mass of the Earth in kilograms.
         raw_gravitational_acceleration (float): Surface gravity in m/s^2.
         raw_gravitational_constant (float): G in m^3 kg^-1 s^-2. Defaults to
@@ -222,22 +219,58 @@ class EarthModelParameters:
                 changes[raw] = float(value)
         return replace(self, **changes)
 
+    def with_hydrostatic_moments(
+        self, fluid_tidal_number: float, /, *, non_hydrostatic_fraction: float = 0.008
+    ) -> EarthModelParameters:
+        """The same parameters with the difference of the principal
+        moments set from a model's hydrostatic fluid limit.
+
+        The equilibrium inertia tensor of the rotational feedback is
+        specified, never computed from the spherically symmetric model
+        (Yu et al. 2025): the default is observed values.  The
+        alternative provided here follows Mitrovica et al. (2005): the
+        oblateness a model can sustain hydrostatically is
+
+            C - A = (1 + delta) k_hyd Omega^2 a^5 / (3 G),
+
+        with k_hyd the model's fluid-limit degree-2 tidal Love number
+        (`pyslfp.love_numbers.fluid_tidal_number`) and delta the
+        prescribed non-hydrostatic excess (0.8 per cent for the Earth).
+        The equatorial moment is adjusted, the polar moment kept, so
+        the axial feedback is untouched.  With delta > 0 the transverse
+        feedback is stable for any rheology of the model, since its
+        tidal response can never exceed k_hyd.
+        """
+        if fluid_tidal_number <= 0.0:
+            raise ValueError("the fluid tidal number must be positive")
+        oblateness = (
+            (1.0 + non_hydrostatic_fraction)
+            * fluid_tidal_number
+            * self.raw_rotation_frequency**2
+            * self.raw_mean_sea_floor_radius**5
+            / (3.0 * self.raw_gravitational_constant)
+        )
+        return replace(
+            self,
+            raw_equatorial_moment_of_inertia=self.raw_polar_moment_of_inertia
+            - oblateness,
+        )
+
     @staticmethod
     def from_defaults() -> EarthModelParameters:
         """
-        Returns parameters using a standard non-dimensionalisation scheme.
-        This is defined such that the Earth's radius, density, and
-        surface gravitational acceleration are equal to one.
+        Returns parameters in the library's one internal frame:
+        planetmodel's `Scales.geophysical` at the Earth's mean radius,
+        under which G is one and the mean radius and mean density are
+        the units of length and density.  Every other constant (the
+        surface gravity among them) is an ordinary non-dimensional
+        number and is always written out, never assumed away.
         """
-
-        length_scale = MEAN_RADIUS
-        density_scale = 3 * MASS / (4 * np.pi * length_scale**3)
-        time_scale = np.sqrt(length_scale / GRAVITATIONAL_ACCELERATION)
-
+        scales = Scales.geophysical(MEAN_RADIUS)
         return EarthModelParameters(
-            length_scale=length_scale,
-            density_scale=density_scale,
-            time_scale=time_scale,
+            length_scale=scales.factor(units.LENGTH),
+            density_scale=scales.factor(units.DENSITY),
+            time_scale=scales.factor(units.TIME),
         )
 
 
@@ -245,10 +278,11 @@ class EarthModel:
     """
     The unified physics configuration object for the library.
 
-    This object encapsulates the non-dimensionalized Earth parameters and
-    the corresponding Love numbers, ensuring physical consistency across
-    all calculations and solvers. Also sets values for SH transforms
-    and provides a range of utility methods.
+    Holds the non-dimensionalised Earth parameters and the matching
+    Love numbers, so every calculation and solver works from one
+    consistent body, together with the spherical harmonic conventions
+    (grid, normalisation, truncation) and the transforms and surface
+    integrals defined by them.
     """
 
     def __init__(
@@ -263,12 +297,12 @@ class EarthModel:
         extend: bool = True,
     ) -> None:
         """
-        Initializes an EarthModel configuration.
+        Initialises an EarthModel configuration.
 
         Args:
             lmax (int): The maximum spherical harmonic degree.
             parameters (Optional[EarthModelParameters]): The Earth's physical scales.
-                If None, standard non-dimensionalized parameters are generated.
+                If None, standard non-dimensionalised parameters are generated.
                 The sea-floor radius, surface gravity and G are then taken from
                 the Love numbers, see `EarthModelParameters.with_body`.
             love_numbers (Optional[LoveNumbers | str | Path]): The Love numbers,
@@ -322,7 +356,7 @@ class EarthModel:
     @staticmethod
     def from_defaults(*, lmax: int = 256) -> EarthModel:
         """
-        Returns the default Earth model, based on PREM with standard non-dimensionalisations.
+        Returns the default Earth model: PREM Love numbers with the standard non-dimensionalisation.
 
         Args:
             lmax (int): Truncation degree for discretisation. Defaults to 256.
@@ -412,7 +446,7 @@ class EarthModel:
 
     @property
     def parameters(self) -> EarthModelParameters:
-        """The fundamental, non-dimensionalized Earth parameters."""
+        """The fundamental, non-dimensionalised Earth parameters."""
         return self._parameters
 
     @property
@@ -443,7 +477,7 @@ class EarthModel:
         )
         if not is_compatible:
             raise ValueError(
-                "Provided SHGrid object is not compatible with FingerPrint settings."
+                "the SHGrid is not compatible with the EarthModel's grid settings"
             )
         return True
 
@@ -456,7 +490,7 @@ class EarthModel:
         )
         if not is_compatible:
             raise ValueError(
-                "Provided SHCoeffs object is not compatible with FingerPrint settings."
+                "the SHCoeffs are not compatible with the EarthModel's conventions"
             )
         return True
 

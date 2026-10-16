@@ -28,7 +28,7 @@ from matplotlib.patches import Ellipse
 
 import pygeoinf as inf
 
-from pyslfp.state import EarthState
+from pyslfp import EarthState
 from pyslfp.linear_operators import (
     FingerPrintOperator,
     ice_thickness_change_to_load_operator,

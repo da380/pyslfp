@@ -10,16 +10,16 @@ from typing import Tuple
 import numpy as np
 from pyshtools import SHGrid
 
-from .ice_models import BaseIceModel
+from .ice_models import BaseIceSeaLevelModel
 
 
-class AnalyticalIceModel(BaseIceModel):
+class AnalyticalIceModel(BaseIceSeaLevelModel):
     """
     A synthetic ice model generating smooth, Super-Gaussian-based
     continents and ice caps.
 
-    Perfect for unit testing the SeaLevelEquation solver at low spherical
-    harmonic degrees without triggering noise or convergence issues.
+    Smooth by construction, so solvers can be tested at low spherical
+    harmonic degrees without aliasing from sharp coastlines.
     """
 
     def get_ice_thickness_and_sea_level(
@@ -32,10 +32,10 @@ class AnalyticalIceModel(BaseIceModel):
         sampling: int = 1,
         extend: bool = True,
     ) -> Tuple[SHGrid, SHGrid]:
-        """
-        Generates synthetic ice and sea level fields for a given "date".
-        (date = 0.0 -> present day, date = 21.0 -> LGM)
-        """
+        """The synthetic ice and sea level fields at a date (0.0 the
+        present day, 21.0 the glacial maximum, the mid-latitude sheet
+        growing linearly between); arguments as
+        `BaseIceModel.get_ice_thickness_and_sea_level`."""
         # Create an empty grid just to extract the required lat/lon arrays
         grid, sampling = self.resolve_grid(grid, sampling)
         template = SHGrid.from_zeros(lmax, grid=grid, sampling=sampling, extend=extend)

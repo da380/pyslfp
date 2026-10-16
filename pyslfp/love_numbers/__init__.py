@@ -36,6 +36,7 @@ from .plot import plot_degree_solution, plot_love_numbers
 from .solver import (
     FORCINGS,
     DegreeSolution,
+    fluid_tidal_number,
     graded_mesh,
     inertia_moment,
     love_numbers,
@@ -53,6 +54,7 @@ __all__ = [
     "solve_degree",
     "graded_mesh",
     "LoveNumbers",
+    "fluid_tidal_number",
     "inertia_moment",
     "love_numbers",
     "read_love_numbers",

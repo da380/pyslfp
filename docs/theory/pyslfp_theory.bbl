@@ -1,0 +1,104 @@
+\begin{thebibliography}{14}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Al-Attar and Tromp(2014)]{AlAttarTromp2014}
+D.~Al-Attar and J.~Tromp.
+\newblock Sensitivity kernels for viscoelastic loading based on adjoint
+  methods.
+\newblock \emph{Geophysical Journal International}, 196\penalty0 (1):\penalty0
+  34--77, 2014.
+\newblock \doi{10.1093/gji/ggt395}.
+
+\bibitem[Al-Attar et~al.(2024)Al-Attar, Syvret, Crawford, Mitrovica, and
+  Lloyd]{AlAttarEtAl2024}
+D.~Al-Attar, F.~Syvret, O.~Crawford, J.~X. Mitrovica, and A.~J. Lloyd.
+\newblock Reciprocity and sensitivity kernels for sea level fingerprints.
+\newblock \emph{Geophysical Journal International}, 236\penalty0 (1):\penalty0
+  362--378, 2024.
+
+\bibitem[Crawford et~al.(2017)Crawford, Al-Attar, Tromp, and
+  Mitrovica]{CrawfordEtAl2017}
+O.~Crawford, D.~Al-Attar, J.~Tromp, and J.~X. Mitrovica.
+\newblock Forward and inverse modelling of post-seismic deformation.
+\newblock \emph{Geophysical Journal International}, 208\penalty0 (2):\penalty0
+  845--876, 2017.
+
+\bibitem[Crawford et~al.(2018)Crawford, Al-Attar, Tromp, Mitrovica, Austermann,
+  and Lau]{CrawfordEtAl2018}
+O.~Crawford, D.~Al-Attar, J.~Tromp, J.~X. Mitrovica, J.~Austermann, and
+  H.~C.~P. Lau.
+\newblock Quantifying the sensitivity of post-glacial sea level change to
+  laterally varying viscosity.
+\newblock \emph{Geophysical Journal International}, 214\penalty0 (2):\penalty0
+  1324--1363, 2018.
+\newblock \doi{10.1093/gji/ggy184}.
+
+\bibitem[Dahlen and Tromp(1998)]{DahlenTromp1998}
+F.~A. Dahlen and J.~Tromp.
+\newblock \emph{Theoretical Global Seismology}.
+\newblock Princeton University Press, Princeton, NJ, 1998.
+
+\bibitem[Farrell(1972)]{Farrell1972}
+W.~E. Farrell.
+\newblock Deformation of the {E}arth by surface loads.
+\newblock \emph{Reviews of Geophysics and Space Physics}, 10\penalty0
+  (3):\penalty0 761--797, 1972.
+
+\bibitem[Farrell and Clark(1976)]{FarrellClark1976}
+W.~E. Farrell and J.~A. Clark.
+\newblock On postglacial sea level.
+\newblock \emph{Geophysical Journal of the Royal Astronomical Society},
+  46\penalty0 (3):\penalty0 647--667, 1976.
+
+\bibitem[Kendall et~al.(2005)Kendall, Mitrovica, and Milne]{KendallEtAl2005}
+R.~A. Kendall, J.~X. Mitrovica, and G.~A. Milne.
+\newblock On post-glacial sea level -- {II}. {N}umerical formulation and
+  comparative results on spherically symmetric models.
+\newblock \emph{Geophysical Journal International}, 161\penalty0 (3):\penalty0
+  679--706, 2005.
+
+\bibitem[Milne and Mitrovica(1998)]{MilneMitrovica1998}
+G.~A. Milne and J.~X. Mitrovica.
+\newblock Postglacial sea-level change on a rotating {E}arth.
+\newblock \emph{Geophysical Journal International}, 133\penalty0 (1):\penalty0
+  1--19, 1998.
+
+\bibitem[Mitrovica and Milne(2003)]{MitrovicaMilne2003}
+J.~X. Mitrovica and G.~A. Milne.
+\newblock On post-glacial sea level: {I}. {G}eneral theory.
+\newblock \emph{Geophysical Journal International}, 154\penalty0 (2):\penalty0
+  253--267, 2003.
+
+\bibitem[Mitrovica et~al.(2005)Mitrovica, Wahr, Matsuyama, and
+  Paulson]{MitrovicaEtAl2005}
+J.~X. Mitrovica, J.~Wahr, I.~Matsuyama, and A.~Paulson.
+\newblock The rotational stability of an ice-age earth.
+\newblock \emph{Geophysical Journal International}, 161\penalty0 (2):\penalty0
+  491--506, 2005.
+\newblock \doi{10.1111/j.1365-246X.2005.02609.x}.
+
+\bibitem[Walker and Ni(2011)]{WalkerNi2011}
+H.~F. Walker and P.~Ni.
+\newblock Anderson acceleration for fixed-point iterations.
+\newblock \emph{SIAM Journal on Numerical Analysis}, 49\penalty0 (4):\penalty0
+  1715--1735, 2011.
+
+\bibitem[Wu and Peltier(1982)]{WuPeltier1982}
+P.~Wu and W.~R. Peltier.
+\newblock Viscous gravitational relaxation.
+\newblock \emph{Geophysical Journal of the Royal Astronomical Society},
+  70\penalty0 (2):\penalty0 435--485, 1982.
+
+\bibitem[Yu et~al.(2025)Yu, Al-Attar, Syvret, and Lloyd]{YuEtAl2025}
+Z.~Yu, D.~Al-Attar, F.~Syvret, and A.~J. Lloyd.
+\newblock Application of first- and second-order adjoint methods to glacial
+  isostatic adjustment incorporating rotational feedbacks.
+\newblock \emph{Geophysical Journal International}, 240\penalty0 (1):\penalty0
+  329--348, 2025.
+\newblock \doi{10.1093/gji/ggae388}.
+
+\end{thebibliography}

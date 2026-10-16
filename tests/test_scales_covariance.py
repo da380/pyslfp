@@ -139,9 +139,7 @@ def _si_outputs(body, scheme):
 
     snapshots, _ = evo.run_ice_history(dates, ice_model, record=True)
     states = [snap.internal_state for snap in snapshots]
-    out = {
-        "xi": snapshots[-1].sea_level_change.data * scales.factor(units.LENGTH)
-    }
+    out = {"xi": snapshots[-1].sea_level_change.data * scales.factor(units.LENGTH)}
     load_si = 1.0 / (scales.factor(SURFACE_DENSITY) * scales.factor(units.LENGTH) ** 2)
     for name, method in (
         ("discrete", evo.adjoint_ice_history),

@@ -174,10 +174,12 @@ def ocean_mass_conservation_operator(
     average = ocean_average_operator(state, sea_level_space)
     return RowLinearOperator(
         [
-            average @ sea_level_change_to_load_operator(
+            average
+            @ sea_level_change_to_load_operator(
                 state, sea_level_space, sea_level_space
             ),
-            average @ ocean_density_change_to_load_operator(
+            average
+            @ ocean_density_change_to_load_operator(
                 state, density_space, sea_level_space
             ),
         ]

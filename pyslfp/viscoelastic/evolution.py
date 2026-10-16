@@ -1074,7 +1074,9 @@ class SeaLevelEvolution:
         its `ocean_functions`) -- the kernels also carry the
         continuous sensitivity to the branch inverse relaxation times:
         the multiplier of the internal-variable dynamics is the
-        branch-weighted adjoint state over itau, so
+        branch-weighted adjoint state over itau, scaled by the ratio of
+        the material's load pairing to the model's sea-level pairing
+        (see `pairing` below), so
 
             dJ / d itau(r) = int W_k m-dagger / itau (d - m) dt,
 
@@ -1230,17 +1232,30 @@ class SeaLevelEvolution:
             K = op.rheology.num_branches
             itau_kernel = [np.zeros((op.material.mesh.nspec, ngll)) for _ in range(K)]
 
+        # the radial state the jumps seed is NOT the true multiplier of
+        # the internal-variable dynamics: `apply_jump` drives the
+        # forward unit-response machinery, whose load pairing lives on
+        # the material's surface (g a^2, in the material's units),
+        # while the functional pairs the dual with sea level on the
+        # model's surface (r^2, in the model's units).  The true
+        # multiplier is the state times the ratio of the two pairings,
+        # which carries dimensions (mass x length), so it is unity only
+        # when the two unit systems agree -- on an SI material its
+        # omission inflates the kernels by ~thirty orders of magnitude
+        pairing = (
+            r2
+            * self._to_nd_length
+            / (op.material.radius**2 * self._to_mat_density)
+            / op.material.surface_gravity
+        )
+
         def accumulate_itau(node: int, weight: float) -> None:
             """One side's contribution at a node: the branch-weighted
-            adjoint state over itau paired with the forward d - m.  The
-            self-adjoint channel mapping poses the adjoint problem in
-            the g-weighted energy form of the sea level equation, so
-            the radial state carried here is the surface gravity times
-            the true multiplier of the internal-variable dynamics --
-            hence the division, with g in the material's units."""
+            adjoint state, scaled to the true multiplier of the
+            internal-variable dynamics by `pairing`, over itau, paired
+            with the forward d - m."""
             if itau_kernel is None or weight == 0.0:
                 return
-            g_mat = op.material.surface_gravity
             fwd = cursor.state(node)
             for l in vstate.degrees:
                 deg = op.degree(l)
@@ -1248,9 +1263,9 @@ class SeaLevelEvolution:
                 weighted = deg.apply_weights(vstate.m[l])
                 for k in range(K):
                     itau_k = deg.itau[k]
-                    inv = np.where(itau_k > 0.0, itau_k, 1.0) * g_mat
+                    inv = np.where(itau_k > 0.0, itau_k, 1.0)
                     g = (weighted[k] * dm[k]).sum(axis=(0, 3))
-                    g = np.where(itau_k > 0.0, g / inv, 0.0)
+                    g = np.where(itau_k > 0.0, pairing * g / inv, 0.0)
                     itau_kernel[k][deg.e0 :] += weight * g
 
         lump_load: dict[int, np.ndarray] = {}

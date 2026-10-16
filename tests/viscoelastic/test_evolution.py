@@ -1265,7 +1265,80 @@ def test_continuous_viscosity_kernels(setting):
     assert 3.0 < coarse / fine < 5.0
 
     stiff = disagreement(_maxwell_operator(material), 6)
-    assert stiff > 0.2
+    # two-sided: an unbounded lower gate would also pass a kernel
+    # inflated by a broken pairing, not just a resolution failure
+    assert 0.2 < stiff < 1.0
+
+
+def test_continuous_viscosity_kernels_unit_covariance():
+    """The continuous itau kernels are covariant under the material's
+    unit system.  The pairing ratio in the accumulation carries
+    dimensions (mass x length), so a non-dimensionalised body cannot
+    see it: the same physical body -- layered, the viscous region
+    capped by an elastic lid -- is built in SI and in geophysical
+    units, and the kernels must agree under a common pairing, with
+    both close to the exact discrete transpose."""
+    L, T_ND, RHO_BAR = 6.371e6, 1.0 / np.sqrt(6.6743e-11 * 5515.0), 5515.0
+
+    def kernel(scales):
+        lf = scales.factor(units.LENGTH)
+        tf = scales.factor(units.TIME)
+        df = scales.factor(units.DENSITY)
+        v = (L / T_ND) / (lf / tf)
+        model = LayeredIsotropicElastic(
+            [0.0, 0.6 * L / lf, L / lf],
+            rho=[RHO_BAR / df] * 2,
+            vp=[3.1 * v] * 2,
+            vs=[1.3 * v] * 2,
+            scales=scales,
+        )
+        mesh = RadialMesh(model, ngll=5, lmax=LMAX)
+        material = Material(mesh, model)
+        base = EarthModel.from_planet_model(model, LMAX, mesh=mesh)
+        parameters = base.parameters.with_hydrostatic_moments(
+            fluid_tidal_number(material, 2)
+        )
+        earth = EarthModel(
+            LMAX, parameters=parameters, love_numbers=love_numbers(material, LMAX)
+        )
+        ice_model = AnalyticalIceModel(length_scale=earth.parameters.length_scale)
+        state = EarthState.from_ice_model(ice_model, 10.0, earth, exclude_caspian=False)
+        # a Maxwell layer under an elastic lid, in the resolved regime
+        mu = float(np.max(np.asarray(material.moduli.kappa_mu()[1]).real))
+        eta = mu * 10.0 * TAU * T_ND / tf
+        op = ViscoelasticOperator(Rheology.maxwell(material, {0: eta}), LMAX)
+        evo = SeaLevelEvolution(op, state)
+        rng = np.random.default_rng(7)
+        c = rng.normal(size=(2, LMAX + 1, LMAX + 1))
+        for degree in range(LMAX + 1):
+            c[:, degree, degree + 1 :] = 0.0
+        c[1, :, 0] = 0.0
+        g = earth.expand_coefficient(
+            SHCoeffs.from_array(
+                c, normalization=earth.normalization, csphase=earth.csphase
+            )
+        )
+        dates = np.linspace(10.0, 0.0, 11)
+        snapshots, _ = evo.run_ice_history(dates, ice_model, record=True)
+        states = [snap.internal_state for snap in snapshots]
+        discrete = evo.adjoint_ice_history(
+            dates, {0.0: g}, internal_states=states
+        ).itau[0]
+        continuous = evo.continuous_adjoint_ice_history(
+            dates, {0.0: g}, internal_states=states
+        ).itau[0]
+        # the common pairing: the kernel pairs with d(itau) in the
+        # material's inverse time, so scaling by the time factor makes
+        # runs in different unit systems comparable node by node
+        return discrete * tf, continuous * tf
+
+    si_d, si_c = kernel(units.Scales.SI)
+    nd_d, nd_c = kernel(units.Scales.geophysical(L))
+    # each method is unit-covariant on its own
+    assert np.linalg.norm(si_d - nd_d) < 1e-9 * np.linalg.norm(nd_d)
+    assert np.linalg.norm(si_c - nd_c) < 1e-9 * np.linalg.norm(nd_c)
+    # and the continuous kernel sits on the discrete one when resolved
+    assert np.linalg.norm(si_c - si_d) < 0.05 * np.linalg.norm(si_d)
 
 
 def test_migrating_viscosity_kernels(setting):

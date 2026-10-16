@@ -304,6 +304,13 @@ recorded on the `Zenodo record <https://zenodo.org/records/22891291>`_.
 
 
 .. toctree::
+   :maxdepth: 1
+   :caption: Conventions
+   :hidden:
+
+   units
+
+.. toctree::
    :maxdepth: 2
    :caption: API Reference
    :hidden:

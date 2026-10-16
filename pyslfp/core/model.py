@@ -259,19 +259,18 @@ class EarthModelParameters:
     @staticmethod
     def from_defaults() -> EarthModelParameters:
         """
-        Returns parameters using a standard non-dimensionalisation scheme.
-        This is defined such that the Earth's radius, density, and
-        surface gravitational acceleration are equal to one.
+        Returns parameters in the library's one internal frame:
+        planetmodel's `Scales.geophysical` at the Earth's mean radius,
+        under which G is one and the mean radius and mean density are
+        the units of length and density.  Every other constant (the
+        surface gravity among them) is an ordinary non-dimensional
+        number and is always written out, never assumed away.
         """
-
-        length_scale = MEAN_RADIUS
-        density_scale = 3 * MASS / (4 * np.pi * length_scale**3)
-        time_scale = np.sqrt(length_scale / GRAVITATIONAL_ACCELERATION)
-
+        scales = Scales.geophysical(MEAN_RADIUS)
         return EarthModelParameters(
-            length_scale=length_scale,
-            density_scale=density_scale,
-            time_scale=time_scale,
+            length_scale=scales.factor(units.LENGTH),
+            density_scale=scales.factor(units.DENSITY),
+            time_scale=scales.factor(units.TIME),
         )
 
 

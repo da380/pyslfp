@@ -366,9 +366,25 @@ class SeaLevelEvolution:
         self._rotation_factor = parameters.rotation_factor
         self._axial_rotation_factor = parameters.axial_rotation_factor
         self._uniform_rotation_factor = parameters.uniform_rotation_factor
-        # conversion factors, material units -> the model's units
+        # the library's internal frame is one unit system (docs/
+        # planning/scales_plan.md): the material must live in the sea
+        # level model's scales, so every conversion factor below is
+        # exactly one.  The factors are kept written out all the same:
+        # they are the dimensional structure of the formulas, and a
+        # factor is never dropped because the current scheme makes it
+        # one.
         material_scales = operator.material.scales
         sle_scales = parameters.scales
+        if not all(
+            np.isclose(getattr(material_scales, name), getattr(sle_scales, name))
+            for name in ("length", "mass", "time")
+        ):
+            raise ValueError(
+                "the material and the earth model live in different unit "
+                "systems; convert the planetmodel model into the model's "
+                "frame (model.converted(state.model.parameters.scales)) "
+                "before building its mesh and material"
+            )
 
         def ratio(dims):
             return material_scales.factor(dims) / sle_scales.factor(dims)

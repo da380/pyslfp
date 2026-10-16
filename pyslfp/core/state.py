@@ -211,6 +211,39 @@ class EarthState(Regions):
         """Returns the total non-dimensional ocean area. Computed lazily."""
         return self.model.integrate(self.ocean_function)
 
+    @cached_property
+    def mean_ocean_depth(self) -> float:
+        """The ocean-average water column depth.
+
+        Over the oceans the sea level is the local water depth, so this
+        is the sea level averaged against the ocean projection. It sets
+        the magnitude of the mean steric response: a vertically averaged
+        density change delta rho produces an effective steric sea level
+        change of order -(mean_ocean_depth / rho_w) delta rho.
+        """
+        depth = self.sea_level * self.ocean_projection(value=0.0)
+        return self.model.integrate(depth) / self.ocean_area
+
+    @cached_property
+    def barystatic_gmsl_weighting(self) -> SHGrid:
+        """The weighting whose surface integral against an ice thickness
+        change gives the implied barystatic global-mean sea level change.
+
+        Global mass conservation puts the mass of melted grounded ice,
+        -rho_ice (1 - C) delta I, into the ocean as a uniform layer of
+        water over the ocean area, so the weighting is
+
+            -rho_ice (1 - C) / (rho_w A_O).
+
+        Floating ice is excluded by the (1 - C) factor, since its melt
+        does not change the ocean's mass.
+        """
+        return (
+            -self.model.parameters.ice_density
+            * self.one_minus_ocean_function
+            / (self.model.parameters.water_density * self.ocean_area)
+        )
+
     # ---------------------------------------------------------#
     #                     Spatial Utilities                    #
     # ---------------------------------------------------------#

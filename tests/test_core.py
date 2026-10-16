@@ -12,6 +12,7 @@ from planetmodel import units
 from pyslfp.core import EarthModelParameters, EarthModel
 from pyslfp.love_numbers import LoveNumbers
 from pyslfp.core import (
+    GRAVITATIONAL_ACCELERATION,
     MEAN_RADIUS,
     MEAN_SEA_FLOOR_RADIUS,
     MASS,
@@ -75,24 +76,30 @@ def test_parameters_custom_initialization():
 
 def test_parameters_non_dimensionalisation_factory(default_params):
     """
-    Tests the factory method that sets up the standard non-dimensionalization
-    scheme based on Earth's mean radius, mean density, and surface gravity.
+    Tests the factory method that sets up the library's one internal
+    frame: planetmodel's geophysical scales at the Earth's mean radius.
     """
-    # Key non-dimensional values should now be exactly 1.0
-    assert default_params.mean_radius == 1.0
-    assert np.isclose(default_params.gravitational_acceleration, 1.0)
+    geo = units.Scales.geophysical(MEAN_RADIUS)
+    assert default_params.length_scale == geo.factor(units.LENGTH)
+    assert default_params.density_scale == geo.factor(units.DENSITY)
+    assert default_params.time_scale == geo.factor(units.TIME)
 
-    # Water density is no longer the base scale (1.0).
-    # It should be correctly scaled relative to Earth's mean density.
-    expected_density_scale = 3 * MASS / (4 * np.pi * MEAN_RADIUS**3)
-    assert np.isclose(default_params.density_scale, expected_density_scale)
+    # the frame's defining properties: unit radius and unit G
+    assert default_params.mean_radius == 1.0
+    assert np.isclose(default_params.gravitational_constant, 1.0)
+
+    # every other constant is an ordinary non-dimensional number --
+    # never one by construction, and never to be assumed away
+    expected_density_scale = geo.factor(units.DENSITY)
     assert np.isclose(
         default_params.water_density, WATER_DENSITY / expected_density_scale
     )
-
-    # Ice density should also be correctly scaled relative to Earth's mean density
     expected_ice_density = ICE_DENSITY / expected_density_scale
     assert np.isclose(default_params.ice_density, expected_ice_density)
+    assert np.isclose(
+        default_params.gravitational_acceleration,
+        GRAVITATIONAL_ACCELERATION / geo.factor(units.GRAVITY),
+    )
 
 
 def test_parameters_scales(default_params):
@@ -107,10 +114,11 @@ def test_parameters_scales(default_params):
         units.G_SI / p.scales.factor(units.GRAVITATIONAL_CONSTANT),
     )
     assert EarthModelParameters().gravitational_constant == units.G_SI
-    # radius, mean density and surface gravity are one in the default scheme
+    # radius and G are one in the default frame; the mean density is
+    # close to one only because the reference density approximates it
     assert np.isclose(p.mean_radius, 1.0)
-    assert np.isclose(p.gravitational_acceleration, 1.0)
-    assert np.isclose(3 * p.mass / (4 * np.pi * p.mean_radius**3), 1.0)
+    assert np.isclose(p.gravitational_constant, 1.0)
+    assert np.isclose(3 * p.mass / (4 * np.pi * p.mean_radius**3), 1.0, rtol=1e-4)
 
 
 def test_parameters_are_immutable(default_params):

@@ -25,7 +25,7 @@ from pyslfp.parallel import set_num_threads
 import pyslfp as sl
 import altimetry_utils as utils
 
-from pyslfp.state import EarthState
+from pyslfp import EarthState
 from pyslfp.linear_operators import ocean_altimetry_points, altimetry_averaging_operator
 
 

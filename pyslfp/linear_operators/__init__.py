@@ -50,6 +50,8 @@ from .loads import (
     ice_thickness_change_to_load_operator,
     sea_level_change_to_load_operator,
     ocean_density_change_to_load_operator,
+    steric_sea_level_operator,
+    ocean_mass_conservation_operator,
     joint_ice_ocean_to_load_operator,
 )
 
@@ -99,6 +101,8 @@ __all__ = [
     "ice_thickness_change_to_load_operator",
     "sea_level_change_to_load_operator",
     "ocean_density_change_to_load_operator",
+    "steric_sea_level_operator",
+    "ocean_mass_conservation_operator",
     "joint_ice_ocean_to_load_operator",
     # .grace
     "grace_observation_operator",

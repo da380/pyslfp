@@ -1271,13 +1271,16 @@ def test_continuous_viscosity_kernels(setting):
 
 
 def test_continuous_viscosity_kernels_unit_covariance():
-    """The continuous itau kernels are covariant under the material's
-    unit system.  The pairing ratio in the accumulation carries
-    dimensions (mass x length), so a non-dimensionalised body cannot
-    see it: the same physical body -- layered, the viscous region
-    capped by an elastic lid -- is built in SI and in geophysical
-    units, and the kernels must agree under a common pairing, with
-    both close to the exact discrete transpose."""
+    """Kernels are covariant under the units a model was AUTHORED in.
+    The same physical body -- layered, the viscous region capped by an
+    elastic lid -- is written down in SI and in geophysical units; each
+    is converted into the library's frame at ingestion
+    (`Model.converted`), and the kernels must agree, with the
+    continuous ones close to the exact discrete transpose.  The pairing
+    ratio in the continuous accumulation carries dimensions
+    (mass x length), so a mixed-frame run could not be trusted even
+    where it seems to work; the coupling refuses it outright, which is
+    also asserted here."""
     L, T_ND, RHO_BAR = 6.371e6, 1.0 / np.sqrt(6.6743e-11 * 5515.0), 5515.0
 
     def kernel(scales):
@@ -1292,6 +1295,9 @@ def test_continuous_viscosity_kernels_unit_covariance():
             vs=[1.3 * v] * 2,
             scales=scales,
         )
+        # ingestion: the authored model enters the library's frame
+        model = model.converted(units.Scales.geophysical(L))
+        tf = units.Scales.geophysical(L).factor(units.TIME)
         mesh = RadialMesh(model, ngll=5, lmax=LMAX)
         material = Material(mesh, model)
         base = EarthModel.from_planet_model(model, LMAX, mesh=mesh)
@@ -1339,6 +1345,22 @@ def test_continuous_viscosity_kernels_unit_covariance():
     assert np.linalg.norm(si_c - nd_c) < 1e-9 * np.linalg.norm(nd_c)
     # and the continuous kernel sits on the discrete one when resolved
     assert np.linalg.norm(si_c - si_d) < 0.05 * np.linalg.norm(si_d)
+
+
+def test_mixed_frame_refused(setting):
+    """A material whose model skipped ingestion conversion does not
+    share the earth model's unit system; the coupling refuses it."""
+    material, earth, _, _, _ = setting
+    _, state = _history_state(material, earth)
+    si = material.model.converted(units.Scales.SI)
+    mesh = RadialMesh(si, ngll=5, lmax=LMAX)
+    si_material = Material(mesh, si)
+    tf = material.scales.factor(units.TIME)
+    op = ViscoelasticOperator(
+        Rheology.from_relaxation_time(si_material, TAU * tf), LMAX
+    )
+    with pytest.raises(ValueError, match="unit systems"):
+        SeaLevelEvolution(op, state)
 
 
 def test_migrating_viscosity_kernels(setting):

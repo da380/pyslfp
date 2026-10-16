@@ -137,7 +137,27 @@ conclusion.
    `sl3dpp/scripts/make_stage5_fixtures.py`, regenerate, and the
    sl3dpp gate compares at 1e-5.
 
-## 2. EarthModel scales deviate from planetmodel's `Scales.geophysical`
+## 2. [FIXED in pyslfp — sl3dpp anchor removal outstanding] EarthModel scales deviate from planetmodel's `Scales.geophysical`
+
+**Resolution (16 Oct 2026).** pyslfp changed, per the plan in
+docs/planning/scales_plan.md: `EarthModelParameters.from_defaults` now
+builds from `Scales.geophysical(MEAN_RADIUS)` (G = 1, T ≈ 1648 s), the
+viscoelastic coupling refuses a material whose scales disagree with
+the model's (models authored in other units convert at ingestion via
+`Model.converted`), and two-frame covariance gates
+(tests/test_scales_covariance.py, and the unit-covariance test in
+tests/viscoelastic/test_evolution.py) hold the frame. The convention
+is documented in docs/source/units.rst.
+
+**Remaining:** sl3dpp's stage gates still carry the SI anchors for
+potential and angular-velocity duals that worked around the old
+mismatch; with both codes in one frame the anchors are redundant and
+can come out when the fixtures are next regenerated (together with the
+stage-5 itau regeneration of issue 1).
+
+---
+
+Original report:
 
 Recorded for the convention unification David called for (16 Oct 2026:
 pyslfp, AdGIA and sl3dpp should share one internal

@@ -4,7 +4,7 @@ Precise, reproducible items found from the outside (sl3dpp's stage-5
 cross-code gates) and parked here for someone to pick up. Each carries a
 diagnosis, a minimal repro and a concrete fix plan.
 
-## 1. [FIXED in pyslfp — sl3dpp regeneration outstanding] Continuous-adjoint itau kernels blow up (~1e31) on layered Maxwell rheologies
+## 1. [CLOSED 16 Oct 2026: fixed in pyslfp, sl3dpp regenerated and gated] Continuous-adjoint itau kernels blow up (~1e31) on layered Maxwell rheologies
 
 **Resolution (16 Oct 2026).** The prime suspect below was wrong: the
 branch support is clean (no tiny-positive itau nodes; the smallest

@@ -114,6 +114,15 @@ def _check_mesh(mesh: RadialMesh, model: Model) -> None:
 def _nodal(mesh: RadialMesh, fields_by_layer: Mapping[int, Field]) -> np.ndarray:
     """A field per layer index, evaluated on each element's own nodes;
     complex where any field is."""
+    for i, field in fields_by_layer.items():
+        if not getattr(field, "is_radial", False):
+            label = repr(field.name) if field.name else "a modulus"
+            raise ValueError(
+                f"{label} on layer {i} depends on direction; the loading "
+                "problem is spherically symmetric and reads radial fields "
+                "only (a model's mapping is ignored) — average the model "
+                "first with planetmodel.spherically_averaged"
+            )
     pieces = {
         i: field.evaluate(mesh.r[mesh.layer == i], 0.0, 0.0)
         for i, field in fields_by_layer.items()

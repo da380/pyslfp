@@ -218,6 +218,14 @@ class Rheology:
             layer = model.layer(int(i))
             if "viscosity" in layer.fields:
                 field = layer.fields["viscosity"]
+                if not getattr(field, "is_radial", False):
+                    raise ValueError(
+                        f"'viscosity' on layer {int(i)} depends on direction; "
+                        "this rheology is spherically symmetric and reads "
+                        "radial fields only (a model's mapping is ignored) — "
+                        "average the model first with "
+                        "planetmodel.spherically_averaged"
+                    )
                 viscosity[int(i)] = lambda r, f=field: f.evaluate(r, 0.0, 0.0)
         if not viscosity:
             raise ValueError(

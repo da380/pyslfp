@@ -4,7 +4,13 @@ parameterisations, the refusals, and the effective moduli."""
 import numpy as np
 import pytest
 
-from planetmodel import PREM, LayeredIsotropicElastic, RadialMesh, constant_field
+from planetmodel import (
+    PREM,
+    AnalyticField,
+    LayeredIsotropicElastic,
+    RadialMesh,
+    constant_field,
+)
 from pyslfp.love_numbers import Material
 from pyslfp.viscoelastic import Rheology
 
@@ -118,3 +124,11 @@ def test_from_model(material):
     assert np.allclose(rheo.itau[0], MU / ETA, rtol=1e-12)
     with pytest.raises(ValueError, match="viscosity"):
         Rheology.from_model(material)
+    lateral = AnalyticField(
+        (0.0, RADIUS), lambda r, t, p: ETA * (1.0 + 0.1 * np.cos(t))
+    )
+    aspherical = Material(
+        material.mesh, material.model.with_field(0, "viscosity", lateral)
+    )
+    with pytest.raises(ValueError, match="spherically_averaged"):
+        Rheology.from_model(aspherical)

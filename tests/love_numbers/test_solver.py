@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from planetmodel import (
+    AnalyticField,
     RadialMesh,
     constant_field,
     frozen,
@@ -137,6 +138,15 @@ def test_material_refusals(model):
         Material(RadialMesh(model, ngll=5, drmax=500e3, rmax=6000e3), model)
     with pytest.raises(ValueError, match="different skeleton"):
         Material(RadialMesh(PREM(), ngll=5, lmax=4), model)
+    flat = LayeredIsotropicElastic(
+        [0.0, 6.371e6], rho=[5510.0], vp=[12000.0], vs=[5000.0]
+    )
+    lateral = AnalyticField(
+        (0.0, 6.371e6), lambda r, t, p: 5000.0 * (1.0 + 0.1 * np.cos(t))
+    )
+    aspherical = flat.with_field(0, "vs", lateral, replace=True)
+    with pytest.raises(ValueError, match="spherically_averaged"):
+        Material(RadialMesh(aspherical, ngll=5, lmax=4), aspherical)
 
 
 def test_nodal_moduli_isotropic_and_voigt():

@@ -357,8 +357,8 @@ class TractionNumbers:
     scales: Scales = Scales.SI
 
     def reciprocity_residual(self) -> np.ndarray:
-        """|h_v - l(l + 1) l_u| by degree, relative to the larger of the
-        two (zero where both vanish, and on an excluded degree)."""
+        """``abs(h_v - l(l+1) l_u)`` by degree, relative to the larger of
+        the two (zero where both vanish, and on an excluded degree)."""
         k2 = self.degree * (self.degree + 1.0)
         diff = np.abs(self.h_v - k2 * self.l_u)
         scale = np.maximum(np.abs(self.h_v), np.abs(k2 * self.l_u))

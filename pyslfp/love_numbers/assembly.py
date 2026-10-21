@@ -26,6 +26,14 @@ where the solution is not negligible, from `RadialMesh.start_element`.
 The system is symmetric and stored as an upper band; it is real for
 real moduli and complex symmetric otherwise.  Everything is in the
 material's units.
+
+With `gravitating=False` the same discretisation solves the
+non-gravitating problem of the benchmark hierarchy: the gravity and
+potential terms are dropped, the unknowns are U and V alone (U alone at
+l = 0), and the natural forcings are the unit tractions.  It takes a
+solid model -- a fluid region has no restoring force without gravity --
+and excludes degree 1, where a surface traction has a net force against
+the rigid translations.
 """
 
 from __future__ import annotations
@@ -53,9 +61,13 @@ def _solid_local(
     jac: np.ndarray,
     D: np.ndarray,
     G: float,
+    *,
+    gravitating: bool = True,
 ) -> np.ndarray:
     """Local matrices of solid elements, shape (ne, 3n, 3n); dofs (U, V, phi)
-    per node, node-major."""
+    per node, node-major.  With `gravitating=False` only the elastic
+    terms are built (the phi rows and columns stay zero and carry no
+    dofs)."""
     ne, n = r.shape
     k2 = l * (l + 1.0)
     iU = 3 * np.arange(n)
@@ -84,6 +96,8 @@ def _solid_local(
     L += XF + np.transpose(XF, (0, 2, 1))
     L += k2 * quad(S, m.L)
     L[:, iV, iV] += k2 * (k2 - 2.0) * m.N * Wq
+    if not gravitating:
+        return L
     L[:, iU, iU] += 4.0 * rho * (np.pi * G * rho * r - g) * r * Wq
     cUV = k2 * rho * g * r * Wq
     L[:, iU, iV] += cUV
@@ -144,18 +158,39 @@ class DegreeSystem:
     and `tide` build them.
     """
 
-    def __init__(self, material: Material, l: int, *, eps: float = 1e-8) -> None:
+    def __init__(
+        self,
+        material: Material,
+        l: int,
+        *,
+        eps: float = 1e-8,
+        gravitating: bool = True,
+    ) -> None:
         if not isinstance(material, Material):
             raise TypeError(f"expected a Material, got {type(material).__name__}")
         if l < 0:
             raise ValueError("degree must be non-negative")
+        self.gravitating = bool(gravitating)
+        if not self.gravitating:
+            if l == 1:
+                raise ValueError(
+                    "the non-gravitating problem excludes degree 1: a "
+                    "surface traction there has a net force against the "
+                    "rigid translations"
+                )
+            if material.fluid.any():
+                raise ValueError(
+                    "the non-gravitating problem takes a solid model: a "
+                    "fluid region has no restoring force without gravity"
+                )
         self.material = material
         self.l = int(l)
         mesh = material.mesh
         self.mesh = mesh
         self.first_element = mesh.start_element(l, eps=eps) if l > 0 else 0
         self.dof, self.ndof = self._dof_map()
-        self.kd = 3 * (mesh.ngll - 1) + 2
+        ncomp = 3 if self.gravitating else (1 if l == 0 else 2)
+        self.kd = ncomp * (mesh.ngll - 1) + ncomp - 1
         self.band = self._assemble()
         self._cholesky = None
         self._cholesky_failed = False
@@ -170,7 +205,10 @@ class DegreeSystem:
         for e in range(e0, mesh.nspec):
             if l == 0 or not self.material.fluid[e]:
                 solid[mesh.gmap[e]] = True
-        comps = (0, 2) if l == 0 else (0, 1, 2)
+        if self.gravitating:
+            comps = (0, 2) if l == 0 else (0, 1, 2)
+        else:
+            comps = (0,) if l == 0 else (0, 1)
         dof = -np.ones((nglob, 3), dtype=int)
         nd = 0
         for gn in range(g0, nglob):
@@ -221,7 +259,16 @@ class DegreeSystem:
             scatter(
                 es,
                 _solid_local(
-                    l, mesh.r[es], mat.rho[es], mat.g[es], sub, w, mesh.jac[es], D, G
+                    l,
+                    mesh.r[es],
+                    mat.rho[es],
+                    mat.g[es],
+                    sub,
+                    w,
+                    mesh.jac[es],
+                    D,
+                    G,
+                    gravitating=self.gravitating,
                 ),
             )
         es = elements[fluid]
@@ -310,6 +357,32 @@ class DegreeSystem:
         if i >= 0:
             a = self.material.radius
             b[i] = -self.material.surface_gravity * a * a * self.l * (self.l + 1.0)
+        return b
+
+    def traction(self) -> np.ndarray:
+        """The force of a unit normal traction pressing on the surface,
+        -Y_lm r_hat per unit amplitude: -a^2 on U'(a).  It is the
+        traction piece of `load` per unit of traction rather than of
+        surface density -- `load(part="force")` is `surface_gravity`
+        times this -- and the natural forcing of the non-gravitating
+        problem, where no g sets the scale."""
+        b = np.zeros(self.ndof)
+        top = int(self.mesh.gmap[-1, -1])
+        a = self.material.radius
+        b[self.dof[top, 0]] = -a * a
+        return b
+
+    def traction_tangential(self) -> np.ndarray:
+        """The force of a unit tangential traction, -grad_1 Y_lm per unit
+        amplitude: -a^2 l(l + 1) on V'(a); `tangential` is
+        `surface_gravity` times this.  Zero at l = 0, where there is no
+        tangential dof."""
+        b = np.zeros(self.ndof)
+        top = int(self.mesh.gmap[-1, -1])
+        i = self.dof[top, 1]
+        if i >= 0:
+            a = self.material.radius
+            b[i] = -a * a * self.l * (self.l + 1.0)
         return b
 
     def tide(self, *, power: int | None = None) -> np.ndarray:

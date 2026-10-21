@@ -14,7 +14,7 @@ needs.  Everything here is in the material's units.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -22,6 +22,7 @@ from numpy.typing import ArrayLike
 
 from planetmodel import RadialMesh
 from planetmodel.mesh1d.gll import lagrange_basis
+from planetmodel.units import Dimensions, Scales
 from .assembly import DegreeSystem
 from .material import Material, NodalModuli
 from .table import NAMES, LoveNumbers
@@ -32,11 +33,13 @@ if TYPE_CHECKING:
 __all__ = [
     "FORCINGS",
     "DegreeSolution",
+    "TractionNumbers",
     "fluid_tidal_number",
     "graded_mesh",
     "inertia_moment",
     "solve_degree",
     "love_numbers",
+    "traction_numbers",
 ]
 
 FORCINGS = (
@@ -46,7 +49,15 @@ FORCINGS = (
     "load_tangential",
     "tide",
     "centrifugal",
+    "traction",
+    "traction_tangential",
 )
+
+#: The forcings defined without gravity: the unit tractions.
+NONGRAVITATING_FORCINGS = ("traction", "traction_tangential")
+
+#: Displacement per unit traction.
+_PER_TRACTION_LENGTH = Dimensions(mass=-1, length=2, time=2)
 
 
 @dataclass(frozen=True)
@@ -173,25 +184,37 @@ def solve_degree(
     mesh: RadialMesh | None = None,
     ngll: int = 5,
     eps: float = 1e-8,
+    gravitating: bool = True,
 ) -> DegreeSolution:
     """The degree-l solution of a model, or of a ready `Material`, for
     one forcing of `FORCINGS`: a unit surface density through both
     channels, its traction-like or attraction piece alone, a unit
-    tangential traction, a unit external potential (r/a)^l, or the
-    centrifugal potential (r/a)^2.  Given a model, the mesh is built
-    with the `lmax=l` rule unless supplied, with `ngll` nodes per
-    element; `eps` is the relative level below which the degree's
-    solution is truncated with depth."""
+    tangential traction, a unit external potential (r/a)^l, the
+    centrifugal potential (r/a)^2, or a unit normal or tangential
+    traction.  Given a model, the mesh is built with the `lmax=l` rule
+    unless supplied, with `ngll` nodes per element; `eps` is the
+    relative level below which the degree's solution is truncated with
+    depth.  `gravitating=False` solves the non-gravitating problem,
+    which takes a traction forcing, a solid model and l != 1."""
     if forcing not in FORCINGS:
         raise ValueError(f"forcing must be one of {FORCINGS}, got {forcing!r}")
+    if not gravitating and forcing not in NONGRAVITATING_FORCINGS:
+        raise ValueError(
+            f"the non-gravitating problem takes a forcing of "
+            f"{NONGRAVITATING_FORCINGS}, got {forcing!r}"
+        )
     material = _material(model_or_material, mesh=mesh, ngll=ngll, lmax=l, eps=eps)
-    system = DegreeSystem(material, l, eps=eps)
+    system = DegreeSystem(material, l, eps=eps, gravitating=gravitating)
     if forcing == "tide":
         b = system.tide()
     elif forcing == "centrifugal":
         b = system.tide(power=2)
     elif forcing == "load_tangential":
         b = system.tangential()
+    elif forcing == "traction":
+        b = system.traction()
+    elif forcing == "traction_tangential":
+        b = system.traction_tangential()
     else:
         part = {"load": "both", "load_force": "force", "load_potential": "potential"}[
             forcing
@@ -305,4 +328,102 @@ def love_numbers(
         omega=material.omega,
         **out,
         **axial,
+    )
+
+
+@dataclass(frozen=True)
+class TractionNumbers:
+    """Surface response per unit surface traction, by degree, in the
+    units of `scales`.
+
+    `h_u` and `l_u` are U(a) and V(a) per unit normal traction pressing
+    on the surface, `h_v` and `l_v` the same per unit tangential
+    traction: the traction channels of the generalised Love numbers per
+    unit of traction rather than of surface density, so on the
+    gravitating problem they are those channels divided by g.
+    `gravitating` records which problem was solved; on the
+    non-gravitating one degree 1 is excluded and its entries are NaN.
+    The problem's self-adjointness gives h_v = l(l + 1) l_u, which
+    `reciprocity_residual` measures.
+    """
+
+    degree: np.ndarray
+    h_u: np.ndarray
+    l_u: np.ndarray
+    h_v: np.ndarray
+    l_v: np.ndarray
+    radius: float
+    gravitating: bool
+    scales: Scales = Scales.SI
+
+    def reciprocity_residual(self) -> np.ndarray:
+        """|h_v - l(l + 1) l_u| by degree, relative to the larger of the
+        two (zero where both vanish, and on an excluded degree)."""
+        k2 = self.degree * (self.degree + 1.0)
+        diff = np.abs(self.h_v - k2 * self.l_u)
+        scale = np.maximum(np.abs(self.h_v), np.abs(k2 * self.l_u))
+        with np.errstate(invalid="ignore"):
+            live = scale > 0.0
+        return np.where(live, diff / np.where(live, scale, 1.0), 0.0)
+
+    def converted(self, scales: Scales, /) -> TractionNumbers:
+        """The same numbers under other scales."""
+        if scales == self.scales:
+            return self
+        ratio = self.scales.factor(_PER_TRACTION_LENGTH) / scales.factor(
+            _PER_TRACTION_LENGTH
+        )
+        length = self.scales.factor(Dimensions(length=1)) / scales.factor(
+            Dimensions(length=1)
+        )
+        return replace(
+            self,
+            h_u=self.h_u * ratio,
+            l_u=self.l_u * ratio,
+            h_v=self.h_v * ratio,
+            l_v=self.l_v * ratio,
+            radius=self.radius * length,
+            scales=scales,
+        )
+
+
+def traction_numbers(
+    model_or_material: Model | Material,
+    lmax: int,
+    *,
+    gravitating: bool = False,
+    mesh: RadialMesh | None = None,
+    ngll: int = 5,
+    eps: float = 1e-8,
+) -> TractionNumbers:
+    """The surface response per unit normal and tangential traction for
+    every degree from 0 to `lmax`, on the non-gravitating problem by
+    default, or on the full problem with `gravitating=True` -- the same
+    forcing on both, so the pair isolates the effect of gravity.  The
+    non-gravitating problem takes a solid model, and its degree 1 is
+    NaN (a surface traction there has a net force).  The mesh arguments
+    are `love_numbers`'s."""
+    if lmax < 0:
+        raise ValueError("lmax must be non-negative")
+    material = _material(model_or_material, mesh=mesh, ngll=ngll, lmax=lmax, eps=eps)
+    dtype = complex if material.is_complex else float
+    out = {name: np.full(lmax + 1, np.nan, dtype=dtype)
+           for name in ("h_u", "l_u", "h_v", "l_v")}  # fmt: skip
+    for l in range(lmax + 1):
+        if l == 1 and not gravitating:
+            continue
+        system = DegreeSystem(material, l, eps=eps, gravitating=gravitating)
+        X = system.solve(
+            np.column_stack([system.traction(), system.traction_tangential()])
+        )
+        iU, iV = system.surface_dof("U"), system.surface_dof("V")
+        for j, channel in enumerate(("u", "v")):
+            out[f"h_{channel}"][l] = X[iU, j]
+            out[f"l_{channel}"][l] = X[iV, j] if iV >= 0 else 0.0
+    return TractionNumbers(
+        np.arange(lmax + 1),
+        radius=material.radius,
+        gravitating=bool(gravitating),
+        scales=material.scales,
+        **out,
     )

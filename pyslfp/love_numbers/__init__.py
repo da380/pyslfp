@@ -36,11 +36,13 @@ from .plot import plot_degree_solution, plot_love_numbers
 from .solver import (
     FORCINGS,
     DegreeSolution,
+    TractionNumbers,
     fluid_tidal_number,
     graded_mesh,
     inertia_moment,
     love_numbers,
     solve_degree,
+    traction_numbers,
 )
 from .table import AXIAL_NAMES, LEGACY_COLUMNS, NAMES, LoveNumbers, read_love_numbers
 
@@ -58,6 +60,8 @@ __all__ = [
     "inertia_moment",
     "love_numbers",
     "read_love_numbers",
+    "TractionNumbers",
+    "traction_numbers",
     "AXIAL_NAMES",
     "NAMES",
     "LEGACY_COLUMNS",

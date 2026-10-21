@@ -247,6 +247,8 @@ def test_solve_degree_and_the_solution(material, love):
         "load_tangential",
         "tide",
         "centrifugal",
+        "traction",
+        "traction_tangential",
     )
     with pytest.raises(ValueError):
         solve_degree(material, 3, mesh=material.mesh)

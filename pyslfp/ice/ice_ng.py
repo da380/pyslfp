@@ -20,6 +20,46 @@ from .ice_models import BaseIceSeaLevelModel
 IceNGVersion = Literal["ICE5G", "ICE6G", "ICE7G"]
 
 
+def standard_dates(version: IceNGVersion) -> np.ndarray:
+    """
+    The dates of a model's stored time slices, in kyr before present.
+
+    Args:
+        version (IceNGVersion): The ice model version.
+
+    Returns:
+        np.ndarray: The dates, increasing from the present.
+    """
+    if version in ["ICE6G", "ICE7G"]:
+        return np.append(np.linspace(0, 21, 43), np.linspace(22, 26, 5))
+    return np.append(np.linspace(0, 17, 35), np.linspace(18, 21, 4))
+
+
+def slice_file(version: IceNGVersion, date: float) -> str:
+    """
+    The data file holding a model's time slice.
+
+    Args:
+        version (IceNGVersion): The ice model version.
+        date (float): The date in kyr before present, one of
+            `standard_dates(version)`.
+
+    Returns:
+        str: The file's path under the pyslfp data directory.
+    """
+    if version in ["ICE6G", "ICE7G"]:
+        date_string = f"{int(date):d}" if date == int(date) else f"{date:3.1f}"
+    else:
+        date_string = f"{date:04.1f}"
+
+    if version == "ICE7G":
+        return str(DATADIR / "ice7g" / f"I7G_NA.VM7_1deg.{date_string}.nc")
+    elif version == "ICE6G":
+        return str(DATADIR / "ice6g" / f"I6_C.VM5a_1deg.{date_string}.nc")
+    else:
+        return str(DATADIR / "ice5g" / f"ice5g_v1.2_{date_string}k_1deg.nc")
+
+
 class IceNG(BaseIceSeaLevelModel):
     """
     A data loader for the ICE-5G, ICE-6G, and ICE-7G glacial isostatic
@@ -56,24 +96,11 @@ class IceNG(BaseIceSeaLevelModel):
 
     def _date_to_file(self, date: float) -> str:
         """Converts a date into the appropriate data file name."""
-        if self._version in ["ICE6G", "ICE7G"]:
-            date_string = f"{int(date):d}" if date == int(date) else f"{date:3.1f}"
-        else:
-            date_string = f"{date:04.1f}"
-
-        if self._version == "ICE7G":
-            return str(DATADIR / "ice7g" / f"I7G_NA.VM7_1deg.{date_string}.nc")
-        elif self._version == "ICE6G":
-            return str(DATADIR / "ice6g" / f"I6_C.VM5a_1deg.{date_string}.nc")
-        else:
-            return str(DATADIR / "ice5g" / f"ice5g_v1.2_{date_string}k_1deg.nc")
+        return slice_file(self._version, date)
 
     def _find_files(self, date: float) -> Tuple[str, str, float]:
         """Finds the bounding data files and interpolation fraction for a given date."""
-        if self._version in ["ICE6G", "ICE7G"]:
-            dates = np.append(np.linspace(0, 21, 43), np.linspace(22, 26, 5))
-        else:
-            dates = np.append(np.linspace(0, 17, 35), np.linspace(18, 21, 4))
+        dates = standard_dates(self._version)
 
         i = bisect.bisect_left(dates, date)
         if i == 0:

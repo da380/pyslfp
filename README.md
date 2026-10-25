@@ -1,7 +1,7 @@
 # PySLFP: Python Sea Level Fingerprints
 
 [![PyPI version](https://badge.fury.io/py/pyslfp.svg)](https://badge.fury.io/py/pyslfp)
-[![CI](https://github.com/da380/pyslfp/actions/workflows/ci.yml/badge.svg)](https://github.com/da380/pyslfp/actions/workflows/ci.yml)
+[![Release](https://github.com/da380/pyslfp/actions/workflows/publish.yml/badge.svg)](https://github.com/da380/pyslfp/actions/workflows/publish.yml)
 [![Documentation](https://readthedocs.org/projects/pyslfp/badge/?version=latest)](https://pyslfp.readthedocs.io/en/latest/)
 [![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD--3--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
 

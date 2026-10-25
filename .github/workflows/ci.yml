@@ -10,6 +10,9 @@ on:
   # The slow tests are excluded from the pull request runs; `full-tests` picks
   # them up, and is run on demand from the Actions tab.
   workflow_dispatch:
+  # The release workflow (publish.yml) calls this one on the tagged code and
+  # publishes only if every job passes, `full-tests` included.
+  workflow_call:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -138,17 +141,17 @@ jobs:
           path: docs/build/html
           retention-days: 7
 
-  # The slow tests are the ones that read the real Zenodo datasets: the ICE-NG
+  # The slow tests are the ones that read the real Zenodo datasets (the ICE-NG
   # histories, the IHO seas and HydroBASINS shapefiles, the GLOSS tide gauge
-  # network. Several hundred megabytes and a few minutes, which is why they are
-  # deselected by default rather than run on every push.
+  # network) and run every tutorial script: several hundred megabytes and tens
+  # of minutes, which is why they are deselected by default.
   #
-  # Run by hand: Actions -> CI -> Run workflow. Worth doing before a release,
-  # and after a change to the regions, ice or tide gauge code, which is what
-  # these tests cover.
+  # They run on every release, through the release workflow, which inherits
+  # the `release` event, and by hand from Actions -> CI -> Run workflow, which
+  # is worth doing after a change to the regions, ice or tide gauge code.
   full-tests:
     name: Full test suite (including slow)
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'release'
     runs-on: ubuntu-latest
 
     steps:

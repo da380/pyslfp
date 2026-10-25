@@ -38,9 +38,10 @@ hundred megabytes. CI runs the fast suite on every pull request into `main`, and
 again whenever the pull request's branch is pushed to; a pull request is merged
 only once it passes, so `main` is always in a working state. CI does not run on
 pushes to `develop`, so run the suite locally before pushing (the pre-push hook
-does). The whole suite is the `full-tests` job, which is run on demand from the
-Actions tab (Actions -> CI -> Run workflow), on any branch. It is worth running before a release, and after a change to the
-regions, ice or tide gauge code.
+does). The whole suite, slow tests included, is the `full-tests` job. It runs
+automatically on every release (see below), and on demand from the Actions tab
+(Actions -> CI -> Run workflow) on any branch, which is worth doing after a
+change to the regions, ice or tide gauge code.
 
 Note that `test_iceng_real_data_integration` is guarded by a `skipif` that looks
 for the ICE-7G directory when the module is imported. On a machine that has
@@ -122,9 +123,8 @@ This outlines the steps to publish a new version of `pyslfp` to PyPI.
 ### Prerequisites
 
 - All code changes for the new version have been merged into `main`.
-- `main` is stable and all tests are passing. The slow tests are not run on
-  every push, so trigger the `full-tests` job by hand first (Actions -> CI ->
-  Run workflow).
+- `main` is stable and its pull request checks have passed. The slow tests need
+  not be run by hand: the release runs them before anything is published.
 
 ### 1. Create a version bump pull request
 
@@ -163,7 +163,7 @@ request.
 ### 3. Publish the release on GitHub
 
 Merging does **not** publish the package. Creating a GitHub Release is what
-triggers the publishing workflow.
+triggers the release workflow, `publish.yml`.
 
 1.  **Go to the repository homepage** on GitHub.
 2.  **Click "Releases"** in the right-hand sidebar.
@@ -177,4 +177,13 @@ triggers the publishing workflow.
 7.  **Write release notes** summarising the changes.
 8.  **Click "Publish release"**.
 
-`publish.yml` then builds the package and uploads it to PyPI.
+The release workflow then checks that the tag matches the version, runs the
+whole of CI on the tagged code (linting, the fast suite on all three platforms,
+the documentation build and the slow tests), and only if every job passes
+builds the package and uploads it to PyPI. The `Release` badge in the README
+shows the outcome of the latest release.
+
+If a check fails, nothing has reached PyPI, so the version number is still free.
+Delete the GitHub release and its tag (`git push --delete origin vX.Y.Z`), fix
+the problem through a pull request into `main` as usual, and publish the release
+again with the same tag.

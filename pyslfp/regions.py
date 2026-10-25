@@ -26,7 +26,7 @@ class Regions:
     harmonic grids.
 
     Note:
-        This class is intended to be used as a mixin for the `FingerPrint` class.
+        This class is used as a mixin for `EarthState`.
         It expects the child class to provide `lats()`, `lons()`, `lmax`,
         `grid`, and `extend` properties.
     """

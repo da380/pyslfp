@@ -21,8 +21,8 @@ Where any branch is active the material must be isotropic: the
 degree-basis internal variables of Al-Attar & Tromp (2014) Appendix D
 assume isotropic shear relaxation.  A transversely isotropic model is
 refused with a pointer to `NodalModuli.voigt`; the general anisotropic
-case (relaxation towards zero deviatoric stress, AdGIA's
-`DeviatoricMaxwell`) is deliberately deferred.  Fluid regions carry no
+case (relaxation towards zero deviatoric stress, as in AdGIA's
+`DeviatoricMaxwell`) is not implemented.  Fluid regions carry no
 branches.
 
 Constructors, all in the material's units:

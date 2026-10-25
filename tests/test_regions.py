@@ -150,13 +150,13 @@ def test_shapefile_lazy_loading(mock_read_file, mock_ensure, region_engine, mock
         patch.object(gpd.GeoDataFrame, "reset_index", return_value=mock_gdf),
     ):
         # 2. Trigger IMBIE load
-        # (pyslfp/regions.py:61-66)
+        # (Regions.imbie_ant_regions)
         ant_regions = region_engine.list_imbie_ant_regions()
         assert "AntA" in ant_regions
         mock_ensure.assert_any_call("IMBIE_ANT")
 
         # 3. Trigger Mouginot load
-        # (pyslfp/regions.py:77-83)
+        # (Regions.mouginot_grl_regions)
         grl_regions = region_engine.list_mouginot_grl_regions()
         assert "GrlA" in grl_regions
         mock_ensure.assert_any_call("MOUGINOT_GRL")
@@ -267,7 +267,7 @@ def test_grouped_ice_projections(
 
 
 # ==================================================================== #
-#                  4. New Composite & Universal Routing                #
+#                  4. Composite & Universal Routing                    #
 # ==================================================================== #
 
 
@@ -278,7 +278,7 @@ def test_ar6_composite_projection(region_engine):
     grl_proj = region_engine.regionmask_projection("Greenland/Iceland", value=0)
     wais_proj = region_engine.regionmask_projection("W.Antarctica", value=0)
 
-    # Get the composite mask using the new list feature
+    # Get the composite mask from the list of regions
     composite_proj = region_engine.regionmask_projection(
         ["Greenland/Iceland", "W.Antarctica"], value=0
     )
@@ -445,11 +445,10 @@ def test_list_all_regions(mock_read_file, mock_ensure, region_engine, mock_gdf):
     # Return the raw mock for HydroBASINS (which doesn't use .to_crs())
     mock_read_file.return_value = mock_gdf
 
-    # --- NEW: Prevent regionmask from trying to load Natural Earth internally ---
+    # Prevent regionmask from trying to load Natural Earth internally
     dummy_ne = MagicMock()
     dummy_ne.names = ["Mocked Ocean Basin"]
     region_engine._ne_ocean_regions = dummy_ne
-    # ----------------------------------------------------------------------------
 
     # Patch the GeoDataFrame methods so they gracefully return the mock_gdf
     # for the other loaders (IMBIE, Mouginot, etc.)

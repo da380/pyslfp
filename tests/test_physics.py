@@ -342,8 +342,7 @@ def test_linear_nonlinear_consistency(analytical_state):
 def _reference_linear_solution(state, direct_load, rotational_feedbacks, rtol=1e-13):
     """
     Straightforward grid-space Picard iteration with lagged rotational
-    feedback (the original pyslfp algorithm). Used as an independent
-    reference for the accelerated solver.
+    feedback. Used as an independent reference for the accelerated solver.
     """
     model = state.model
     p = model.parameters
@@ -356,7 +355,8 @@ def _reference_linear_solution(state, direct_load, rotational_feedbacks, rtol=1e
     r3, i3 = p.axial_rotation_factor, p.axial_inertia_factor
     r0 = p.uniform_rotation_factor
     ht, kt = ln.h_t[2], ln.k_t[2]
-    # the degree-0 terms of the axial feedback, absent from an older table
+    # the degree-0 terms of the axial feedback, absent from a table without
+    # the axial numbers
     hc, kc, mc = (ln.h_c, ln.k_c, ln.m_c) if ln.has_axial else (0.0, 0.0, 0.0)
     trace = (4.0 / 3.0) * p.rotation_frequency / p.polar_moment_of_inertia
 

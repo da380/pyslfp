@@ -53,9 +53,9 @@ form gives
     m_u = sqrt(4 pi) g a^4 h_c / 2,   m_phi = sqrt(4 pi) a^4 k_c / 2,
 
 checked by `axial_reciprocity_residual`; m_phi vanishes with k_c, a
-surface shell attracting nothing inside it.  A table from a file that
-predates them has them NaN, and the sea level equation then neglects
-the deformation terms of the axial feedback.
+surface shell attracting nothing inside it.  A table read from a file
+without the `axial` line has them NaN, and the sea level equation then
+neglects the deformation terms of the axial feedback.
 
 The file is plain text, one row per degree from 0, in SI: h per unit
 surface density in m^3 kg^-1, k likewise in m^4 kg^-1 s^-2, h_t in
@@ -63,8 +63,8 @@ s^2 m^-1 and k_t dimensionless.  Its comment lines name the columns
 (`columns: l h_u l_u k_u ...`), record the body's radius, surface
 gravity and G, and give the axial numbers (`axial h_c ... k_c ...`),
 all of which the reader takes back; a file with no column line is read
-in the seven-column layout of the original table,
-`l h_u k_u h_phi k_phi h_t k_t`, with the tangential numbers NaN.
+in the seven-column layout `l h_u k_u h_phi k_phi h_t k_t`, with the
+tangential numbers NaN.
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 [project]
 name = "pyslfp"
 version = "2.2.2"
-description = "Package for computing elastic sea level fingerprints"
+description = "Sea level fingerprints and glacial isostatic adjustment"
 # NOTE: poetry-core renders only authors[0] into the distribution metadata
 # (Package._get_author), so the names are kept as one combined credit line to
 # avoid dropping a co-author from the published package.
@@ -29,13 +29,12 @@ dependencies = [
 [project.optional-dependencies]
 # A Qt backend for matplotlib, for interactive use: `pip install pyslfp[interactive]`.
 #
-# This was a hard runtime dependency until this was written, which put about
-# 250 MB of Qt into every install, including headless ones on CI and Read the
-# Docs. Nothing in the library imports it, or selects a backend at all: it was
-# there so that `plt.show()` in the README example opens a window. It is not
-# needed for that on a Python built with tkinter, which is the usual case and
-# where matplotlib falls back to tkagg, itself interactive. It is worth having
-# where tkinter is absent, or for anyone who prefers Qt.
+# Optional because Qt adds about 250 MB to every install, headless ones on CI
+# and Read the Docs included, and nothing in the library imports it or selects
+# a backend at all. On a Python built with tkinter, which is the usual case,
+# matplotlib falls back to the interactive tkagg backend, so `plt.show()` opens
+# a window without it. It is worth having where tkinter is absent, or for
+# anyone who prefers Qt.
 interactive = ["pyqt6>=6.9.0"]
 
 [project.urls]
@@ -49,20 +48,20 @@ optional = true
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.5"
 pytest-cov = "^6.2.1"
+# Runs the tutorial notebooks, and provides the nbformat package that
+# tutorials/make_notebooks.py writes them with.
 jupyter = "^1.1.1"
 furo = "^2025.7.19"
 # Lower bound: the apidoc template in docs/apidoc_templates is named
-# package.rst.jinja, which is the name Sphinx looks for from 7.4 onwards (it was
-# package.rst_t before). There is no upper bound. The `<8.2` this carried from
-# the commit that first added Sphinx was almost certainly working around furo,
-# which Sphinx 8.2's toctree changes broke at the time; furo has long since
-# been fixed, and the docs build clean under -W on 8.2.3 and 9.1.0 alike.
+# package.rst.jinja, which is the name Sphinx looks for from 7.4 onwards
+# (earlier versions look for package.rst_t). No upper bound: the docs build
+# clean under -W on 8.2 and 9.1 alike.
 sphinx = ">=7.4"
 # Keep in step with the `rev` of the ruff hook in .pre-commit-config.yaml, so
 # that the hook and `poetry run ruff` format identically.
 ruff = "^0.5.5"
-# pre-commit was a runtime dependency until this was written, which installed it
-# for everyone who merely used the library. It belongs here.
+# A development tool, kept out of the runtime dependencies so that using the
+# library does not install it.
 pre-commit = "^4.6.0"
 # Strips outputs and normalises cell ids in the tutorial notebooks. Driven by
 # pre-commit; listed here so it can also be run by hand on a single notebook.

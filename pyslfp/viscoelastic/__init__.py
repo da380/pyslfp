@@ -6,9 +6,10 @@ built on them.
 The formulation follows Al-Attar & Tromp (2014), internal variables
 in the degree basis; the time-stepping algebra is shared with the
 AdGIA library so the two can benchmark one another.  The kernel
-drivers here are the computational layer: as the sea level engine
-sits beneath `pyslfp.linear_operators` on the elastic side, these are
-what inversion-facing operator wrappers build on.
+drivers here are a computational layer, in the role the sea level
+engine plays beneath `pyslfp.linear_operators` on the elastic side:
+they return kernels as plain grids and nodal arrays, without a
+Hilbert-space structure of their own.
 """
 
 from .functionals import (

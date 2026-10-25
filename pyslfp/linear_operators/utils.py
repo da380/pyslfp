@@ -129,7 +129,7 @@ def l2_products_operator(
     """
     Deprecated: use ``load_space.l2_products_operator(weighting_functions)``.
 
-    The construction now lives on the pygeoinf symmetric-space classes;
+    The construction lives on the pygeoinf symmetric-space classes;
     this wrapper delegates to it and will be removed in a future release.
     The action on function `u` returns a vector `d` where `d_i = <u, w_i>_L2`,
     with the standard L2 integral used even on a Sobolev space.
@@ -189,7 +189,7 @@ def spatial_multiplication_operator(
     """
     Deprecated: use ``space.spatial_multiplication_operator(v)``.
 
-    The construction now lives on the pygeoinf symmetric-space classes;
+    The construction lives on the pygeoinf symmetric-space classes;
     this wrapper delegates to it and will be removed in a future release.
     Returns the linear operator u -> v * u on the given space.
     """

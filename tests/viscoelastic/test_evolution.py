@@ -584,10 +584,10 @@ def test_quelled_rate_kernels(setting):
 
 
 def test_continuous_adjoint_against_the_discrete(setting):
-    """The two adjoints compared (the deliverable of the comparison):
-    the discrete transpose is exact at any step; the continuous
-    adjoint, discretised, carries the commute error -- negligible and
-    high-order once the steps resolve the relaxation, first order at
+    """The two adjoints compared: the discrete transpose is exact at any
+    step; the continuous adjoint, discretised, carries the commute error
+    -- negligible and high-order once the steps resolve the relaxation,
+    first order at
     the per-cent level when they do not.  Their delta amplitudes agree
     although computed by different realisations (the engine transpose
     against the forward channel mapping), cross-validating both."""
@@ -1229,7 +1229,7 @@ def test_continuous_viscosity_kernels(setting):
     """The continuous-adjoint viscosity kernels converge to the exact
     discrete ones at second order as the run resolves its rheology,
     and the disagreement on a stiff body is the resolution diagnostic
-    firing -- the two-method doctrine applied to dJ / d itau."""
+    firing -- the comparison of the two adjoints, applied to dJ / d itau."""
     material, earth, _, _, _ = setting
     ice_model, state = _history_state(material, earth)
     rng = np.random.default_rng(7)

@@ -1,16 +1,25 @@
-"""The coupled forward GIA time loop under frozen shorelines.
+"""The coupled forward GIA time loop, its adjoints, and the calibration
+of the initial sea level.
 
 Each implicit or trapezoid step opens on the radial side
 (`ViscoelasticOperator.start_step`), which fixes the step's memory
 state; its instantaneous response to loads is then an elastic one with
 the step's effective Love numbers, so the sea level equation closes
-with the existing solver: the memory field enters through the response
-channels, its degree-0 inertia moment joins the axial feedback, and
-the ocean and rotational couplings converge inside the one linear SLE
-solve.  The converged load and centrifugal potential then finish the
-radial step, updating the internal variables.  The shorelines are the
-background state's throughout (the linear equation); migrating
-shorelines are a later rung.
+with the solver of `pyslfp.core`: the memory field enters through the
+response channels, its degree-0 inertia moment joins the axial
+feedback, and the ocean and rotational couplings converge inside the
+one sea level solve.  The converged load and centrifugal potential
+then finish the radial step, updating the internal variables.  Under
+frozen shorelines the ocean function is the background state's
+throughout and each step solves the linear equation; under migrating
+shorelines each step solves the nonlinear equation, the ocean function
+following the flotation condition.
+
+The adjoints give the sensitivity of an objective functional to the
+ice history, the initial sea level and the relaxation times, either as
+the exact transpose of the time-stepped map (`adjoint_ice_history`) or
+by discretising the continuous adjoint equations
+(`continuous_adjoint_ice_history`).
 
 The driver's public quantities -- times, loads, the returned fields --
 are in the Earth model's non-dimensional units, like the rest of the
@@ -334,7 +343,8 @@ class SeaLevelEvolution:
 
     `operator` is the radial viscoelastic operator, which must carry
     every degree up to the state's lmax; `state` the background
-    `EarthState` whose ocean function the linear equation freezes.
+    `EarthState` at the start of the run, whose ocean function the
+    frozen-shoreline equation holds fixed.
     """
 
     def __init__(
@@ -366,8 +376,8 @@ class SeaLevelEvolution:
         self._rotation_factor = parameters.rotation_factor
         self._axial_rotation_factor = parameters.axial_rotation_factor
         self._uniform_rotation_factor = parameters.uniform_rotation_factor
-        # the library's internal frame is one unit system (docs/
-        # planning/scales_plan.md): the material must live in the sea
+        # the library's internal frame is one unit system (see
+        # docs/source/units.rst): the material must live in the sea
         # level model's scales, so every conversion factor below is
         # exactly one.  The factors are kept written out all the same:
         # they are the dimensional structure of the formulas, and a

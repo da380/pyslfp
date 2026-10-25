@@ -7,7 +7,7 @@ the answer is mesh-independent to rounding; and at degree 0 a unit
 pressure compresses the sphere uniformly, U(a) = -a / (3 kappa), a
 closed form.  The gravitating and non-gravitating problems share the
 traction forcings exactly, with load(part="force") = g traction(), which
-ties the new channels to the released solver.
+ties the traction channels to the load channels of the gravitating solver.
 """
 
 from __future__ import annotations

@@ -39,9 +39,9 @@ jobs:
           echo "Tag and version agree on ${version}."
 
       # `poetry build` reads pyproject.toml and the source tree; it does not
-      # need the dependencies installed. Dropping the install takes Cartopy,
-      # PyQt6 and pyshtools out of the publish path entirely, so a wheel that
-      # is slow or briefly unavailable can no longer fail a release.
+      # need the dependencies installed. Not installing them keeps Cartopy and
+      # pyshtools out of the publish path, so a wheel that is slow or briefly
+      # unavailable cannot fail a release.
       - name: Build package
         run: poetry build
 

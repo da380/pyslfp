@@ -23,8 +23,8 @@ class EarthState(Regions):
     A pure data container representing a snapshot of the Earth's surface state.
 
     Handles the lazy evaluation of ocean functions, surface integration,
-    and geographic masking. It is decoupled entirely from the elastic SLE
-    physics to ensure a strict one-way data flow.
+    and geographic masking. It is decoupled entirely from the sea level
+    equation to ensure a strict one-way data flow.
     """
 
     def __init__(

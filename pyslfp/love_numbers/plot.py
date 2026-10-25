@@ -28,8 +28,9 @@ def plot_love_numbers(
     The left axes show the dimensionless load numbers h', l l' and l k'
     from degree 1, the factor of l making the three comparable in size;
     the right axes the geodetic tidal numbers k^T, h^T, l^T from degree
-    2. A column the table lacks (the tangential numbers of the shipped
-    table) is left out, and a complex table is drawn by its real parts.
+    2. A column the table lacks (the tangential numbers of a file in the
+    seven-column layout) is left out, and a complex table is drawn by its
+    real parts.
 
     Args:
         love: The Love numbers.

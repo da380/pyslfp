@@ -135,9 +135,9 @@ def test_axial_feedback_uses_the_tables_degree_zero_numbers(table):
     """
     With the axial numbers a change in spin rate expands or contracts the
     body uniformly, so the degree-0 displacement responds to a zonal
-    load; without them (a table from an older file) that response is
-    absent, while the adjoint identity closes either way, each treatment
-    being self-adjoint.
+    load; without them (a table read from a file without the axial line)
+    that response is absent, while the adjoint identity closes either way,
+    each treatment being self-adjoint.
     """
     from dataclasses import replace
 

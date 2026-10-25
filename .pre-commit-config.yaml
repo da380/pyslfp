@@ -28,7 +28,23 @@ repos:
       - id: check-added-large-files
         args: [--maxkb=1024]
 
-  # --- 2. Strip notebook outputs ---
+  # --- 2. Tutorial notebooks ---
+  # The notebooks in tutorials/notebooks are generated from the scripts in
+  # tutorials/scripts, which are the source. This regenerates them whenever
+  # anything under tutorials/ changes, and fails when a notebook was stale so
+  # that the regenerated one can be added to the commit. In CI it fails a pull
+  # request whose notebooks were not regenerated.
+  - repo: local
+    hooks:
+      - id: tutorial-notebooks
+        name: tutorial notebooks
+        entry: python tutorials/make_notebooks.py
+        language: python
+        additional_dependencies: ["nbformat>=5.10"]
+        files: ^tutorials/
+        pass_filenames: false
+
+  # --- 3. Strip notebook outputs ---
   # Tutorials are committed as source, not as a record of one run. Outputs are
   # megabytes of base64 images and run-dependent numbers that make every diff
   # unreadable and every re-execution a spurious change. nbstripout also
@@ -38,7 +54,7 @@ repos:
     hooks:
       - id: nbstripout
 
-  # --- 3. Ruff: linting and formatting ---
+  # --- 4. Ruff: linting and formatting ---
   # `rev` tracks the ruff version in pyproject.toml's dev group so that the hook
   # and `poetry run ruff` format identically. Bump the two together, never one
   # alone: a mismatch reformats files back and forth between commits. They had
@@ -50,7 +66,7 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-  # --- 4. Pytest (local hook) ---
+  # --- 5. Pytest (local hook) ---
   # On push rather than on commit. The suite takes long enough that running it
   # per commit is what teaches people to reach for `--no-verify`; running it
   # per push still keeps a broken tree off the remote.

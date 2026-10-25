@@ -179,9 +179,10 @@ print("and computed on the fly to degree 64:", quick.love_numbers)
 # frequency-dependent moduli, and `planetmodel.frozen` builds that body
 # from the rheology each layer holds: `qmu` and `qkappa` for PREM's own
 # attenuation, or a `viscosity` for a Maxwell solid. The Love numbers of
-# a frozen model are complex. The sea level solver does not take them,
-# but they can be computed, written down and plotted, and they are where
-# a time-dependent solver would start.
+# a frozen model are complex. The sea level solver does not take them:
+# the time-domain solver of `pyslfp.viscoelastic` relaxes the same
+# `viscosity` field instead (tutorial 6), and the complex numbers are an
+# independent check on it, related by the correspondence principle.
 #
 # Below, PREM with its own Q at the semidiurnal tide, and then a Maxwell
 # mantle of viscosity 1e21 Pa s across periods from minutes to hundreds

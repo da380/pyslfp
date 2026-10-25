@@ -1,18 +1,19 @@
 name: CI
 
 on:
-  push:
-    branches: [main, develop]
+  # Runs on pull requests into main, so that a failing change is never merged
+  # and main is always in a working state. The suite is run locally (the
+  # pre-push hook) before work goes to develop, so runs on develop pushes, or on
+  # main after a merge, would repeat the same checks.
   pull_request:
-    branches: [main, develop]
-  # The slow tests are excluded from every run above; `full-tests` picks them up,
-  # and is run on demand from the Actions tab.
+    branches: [main]
+  # The slow tests are excluded from the pull request runs; `full-tests` picks
+  # them up, and is run on demand from the Actions tab.
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Superseded pull request runs are pointless; pushes to a branch are kept so
-  # that main and develop keep a complete history of green and red commits.
+  # A push to an open pull request supersedes the run in progress on it.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:

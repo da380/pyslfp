@@ -276,17 +276,28 @@ pairing a forward operator with the machinery needed to pose an inversion:
 Tutorials
 ---------
 
-Four introductory notebooks are kept in the ``tutorials`` directory of the
-repository, and can be run locally or in Google Colab:
+The tutorials are scripts in the ``tutorials/scripts`` directory of the
+repository, each with a notebook generated from it in ``tutorials/notebooks``.
+The notebooks can be run locally or in Google Colab:
 
-* `Tutorial 1 — A first sea level fingerprint
-  <https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/tutorial1.ipynb>`_
-* `Tutorial 2 — A closer look at the physics
-  <https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/tutorial2.ipynb>`_
-* `Tutorial 3 — Operators, composition and sensitivity kernels
-  <https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/tutorial3.ipynb>`_
-* `Tutorial 4 — A Bayesian inversion of tide gauge data
-  <https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/tutorial4.ipynb>`_
+* `1 — A first sea level fingerprint
+  <https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/01_first_fingerprint.ipynb>`_
+* `2 — A closer look at the physics
+  <https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/02_physics.ipynb>`_
+* `3 — Love numbers
+  <https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/03_love_numbers.ipynb>`_
+* `4 — Operators, composition and sensitivity kernels
+  <https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/04_operators.ipynb>`_
+* `5 — A Bayesian inversion of tide gauge data
+  <https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/05_inversion.ipynb>`_
+* `6 — A first forward GIA simulation
+  <https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/06_forward_gia.ipynb>`_
+* `7 — The last deglaciation
+  <https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/07_ice7g_deglaciation.ipynb>`_
+* `8 — Ice-history sensitivity kernels
+  <https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/08_gia_kernels.ipynb>`_
+* `9 — The decay time of postglacial emergence
+  <https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/09_decay_time_viscosity.ipynb>`_
 
 
 Citation

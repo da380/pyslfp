@@ -187,7 +187,7 @@ and $k$ alone.
 
 The following melts ten percent of the West Antarctic Ice Sheet and plots the
 resulting sea level fingerprint. It is a condensed form of
-[Tutorial 1](tutorials/tutorial1.ipynb).
+[the first tutorial](tutorials/scripts/01_first_fingerprint.py).
 
 ```python
 import matplotlib.pyplot as plt
@@ -288,26 +288,21 @@ forward operator with the machinery needed to pose an inversion:
 ## Tutorials
 
 The tutorials are scripts under `tutorials/scripts`, written in cells (`# %%`) so
-that they run from the command line or cell by cell in an editor:
+that they run from the command line or cell by cell in an editor. Each has a
+notebook generated from it in `tutorials/notebooks`, which can be run locally or
+in Google Colab. They read the real datasets, so the first run downloads them.
 
-| Script | Contents |
-| :--- | :--- |
-| `01_first_fingerprint.py` | Everything at its default: the fingerprint of a West Antarctic melt. |
-| `02_physics.py` | The scales, the Earth model, a state from an analytic ice model, a load of one's own, the linear and non-linear solutions. |
-| `03_love_numbers.py` | The shipped table, computing Love numbers from PREM, the identities, the radial solutions, files, and the complex numbers of a viscoelastic body. |
-| `04_operators.py` | The fingerprint as an operator, composition, adjoints and sensitivity kernels, polar wander, Sobolev spaces and tide gauges. |
-| `05_inversion.py` | A Bayesian inversion of synthetic GLOSS tide gauge data for ice thickness change. |
-
-They read the real datasets, so the first run downloads them. Earlier versions of
-the first, second, fourth and fifth exist as notebooks, which can be run locally or
-in Google Colab.
-
-| Tutorial | Colab |
-| :--- | :--- |
-| 1 — A first sea level fingerprint | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/tutorial1.ipynb) |
-| 2 — A closer look at the physics | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/tutorial2.ipynb) |
-| 3 — Operators, composition and sensitivity kernels | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/tutorial3.ipynb) |
-| 4 — A Bayesian inversion of tide gauge data | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/tutorial4.ipynb) |
+| Tutorial | Contents | Colab |
+| :--- | :--- | :--- |
+| `01_first_fingerprint` | Everything at its default: the fingerprint of a West Antarctic melt. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/01_first_fingerprint.ipynb) |
+| `02_physics` | The scales, the Earth model, a state from an analytic ice model, a load of one's own, the linear and non-linear solutions. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/02_physics.ipynb) |
+| `03_love_numbers` | The shipped table, computing Love numbers from PREM, the identities, the radial solutions, files, and the complex numbers of a viscoelastic body. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/03_love_numbers.ipynb) |
+| `04_operators` | The fingerprint as an operator, composition, adjoints and sensitivity kernels, polar wander and length of day, Sobolev spaces and tide gauges. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/04_operators.ipynb) |
+| `05_inversion` | A Bayesian inversion of synthetic GLOSS tide gauge data for ice thickness change. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/05_inversion.ipynb) |
+| `06_forward_gia` | A first forward GIA run: a melting ice cap on a viscoelastic PREM, and postglacial rebound. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/06_forward_gia.ipynb) |
+| `07_ice7g_deglaciation` | ICE-7G from 26 ka to the present: uplift rates, the sea level curve and a Hudson Bay emergence record. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/07_ice7g_deglaciation.ipynb) |
+| `08_gia_kernels` | Ice-history sensitivity kernels by the discrete and continuous adjoints. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/08_gia_kernels.ipynb) |
+| `09_decay_time_viscosity` | The decay time of postglacial emergence and its viscosity kernel. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/09_decay_time_viscosity.ipynb) |
 
 ## Tests
 

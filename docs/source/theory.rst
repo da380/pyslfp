@@ -432,9 +432,11 @@ For an evolution, an objective functional is a sum over observation dates
    + \int g^{(i)}_\phi\,\phi(t_i)\,dS + \mathbf{g}^{(i)}_\omega\cdot
    \boldsymbol{\omega}(t_i)\Big],
 
-whose duals a ``Measurement`` carries. The theory of Yu et al. (2025) shows
-that the adjoint problem has the same form as the forward problem with more
-general forces: a sea level dual forces like an ice load, displacement and
+whose duals a ``Measurement`` carries. The adjoint theory of glacial isostatic
+adjustment was set out by Crawford et al. (2018), and extended to rotational
+feedbacks by Yu et al. (2025), whose formulation the library follows. The
+adjoint problem has the same form as the forward problem with more general
+forces: a sea level dual forces like an ice load, displacement and
 potential duals enter as the generalised channels, and an angular velocity dual
 as an angular momentum forcing. The adjoint ocean function is not determined
 dynamically but is the time-reversed ocean function of the forward run, so the

@@ -32,9 +32,12 @@ Around these it provides:
   map projections.
 
 The theory follows [Al-Attar et al. (2024)](https://academic.oup.com/gji/article/236/1/362/7338265)
-for fingerprints and their kernels, and Al-Attar & Tromp (2014) and Yu et al.
-(2025) for viscoelastic loading and its adjoints. Documentation is at
-[pyslfp.readthedocs.io](https://pyslfp.readthedocs.io).
+for fingerprints and their kernels. Viscoelastic loading uses the
+internal-variable formulation of Al-Attar & Tromp (2014), and its adjoints and
+sensitivity kernels the adjoint theory of glacial isostatic adjustment of
+[Crawford et al. (2018)](https://doi.org/10.1093/gji/ggy184), extended to
+rotational feedbacks by [Yu et al. (2025)](https://doi.org/10.1093/gji/ggae388).
+Documentation is at [pyslfp.readthedocs.io](https://pyslfp.readthedocs.io).
 
 ## Installation
 

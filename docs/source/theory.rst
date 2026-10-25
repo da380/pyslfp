@@ -545,14 +545,22 @@ minimises the misfit
 
 with non-negative weights :math:`w`. Its linearisation is
 :math:`\mathcal{H}' = I + A`, where :math:`A = \partial\xi(t_f)/\partial S_0` comes
-only from the dependence of the loads on :math:`S_0`. Under frozen shorelines
-:math:`\xi` depends on :math:`S_0` only through the initial ocean function, so
-:math:`A = 0` away from changes of it. Under migrating shorelines each load
-contains :math:`\rho_w(C_n - C_0)S_0`, so :math:`A` is confined to where the
-shorelines move, and small.
+only from the dependence of the loads on :math:`S_0`.
 
-``SeaLevelEvolution.calibrate_initial_sea_level`` offers two methods, both
-accelerated by Anderson mixing, and ``run_ice_history(...,
+Under frozen shorelines the problem is linear. The shorelines are those of the
+starting state, held fixed, so :math:`\xi` does not depend on :math:`S_0` at
+all, :math:`A = 0`, and one run gives the answer exactly:
+:math:`S_0 = S_f - \xi(t_f)` wherever the weights are positive. The calibrated
+state keeps those shorelines as a prescribed ocean function, so that a frozen
+run from it reproduces :math:`S_f`; were the ocean function instead re-derived
+from each new :math:`S_0` by flotation, the cells near the flotation limit
+could flip back and forth between iterations without settling.
+
+Under migrating shorelines the initial shorelines follow from :math:`S_0` by
+flotation, and each later load contains :math:`\rho_w(C_n - C_0)S_0`, so
+:math:`A` is confined to where the shorelines move, and small, and the
+calibration iterates. ``SeaLevelEvolution.calibrate_initial_sea_level`` offers
+two methods, both accelerated by Anderson mixing, and ``run_ice_history(...,
 final_sea_level=...)`` calibrates before it runs.
 
 * The fixed point, the classical update (Kendall et al. 2005), with
@@ -563,10 +571,8 @@ final_sea_level=...)`` calibrates before it runs.
      S_0 \leftarrow S_0 - r = S_f - \xi(t_f;\, S_0).
 
   It is Newton's method for :math:`\mathcal{H}(S_0) = S_f` with the Jacobian
-  :math:`I + A` replaced by the identity. Under frozen shorelines that is
-  exact, and the iteration stops as soon as the initial ocean function
-  settles; under migrating shorelines it contracts at the rate set by
-  :math:`A`.
+  :math:`I + A` replaced by the identity, so it contracts at the rate set by
+  :math:`A`; with :math:`A = 0` it is the frozen-shoreline solution above.
 * Steepest descent with the adjoint gradient,
   :math:`S_0 \leftarrow S_0 - \nabla J`, where
 
@@ -575,8 +581,8 @@ final_sea_level=...)`` calibrates before it runs.
      \nabla J = (I + A^{\mathsf T})\,w\,r
 
   is the weighted residual plus the initial sea level kernel of a sea level
-  measurement :math:`w\,r` at :math:`t_f` (Yu et al. 2025, eq. 87). Under frozen
-  shorelines with unit weights it is the classical update exactly, the
+  measurement :math:`w\,r` at :math:`t_f` (Yu et al. 2025, eq. 87). With
+  :math:`A = 0` and unit weights it is the classical update exactly, the
   observation of Yu et al. (2025, Section 3.9) that the classical scheme
   approximates steepest descent. Under migrating shorelines it costs an adjoint
   sweep per iteration, and unit steps contract at about the rate set by
@@ -603,7 +609,7 @@ the gain becomes :math:`K = \mathcal{H}'^{-1}`, the prior drops out, and the
 iteration is Newton's method for :math:`\mathcal{H}(S_0) = y`; with
 :math:`\mathcal{H}'` replaced by the identity, :math:`K = I` and it is the
 classical update. The classical scheme is therefore an iterated Kalman update
-of unit gain, exact under frozen shorelines. The adjoint supplies the action of
+of unit gain, exact in a single step under frozen shorelines. The adjoint supplies the action of
 :math:`\mathcal{H}'^{\mathsf T}` that the gain needs beyond that case: in the
 language of data assimilation the calibration is a strong-constraint
 variational problem for the initial state, which for linear Gaussian problems

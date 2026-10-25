@@ -187,6 +187,7 @@ in Google Colab. They read the real datasets, so the first run downloads them.
 | `07_ice7g_deglaciation` | ICE-7G from 26 ka to the present: uplift rates, the sea level curve and a Hudson Bay emergence record. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/07_ice7g_deglaciation.ipynb) |
 | `08_gia_kernels` | Ice-history sensitivity kernels by the discrete and continuous adjoints. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/08_gia_kernels.ipynb) |
 | `09_decay_time_viscosity` | The decay time of postglacial emergence and its viscosity kernel. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/09_decay_time_viscosity.ipynb) |
+| `10_initial_sea_level` | Calibrating the initial sea level of a thickness-only history against the present day, by the classical update and the adjoint gradient. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/10_initial_sea_level.ipynb) |
 
 ## Data
 

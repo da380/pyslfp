@@ -309,10 +309,45 @@ def _marine_truth(material, earth):
     return operator, ice_model, truth, dates, final, lats, lons
 
 
+def test_frozen_calibration_is_one_linear_step(setting):
+    """With the shorelines fixed the problem is linear: one run gives the
+    initial sea level exactly, the calibrated state keeps the guess's
+    shorelines as a prescribed ocean function, and a fresh frozen run
+    from it reaches the target.  A migrating run refuses such a state,
+    since its shorelines follow flotation."""
+    material, earth, _, _, _ = setting
+    ice_model, state = _history_state(material, earth)
+    operator = _maxwell_operator(material)
+    dates = np.linspace(10.0, 0.0, 6)
+    metre = earth.parameters.length_scale
+    target = SHGrid.from_array(
+        state.sea_level.data
+        + (40.0 / metre) * np.cos(np.radians(earth.lats()))[:, None],
+        grid=earth.grid,
+    )
+    guess = EarthState(state.ice_thickness, target, earth, exclude_caspian=False)
+    evolution = SeaLevelEvolution(operator, guess)
+    calibration = evolution.calibrate_initial_sea_level(dates, ice_model, target)
+    assert calibration.converged and len(calibration.updates) == 1
+    calibrated = calibration.state
+    assert calibrated.has_prescribed_ocean_function
+    assert np.array_equal(calibrated.ocean_function.data, guess.ocean_function.data)
+    snapshots, _ = SeaLevelEvolution(operator, calibrated).run_ice_history(
+        dates, ice_model
+    )
+    reached = calibrated.sea_level.data + snapshots[-1].sea_level_change.data
+    scale = np.max(np.abs(target.data))
+    assert np.max(np.abs(reached - target.data)) < 1e-9 * scale
+    with pytest.raises(ValueError, match="prescribe"):
+        SeaLevelEvolution(operator, calibrated).run_ice_history(
+            dates, ice_model, shorelines="migrating"
+        )
+
+
 def test_calibration_methods_agree_under_frozen_shorelines(setting):
-    """Under frozen shorelines the initial sea level kernel vanishes, so
-    a unit step down the gradient is the classical update: the two
-    methods take identical iterates.  The evolution adopts the result."""
+    """Under frozen shorelines the initial sea level kernel vanishes and
+    the problem is linear, so both methods give the same one-step
+    answer.  The evolution adopts the result."""
     material, earth, _, _, _ = setting
     ice_model, truth = _history_state(material, earth)
     operator = _maxwell_operator(material)

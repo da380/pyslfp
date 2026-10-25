@@ -5,7 +5,7 @@ geographic projections and standard loads built on them."""
 from __future__ import annotations
 from functools import cached_property
 
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 from pyshtools import SHGrid
@@ -35,6 +35,7 @@ class EarthState(Regions):
         /,
         *,
         exclude_caspian: bool = True,
+        ocean_function: Optional[SHGrid] = None,
     ) -> None:
         """
         Initialises an EarthState container.
@@ -45,6 +46,12 @@ class EarthState(Regions):
             model (EarthModel): The physical Earth model parameters and Love numbers.
             exclude_caspian (bool): If True, the Caspian Sea is strictly treated as
                 land in all flotation and ocean function calculations. Defaults to True.
+            ocean_function (Optional[SHGrid]): A prescribed ocean function, ones
+                and zeros, used in place of the one the flotation condition
+                gives. It fixes the shorelines of a frozen-shoreline problem
+                independently of the sea level; see
+                `SeaLevelEvolution.calibrate_initial_sea_level`. None (the
+                default) derives the ocean function from flotation.
 
         Raises:
             ValueError: If the input grids do not match in lmax, grid type, or extension.
@@ -59,6 +66,11 @@ class EarthState(Regions):
         self._sea_level = sea_level
         self._model = model
         self._exclude_caspian = exclude_caspian
+        if ocean_function is not None:
+            model.check_field(ocean_function)
+            if not np.all((ocean_function.data == 0.0) | (ocean_function.data == 1.0)):
+                raise ValueError("a prescribed ocean function must be ones and zeros")
+        self._prescribed_ocean_function = ocean_function
 
     @staticmethod
     def from_defaults(*, lmax: int = 256) -> EarthState:
@@ -161,6 +173,12 @@ class EarthState(Regions):
         return self._exclude_caspian
 
     @property
+    def has_prescribed_ocean_function(self) -> bool:
+        """True if the ocean function is prescribed rather than given by
+        the flotation condition."""
+        return self._prescribed_ocean_function is not None
+
+    @property
     def grid(self) -> str:
         """Return spatial grid option."""
         return self.model.grid
@@ -183,8 +201,11 @@ class EarthState(Regions):
     def ocean_function(self) -> SHGrid:
         """
         Returns the ocean function (1 over oceans, 0 elsewhere).
-        Computed lazily using the state's internal flotation conditions.
+        Computed lazily using the state's internal flotation conditions,
+        unless the state was given a prescribed one.
         """
+        if self._prescribed_ocean_function is not None:
+            return self._prescribed_ocean_function.copy()
         ocean_data = np.where(
             self.model.parameters.water_density * self.sea_level.data
             - self.model.parameters.ice_density * self.ice_thickness.data

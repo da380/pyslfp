@@ -1019,6 +1019,12 @@ class SeaLevelEvolution:
         kyr = KYR / parameters.scales.factor(units.TIME)
         date0 = float(dates[0])
 
+        if self.state.has_prescribed_ocean_function:
+            raise ValueError(
+                "migrating shorelines follow the flotation condition from the "
+                "first date, so the background state must not prescribe its "
+                "ocean function"
+            )
         start_ice = self._thickness(ice_model, date0)
         scale = np.max(np.abs(start_ice))
         if np.max(np.abs(self.state.ice_thickness.data - start_ice)) > 1e-6 * scale:
@@ -1242,25 +1248,36 @@ class SeaLevelEvolution:
 
         A thickness-only ice history leaves the initial sea level S0 to
         be found, and the standard device is to choose it so that the
-        run reproduces the observed present-day sea level S_f.  Writing
-        the final sea level as S0 + xi(t_f; S0), two methods are
-        offered:
+        run reproduces the observed present-day sea level S_f.  Write
+        the final sea level as S0 + xi(t_f; S0) and the residual as
+        r = S0 + xi(t_f) - S_f.
 
-        - "fixed_point": the classical update S0 <- S0 - r, with r the
-          residual S0 + xi(t_f) - S_f; that is, S0 <- S_f - xi(t_f).
-          It is Newton's method for S0 + xi(t_f; S0) = S_f with the
-          Jacobian I + d xi / d S0 replaced by the identity, which is
-          exact under frozen shorelines, where xi depends on S0 only
-          through the initial ocean function; it converges at the rate
-          set by the dependence of xi on S0 through the migrating
-          shorelines.  With `weights` it updates only where they are
-          positive.
+        Under frozen shorelines the problem is linear: the shorelines
+        are those of the background state (with the history's ice at
+        the first date), held fixed, and the run does not depend on S0
+        at all.  One run then gives the exact answer, S0 <- S_f -
+        xi(t_f) wherever the weights are positive, by either method.
+        The calibrated state keeps those shorelines as a prescribed
+        ocean function, so that later frozen runs from it reproduce
+        the target.
+
+        Under migrating shorelines the initial shorelines follow from
+        S0 by flotation, and the loads at later dates depend on S0
+        through the shorelines that move, so the calibration iterates.
+        Two methods are offered:
+
+        - "fixed_point": the classical update S0 <- S0 - r, that is
+          S0 <- S_f - xi(t_f; S0), restricted to where the weights are
+          positive.  It is Newton's method for S0 + xi(t_f; S0) = S_f
+          with the Jacobian I + d xi / d S0 replaced by the identity,
+          and contracts at the rate set by the dependence of xi on S0.
         - "gradient": steepest descent on the weighted misfit of
           `final_sea_level_misfit`, S0 <- S0 - step grad J, with the
           gradient from the adjoint (Yu et al. 2025, Section 3.9).
-          Under frozen shorelines with unit weights and step it is the
-          classical update exactly.  It is the method for an objective
-          the classical update does not serve: a weighted or partial
+          Unit steps contract more slowly than the classical update,
+          which approximately inverts the Jacobian where the gradient
+          applies its transpose; it is the method for an objective
+          the classical update does not serve, a weighted or partial
           comparison with the present.
 
         Either update is accelerated by Anderson mixing, a multisecant
@@ -1284,10 +1301,12 @@ class SeaLevelEvolution:
             method: "fixed_point" or "gradient".
             weights: Non-negative weights on the misfit, an SHGrid; None
                 weights every point equally.
-            step: The step length of either update; one is the natural
-                value.
-            iterations: The most forward runs taken.
-            rtol: The convergence tolerance on the update.
+            step: The step length of either update under migrating
+                shorelines; one is the natural value.
+            iterations: The most forward runs taken under migrating
+                shorelines.
+            rtol: The convergence tolerance on the update under
+                migrating shorelines.
             anderson_memory: The depth of the acceleration; zero gives
                 the plain iteration.
             rotational_feedbacks: As for `run_ice_history`.
@@ -1320,8 +1339,66 @@ class SeaLevelEvolution:
         support = (w > 0.0).astype(float)
         total_weight = model.integrate(SHGrid.from_array(w, grid=model.grid))
 
-        mixer = AndersonMixer(anderson_memory)
+        def rms(residual: np.ndarray) -> float:
+            integral = model.integrate(
+                SHGrid.from_array(w * residual**2, grid=model.grid, copy=False)
+            )
+            return float(np.sqrt(integral / total_weight))
+
         guess = self.state.sea_level.data.copy()
+        if shorelines == "frozen":
+            # with the shorelines fixed the problem is linear, and the run
+            # does not depend on S0 at all: one run gives the misfit's
+            # exact minimiser, and the run from it is the run already made
+            prescribed = (
+                self.state.ocean_function
+                if self.state.has_prescribed_ocean_function
+                else None
+            )
+            start = EarthState(
+                ice_start,
+                SHGrid.from_array(guess, grid=model.grid),
+                model,
+                exclude_caspian=self.state.exclude_caspian,
+                ocean_function=prescribed,
+            )
+            misfit = self._with_state(start).final_sea_level_misfit(
+                dates,
+                ice_model,
+                final_sea_level,
+                weights=weights,
+                gradient=False,
+                rotational_feedbacks=rotational_feedbacks,
+                rtol=solver_rtol,
+            )
+            residual = misfit.residual.data
+            calibrated = guess - support * residual
+            state = EarthState(
+                ice_start,
+                SHGrid.from_array(calibrated, grid=model.grid),
+                model,
+                exclude_caspian=self.state.exclude_caspian,
+                ocean_function=start.ocean_function,
+            )
+            update = float(np.max(np.abs(support * residual)))
+            if verbose:
+                print(
+                    f"calibration under frozen shorelines: misfit "
+                    f"{rms(residual):.3e} removed in one step"
+                )
+            self.state = state
+            return InitialSeaLevelCalibration(
+                state,
+                misfit.snapshots,
+                misfit.internal_state,
+                [rms(residual), rms((1.0 - support) * residual)],
+                [update / float(np.max(np.abs(calibrated)))],
+                True,
+                method,
+                shorelines,
+            )
+
+        mixer = AndersonMixer(anderson_memory)
         misfits: list[float] = []
         updates: list[float] = []
         converged = False
@@ -1342,7 +1419,7 @@ class SeaLevelEvolution:
                 rotational_feedbacks=rotational_feedbacks,
                 rtol=solver_rtol,
             )
-            misfits.append(float(np.sqrt(2.0 * misfit.value / total_weight)))
+            misfits.append(rms(misfit.residual.data))
             if method == "fixed_point":
                 direction = support * misfit.residual.data
             else:
@@ -2144,12 +2221,14 @@ def calibrate_initial_sea_level(
     the observed present-day sea level, under frozen shorelines.
 
     A generic ice model carries no sea level, so the initial state must
-    be found. Starting from the present-day sea level as the guess, the
-    classical fixed point
+    be found.  With the shorelines frozen at those of the starting
+    state, the present-day sea level under the ice of the first date,
+    the problem is linear and one run gives
 
-        SL(t0) <- SL(present, observed) - xi(present; SL(t0))
+        SL(t0) = SL(present, observed) - xi(present),
 
-    is iterated with Anderson acceleration.  This is a shorthand for
+    the returned state keeping those shorelines as a prescribed ocean
+    function.  This is a shorthand for
     `SeaLevelEvolution.calibrate_initial_sea_level`, which also offers
     migrating shorelines, weights and the adjoint gradient.  The ICE-NG
     models carry their own (inverted) initial sea level and do not need

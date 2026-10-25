@@ -1290,10 +1290,20 @@ J = \frac{1}{2}\int w\,\big(\mathcal{H}(S_{0}) - S_{f}\big)^{2}\,\dd S
 \end{equation}
 with non-negative weights $w$. The linearisation is $\mathcal{H}' = I + A$,
 with $A = \partial\xi(t_{f})/\partial S_{0}$ arising only from the dependence of
-the loads on $S_{0}$: under frozen shorelines through the initial ocean
-function alone, so that $A = 0$ away from changes of it, and under migrating
-shorelines through the terms $\rho_{w}(C_{n}-C_{0})S_{0}$ of
-Section~\ref{sec:kernels}, so that $A$ is confined to where the shorelines move.
+the loads on $S_{0}$.
+
+Under frozen shorelines the problem is linear. The shorelines are those of the
+starting state, held fixed, so $\xi$ does not depend on $S_{0}$ at all, $A=0$,
+and one run gives $S_{0} = S_{f} - \xi(t_{f})$ exactly wherever $w>0$. The
+calibrated state keeps those shorelines as a prescribed ocean function, so
+that a frozen run from it reproduces $S_{f}$. Were the ocean function instead
+re-derived from each new $S_{0}$ by flotation, the problem would no longer be
+linear, and cells near the flotation limit could flip back and forth between
+iterations without settling. Under migrating shorelines the initial shorelines
+do follow from $S_{0}$ by flotation, and the loads at later dates depend on
+$S_{0}$ through the terms $\rho_{w}(C_{n}-C_{0})S_{0}$ of Section~\ref{sec:kernels},
+so that $A$ is confined to where the shorelines move, and the calibration
+iterates.
 
 The classical update \citep{KendallEtAl2005}, with $r = \mathcal{H}(S_{0}) - S_{f}$,
 \begin{equation}
@@ -1301,15 +1311,15 @@ S_{0} \leftarrow S_{0} - r = S_{f} - \xi(t_{f};S_{0}),
 \label{eq:classical}
 \end{equation}
 is Newton's method for $\mathcal{H}(S_{0}) = S_{f}$ with $I + A$ replaced by the
-identity, exact under frozen shorelines and contracting at the rate set by $A$
-under migrating ones. The gradient of \eqref{eq:calmisfit} in the surface
+identity, contracting at the rate set by $A$; with $A=0$ it is the
+frozen-shoreline solution. The gradient of \eqref{eq:calmisfit} in the surface
 pairing is
 \begin{equation}
 \nabla J = (I + A^{\mathsf T})\,w\,r,
 \end{equation}
 the weighted residual plus the kernel \eqref{eq:ksl0} of a sea level
-measurement $w\,r$ at $t_{f}$ \citep[eq.~87]{YuEtAl2025}. Under frozen shorelines
-with unit weights a unit step down it is \eqref{eq:classical}, which is the
+measurement $w\,r$ at $t_{f}$ \citep[eq.~87]{YuEtAl2025}. With $A=0$ and unit
+weights a unit step down it is \eqref{eq:classical}, which is the
 sense in which the classical scheme approximates steepest descent
 \citep[Section 3.9]{YuEtAl2025}. Under migrating shorelines unit steps contract
 at about the rate set by $A + A^{\mathsf T}$, more slowly than \eqref{eq:classical},
@@ -1332,8 +1342,8 @@ For a perfect and complete observation, $R\to0$, the gain is
 $K = \mathcal{H}'^{-1}$, the prior drops out and the iteration is Newton's
 method for $\mathcal{H}(S_{0}) = y$; with $\mathcal{H}'$ replaced by the identity
 the gain is $K = I$ and the iteration is \eqref{eq:classical}. The classical
-scheme is an iterated Kalman update of unit gain, exact under frozen
-shorelines. The adjoint supplies the action of $\mathcal{H}'^{\mathsf T}$ that the
+scheme is an iterated Kalman update of unit gain, exact in a single step
+under frozen shorelines. The adjoint supplies the action of $\mathcal{H}'^{\mathsf T}$ that the
 gain needs beyond that case: the calibration is a strong-constraint
 variational problem for the initial state, which for linear Gaussian problems
 coincides with the Kalman smoother, the adjoint run being the smoother's

@@ -197,12 +197,12 @@ truncation, so patches should be tapered in degree, as the tutorials do.
 Calibrating the initial sea level
 ---------------------------------
 
-Each iteration of ``calibrate_initial_sea_level`` is one forward run, plus,
-for the gradient method under migrating shorelines, one adjoint sweep of about
-the same cost; under frozen shorelines the gradient method needs no sweep and
-coincides with the classical update. The iteration stops when the largest
+Under frozen shorelines ``calibrate_initial_sea_level`` makes one forward run
+and solves the linear problem exactly, by either method. Under migrating
+shorelines each iteration is one forward run, plus, for the gradient method,
+one adjoint sweep of about the same cost. The iteration stops when the largest
 update of the initial sea level falls below ``rtol`` times its largest value
-(``1e-4`` by default, about half a metre on the Earth), and returns the last
+(``1e-4`` by default, of order a metre on the Earth), and returns the last
 state it ran, with that run, so the two are consistent; it warns if the
 iterations run out first.
 
@@ -212,10 +212,10 @@ the misfit by a factor of about 0.08 per iteration and unit steps down the
 gradient by about 0.33, as the theory leads one to expect. With Anderson mixing,
 the default, the classical update recovers the known initial sea level to a
 relative error below :math:`10^{-12}` in six runs, and the gradient method to a
-few times :math:`10^{-12}` in eight. Under frozen shorelines the first update is
-exact unless it changes the initial ocean function, so a calibration takes as
-many runs as the ocean function needs to settle, and one more to confirm it:
-two on the test bodies.
+few times :math:`10^{-12}` in eight. Calibrating the thickness of ICE-7G from
+26 ka against the present day at degree 64 (tutorial 10), the classical update
+reduces the misfit from about 150 m to about a centimetre in five runs, and the
+gradient method to a few centimetres in seven.
 
 
 Threads and processes

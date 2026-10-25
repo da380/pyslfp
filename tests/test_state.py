@@ -70,6 +70,34 @@ def test_ocean_function_evaluation(analytical_state):
     assert np.all(inv_ocean_func.data == (1 - ocean_func.data))
 
 
+def test_prescribed_ocean_function(analytical_state):
+    """A prescribed ocean function replaces the flotation condition, and
+    what is derived from it follows; it must be ones and zeros."""
+    state = analytical_state
+    northern = (
+        np.where(state.model.lats() > 0.0, 1.0, 0.0)[:, None]
+        * np.ones_like(state.model.lons())[None, :]
+    )
+    prescribed = SHGrid.from_array(northern, grid=state.model.grid)
+    fixed = EarthState(
+        state.ice_thickness,
+        state.sea_level,
+        state.model,
+        ocean_function=prescribed,
+    )
+    assert fixed.has_prescribed_ocean_function
+    assert not state.has_prescribed_ocean_function
+    assert np.array_equal(fixed.ocean_function.data, northern)
+    assert np.isclose(fixed.ocean_area, state.model.integrate(prescribed))
+    with pytest.raises(ValueError, match="ones and zeros"):
+        EarthState(
+            state.ice_thickness,
+            state.sea_level,
+            state.model,
+            ocean_function=SHGrid.from_array(0.5 * northern, grid=state.model.grid),
+        )
+
+
 def test_ocean_area_calculation(analytical_state):
     """Tests that ocean area is a positive float less than the total Earth area."""
     ocean_area = analytical_state.ocean_area

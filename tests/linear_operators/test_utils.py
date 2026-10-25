@@ -121,7 +121,7 @@ def test_check_response_space(testing_state):
     with pytest.raises(ValueError, match="Subspaces 1 and 2 must match"):
         check_response_space(mismatched)
 
-    # Invalid: Rotation space is wrong (the transverse-only dimension of old)
+    # Invalid: Rotation space is wrong (the transverse pair without the axial component)
     bad_rot = inf.HilbertSpaceDirectSum([leb, leb, leb, inf.EuclideanSpace(2)])
     with pytest.raises(ValueError, match="3D Euclidean space for rotation"):
         check_response_space(bad_rot)

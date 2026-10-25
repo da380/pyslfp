@@ -32,7 +32,7 @@ LMAX = 128
 # ## The fingerprint operator
 #
 # The operator carries its domain, the space of loads, and its codomain,
-# a direct sum of three fields and a two-vector: sea level change,
+# a direct sum of three fields and a three-vector: sea level change,
 # vertical displacement, potential change and angular velocity change.
 # Applying it solves the sea level equation.
 

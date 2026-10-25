@@ -157,8 +157,8 @@ def test_love_numbers_lmax_too_large_raises_error():
 
 
 def test_non_dimensionalisation_matches_the_hand_formulae(default_params, default_love):
-    """`converted` reproduces the column-by-column scaling the library used
-    to do by hand: displacement per unit surface density by load / length,
+    """`converted` agrees with scaling each column by its dimensions by
+    hand: displacement per unit surface density by load / length,
     potential per unit surface density by load / potential, and so on."""
     data = np.loadtxt(DATADIR / "pyslfp_love_numbers" / "PREM_4096.dat")[:65]
     columns = {name: data[:, j + 1] for j, name in enumerate(NAMES)}

@@ -24,9 +24,9 @@ stays put and the effective modulus is the unrelaxed one.  The weights
 lie in (0, 1] at the nodes where they are evaluated; anything that
 ever interpolates them between nodes must clamp to that interval.
 
-This is a port of AdGIA's `detail::ExponentialTrapezoidWeights` and
-the scheme eliminations of `viscoelastic.cpp`; the two must stay
-algebraically identical for the cross-benchmarks to isolate spatial
+The algebra is identical to AdGIA's `detail::ExponentialTrapezoidWeights`
+and the scheme eliminations of its `viscoelastic.cpp`, and must stay so
+for cross-benchmarks between the two codes to isolate spatial
 discretisation.
 """
 

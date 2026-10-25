@@ -4,8 +4,7 @@ Physical operator wrappers for the pyslfp library.
 This module bridges the core SeaLevelEquation solver with the pygeoinf
 functional-analysis library: the solver's forward and adjoint solves
 become LinearOperators on the appropriate Hilbert spaces, the form an
-inversion consumes.  The same pattern is intended for the viscoelastic
-solvers in due course.
+inversion consumes.
 """
 
 from __future__ import annotations
@@ -56,7 +55,8 @@ class FingerPrintOperator(LinearOperator):
                 load space. If not provided, defaults to a Lebesgue space.
             response_parameters: A tuple of the Sobolev order and scale for the
                 response fields. If not provided, defaults to a Lebesgue space.
-            rotational_feedbacks (bool): Whether to calculate polar wander effects.
+            rotational_feedbacks (bool | str): True for the full feedback,
+                "axial" for the axial component alone, False for none.
             rtol (float): The relative tolerance for convergence.
             max_iterations (Optional[int]): Hard limit on iteration count.
             verbose (bool): If True, prints iteration metrics.
@@ -156,7 +156,8 @@ class FingerPrintOperator(LinearOperator):
             lmax: Truncation degree for the calculations.
             load_parameters: Tuple of (Sobolev order, relative length scale).
             response_parameters: Tuple of (Sobolev order, relative length scale).
-            rotational_feedbacks: Whether to calculate polar wander effects.
+            rotational_feedbacks: True for the full feedback, "axial" for
+                the axial component alone, False for none.
             rtol: The relative tolerance for convergence.
             max_iterations: Hard limit on iteration count.
             verbose: If True, prints iteration metrics.
@@ -210,7 +211,8 @@ class FingerPrintOperator(LinearOperator):
             lmax: Truncation degree for the calculations.
             load_parameters: Tuple of (Sobolev order, relative length scale).
             response_parameters: Tuple of (Sobolev order, relative length scale).
-            rotational_feedbacks: Whether to calculate polar wander effects.
+            rotational_feedbacks: True for the full feedback, "axial" for
+                the axial component alone, False for none.
             rtol: The relative tolerance for convergence.
             max_iterations: Hard limit on iteration count.
             verbose: If True, prints iteration metrics.

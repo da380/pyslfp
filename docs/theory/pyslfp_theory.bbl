@@ -1,4 +1,4 @@
-\begin{thebibliography}{14}
+\begin{thebibliography}{16}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
@@ -19,6 +19,20 @@ D.~Al-Attar, F.~Syvret, O.~Crawford, J.~X. Mitrovica, and A.~J. Lloyd.
 \newblock Reciprocity and sensitivity kernels for sea level fingerprints.
 \newblock \emph{Geophysical Journal International}, 236\penalty0 (1):\penalty0
   362--378, 2024.
+
+\bibitem[Backus(1970)]{Backus1970}
+G.~E. Backus.
+\newblock Inference from inadequate and inaccurate data, {I}.
+\newblock \emph{Proceedings of the National Academy of Sciences}, 65\penalty0
+  (1):\penalty0 1--7, 1970.
+\newblock \doi{10.1073/pnas.65.1.1}.
+
+\bibitem[Bell and Cathey(1993)]{BellCathey1993}
+B.~M. Bell and F.~W. Cathey.
+\newblock The iterated {K}alman filter update as a {G}auss-{N}ewton method.
+\newblock \emph{IEEE Transactions on Automatic Control}, 38\penalty0
+  (2):\penalty0 294--297, 1993.
+\newblock \doi{10.1109/9.250476}.
 
 \bibitem[Crawford et~al.(2017)Crawford, Al-Attar, Tromp, and
   Mitrovica]{CrawfordEtAl2017}

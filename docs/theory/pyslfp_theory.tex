@@ -34,16 +34,19 @@
 \begin{abstract}
 \noindent
 This note sets out the physics and numerics behind \texttt{pyslfp}, a Python
-library for gravitationally self-consistent sea level fingerprints on a
-spherically symmetric, rotating, elastic earth. It states the conventions in
+library for gravitationally self-consistent sea level change on a spherically
+symmetric, rotating earth, elastic or viscoelastic. It states the conventions in
 force throughout the code; the generalised load Love numbers, their reciprocity
 relations and the axial numbers that enter the rotational feedback; the
 spectral-element solution of the radial loading problem at each spherical
 harmonic degree; the linear, generalised and nonlinear forms of the sea level
 equation together with the iterative methods used to solve them; and the
-closed-form treatment of the rotational feedback. A final section describes the
-internal-variable formulation of viscoelastic loading that is being added. Every
-sign and factor below is the one the code uses.
+closed-form treatment of the rotational feedback. It then describes the
+internal-variable formulation of viscoelastic loading and its coupling to the
+sea level equation through an ice history, and the discrete and continuous
+adjoints that give sensitivity kernels with respect to the ice history, the
+initial sea level and the mantle viscosity. Every sign and factor below is the
+one the code uses.
 \end{abstract}
 
 \tableofcontents
@@ -153,19 +156,27 @@ $\mathsf{M}=\mathsf{P}\mathsf{L}^{3}$, and a quantity with dimensions
 $\mathrm{M}^{\alpha}\mathrm{L}^{\beta}\mathrm{T}^{\gamma}$ is stored as its SI
 value divided by $\mathsf{M}^{\alpha}\mathsf{L}^{\beta}\mathsf{T}^{\gamma}$.
 The same three scales define a \texttt{planetmodel} unit system, so that Love
-numbers computed from a model in one set of units can be converted to those of
-the sea level solver by the same rule. The default scheme is
+numbers and radial models in one set of units can be converted to those of the
+sea level solver by the same rule. The library computes in one frame,
+\texttt{planetmodel}'s \code{Scales.geophysical} at the Earth's mean radius,
 \begin{equation}
 \mathsf{L} = R_{\oplus},\qquad
-\mathsf{P} = \bar\rho = \frac{3M_{\oplus}}{4\pi R_{\oplus}^{3}},\qquad
-\mathsf{T} = \sqrt{R_{\oplus}/g_{0}},
+\mathsf{P} = \bar\rho,\qquad
+\mathsf{T} = \frac{1}{\sqrt{G\bar\rho}},
 \label{eq:scales}
 \end{equation}
-with $R_{\oplus}=6371$\,km the mean radius, $M_{\oplus}=5.974\times10^{24}$\,kg
-and $g_{0}=9.825652323$\,m\,s$^{-2}$. In these units the mean density is one,
-the reference gravity is one, and the gravitational constant is
-$G\mathsf{P}\mathsf{T}^{2} = 3GM_{\oplus}/(4\pi R_{\oplus}^{2}g_{0})$, close to
-$3/4\pi$. The remaining constants are the water and ice densities
+with $R_{\oplus}=6371$\,km the mean radius and $\bar\rho$ the Earth's mean
+density, so that $\mathsf{T}\approx1648$\,s. In these units the radius, the mean
+density and the gravitational constant are one, and the surface gravity
+$g_{0}=9.825652323$\,m\,s$^{-2}$ is close to $4\pi/3$. A radial model authored in
+other units is converted into this frame before its mesh is built, and the
+viscoelastic coupling refuses a model in any other. The time scale is
+gravitational although viscoelastic relaxation is slow: time enters the
+evolution only through the ratios $\Delta t/\tau$ and the conversion of dates
+from kiloyears, so relaxation times of order $10^{7}$ in these units cost
+nothing, whereas a relaxation-based time scale would put factors of order
+$10^{13}$ into the gravitational terms of every stiffness matrix. The remaining
+constants are the water and ice densities
 $\rho_{w}=1000$ and $\rho_{i}=917$\,kg\,m$^{-3}$, the rotation rate
 $\Omega=7.2722\times10^{-5}$\,rad\,s$^{-1}$, and the equatorial and polar moments
 of inertia $A=8.0096\times10^{37}$ and $C=8.0359\times10^{37}$\,kg\,m$^{2}$.
@@ -381,7 +392,7 @@ surface shell attracting nothing inside it. The self-moment
 $m_{c}=-\tfrac12\sqrt{4\pi}a^{2}\,\mathbf{b}_{c}^{\mathsf T}\mathsf{A}^{-1}\mathbf{b}_{c}$
 is negative when $\mathsf A$ is positive definite: a positive centrifugal
 potential $(r/a)^{2}$ pulls inward. A table that lacks the axial numbers
-(as read from an older file) has them undefined, and the sea level solver then
+(as read from a file without them) has them undefined, and the sea level solver then
 sets the deformation terms of the axial feedback to zero.
 
 \subsection{The table}
@@ -910,12 +921,12 @@ denominator corrections in \eqref{eq:axialomega} being positive, and may be
 retained alone.
 
 %======================================================================
-\section{Viscoelastic extension (in development)}
+\section{Viscoelastic loading}
 \label{sec:visco}
 %======================================================================
 
-This section describes a formulation being implemented in
-\texttt{pyslfp.gia}; its interface is not yet stable.
+This section describes the formulation implemented in
+\texttt{pyslfp.viscoelastic}.
 
 \subsection{Rheology and internal variables}
 
@@ -1033,6 +1044,315 @@ the complex moduli of a model frozen at a frequency
 (Section~\ref{sec:love}); by the correspondence principle
 \citep{WuPeltier1982} the two descriptions are related by a Laplace
 transform, which provides an independent check of the time stepping.
+
+A run starts at its first time $t_{0}$ with the internal variables zero and the
+instantaneous response, computed with the unrelaxed numbers, to the load at
+$t_{0}$: the right limit, so that a load switched on at the start is stepped at
+full order rather than costing the trapezoid an order.
+
+\subsection{Ice histories and shorelines}
+\label{sec:shorelines}
+
+An ice history supplies the thickness $I(t)$ at any date, interpolating
+linearly between its slices; dates are in kiloyears before present and the
+step grid should contain the history's breakpoints. With the shorelines frozen
+at those of the background state, the direct load at the $n$th date is the
+grounded thickness change $\zeta_{d,n} = \rho_{i}(1-C_{0})(I_{n}-I_{0})$, and
+each step's sea level equation is the linear one with the ocean function
+$C_{0}$. With the shorelines migrating, each step solves the nonlinear
+equation of Section~\ref{sec:sle} from the background state, with the memory
+field as a ready response whose displaced water the explicit mass budget
+conserves, and the load of the converged state relative to the background
+finishes the radial step. The ocean function $C_{n}$ of each step is recorded:
+it is all of the trajectory that the adjoint of Section~\ref{sec:kernels}
+needs. Under migrating shorelines the step is consistent to the tolerance of
+the nonlinear iteration rather than eliminated exactly. In either case the
+transverse rotational feedback is refused when the specified moments cannot
+sustain the model's hydrostatic limit (Section~\ref{sec:rotation}).
+
+%======================================================================
+\section{Sensitivity kernels}
+\label{sec:kernels}
+%======================================================================
+
+\subsection{Objective functionals and the adjoint problem}
+
+An objective functional of an evolution is a sum of measurements at
+observation dates $t_{i}$ on the step grid,
+\begin{equation}
+J = \sum_{i}\Big[\int g^{(i)}_{\xi}\,\xi(t_{i})\,\dd S
+ + \int g^{(i)}_{u}\,u(t_{i})\,\dd S
+ + \int g^{(i)}_{\phi}\,\phi(t_{i})\,\dd S
+ + \mathbf{g}^{(i)}_{\omega}\cdot\bm{\omega}(t_{i})\Big],
+\label{eq:objective}
+\end{equation}
+and its kernels are the derivatives with respect to the ice thickness
+$I(\x,t)$, the initial sea level $S_{0}(\x)$ and the inverse relaxation times
+$\tau_{k}^{-1}(r)$. The adjoint theory of glacial isostatic adjustment was set
+out by \citet{CrawfordEtAl2018} and extended to rotational feedbacks by
+\citet{YuEtAl2025}, whose formulation is followed here. The adjoint problem has
+the form of the forward problem with more general forces: $g_{\xi}$ forces like an
+ice load, $g_{u}$ and $g_{\phi}$ enter as the displacement and potential
+channels of the generalised equation, and $\mathbf{g}_{\omega}$ as an angular
+momentum forcing, through the mapping \eqref{eq:adjoint}. The adjoint ocean
+function is the time-reversed ocean function of the forward run rather than a
+dynamical variable, so the adjoint problem is linear whether or not the
+shorelines migrate, and the singular terms of shoreline motion cancel. Under
+frozen shorelines the ice history enters linearly and no forward run is needed.
+
+The library realises the adjoint twice: as the exact transpose of the
+time-stepped map, and by discretising the continuous adjoint equations. A
+discrete adjoint is exact for the discretised functional, which in an
+under-resolved run is a poor stand-in for the continuum one; the two differ by
+the commute error of discretisation and transposition, which vanishes as the
+run resolves its rheology, so their disagreement is a diagnostic of the forward
+resolution.
+
+\subsection{The discrete adjoint of a step}
+
+Per degree, let $\mathsf{K}$ be the symmetric effective system of the step,
+$\mathsf{D}$ the map from a degree solution to the nodal strain scalars,
+$\mathsf{W}$ the nodal weights $\mu_{k}w_{q}w_{c}$ (the GLL quadrature weight
+times the scalar weight $w_{c}$ of $M$, $R$ or $S$), $\mathsf{E}$,
+$\mathsf{A}$ and $\mathsf{B}$ the diagonal scheme weights ($e$, $\alpha$ and
+$\beta$ for the trapezoid), $\mathsf{P}$ the surface rows giving $U(a)$ and
+$\phi(a)$, and $\mathbf{q}$ the row giving the degree-0 inertia moment. The
+memory-force assembly is $\mathsf{D}^{\mathsf T}\mathsf{W}$, with the same
+quadrature. One step, as a linear map of the state $(\mathbf{m}^{n},\mathbf{d}^{n})$,
+is
+\begin{gather*}
+\tilde{\mathbf{m}} = \mathsf{E}\mathbf{m}^{n} + \mathsf{A}\mathbf{d}^{n},\qquad
+\mathbf{x}_{m} = \mathsf{K}^{-1}\mathsf{D}^{\mathsf T}\mathsf{W}\tilde{\mathbf{m}},\qquad
+(U_{m},\phi_{m}) = \mathsf{P}\mathbf{x}_{m},\quad J_{0} = \mathbf{q}\cdot\mathbf{x}_{m},\\
+(\sigma,\psi) = \mathcal{L}\big(\zeta_{d,n+1}, (U_{m},\phi_{m}), J_{0}\big),\qquad
+\mathbf{x} = \mathbf{x}_{m} + \mathbf{x}_{\sigma}\sigma^{\mathsf T} + \mathbf{x}_{\psi}\psi^{\mathsf T},\\
+\mathbf{d}^{n+1} = \mathsf{D}\mathbf{x},\qquad
+\mathbf{m}^{n+1} = \tilde{\mathbf{m}} + \mathsf{B}\mathbf{d}^{n+1},
+\end{gather*}
+where $\mathcal{L}$ is the step's generalised sea level solve, returning the
+converged load and centrifugal coefficients, and $\mathbf{x}_{\sigma}$ and
+$\mathbf{x}_{\psi}$ are the unit solutions for a load and a tide, the load
+right-hand sides being rank one. With daggers for duals, the transpose run in
+reverse is
+\begin{gather*}
+\mathbf{x}^{\dagger} = \mathsf{D}^{\mathsf T}\big(\mathsf{B}\mathbf{m}^{n+1\dagger} + \mathbf{d}^{n+1\dagger}\big),\qquad
+\sigma^{\dagger} = \mathbf{x}_{\sigma}\cdot\mathbf{x}^{\dagger},\quad
+\psi^{\dagger} = \mathbf{x}_{\psi}\cdot\mathbf{x}^{\dagger},\\
+\big(\zeta_{d,n+1}^{\dagger}, (U_{m},\phi_{m})^{\dagger}, J_{0}^{\dagger}\big)
+ = \mathcal{L}^{\mathsf T}(\sigma^{\dagger},\psi^{\dagger}),\qquad
+\mathbf{x}_{m}^{\dagger} = \mathbf{x}^{\dagger} + \mathsf{P}^{\mathsf T}(U_{m},\phi_{m})^{\dagger} + \mathbf{q}\,J_{0}^{\dagger},\\
+\tilde{\mathbf{m}}^{\dagger} = \mathbf{m}^{n+1\dagger} + \mathsf{W}\mathsf{D}\mathsf{K}^{-1}\mathbf{x}_{m}^{\dagger},\qquad
+\mathbf{m}^{n\dagger} = \mathsf{E}\tilde{\mathbf{m}}^{\dagger},\qquad
+\mathbf{d}^{n\dagger} = \mathsf{A}\tilde{\mathbf{m}}^{\dagger},
+\end{gather*}
+the measurement duals at date $n+1$ joining the inputs of $\mathcal{L}^{\mathsf T}$.
+A reverse step costs one symmetric banded solve per degree, as a forward step
+does. Backward Euler is the case $\mathsf{E}=(1+h)^{-1}$, $\mathsf{A}=0$,
+$\mathsf{B}=1-\mathsf{E}$, and the sweep closes with the transpose of the
+right-limit solve at $t_{0}$.
+
+The transpose $\mathcal{L}^{\mathsf T}$ is the exact reverse mode of the
+engine's own code path. The generalised solve is a fixed point for the load
+built from a diagonal Love-number multiplication, multiplication by the ocean
+function, the synthesis and analysis transforms (mutual transposes up to the
+quadrature weights), a rank-one mass-conservation projection and the
+closed-form rotational scalars, each of which transposes directly, so the
+adjoint is a transposed fixed point run through the same Anderson mixer,
+returning the duals of the direct load, both response channels and the inertia
+moment. Its rotational block dualises the complete degree-2 displacement and
+potential, not only their forcing parts. Under migrating shorelines the same
+construction applies about the trajectory, with the recorded $C_{n}$ in place
+of $C_{0}$.
+
+\subsection{The continuous adjoint}
+
+Between observation times the adjoint state evolves by the forward equations
+without load, in reversed time, so it is stepped by the forward machinery. At
+an observation time the measurement drives an instantaneous, unrelaxed
+generalised fingerprint problem through the mapping \eqref{eq:adjoint}; its
+sea level gives the singular part of the ice kernel at that time, and the
+adjoint internal variables jump by
+\begin{equation}
+[\mathbf{m}^{\dagger}] = \frac{1}{\tau}\,\tilde{\mathbf{d}}^{\dagger},
+\label{eq:jump}
+\end{equation}
+with $\tilde{\mathbf{d}}^{\dagger}$ the strain of the instantaneous adjoint
+solution \citep[eq.~80]{YuEtAl2025}. The smooth adjoint fields are densities
+per unit time, and the date quadrature splits its weight at each observation
+across the jump. This formulation never sees the stepper's internals, and
+survives a change of scheme.
+
+\subsection{The ice kernel and its views}
+
+The discrete adjoint returns, for each date, the dual $\lambda_{n}$ of the direct
+load, $\delta J = \sum_{n}\int\lambda_{n}\,\delta\zeta_{d,n}\,\dd S$. Each load
+depends on the thickness at its own date through $\rho_{i}(1-C_{n})I_{n}$ and on
+the initial thickness through $-\rho_{i}(1-C_{0})I_{0}$, so the thickness duals
+are $\rho_{i}(1-C_{n})\lambda_{n}$ with the baseline
+$-\rho_{i}(1-C_{0})\sum_{n}\lambda_{n}$ added at the first date; the baseline
+grounds with the initial ocean function. These satisfy the gradient identity
+exactly for perturbations on the date grid, but they do not converge pointwise
+under refinement, because the kernel is singular in time
+\citep[eq.~81]{YuEtAl2025}:
+\begin{equation}
+K_{I}(\x,t) = \kappa(\x,t) + \sum_{i}\kappa_{i}(\x)\,\delta(t-t_{i})
+ + \kappa_{0}(\x)\,\delta(t-t_{0}).
+\end{equation}
+A load applied at an observation time produces an instantaneous elastic
+response, whose amplitude $\kappa_{i}$ is the grounded instantaneous fingerprint
+adjoint of that measurement, independent of the date grid; $\kappa_{0}$ is the
+baseline; and the density $\kappa$ converges under refinement. The quelled view
+of \citet{Backus1970} removes the singularities by changing variable to the
+rate of thickness change, $I(t) = I(t_{0}) + \int\dot I$: the kernel with respect
+to $\dot I$ is the cumulative time integral of $K_{I}$, bounded with finite jumps
+at the observation times only, and pairs with histories continuous in time.
+Under frozen shorelines the dual of the initial thickness then vanishes
+identically, a uniform thickness change loading nothing.
+
+\subsection{The initial sea level}
+
+The ocean load at a date is $\rho_{w}(C_{n}S_{n} - C_{0}S_{0})$ with
+$S_{n} = S_{0} + \xi_{n}$, so the initial sea level enters each load as
+$\rho_{w}(C_{n}-C_{0})\,\delta S_{0}$, and its kernel assembles from the load
+duals already computed,
+\begin{equation}
+K_{S_{0}} = \rho_{w}\sum_{n}(C_{n}-C_{0})\,\lambda_{n},
+\label{eq:ksl0}
+\end{equation}
+the discrete form of eq.~(65) of \citet{YuEtAl2025}. It vanishes identically
+under frozen shorelines. This is the kernel for objectives on the sea level
+change; an objective on the absolute sea level $S_{0}+\xi$ adds the sum of its
+own sea level duals.
+
+\subsection{Relaxation times and viscosity}
+
+With the forward trajectory recorded, the adjoints also return
+$\partial J/\partial\tau_{k}^{-1}(r)$ for each branch, the one-dimensional reduction
+of eq.~(61) of \citet{YuEtAl2025}, whose tensor contraction becomes the
+weighted sum over the scalars $M$, $R$ and $S$. The discrete variant
+differentiates the scheme weights in $h=\Delta t\,\tau^{-1}$: per step, the
+derivatives of $e$ and $\alpha$ pair $\tilde{\mathbf{m}}^{\dagger}$ with the forward
+$\mathbf{m}^{n}$ and $\mathbf{d}^{n}$, and the derivative of $\beta$ pairs
+$\mathbf{m}^{n+1\dagger}$ with $\mathbf{d}^{n+1}$ and, through the effective
+modulus, the transposed and forward solutions through the branch bilinear form.
+The continuous variant integrates the multiplier of the internal-variable
+dynamics, the branch-weighted adjoint state over $\tau^{-1}$, against the forward
+$\mathbf{d}-\mathbf{m}$. The viscosity kernels follow from
+$\partial\tau^{-1}/\partial\eta = -\tau^{-2}/\mu$, so an elastic branch has no
+viscosity sensitivity in this parameterisation.
+
+Recording the trajectory at every date is expensive at high degree, so it may
+be checkpointed and reconstructed backwards between stored states. The inverse
+of a trapezoid step is the same update with the step negated and the start and
+end strains exchanged, since $e(-h)=1/e(h)$, $\alpha(-h) = -\beta(h)/e(h)$ and
+$\beta(-h) = -\alpha(h)/e(h)$; its effective weight $\varphi_{1}(-h)>1$ keeps the
+system positive definite. Backward Euler inverts explicitly,
+$\mathbf{m}^{n} = (1+h)\mathbf{m}^{n+1} - h\,\mathbf{d}^{n+1}$. Running dissipation
+backwards amplifies rounding by $e^{h}$ per branch and step, so the sum of $h$
+across a gap is the number of digits spent.
+
+\subsection{Decay times}
+
+A decay time is the parameter $\tau_{d}=1/s$ of a curve $a\,e^{-st}+b$ fitted
+to a series $v_{j}$ at times $t_{j}$, so its kernel follows from differentiating
+the fit. Following \citet[Appendix C]{AlAttarTromp2014}, the model times
+$\hat t_{j}$ join the parameters with Gaussian penalties towards the nominal
+ones, to account for the timing uncertainty of sea level data, and the fit
+minimises
+\begin{equation}
+\sum_{j}\frac{\big(v_{j} - a\,e^{-s\hat t_{j}} - b\big)^{2}}{\sigma_{v}^{2}}
+ + \sum_{j}\frac{(\hat t_{j}-t_{j})^{2}}{\sigma_{t}^{2}},
+\end{equation}
+only the ratio of the two uncertainties mattering. The implicit function
+theorem applied to the stationarity conditions, with the full Hessian, gives
+the weights $w_{j} = \partial\tau_{d}/\partial v_{j}$, so that the decay time is,
+to first order, the multi-date measurement $\sum_{j}w_{j}v_{j}$ to which every
+kernel above applies. The datum belongs near the centre of a former ice sheet
+and after the melting has stopped, where rebound curves are close to
+exponential; elsewhere the fit degenerates towards long decay times and is
+refused.
+
+%======================================================================
+\section{The initial sea level}
+\label{sec:calibration}
+%======================================================================
+
+An ice history that carries no sea level leaves the initial sea level $S_{0}$
+to be chosen, and the standard device is to choose it so that the run
+reproduces a final sea level $S_{f}$ at the last date $t_{f}$, the observed
+present day on the Earth. The run from $S_{0}$ reaches
+\begin{equation}
+\mathcal{H}(S_{0}) = S_{0} + \xi(t_{f};S_{0}),
+\end{equation}
+and the calibration solves $\mathcal{H}(S_{0}) = S_{f}$ or, more generally,
+minimises
+\begin{equation}
+J = \frac{1}{2}\int w\,\big(\mathcal{H}(S_{0}) - S_{f}\big)^{2}\,\dd S
+\label{eq:calmisfit}
+\end{equation}
+with non-negative weights $w$. The linearisation is $\mathcal{H}' = I + A$,
+with $A = \partial\xi(t_{f})/\partial S_{0}$ arising only from the dependence of
+the loads on $S_{0}$.
+
+Under frozen shorelines the problem is linear. The shorelines are those of the
+starting state, held fixed, so $\xi$ does not depend on $S_{0}$ at all, $A=0$,
+and one run gives $S_{0} = S_{f} - \xi(t_{f})$ exactly wherever $w>0$. The
+calibrated state keeps those shorelines as a prescribed ocean function, so
+that a frozen run from it reproduces $S_{f}$. Were the ocean function instead
+re-derived from each new $S_{0}$ by flotation, the problem would no longer be
+linear, and cells near the flotation limit could flip back and forth between
+iterations without settling. Under migrating shorelines the initial shorelines
+do follow from $S_{0}$ by flotation, and the loads at later dates depend on
+$S_{0}$ through the terms $\rho_{w}(C_{n}-C_{0})S_{0}$ of Section~\ref{sec:kernels},
+so that $A$ is confined to where the shorelines move, and the calibration
+iterates.
+
+The classical update \citep{KendallEtAl2005}, with $r = \mathcal{H}(S_{0}) - S_{f}$,
+\begin{equation}
+S_{0} \leftarrow S_{0} - r = S_{f} - \xi(t_{f};S_{0}),
+\label{eq:classical}
+\end{equation}
+is Newton's method for $\mathcal{H}(S_{0}) = S_{f}$ with $I + A$ replaced by the
+identity, contracting at the rate set by $A$; with $A=0$ it is the
+frozen-shoreline solution. The gradient of \eqref{eq:calmisfit} in the surface
+pairing is
+\begin{equation}
+\nabla J = (I + A^{\mathsf T})\,w\,r,
+\end{equation}
+the weighted residual plus the kernel \eqref{eq:ksl0} of a sea level
+measurement $w\,r$ at $t_{f}$ \citep[eq.~87]{YuEtAl2025}. With $A=0$ and unit
+weights a unit step down it is \eqref{eq:classical}, which is the
+sense in which the classical scheme approximates steepest descent
+\citep[Section 3.9]{YuEtAl2025}. Under migrating shorelines unit steps contract
+at about the rate set by $A + A^{\mathsf T}$, more slowly than \eqref{eq:classical},
+which inverts the Jacobian approximately where the gradient applies its
+transpose; the gradient is the method for objectives that \eqref{eq:classical}
+does not serve, a weighted or partial comparison with the present. Either
+iteration is accelerated by Anderson mixing.
+
+The connection with Kalman filtering places the two. Let $S_{0}$ have prior
+mean $S_{b}$ and covariance $P$, and let the final sea level be observed as
+$y = \mathcal{H}(S_{0}) + \varepsilon$ with noise covariance $R$. The Kalman
+update iterated about the current estimate, which is Gauss--Newton on the
+posterior \citep{BellCathey1993}, is
+\begin{equation}
+S_{0} \leftarrow S_{b} + K\big[y - \mathcal{H}(S_{0}) - \mathcal{H}'(S_{b}-S_{0})\big],
+\qquad
+K = P\,\mathcal{H}'^{\mathsf T}\big(\mathcal{H}'P\,\mathcal{H}'^{\mathsf T} + R\big)^{-1}.
+\end{equation}
+For a perfect and complete observation, $R\to0$, the gain is
+$K = \mathcal{H}'^{-1}$, the prior drops out and the iteration is Newton's
+method for $\mathcal{H}(S_{0}) = y$; with $\mathcal{H}'$ replaced by the identity
+the gain is $K = I$ and the iteration is \eqref{eq:classical}. The classical
+scheme is an iterated Kalman update of unit gain, exact in a single step
+under frozen shorelines. The adjoint supplies the action of $\mathcal{H}'^{\mathsf T}$ that the
+gain needs beyond that case: the calibration is a strong-constraint
+variational problem for the initial state, which for linear Gaussian problems
+coincides with the Kalman smoother, the adjoint run being the smoother's
+backward sweep. An imperfect or incomplete present-day field makes the gain a
+blend of prior and data, $K = P(P+R)^{-1}$ when $\mathcal{H}' = I$; the weights
+of \eqref{eq:calmisfit} are the simplest instance, the inverse of a diagonal
+noise covariance without a prior.
 
 \bibliographystyle{plainnat}
 \bibliography{pyslfp_theory}

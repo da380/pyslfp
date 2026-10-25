@@ -24,7 +24,7 @@ end.
 
     love = LoveNumbers.from_model(PREM(ocean=False), 256)
     love.conventional()["h"]                  # h' by degree
-    love.write("love.dat")                    # for EarthModel(love_number_file=...)
+    love.write("love.dat")                    # for EarthModel(love_numbers=...)
     LoveNumbers.default()                     # the shipped PREM table
     solve_degree(model, 2, forcing="tide").evaluate(radii)
     plot_love_numbers(love); plot_degree_solution(solve_degree(model, 2))

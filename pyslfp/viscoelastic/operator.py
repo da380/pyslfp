@@ -9,20 +9,22 @@ three radial scalars per coefficient column, stored in the order
     e_R = r d_r U - U + (1/2) k^2 V,
     e_S = r d_r V - V + U,
 
-and force weights k^2 (k^2 - 2), 4/3 and k^2; the algebra is recorded
-in docs/planning/gia_notes.md.  Evaluating anything else -- the
-displacement, the potential, a rate, a step -- contains the
-quasi-static degree solves: the elastic system assembled with the
-unrelaxed or a per-step effective shear modulus, forced by the load
-channels and by the memory force
+and force weights k^2 (k^2 - 2), 4/3 and k^2; the algebra, generalised
+branch by branch, is set out in the theory note (docs/theory).
+Evaluating anything else -- the displacement, the potential, a rate, a
+step -- contains the quasi-static degree solves: the elastic system
+assembled with the unrelaxed or a per-step effective shear modulus,
+forced by the load channels and by the memory force
 
     b_mem(U', V') = sum_k int mu_k [ (4/3) R_k e_R(U', V')
                                      + k^2 S_k e_S(U', V')
                                      + k^2 (k^2 - 2) M_k V' ] dr.
 
-The steppers are AdGIA's: backward Euler, exponential Euler and the
-exponential trapezoid (the default), with the elimination weights of
-`weights.py` and one factorised banded system per degree and flavour.
+The steppers are backward Euler, exponential Euler and the exponential
+trapezoid (the default), with the elimination weights of `weights.py`
+and one factorised banded system per degree and flavour; their algebra
+is identical to AdGIA's, so that the two codes can benchmark one
+another.
 Each degree's columns are independent right-hand sides, so a state may
 carry one column (a Love-number history) or the full set of spherical
 harmonic orders.
@@ -287,9 +289,9 @@ class _Degree:
 class ViscoelasticOperator:
     """The viscoelastic loading operator of a rheology, degree by degree.
 
-    Mirrors AdGIA's `ViscoelasticOperator`: the internal variables are
-    the state, the displacement is slaved, and the per-(scheme, dt)
-    effective systems are factorised once and reused.  `degrees` fixes
+    The internal variables are the state, the displacement is slaved,
+    and the per-(scheme, dt) effective systems are factorised once and
+    reused.  `degrees` fixes
     which spherical-harmonic degrees are carried (all of 0..lmax by
     default).
 

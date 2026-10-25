@@ -1,4 +1,4 @@
-name: Publish to PyPI
+name: Release
 
 on:
   release:
@@ -8,7 +8,14 @@ permissions:
   contents: read
 
 jobs:
-  publish:
+  # The release tag and the version in pyproject.toml are set by hand, in two
+  # different places, several steps apart (see CONTRIBUTING.md). If they
+  # disagree, PyPI accepts whatever pyproject says and the tag then points at
+  # something that was never published under that name. PyPI does not allow a
+  # version to be re-uploaded, so this is checked first, before the tests spend
+  # their time on a release that could not be published anyway.
+  version:
+    name: Tag matches version
     runs-on: ubuntu-latest
 
     steps:
@@ -22,12 +29,6 @@ jobs:
       - name: Install Poetry
         run: pip install poetry
 
-      # The release tag and the version in pyproject.toml are set by hand, in
-      # two different places, several steps apart (see CONTRIBUTING.md). If they
-      # disagree, PyPI accepts whatever pyproject says and the tag then points
-      # at something that was never published under that name. Catching it here
-      # costs one step and cannot be undone later: PyPI does not allow a version
-      # to be re-uploaded.
       - name: Check the tag matches the package version
         run: |
           version=$(poetry version --short)
@@ -38,10 +39,34 @@ jobs:
           fi
           echo "Tag and version agree on ${version}."
 
+  # The whole of CI on the tagged code: linting, the fast suite on all three
+  # platforms, the documentation build, and the slow tests, which the `release`
+  # event switches on. Nothing is published unless every job passes.
+  tests:
+    name: Tests
+    needs: version
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: Publish to PyPI
+    needs: tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pip install poetry
+
       # `poetry build` reads pyproject.toml and the source tree; it does not
-      # need the dependencies installed. Dropping the install takes Cartopy,
-      # PyQt6 and pyshtools out of the publish path entirely, so a wheel that
-      # is slow or briefly unavailable can no longer fail a release.
+      # need the dependencies installed. Not installing them keeps Cartopy and
+      # pyshtools out of the publish path, so a wheel that is slow or briefly
+      # unavailable cannot fail a release.
       - name: Build package
         run: poetry build
 

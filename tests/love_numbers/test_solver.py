@@ -1,5 +1,5 @@
-"""Love numbers: the archived solver's PREM values, identities, closed
-forms, convergence, the frozen viscoelastic path."""
+"""Love numbers: reference PREM values, identities, closed forms,
+convergence, the frozen viscoelastic path."""
 
 import numpy as np
 import pytest
@@ -23,9 +23,9 @@ from pyslfp.love_numbers import (
 )
 from planetmodel.units import Scales
 
-# The archived solver on the same mesh (lmax = 20, five GLL nodes), which
-# matched DSpecM1D: h_u, k_u, h_phi, k_phi, h_t, k_t per degree.
-ARCHIVED = {
+# Reference values for PREM on the same mesh (lmax = 20, five GLL nodes),
+# which agree with DSpecM1D: h_u, k_u, h_phi, k_phi, h_t, k_t per degree.
+REFERENCE = {
     1: (-2.3286097586e-04, 0.0, 0.0, 0.0, -1.0174391584e-01, 0.0),
     2: (
         -1.7326967358e-04,
@@ -60,7 +60,7 @@ ARCHIVED = {
         2.3977651315e-03,
     ),
 }
-# The older Fortran table that pyslfp ships, for the same degrees.
+# PREM values from an independent Fortran solver, for the same degrees.
 FORTRAN = {
     1: (-0.23329549e-03, 0.0, 0.0, 0.0, -0.10177450e00, 0.0),
     2: (
@@ -168,8 +168,8 @@ def test_nodal_moduli_isotropic_and_voigt():
         NodalModuli(m.A, m.C, m.F, m.L, m.N[:1])
 
 
-def test_prem_matches_the_archived_solver(love):
-    for l, vals in ARCHIVED.items():
+def test_prem_matches_the_reference_values(love):
+    for l, vals in REFERENCE.items():
         for name, want in zip(COLUMNS, vals):
             got = getattr(love, name)[l]
             assert abs(got - want) <= 1e-8 * max(abs(want), 1e-30) + 1e-300, (l, name)

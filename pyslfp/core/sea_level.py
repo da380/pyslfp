@@ -317,7 +317,8 @@ class SeaLevelEquation:
         Args:
             state (EarthState): The unperturbed background Earth state.
             direct_load (SHGrid): The mass redistribution forcing the system.
-            rotational_feedbacks (bool): Whether to calculate polar wander effects.
+            rotational_feedbacks (bool | str): True for the full feedback,
+                "axial" for the axial component alone, False for none.
             rtol (float): The relative tolerance for convergence, measured as the
                 change in sea level over the oceans between iterations relative
                 to its magnitude.

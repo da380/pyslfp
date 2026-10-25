@@ -310,7 +310,7 @@ class EarthModel:
                 the path of a file written by `LoveNumbers.write`. If None, the
                 shipped PREM table is used, downloaded on first use. The table
                 must be real and reach `lmax`.
-            love_number_file (Optional[str | Path]): The older name of
+            love_number_file (Optional[str | Path]): An alias of
                 `love_numbers` for a path; one of the two may be given.
             grid (str): The pyshtools grid format ("DH", "DH2" or "GLQ").
                 Defaults to "DH".

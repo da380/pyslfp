@@ -137,7 +137,6 @@ class BaseIceModel(ABC):
         if "symmetric" not in plot_kwargs and field == "sea_level":
             plot_kwargs["symmetric"] = True
 
-        # Use the newly updated plot function from plotting.py
         ax, artist = plot(initial_data, **plot_kwargs)
         fig = ax.figure
 

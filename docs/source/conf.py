@@ -75,10 +75,8 @@ html_static_path = ["_static"]
 # sphinx-apidoc runs from here rather than from .readthedocs.yaml or a Makefile
 # rule, so that a local build, a CI build and a Read the Docs build all produce
 # the same pages from the same settings. The .rst files it writes are build
-# output, not source, and are gitignored; previously they were committed and
-# then hand-edited to add `:no-index:`, which meant every added or renamed
-# module needed a manual regeneration step to avoid quietly disappearing from
-# the documentation.
+# output, not source, and are gitignored, so a module that is added or renamed
+# appears in the documentation without a manual regeneration step.
 
 _SOURCE_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.abspath(os.path.join(_SOURCE_DIR, "..", ".."))

@@ -3,10 +3,10 @@
 The library's outputs are physical, so running the same body, history
 and (SI-anchored) measurements under two different non-dimensional
 schemes for `EarthModelParameters` must give the same SI-converted
-answers.  This guards the scales refactor (docs/planning/
-scales_plan.md): any formula that silently dropped a factor because
-the default scheme makes it one (g, G, a density ratio) breaks
-covariance here before it breaks a physical result.
+answers.  This guards the rule of docs/source/units.rst: any formula
+that silently dropped a factor because the default scheme makes it one
+(g, G, a density ratio) breaks covariance here before it breaks a
+physical result.
 
 The material's frame is held fixed (planetmodel's geophysical scales);
 only the sea-level side's scheme varies, which is exactly the boundary
@@ -42,7 +42,7 @@ PHI_ANCHOR = 1.0e7  # m^2 s^-2
 OMEGA_ANCHOR = 1.0e-4  # s^-1
 
 SCHEMES = {
-    # g = 1: the scheme of the pre-refactor defaults
+    # g = 1: the mean radius, mean density and surface gravity as units
     "classic": dict(
         length_scale=MEAN_RADIUS,
         density_scale=3.0 * MASS / (4.0 * np.pi * MEAN_RADIUS**3),
@@ -108,7 +108,8 @@ def _si_outputs(body, scheme):
 
     # the measurement duals, SI-anchored so every scheme poses the same
     # physical functional (the potential dual scales as T^2 and the
-    # angular-velocity dual as 1/T, the trap of open-issues issue 2)
+    # angular-velocity dual as 1/T, so a dual fixed in non-dimensional
+    # units would pose a different functional in each scheme)
     rng = np.random.default_rng(7)
 
     def dual():

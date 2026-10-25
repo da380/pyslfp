@@ -3,7 +3,6 @@ import pytest
 import requests
 from unittest.mock import patch, MagicMock
 
-# Updated import paths
 import pyslfp.data.downloader as dl
 import pyslfp.data.config as cfg
 

@@ -33,7 +33,7 @@ def test_series_switch_is_seamless():
     # precision through the small-h cancellation.  phi1 = 1 - beta is
     # accurate to round-off everywhere; beta itself loses a few digits
     # just above the switch, where the quotient's cancellation error is
-    # amplified by phi1 / beta -- the port keeps AdGIA's grade.
+    # amplified by phi1 / beta, the same accuracy as AdGIA's evaluation.
     hs = np.logspace(-8, 1, 50)
     _, _, beta_s = exponential_trapezoid_weights(hs)
     phi1 = -np.expm1(-hs) / hs

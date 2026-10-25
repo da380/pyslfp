@@ -63,8 +63,10 @@ operator = ViscoelasticOperator(Rheology.maxwell(material, viscosity), LMAX)
 # The background state is what ICE-7G records at 26 ka: being the
 # product of an inversion, it carries a sea level history alongside the
 # ice, so the state can be read straight off it. A thickness-only ice
-# model would instead need its initial sea level found by iteration
-# against the present day (`pyslfp.viscoelastic.calibrate_initial_sea_level`).
+# model would instead need its initial sea level chosen so that the run
+# reaches the observed present day: `run_ice_history(...,
+# final_sea_level=...)` does this, by the methods of
+# `SeaLevelEvolution.calibrate_initial_sea_level`.
 
 # %%
 earth_model = sl.EarthModel.from_planet_model(model, LMAX, mesh=mesh)

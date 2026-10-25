@@ -18,8 +18,10 @@ from .functionals import (
     fit_decay_time,
 )
 from .evolution import (
+    FinalSeaLevelMisfit,
     ForwardTrajectory,
     IceKernels,
+    InitialSeaLevelCalibration,
     Measurement,
     SeaLevelEvolution,
     SeaLevelSnapshot,
@@ -38,10 +40,12 @@ __all__ = [
     "DecayTimeFit",
     "decay_time_measurement",
     "fit_decay_time",
+    "FinalSeaLevelMisfit",
     "ForwardTrajectory",
     "SCHEMES",
     "Rheology",
     "IceKernels",
+    "InitialSeaLevelCalibration",
     "Measurement",
     "SeaLevelEvolution",
     "calibrate_initial_sea_level",

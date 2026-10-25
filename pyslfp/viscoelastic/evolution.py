@@ -29,6 +29,8 @@ driver converts at the boundary between the two.
 
 from __future__ import annotations
 
+import copy
+import warnings
 from collections.abc import Callable, Sequence
 from typing import Optional
 from dataclasses import dataclass, field, replace
@@ -47,6 +49,11 @@ from .operator import ViscoelasticOperator, ViscoelasticState
 from .rheology import Rheology
 
 __all__ = [
+    "FinalSeaLevelMisfit",
+    "ForwardTrajectory",
+    "IceKernels",
+    "InitialSeaLevelCalibration",
+    "Measurement",
     "SeaLevelSnapshot",
     "SeaLevelEvolution",
     "calibrate_initial_sea_level",
@@ -226,6 +233,50 @@ class SeaLevelSnapshot:
     #: steps.
     load_coefficients: np.ndarray | None = field(default=None, repr=False)
     tide_coefficients: np.ndarray | None = field(default=None, repr=False)
+
+
+@dataclass(frozen=True)
+class FinalSeaLevelMisfit:
+    """The misfit of a run's final sea level to a target, and its
+    gradient with respect to the initial sea level.
+
+    With S0 the background state's sea level, xi(t_f) the sea level
+    change at the last date and S_f the target,
+
+        J = (1/2) int w (S0 + xi(t_f) - S_f)^2 dS,
+
+    `value` is J, `residual` the field S0 + xi(t_f) - S_f, and
+    `gradient` the derivative of J with respect to S0 in the surface
+    pairing (None when not asked for).  `snapshots` and
+    `internal_state` are those of the forward run."""
+
+    value: float
+    residual: SHGrid = field(repr=False)
+    gradient: Optional[SHGrid] = field(repr=False)
+    snapshots: list[SeaLevelSnapshot] = field(repr=False)
+    internal_state: ViscoelasticState = field(repr=False)
+
+
+@dataclass(frozen=True)
+class InitialSeaLevelCalibration:
+    """The outcome of calibrating the initial sea level against a final
+    one.
+
+    `state` is the calibrated background state at the first date, and
+    `snapshots` and `internal_state` are the run from it.  `misfits`
+    holds the weighted root-mean-square residual of every run, in the
+    Earth model's units, and `updates` the largest update of each
+    iteration relative to the largest value of the initial sea level;
+    `converged` says whether the tolerance was met."""
+
+    state: EarthState = field(repr=False)
+    snapshots: list[SeaLevelSnapshot] = field(repr=False)
+    internal_state: ViscoelasticState = field(repr=False)
+    misfits: list[float]
+    updates: list[float]
+    converged: bool
+    method: str
+    shorelines: str
 
 
 def _record_stride(record: bool | int) -> int:
@@ -810,6 +861,8 @@ class SeaLevelEvolution:
         rtol: float = 1e-9,
         verbose: bool = False,
         record: bool | int = False,
+        final_sea_level: Optional[SHGrid] = None,
+        calibration: str = "fixed_point",
     ) -> tuple[list[SeaLevelSnapshot], ViscoelasticState]:
         """Integrates an ice history given by any ice model.
 
@@ -831,6 +884,14 @@ class SeaLevelEvolution:
 
         `record` keeps the internal states for a viscosity-kernel
         adjoint, every node or on a checkpoint stride; see `run`.
+
+        Given `final_sea_level`, the sea level at the last date, the
+        initial sea level is first calibrated so that the run reaches
+        it, by `calibrate_initial_sea_level` with the method named by
+        `calibration` ("fixed_point" or "gradient") and its defaults
+        otherwise; the background state's sea level is the starting
+        guess, and the evolution adopts the calibrated state.  The run
+        returned is the one from that state.
         """
         if shorelines not in ("frozen", "migrating"):
             raise ValueError(
@@ -846,6 +907,30 @@ class SeaLevelEvolution:
         if not np.isclose(ice_model.length_scale, parameters.length_scale):
             raise ValueError(
                 "the ice model's length scale differs from the Earth model's"
+            )
+        if final_sea_level is not None:
+            calibrated = self.calibrate_initial_sea_level(
+                dates,
+                ice_model,
+                final_sea_level,
+                shorelines=shorelines,
+                method=calibration,
+                rotational_feedbacks=rotational_feedbacks,
+                solver_rtol=rtol,
+                verbose=verbose,
+            )
+            if not record:
+                return calibrated.snapshots, calibrated.internal_state
+            # the calibration's runs keep no trajectory, so a recording
+            # run is repeated from the calibrated state
+            return self.run_ice_history(
+                dates,
+                ice_model,
+                shorelines=shorelines,
+                rotational_feedbacks=rotational_feedbacks,
+                rtol=rtol,
+                verbose=verbose,
+                record=record,
             )
         if shorelines == "migrating":
             return self._run_migrating(
@@ -1026,6 +1111,274 @@ class SeaLevelEvolution:
                 )
             )
         return snapshots, vstate
+
+    # -- the initial sea level ------------------------------------------------
+
+    def _with_state(self, state: EarthState) -> SeaLevelEvolution:
+        """The same evolution over another background state.  The
+        caches of effective Love numbers and solvers depend on the
+        operator and the Earth model only, so they are shared."""
+        if state.model is not self.model:
+            raise ValueError("the state must use the evolution's Earth model")
+        sibling = copy.copy(self)
+        sibling.state = state
+        return sibling
+
+    def final_sea_level_misfit(
+        self,
+        dates: Sequence[float],
+        ice_model: BaseIceModel,
+        final_sea_level: SHGrid,
+        *,
+        shorelines: str = "frozen",
+        weights: Optional[SHGrid] = None,
+        gradient: bool = True,
+        rotational_feedbacks: bool = True,
+        rtol: float = 1e-9,
+        verbose: bool = False,
+    ) -> FinalSeaLevelMisfit:
+        """The misfit of the run's final sea level to a target, and its
+        gradient with respect to the initial sea level.
+
+        The background state is the initial state, so its sea level is
+        S0 and, under migrating shorelines, its ice thickness must be
+        the history's at the first date.  The objective is
+
+            J = (1/2) int w (S0 + xi(t_f) - S_f)^2 dS,
+
+        with S_f the target at the last date and w the `weights` (one
+        everywhere by default).  Its gradient, following Yu et al.
+        (2025, eq. 87), is the weighted residual plus the initial sea
+        level kernel of a sea-level measurement of that residual at the
+        last date: the initial sea level enters the absolute sea level
+        directly, and the load at each date through rho_w (C_n - C_0)
+        S0.  Under frozen shorelines the ocean function never changes,
+        the kernel vanishes identically and no adjoint sweep is run;
+        the gradient is then the weighted residual, and a unit step
+        down it is the classical update.  Under migrating shorelines
+        the kernel costs one adjoint sweep, about the cost of the
+        forward run.  The gradient is exact away from changes of the
+        initial ocean function itself, where J is not differentiable.
+
+        Args:
+            dates: Kiloyears before present, decreasing; the last is
+                the date of the target.
+            ice_model: The ice history.
+            final_sea_level: The target sea level at the last date.
+            shorelines: "frozen" or "migrating", as for
+                `run_ice_history`.
+            weights: Non-negative weights on the residual, an SHGrid;
+                None weights every point equally.
+            gradient: Whether to compute the gradient.
+            rotational_feedbacks, rtol, verbose: As for
+                `run_ice_history`.
+
+        Returns:
+            The misfit, its residual and gradient, and the forward run.
+        """
+        model = self.model
+        model.check_field(final_sea_level)
+        if weights is not None:
+            model.check_field(weights)
+            if np.any(weights.data < 0.0):
+                raise ValueError("the weights must be non-negative")
+        snapshots, vstate = self.run_ice_history(
+            dates,
+            ice_model,
+            shorelines=shorelines,
+            rotational_feedbacks=rotational_feedbacks,
+            rtol=rtol,
+            verbose=verbose,
+        )
+        residual = (
+            self.state.sea_level.data
+            + snapshots[-1].sea_level_change.data
+            - final_sea_level.data
+        )
+        w = 1.0 if weights is None else weights.data
+        value = 0.5 * model.integrate(
+            SHGrid.from_array(w * residual**2, grid=model.grid, copy=False)
+        )
+        grad = None
+        if gradient:
+            g = w * residual
+            if shorelines == "migrating":
+                kernels = self.adjoint_ice_history(
+                    dates,
+                    {float(dates[-1]): SHGrid.from_array(g, grid=model.grid)},
+                    ocean_functions=[snap.ocean_function for snap in snapshots],
+                    rotational_feedbacks=rotational_feedbacks,
+                    rtol=rtol,
+                )
+                g = g + kernels.initial_sea_level.data
+            grad = SHGrid.from_array(g, grid=model.grid)
+        return FinalSeaLevelMisfit(
+            float(value),
+            SHGrid.from_array(residual, grid=model.grid),
+            grad,
+            snapshots,
+            vstate,
+        )
+
+    def calibrate_initial_sea_level(
+        self,
+        dates: Sequence[float],
+        ice_model: BaseIceModel,
+        final_sea_level: SHGrid,
+        *,
+        shorelines: str = "frozen",
+        method: str = "fixed_point",
+        weights: Optional[SHGrid] = None,
+        step: float = 1.0,
+        iterations: int = 10,
+        rtol: float = 1e-4,
+        anderson_memory: int = 5,
+        rotational_feedbacks: bool = True,
+        solver_rtol: float = 1e-9,
+        verbose: bool = False,
+    ) -> InitialSeaLevelCalibration:
+        """Calibrates the initial sea level so that the run reaches a
+        given final sea level, and adopts the calibrated state.
+
+        A thickness-only ice history leaves the initial sea level S0 to
+        be found, and the standard device is to choose it so that the
+        run reproduces the observed present-day sea level S_f.  Writing
+        the final sea level as S0 + xi(t_f; S0), two methods are
+        offered:
+
+        - "fixed_point": the classical update S0 <- S0 - r, with r the
+          residual S0 + xi(t_f) - S_f; that is, S0 <- S_f - xi(t_f).
+          It is Newton's method for S0 + xi(t_f; S0) = S_f with the
+          Jacobian I + d xi / d S0 replaced by the identity, which is
+          exact under frozen shorelines, where xi depends on S0 only
+          through the initial ocean function; it converges at the rate
+          set by the dependence of xi on S0 through the migrating
+          shorelines.  With `weights` it updates only where they are
+          positive.
+        - "gradient": steepest descent on the weighted misfit of
+          `final_sea_level_misfit`, S0 <- S0 - step grad J, with the
+          gradient from the adjoint (Yu et al. 2025, Section 3.9).
+          Under frozen shorelines with unit weights and step it is the
+          classical update exactly.  It is the method for an objective
+          the classical update does not serve: a weighted or partial
+          comparison with the present.
+
+        Either update is accelerated by Anderson mixing, a multisecant
+        quasi-Newton method built from the iterates.  The iteration
+        stops when the largest update falls below `rtol` times the
+        largest value of S0.
+
+        The evolution's background state supplies the starting guess
+        and the Caspian option; its ice thickness is replaced by the
+        history's at the first date.  On return the evolution's state
+        is the calibrated one, so that later runs and adjoints use it.
+
+        Args:
+            dates: Kiloyears before present, decreasing; the last is
+                the date of the target.
+            ice_model: The ice history; its thickness alone is used.
+            final_sea_level: The target sea level at the last date, an
+                SHGrid in the Earth model's units.
+            shorelines: "frozen" or "migrating", as for
+                `run_ice_history`.
+            method: "fixed_point" or "gradient".
+            weights: Non-negative weights on the misfit, an SHGrid; None
+                weights every point equally.
+            step: The step length of either update; one is the natural
+                value.
+            iterations: The most forward runs taken.
+            rtol: The convergence tolerance on the update.
+            anderson_memory: The depth of the acceleration; zero gives
+                the plain iteration.
+            rotational_feedbacks: As for `run_ice_history`.
+            solver_rtol: The tolerance of the sea level solves.
+            verbose: Prints each iteration's misfit and update.
+
+        Returns:
+            The calibration, with the calibrated state and its run.
+        """
+        if method not in ("fixed_point", "gradient"):
+            raise ValueError(
+                f"method must be 'fixed_point' or 'gradient', got {method!r}"
+            )
+        if iterations < 1:
+            raise ValueError("iterations must be at least one")
+        model = self.model
+        dates = np.asarray(dates, dtype=float)
+        ice_start = ice_model.get_ice_thickness(
+            float(dates[0]),
+            model.lmax,
+            grid=model.grid_name,
+            sampling=model.sampling,
+            extend=model.extend,
+        )
+        if weights is None:
+            w = np.ones_like(final_sea_level.data)
+        else:
+            model.check_field(weights)
+            w = weights.data
+        support = (w > 0.0).astype(float)
+        total_weight = model.integrate(SHGrid.from_array(w, grid=model.grid))
+
+        mixer = AndersonMixer(anderson_memory)
+        guess = self.state.sea_level.data.copy()
+        misfits: list[float] = []
+        updates: list[float] = []
+        converged = False
+        for n in range(iterations):
+            state = EarthState(
+                ice_start,
+                SHGrid.from_array(guess, grid=model.grid),
+                model,
+                exclude_caspian=self.state.exclude_caspian,
+            )
+            misfit = self._with_state(state).final_sea_level_misfit(
+                dates,
+                ice_model,
+                final_sea_level,
+                shorelines=shorelines,
+                weights=weights,
+                gradient=method == "gradient",
+                rotational_feedbacks=rotational_feedbacks,
+                rtol=solver_rtol,
+            )
+            misfits.append(float(np.sqrt(2.0 * misfit.value / total_weight)))
+            if method == "fixed_point":
+                direction = support * misfit.residual.data
+            else:
+                direction = misfit.gradient.data
+            updated = mixer.update(guess, guess - step * direction)
+            change = float(np.max(np.abs(updated - guess)))
+            scale = float(np.max(np.abs(updated)))
+            updates.append(change / scale)
+            if verbose:
+                print(
+                    f"calibration iteration {n + 1}: misfit {misfits[-1]:.3e}, "
+                    f"relative update {updates[-1]:.3e}"
+                )
+            if change <= rtol * scale:
+                converged = True
+                break
+            guess = updated
+        if not converged:
+            warnings.warn(
+                f"the initial sea level calibration did not converge in "
+                f"{iterations} iterations (relative update {updates[-1]:.3e}, "
+                f"tolerance {rtol:.1e}); the last state run is returned",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        self.state = state
+        return InitialSeaLevelCalibration(
+            state,
+            misfit.snapshots,
+            misfit.internal_state,
+            misfits,
+            updates,
+            converged,
+            method,
+            shorelines,
+        )
 
     def _as_trajectory(self, internal_states, dates) -> ForwardTrajectory:
         """Normalises the recorded forward trajectory an adjoint was
@@ -1788,23 +2141,19 @@ def calibrate_initial_sea_level(
     verbose: bool = False,
 ) -> EarthState:
     """The background state at the first date whose forward run reaches
-    the observed present-day sea level.
+    the observed present-day sea level, under frozen shorelines.
 
     A generic ice model carries no sea level, so the initial state must
-    be found: the standard device is iteration against the present.
-    Starting from the present-day sea level as the guess, each pass
-    runs the history forward and replaces the initial guess by the
-    observed present-day field minus the modelled change,
+    be found. Starting from the present-day sea level as the guess, the
+    classical fixed point
 
-        SL(t0) <- SL(present, observed) - xi(present; SL(t0)),
+        SL(t0) <- SL(present, observed) - xi(present; SL(t0))
 
-    which converges quickly because xi depends on the initial state
-    only through the shorelines and the grounding of the load.  The
-    passes are accelerated by Anderson mixing -- a multisecant
-    quasi-Newton built from the iterates themselves, so no Jacobian
-    solves are needed -- which tightens the convergence where the
-    shoreline feedback is strong.  The ICE-NG models carry their own
-    (inverted) initial sea level and do not need this.
+    is iterated with Anderson acceleration.  This is a shorthand for
+    `SeaLevelEvolution.calibrate_initial_sea_level`, which also offers
+    migrating shorelines, weights and the adjoint gradient.  The ICE-NG
+    models carry their own (inverted) initial sea level and do not need
+    it.
 
     Args:
         operator: The radial viscoelastic operator.
@@ -1821,10 +2170,10 @@ def calibrate_initial_sea_level(
             relative to its largest value.
         anderson_memory: The depth of the quasi-Newton acceleration;
             0 is the plain fixed-point iteration.
-        verbose: Prints each pass's update.
+        verbose: Prints each pass's misfit and update.
 
     Returns:
-        The converged background `EarthState` at the first date.
+        The calibrated background `EarthState` at the first date.
     """
     model.check_field(present_sea_level)
     ice_start = ice_model.get_ice_thickness(
@@ -1834,32 +2183,17 @@ def calibrate_initial_sea_level(
         sampling=model.sampling,
         extend=model.extend,
     )
-    mixer = AndersonMixer(anderson_memory)
-    initial = present_sea_level
-    state = None
-    for n in range(iterations):
-        state = EarthState(ice_start, initial, model, exclude_caspian=exclude_caspian)
-        evolution = SeaLevelEvolution(operator, state, scheme=scheme)
-        snapshots, _ = evolution.run_ice_history(
-            dates,
-            ice_model,
-            rotational_feedbacks=rotational_feedbacks,
-            verbose=verbose,
-        )
-        updated = SHGrid.from_array(
-            mixer.update(
-                initial.data,
-                present_sea_level.data - snapshots[-1].sea_level_change.data,
-            ),
-            grid=model.grid,
-        )
-        change = np.max(np.abs(updated.data - initial.data))
-        scale = np.max(np.abs(updated.data))
-        if verbose:
-            print(f"calibration pass {n + 1}: relative update {change / scale:.3e}")
-        initial = updated
-        if change <= rtol * scale:
-            return EarthState(
-                ice_start, initial, model, exclude_caspian=exclude_caspian
-            )
-    return EarthState(ice_start, initial, model, exclude_caspian=exclude_caspian)
+    guess = EarthState(
+        ice_start, present_sea_level, model, exclude_caspian=exclude_caspian
+    )
+    evolution = SeaLevelEvolution(operator, guess, scheme=scheme)
+    return evolution.calibrate_initial_sea_level(
+        dates,
+        ice_model,
+        present_sea_level,
+        iterations=iterations,
+        rtol=rtol,
+        anderson_memory=anderson_memory,
+        rotational_feedbacks=rotational_feedbacks,
+        verbose=verbose,
+    ).state

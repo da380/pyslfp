@@ -278,6 +278,215 @@ def test_initial_sea_level_calibration(setting):
     )
 
 
+def _marine_truth(material, earth):
+    """The marine cap's history over a known, non-uniform initial sea
+    level, and the final sea level its migrating run reaches: the round
+    trip the calibration must invert, with flotation cells flipping on
+    the way."""
+    ice_model, state = _marine_history_state(material, earth)
+    lats = earth.lats()[:, None] * np.ones_like(earth.lons())[None, :]
+    lons = np.ones_like(earth.lats())[:, None] * earth.lons()[None, :]
+    bump = (200.0 / earth.parameters.length_scale) * (
+        np.cos(np.radians(lats)) * np.cos(np.radians(lons))
+    )
+    truth = EarthState(
+        state.ice_thickness,
+        SHGrid.from_array(state.sea_level.data + bump, grid=earth.grid),
+        earth,
+        exclude_caspian=False,
+    )
+    operator = _maxwell_operator(material)
+    dates = np.linspace(10.0, 0.0, 6)
+    snapshots, _ = SeaLevelEvolution(operator, truth).run_ice_history(
+        dates, ice_model, shorelines="migrating"
+    )
+    assert not np.array_equal(
+        snapshots[-1].ocean_function.data, truth.ocean_function.data
+    )
+    final = SHGrid.from_array(
+        truth.sea_level.data + snapshots[-1].sea_level_change.data, grid=earth.grid
+    )
+    return operator, ice_model, truth, dates, final, lats, lons
+
+
+def test_calibration_methods_agree_under_frozen_shorelines(setting):
+    """Under frozen shorelines the initial sea level kernel vanishes, so
+    a unit step down the gradient is the classical update: the two
+    methods take identical iterates.  The evolution adopts the result."""
+    material, earth, _, _, _ = setting
+    ice_model, truth = _history_state(material, earth)
+    operator = _maxwell_operator(material)
+    dates = np.linspace(10.0, 0.0, 6)
+    snapshots, _ = SeaLevelEvolution(operator, truth).run_ice_history(dates, ice_model)
+    final = SHGrid.from_array(
+        truth.sea_level.data + snapshots[-1].sea_level_change.data, grid=earth.grid
+    )
+    results = {}
+    for method in ("fixed_point", "gradient"):
+        guess = EarthState(truth.ice_thickness, final, earth, exclude_caspian=False)
+        evolution = SeaLevelEvolution(operator, guess)
+        results[method] = evolution.calibrate_initial_sea_level(
+            dates, ice_model, final, method=method, rtol=1e-8
+        )
+        assert evolution.state is results[method].state
+        assert results[method].converged
+    a, b = results["fixed_point"], results["gradient"]
+    assert a.misfits == b.misfits
+    assert np.array_equal(a.state.sea_level.data, b.state.sea_level.data)
+    scale = np.max(np.abs(truth.sea_level.data))
+    assert np.max(np.abs(a.state.sea_level.data - truth.sea_level.data)) < 1e-6 * scale
+
+
+def test_calibration_recovers_the_initial_sea_level_under_migrating_shorelines(
+    setting,
+):
+    """Both methods recover a known initial sea level from the final one
+    its migrating run reached.  Unaccelerated, the classical update
+    contracts faster than unit steps down the gradient: it is Newton's
+    method with the identity for the Jacobian I + A, contracting at the
+    rate of A, where the gradient step applies I + A^T and contracts at
+    about that of A + A^T."""
+    material, earth, _, _, _ = setting
+    operator, ice_model, truth, dates, final, _, _ = _marine_truth(material, earth)
+    scale = np.max(np.abs(truth.sea_level.data))
+    for method in ("fixed_point", "gradient"):
+        guess = EarthState(truth.ice_thickness, final, earth, exclude_caspian=False)
+        calibration = SeaLevelEvolution(operator, guess).calibrate_initial_sea_level(
+            dates,
+            ice_model,
+            final,
+            shorelines="migrating",
+            method=method,
+            iterations=12,
+            rtol=1e-9,
+        )
+        assert calibration.converged, method
+        error = np.max(np.abs(calibration.state.sea_level.data - truth.sea_level.data))
+        assert error < 1e-8 * scale, method
+    rates = {}
+    for method in ("fixed_point", "gradient"):
+        guess = EarthState(truth.ice_thickness, final, earth, exclude_caspian=False)
+        with pytest.warns(RuntimeWarning, match="did not converge"):
+            plain = SeaLevelEvolution(operator, guess).calibrate_initial_sea_level(
+                dates,
+                ice_model,
+                final,
+                shorelines="migrating",
+                method=method,
+                iterations=4,
+                rtol=1e-12,
+                anderson_memory=0,
+            )
+        rates[method] = plain.misfits[3] / plain.misfits[2]
+    assert rates["fixed_point"] < 0.5 * rates["gradient"] < 0.5
+
+
+def test_final_sea_level_misfit_gradient_matches_finite_differences(setting):
+    """About a migrating trajectory the adjoint gradient of the misfit
+    predicts central differences of it.  The perturbation flips no
+    flotation cell, so the misfit is quadratic along it; the direct term
+    alone is orthogonal to the perturbation here, so the agreement rests
+    on the initial sea level kernel."""
+    material, earth, _, _, _ = setting
+    operator, ice_model, truth, dates, final, lats, lons = _marine_truth(
+        material, earth
+    )
+    metre = earth.parameters.length_scale
+    target = SHGrid.from_array(
+        final.data + (50.0 / metre) * np.sin(np.radians(lats)), grid=earth.grid
+    )
+    evolution = SeaLevelEvolution(operator, truth)
+    base = evolution.final_sea_level_misfit(
+        dates, ice_model, target, shorelines="migrating"
+    )
+    direction = (
+        (30.0 / metre) * np.cos(np.radians(lats)) ** 2 * np.sin(np.radians(lons))
+    )
+
+    def pairing(field):
+        return earth.integrate(SHGrid.from_array(field * direction, grid=earth.grid))
+
+    predicted = pairing(base.gradient.data)
+    eps = 1e-2
+    values = []
+    for sign in (1.0, -1.0):
+        state = EarthState(
+            truth.ice_thickness,
+            SHGrid.from_array(
+                truth.sea_level.data + sign * eps * direction, grid=earth.grid
+            ),
+            earth,
+            exclude_caspian=False,
+        )
+        assert np.array_equal(state.ocean_function.data, truth.ocean_function.data)
+        values.append(
+            evolution._with_state(state)
+            .final_sea_level_misfit(
+                dates, ice_model, target, shorelines="migrating", gradient=False
+            )
+            .value
+        )
+    finite_difference = (values[0] - values[1]) / (2.0 * eps)
+    assert abs(predicted - finite_difference) < 1e-6 * abs(finite_difference)
+    assert abs(pairing(base.residual.data)) < 1e-6 * abs(finite_difference)
+
+
+def test_weighted_calibration_updates_only_where_weighted(setting):
+    """With weights that vanish over a band, the classical update leaves
+    the initial sea level at its guess there and fits the final sea
+    level everywhere else."""
+    material, earth, _, _, _ = setting
+    ice_model, truth = _history_state(material, earth)
+    operator = _maxwell_operator(material)
+    dates = np.linspace(10.0, 0.0, 6)
+    snapshots, _ = SeaLevelEvolution(operator, truth).run_ice_history(dates, ice_model)
+    final = SHGrid.from_array(
+        truth.sea_level.data + snapshots[-1].sea_level_change.data, grid=earth.grid
+    )
+    lats = earth.lats()[:, None] * np.ones_like(earth.lons())[None, :]
+    weights = SHGrid.from_array(
+        np.where(np.abs(lats) < 20.0, 0.0, 1.0), grid=earth.grid
+    )
+    guess = EarthState(truth.ice_thickness, final, earth, exclude_caspian=False)
+    calibration = SeaLevelEvolution(operator, guess).calibrate_initial_sea_level(
+        dates, ice_model, final, weights=weights, rtol=1e-8
+    )
+    assert calibration.converged
+    unweighted = weights.data == 0.0
+    assert np.array_equal(
+        calibration.state.sea_level.data[unweighted], final.data[unweighted]
+    )
+    reached = (
+        calibration.state.sea_level.data
+        + calibration.snapshots[-1].sea_level_change.data
+    )
+    scale = np.max(np.abs(final.data))
+    assert np.max(np.abs((reached - final.data)[~unweighted])) < 1e-6 * scale
+
+
+def test_run_ice_history_with_a_final_sea_level(setting):
+    """Given the final sea level, the run calibrates its initial state
+    first, adopts it, and reaches the target; a recording run keeps its
+    trajectory."""
+    material, earth, _, _, _ = setting
+    operator, ice_model, truth, dates, final, _, _ = _marine_truth(material, earth)
+    guess = EarthState(truth.ice_thickness, final, earth, exclude_caspian=False)
+    evolution = SeaLevelEvolution(operator, guess)
+    snapshots, _ = evolution.run_ice_history(
+        dates,
+        ice_model,
+        shorelines="migrating",
+        final_sea_level=final,
+        record=True,
+    )
+    assert evolution.state is not guess
+    reached = evolution.state.sea_level.data + snapshots[-1].sea_level_change.data
+    scale = np.max(np.abs(final.data))
+    # the default tolerance of the calibration bounds the last update
+    assert np.max(np.abs(reached - final.data)) < 1e-4 * scale
+    assert all(snap.internal_state is not None for snap in snapshots)
+
+
 class _ThinningCap(BaseIceModel):
     """The 5 km cap losing just one metre over the history: every cell
     stays grounded, so the shorelines cannot move."""

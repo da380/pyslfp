@@ -163,6 +163,7 @@ def test_averaging_operator(testing_state, sobolev):
         A,
         rng=np.random.default_rng(0),
         measure=domain_measure,
+        codomain_measure=inf.GaussianMeasure.from_standard_deviation(A.codomain, 1.0),
         trials=2,
         rtol=1e-5,
         atol=1e-5,

@@ -99,6 +99,7 @@ def test_sea_surface_height_operator(fingerprint_operator, remove_rot):
     """
     response_space = fingerprint_operator.codomain
     state = fingerprint_operator.state
+    b = state.model.parameters.mean_sea_floor_radius
 
     A = sea_surface_height_operator(
         state, response_space, remove_rotational_contribution=remove_rot
@@ -111,6 +112,7 @@ def test_sea_surface_height_operator(fingerprint_operator, remove_rot):
         A,
         rng=np.random.default_rng(0),
         measure=domain_measure,
+        codomain_measure=A.codomain.heat_measure(0.5 * b),
         trials=2,
         rtol=1e-4,
         atol=1e-4,
@@ -135,6 +137,7 @@ def test_altimetry_point_operator(fingerprint_operator, sample_points, remove_ro
         A,
         rng=np.random.default_rng(0),
         measure=domain_measure,
+        codomain_measure=inf.GaussianMeasure.from_standard_deviation(A.codomain, 1.0),
         trials=2,
         rtol=1e-4,
         atol=1e-4,
@@ -162,6 +165,7 @@ def test_altimetry_observation_model_adjoint(fingerprint_operator, sample_points
         A,
         rng=np.random.default_rng(0),
         measure=domain_measure,
+        codomain_measure=inf.GaussianMeasure.from_standard_deviation(A.codomain, 1.0),
         trials=2,
         rtol=1e-4,
         atol=1e-4,
@@ -185,6 +189,7 @@ def test_joint_altimetry_observation_model_adjoint(fingerprint_operator, sample_
         A,
         rng=np.random.default_rng(0),
         measure=domain_measure,
+        codomain_measure=inf.GaussianMeasure.from_standard_deviation(A.codomain, 1.0),
         trials=2,
         rtol=1e-4,
         atol=1e-4,

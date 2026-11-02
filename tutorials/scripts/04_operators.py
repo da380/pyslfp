@@ -140,6 +140,7 @@ report = check_operator(
     fingerprint,
     rng=np.random.default_rng(0),
     measure=fingerprint.load_measure_for_testing(),
+    codomain_measure=fingerprint.response_measure_for_testing(),
     trials=2,
     rtol=1e-4,
 )

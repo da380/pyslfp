@@ -5,7 +5,7 @@ equivalent. It also lists the changes in behaviour that a rename does not
 cover, and the gaps to be fixed in pygeoinf rather than worked around here.
 
 The port is released as pyslfp 3.1.0. The minimum versions become
-`pygeoinf>=2.1` and `planetmodel>=1.4.1`. The release notes should say that
+`pygeoinf>=2.1.1` and `planetmodel>=1.4.1`. The release notes should say that
 the spaces, operators and measures pyslfp returns are pygeoinf 2 objects.
 
 The v1 names were taken from the `v1-final` tag of pygeoinf and the v2
@@ -64,7 +64,7 @@ The area columns count uses in:
 | `DiagonalSparseMatrixLinearOperator.from_diagonal_values(dom, cod, v)` | `DiagonalLinearOperator(dom, v)` | lib, tst | Endomorphisms only, which is every pyslfp use. |
 | `op.extract_diagonal(parallel=, n_jobs=)` | `op.diagonals(n_jobs=)[0]`; `.eigenvalues` on a diagonal operator | lib | |
 | `op.matrix(dense=True)` | `op.matrix(form=)` | tut, H26 | Always dense. `form="auto"` gives the Galerkin form for a self-adjoint operator; say `"components"` where that is meant. |
-| `op.check(n_checks=, check_rtol=, domain_measure=, codomain_measure=)` | `pygeoinf.testing.check_operator(op, rng=, measure=, trials=, rtol=)` | tst, tut | Returns a `CheckReport`. There is no codomain measure; see §3. |
+| `op.check(n_checks=, check_rtol=, domain_measure=, codomain_measure=)` | `pygeoinf.testing.check_operator(op, rng=, measure=, codomain_measure=, trials=, rtol=)` | tst, tut | Returns a `CheckReport`; `codomain_measure` from pygeoinf 2.1.1. |
 
 ### Solvers
 
@@ -242,16 +242,7 @@ Unchanged and used: `HilbertSpace` (type hints only), `EuclideanSpace`,
 
 ## 3. Gaps in pygeoinf
 
-1. **A codomain measure in `check_operator`.** v1's `check` drew the
-   codomain probes from a measure. pyslfp's tests use smooth response
-   measures, because the fingerprint operator's adjoint is accurate only to
-   the solver tolerance. v2 probes the codomain with white noise; pygeoinf's
-   `CODE_NOTES.md` already records this. It is wanted later, but does not
-   block the port. In the meantime the operator checks run on the
-   analytical test states (`EarthState.for_testing`), where the solves
-   converge tightly.
-
-2. **Exact conditioning of a semidefinite prior.** `GaussianMeasure.condition`
+1. **Exact conditioning of a semidefinite prior.** `GaussianMeasure.condition`
    requires A C A* to be known positive definite, and infers that only from
    a positive-definite C and a surjective A. A masked prior P C P* is
    semidefinite, so conditioning it is refused even where A C A* is
@@ -268,7 +259,7 @@ Unchanged and used: `HilbertSpace` (type hints only), `EuclideanSpace`,
    submodule will also constrain masked components where A P = A need not
    hold.
 
-3. **A tensor product of spaces.** It is not needed for the port. It is
+2. **A tensor product of spaces.** It is not needed for the port. It is
    needed later for model spaces that vary in time and for the viscoelastic
    operators on ice histories.
 

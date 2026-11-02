@@ -68,6 +68,7 @@ def test_spatial_projection_operators(testing_state, sobolev):
             A,
             rng=np.random.default_rng(0),
             measure=domain_measure,
+            codomain_measure=domain_measure,
             trials=2,
             rtol=1e-4,
             atol=1e-4,
@@ -103,6 +104,9 @@ def test_spatial_averaging_operators(testing_state, sobolev):
             A,
             rng=np.random.default_rng(0),
             measure=domain_measure,
+            codomain_measure=inf.GaussianMeasure.from_standard_deviation(
+                ops[0].codomain, 1.0
+            ),
             trials=2,
             rtol=1e-4,
             atol=1e-4,
@@ -154,6 +158,7 @@ def test_remove_ocean_average_adjoint(testing_state, sobolev):
         A,
         rng=np.random.default_rng(0),
         measure=domain_measure,
+        codomain_measure=domain_measure,
         trials=2,
         rtol=1e-4,
         atol=1e-4,
@@ -188,6 +193,7 @@ def test_ice_sheet_basin_operators(testing_state, sobolev):
         A,
         rng=np.random.default_rng(0),
         measure=domain_measure,
+        codomain_measure=inf.GaussianMeasure.from_standard_deviation(A.codomain, 1.0),
         trials=2,
         rtol=1e-4,
         atol=1e-4,
@@ -273,6 +279,9 @@ def test_region_routing_adjoints(testing_state, sobolev):
         avg_op,
         rng=np.random.default_rng(0),
         measure=domain_measure,
+        codomain_measure=inf.GaussianMeasure.from_standard_deviation(
+            avg_op.codomain, 1.0
+        ),
         trials=2,
         rtol=1e-4,
         atol=1e-4,
@@ -283,6 +292,7 @@ def test_region_routing_adjoints(testing_state, sobolev):
         proj_op,
         rng=np.random.default_rng(0),
         measure=domain_measure,
+        codomain_measure=domain_measure,
         trials=2,
         rtol=1e-4,
         atol=1e-4,

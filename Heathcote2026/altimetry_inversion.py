@@ -44,6 +44,28 @@ plt.rcParams.update(
 )
 
 
+def surrogate_woodbury_preconditioner(normal_operator, forward, prior, noise, solver):
+    """Approximates the inverse of a data-space normal operator A Q A* + R
+    by the Woodbury identity applied to a cheaper surrogate problem,
+
+        R^-1 - R^-1 A (Q^-1 + A* R^-1 A)^-1 A* R^-1,
+
+    with A, Q and R the surrogate's forward operator, prior covariance and
+    noise covariance. Q^-1 and R^-1 are the measures' precisions where they
+    have them, and are otherwise found with `solver`, which also inverts the
+    inner operator on the surrogate's model space.
+    """
+    woodbury = inf.WoodburyPreconditioner(
+        forward,
+        prior.covariance,
+        noise.covariance,
+        solver=solver,
+        prior_inverse=prior.precision,
+        noise_inverse=noise.precision,
+    )
+    return woodbury(normal_operator)
+
+
 def parse_arguments():
     parser = argparse.ArgumentParser(
         description="Extended Bayesian inversion of Altimetry data (Ice, Dyn, Rho)."
@@ -338,12 +360,10 @@ def main():
         )
 
     print("Setting up Bayesian Inversion...")
-    forward_problem = inf.LinearForwardProblem(
-        forward_op, data_error_measure=noise_measure
-    )
+    forward_problem = inf.LinearForwardProblem(forward_op, error=noise_measure)
     model, data = forward_problem.synthetic_model_and_data(model_prior)
-    data_measure = noise_measure.affine_mapping(translation=data)
-    inverse_problem = inf.LinearBayesianInversion(forward_problem, model_prior)
+    data_measure = noise_measure.translate(data)
+    inverse_problem = inf.LinearGaussianInversion(forward_problem, model_prior)
 
     # ------------------ 2. PRECONDITIONER SETUP ------------------
     print(
@@ -383,30 +403,31 @@ def main():
     )
 
     print("Constructing Woodbury preconditioner from unconstrained surrogate model...")
-    woodbury_solver = inf.LUSolver(
-        galerkin=True, parallel=args.parallel, n_jobs=args.max_jobs
-    )
-    woodbury_preconditioner = inverse_problem.surrogate_woodbury_data_preconditioner(
+    woodbury_solver = inf.LUSolver(n_jobs=args.max_jobs if args.parallel else None)
+    woodbury_preconditioner = surrogate_woodbury_preconditioner(
+        inverse_problem.normal_operator,
+        surr_forward_op,
+        surr_model_prior,
+        surr_noise_measure,
         woodbury_solver,
-        alternate_forward_operator=surr_forward_op,
-        alternate_prior_measure=surr_model_prior,
-        alternate_data_error_measure=surr_noise_measure,
     )
 
     alpha = 0.1
     preconditioner = (
         1 - alpha
-    ) * woodbury_preconditioner + alpha * surr_noise_measure.inverse_covariance
+    ) * woodbury_preconditioner + alpha * surr_noise_measure.precision
 
     # ------------------ 3. POSTERIOR SOLVE ------------------
-    callback = inf.ProgressCallback()
-    solver = inf.CGSolver(callback=callback, rtol=0.01 * args.noise_std_factor)
+    callback = inf.ProgressCallback(report=print)
+    solver = inf.CGSolver(
+        callback=callback,
+        rtol=0.01 * args.noise_std_factor,
+        preconditioner=preconditioner,
+    )
 
     print("\nSolving for 3-component posterior expectation...")
-    model_posterior = inverse_problem.model_posterior_measure(
-        data, solver, preconditioner=preconditioner
-    )
-    print(f"\nSolution reached in {solver.iterations} iterations.")
+    model_posterior = inverse_problem.with_solver(solver)(data)
+    print(f"\nSolution reached in {callback.iterations} iterations.")
 
     # ------------------ 4. GMSL & METRICS ------------------
     true_gmsl_op = utils.true_gmsl_operator(state, load_space, continuous_sl) * mm_scale
@@ -414,21 +435,19 @@ def main():
 
     if args.plot_pdfs:
         print("Extracting GMSLR PDFs...")
-        prior_gmsl_measure = model_prior.affine_mapping(
-            operator=true_gmsl_op
+        prior_gmsl_measure = model_prior.affine_map(
+            true_gmsl_op
         ).with_dense_covariance()
-        alt_gmsl_measure = data_measure.affine_mapping(
-            operator=alt_avg_op
-        ).with_dense_covariance()
-        post_gmsl_measure = model_posterior.affine_mapping(
-            operator=true_gmsl_op
+        alt_gmsl_measure = data_measure.affine_map(alt_avg_op).with_dense_covariance()
+        post_gmsl_measure = model_posterior.affine_map(
+            true_gmsl_op
         ).with_dense_covariance()
 
         true_gmsl = true_gmsl_op(model)[0]
         kl_div = post_gmsl_measure.kl_divergence(prior_gmsl_measure)
 
-        post_var = post_gmsl_measure.covariance.matrix(dense=True)[0, 0]
-        prior_var = prior_gmsl_measure.covariance.matrix(dense=True)[0, 0]
+        post_var = post_gmsl_measure.covariance.matrix(form="components")[0, 0]
+        prior_var = prior_gmsl_measure.covariance.matrix(form="components")[0, 0]
         var_reduction = 100.0 * (1.0 - (post_var / prior_var))
 
         with open(metrics_file, "a") as f_metrics:
@@ -441,13 +460,13 @@ def main():
             )
 
         fig_pdf, ax_pdf = plt.subplots(figsize=(8, 5), layout="constrained")
-        inf.plot_1d_distributions(
+        inf.plot_densities(
             [post_gmsl_measure, alt_gmsl_measure],
-            true_value=true_gmsl,
+            truth=true_gmsl,
             ax=ax_pdf,
             title="",
             xlabel="Global Mean Sea Level Rise (mm)",
-            posterior_labels=["Bayesian", "Simple averaging"],
+            labels=["Bayesian", "Simple averaging"],
         )
         figures_to_save["gmslr_pdf"] = fig_pdf
 
@@ -458,21 +477,21 @@ def main():
             utils.gmsl_split_operators(state, load_space, continuous_sl)
         )
         split_op = inf.ColumnLinearOperator([bary_op, steric_gmsl_op]) * mm_scale
-        final_split_op = split_op.codomain.coordinate_projection @ split_op
+        final_split_op = split_op.codomain.coordinate_projection() @ split_op
 
         true_split = final_split_op(model)
 
-        prior_split = model_prior.affine_mapping(
-            operator=final_split_op
-        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(2, args.max_jobs))
-        post_split = model_posterior.affine_mapping(
-            operator=final_split_op
-        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(2, args.max_jobs))
+        prior_split = model_prior.affine_map(final_split_op).with_dense_covariance(
+            n_jobs=min(2, args.max_jobs) if args.parallel else None
+        )
+        post_split = model_posterior.affine_map(final_split_op).with_dense_covariance(
+            n_jobs=min(2, args.max_jobs) if args.parallel else None
+        )
 
         kl_div = post_split.kl_divergence(prior_split)
 
-        prior_cov_mat = prior_split.covariance.matrix(dense=True)
-        post_cov_mat = post_split.covariance.matrix(dense=True)
+        prior_cov_mat = prior_split.covariance.matrix(form="components")
+        post_cov_mat = post_split.covariance.matrix(form="components")
 
         def correlation(cov):
             return cov[0, 1] / np.sqrt(cov[0, 0] * cov[1, 1])
@@ -521,13 +540,13 @@ def main():
                 )
             f_metrics.write("-" * 70 + "\n")
 
-        axes = inf.plot_corner_distributions(
+        axes = inf.plot_corner(
             post_split,
-            prior_measure=prior_split,
-            true_values=true_split,
+            prior=prior_split,
+            truth=true_split,
             labels=["Barystatic SLR (mm)", "Steric SLR (mm)"],
             title="",
-            fill_density=False,
+            fill=False,
         )
         fig = plt.gcf()
         figures_to_save["gmslr_split_corner"] = fig
@@ -571,39 +590,39 @@ def main():
                 f"\nComputing pointwise standard deviation from {args.std_samples} posterior samples..."
             )
             samples = model_posterior.samples(
-                args.std_samples, parallel=args.parallel, n_jobs=args.max_jobs
+                args.std_samples, n_jobs=args.max_jobs if args.parallel else None
             )
             var_ice, var_dyn, var_rho = (
-                load_space.zero,
-                load_space.zero,
-                load_space.zero,
+                load_space.zero(),
+                load_space.zero(),
+                load_space.zero(),
             )
 
             for s_ice, s_dyn, s_rho in samples:
                 diff_ice = load_space.subtract(s_ice, post_ice)
                 load_space.axpy(
                     1.0 / args.std_samples,
-                    load_space.vector_multiply(diff_ice, diff_ice),
+                    load_space.multiply(diff_ice, diff_ice),
                     var_ice,
                 )
 
                 diff_dyn = load_space.subtract(s_dyn, post_dyn)
                 load_space.axpy(
                     1.0 / args.std_samples,
-                    load_space.vector_multiply(diff_dyn, diff_dyn),
+                    load_space.multiply(diff_dyn, diff_dyn),
                     var_dyn,
                 )
 
                 diff_rho = load_space.subtract(s_rho, post_rho)
                 load_space.axpy(
                     1.0 / args.std_samples,
-                    load_space.vector_multiply(diff_rho, diff_rho),
+                    load_space.multiply(diff_rho, diff_rho),
                     var_rho,
                 )
 
-            std_ice = load_space.vector_sqrt(var_ice)
-            std_dyn = load_space.vector_sqrt(var_dyn)
-            std_rho = load_space.vector_sqrt(var_rho)
+            std_ice = load_space.sqrt(var_ice)
+            std_dyn = load_space.sqrt(var_dyn)
+            std_rho = load_space.sqrt(var_rho)
             cmap_std = "Blues"
 
         fig_width = 22 if plot_std else 16
@@ -851,8 +870,8 @@ def main():
         for comp_name, comp_idx, pt, pt_name in scenarios:
             print(f"  Evaluating perturbation in {comp_name} at {pt}...")
 
-            dirac_rep = load_space.dirac_representation(pt)
-            test_vec = [load_space.zero, load_space.zero, load_space.zero]
+            dirac_rep = load_space.dirac(pt).representer
+            test_vec = [load_space.zero(), load_space.zero(), load_space.zero()]
             test_vec[comp_idx] = dirac_rep
 
             prior_cov = model_prior.covariance(test_vec)
@@ -940,21 +959,21 @@ def main():
             state, load_space, fp_op, regions_to_analyze
         )
         combined_op = inf.ColumnLinearOperator([op_sslc, op_dmslc, op_bmslc]) * mm_scale
-        final_op = combined_op.codomain.coordinate_projection @ combined_op
+        final_op = combined_op.codomain.coordinate_projection() @ combined_op
 
         true_vals = final_op(model)
-        post_meas = model_posterior.affine_mapping(
-            operator=final_op
-        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(3, args.max_jobs))
-        prior_meas = model_prior.affine_mapping(
-            operator=final_op
-        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(3, args.max_jobs))
+        post_meas = model_posterior.affine_map(final_op).with_dense_covariance(
+            n_jobs=min(3, args.max_jobs) if args.parallel else None
+        )
+        prior_meas = model_prior.affine_map(final_op).with_dense_covariance(
+            n_jobs=min(3, args.max_jobs) if args.parallel else None
+        )
 
         kl_div = post_meas.kl_divergence(prior_meas)
 
         # --- Extract Dense Covariance Matrices ---
-        prior_cov_mat = prior_meas.covariance.matrix(dense=True)
-        post_cov_mat = post_meas.covariance.matrix(dense=True)
+        prior_cov_mat = prior_meas.covariance.matrix(form="components")
+        post_cov_mat = post_meas.covariance.matrix(form="components")
 
         prior_trace = np.trace(prior_cov_mat)
         post_trace = np.trace(post_cov_mat)
@@ -1000,13 +1019,13 @@ def main():
             "BMSLC (mm)",
         ]
 
-        inf.plot_corner_distributions(
+        inf.plot_corner(
             post_meas,
-            prior_measure=prior_meas,
-            true_values=true_vals,
+            prior=prior_meas,
+            truth=true_vals,
             labels=labels,
             title="",
-            fill_density=False,
+            fill=False,
         )
         figures_to_save["regional_corner"] = plt.gcf()
 

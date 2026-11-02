@@ -266,7 +266,7 @@ def main():
         calib, scale_mm, state.model.parameters.density_scale
     )
 
-    joint_meas = inf.GaussianMeasure.from_direct_sum([model_prior, noise_meas])
+    joint_meas = inf.GaussianMeasure.from_product([model_prior, noise_meas])
     data_space = noise_meas.domain
 
     # The TRUE GMSLR uses the Sea Level Operator (SLC)
@@ -280,20 +280,23 @@ def main():
     err_gmsl_op = true_gmsl_op - est_gmsl_op
 
     op_true = inf.RowLinearOperator(
-        [true_gmsl_op, data_space.zero_operator(inf.EuclideanSpace(1))]
+        [
+            true_gmsl_op,
+            inf.LinearOperator.zero(data_space, codomain=inf.EuclideanSpace(1)),
+        ]
     )
     op_err = inf.RowLinearOperator([err_gmsl_op, -1.0 * alt_avg_op])
 
     print("Calculating exact analytical moments of the bias...")
-    true_meas = joint_meas.affine_mapping(operator=op_true)
-    err_meas = joint_meas.affine_mapping(operator=op_err)
-    alt_noise_meas = noise_meas.affine_mapping(operator=alt_avg_op)
+    true_meas = joint_meas.affine_map(op_true)
+    err_meas = joint_meas.affine_map(op_err)
+    alt_noise_meas = noise_meas.affine_map(alt_avg_op)
 
-    true_std = np.sqrt(true_meas.covariance.matrix(dense=True)[0, 0]) * scale_mm
-    err_std = np.sqrt(err_meas.covariance.matrix(dense=True)[0, 0]) * scale_mm
+    true_std = np.sqrt(true_meas.covariance.matrix(form="components")[0, 0]) * scale_mm
+    err_std = np.sqrt(err_meas.covariance.matrix(form="components")[0, 0]) * scale_mm
     err_mean = err_meas.expectation[0] * scale_mm
     alt_noise_std = (
-        np.sqrt(alt_noise_meas.covariance.matrix(dense=True)[0, 0]) * scale_mm
+        np.sqrt(alt_noise_meas.covariance.matrix(form="components")[0, 0]) * scale_mm
     )
 
     # -- Plotting --
@@ -467,7 +470,7 @@ def main():
             f"Drawing {args.samples} Monte Carlo samples to validate analytical bias..."
         )
         joint_samples_list = joint_meas.samples(
-            args.samples, parallel=args.parallel, n_jobs=args.max_jobs
+            args.samples, n_jobs=args.max_jobs if args.parallel else None
         )
         err_samples = np.array(
             [op_err(sample)[0] * scale_mm for sample in joint_samples_list]

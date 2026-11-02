@@ -62,6 +62,17 @@ from pyslfp.linear_operators import (
 )
 
 
+def _correlated_invariant_measure(space, measures, correlation):
+    """Invariant measures on one space, correlated scale by scale.
+
+    `correlation` maps a Laplacian eigenvalue to the correlation matrix of
+    the fields at that scale; the marginals keep the spectra of `measures`.
+    """
+    variances = [measure.covariance.eigenvalues for measure in measures]
+    matrices = np.array([correlation(k) for k in space.laplacian_eigenvalues])
+    return space.correlated_measure_from_correlations(variances, matrices)
+
+
 def build_physics_components(
     lmax, load_order, load_scale_km, points, is_surrogate=False
 ):
@@ -89,8 +100,8 @@ def build_physics_components(
     ) @ ice_projection_operator(state, load_space)
 
     if is_surrogate:
-        ocean_dyn_to_load = load_space.zero_operator(load_space)
-        ocean_rho_to_load = load_space.zero_operator(load_space)
+        ocean_dyn_to_load = inf.LinearOperator.zero(load_space, codomain=load_space)
+        ocean_rho_to_load = inf.LinearOperator.zero(load_space, codomain=load_space)
     else:
         ocean_dyn_to_load = sea_level_change_to_load_operator(
             state, load_space, load_space
@@ -105,18 +116,21 @@ def build_physics_components(
     joint_space = joint_to_load.domain
 
     # Map [Ice, Dyn, Rho] -> [Total Load, OceanDyn]
-    op1 = inf.ColumnLinearOperator([joint_to_load, joint_space.subspace_projection(1)])
+    op1 = inf.ColumnLinearOperator([joint_to_load, joint_space.projection(1)])
 
     # --- A. Resolve the Sea Surface Height Components (For Altimetry) ---
     static_ssh_op = sea_surface_height_operator(state, finger_print_operator.codomain)
     barystatic_ssh_op = static_ssh_op @ finger_print_operator
 
     op2_ssh = inf.BlockDiagonalLinearOperator(
-        [barystatic_ssh_op, load_space.identity_operator()]
+        [barystatic_ssh_op, inf.LinearOperator.identity(load_space)]
     )
 
     op3 = inf.RowLinearOperator(
-        [load_space.identity_operator(), load_space.identity_operator()]
+        [
+            inf.LinearOperator.identity(load_space),
+            inf.LinearOperator.identity(load_space),
+        ]
     )
 
     continuous_ssh_operator = op3 @ op2_ssh @ op1
@@ -124,11 +138,11 @@ def build_physics_components(
     # --- B. Resolve the True Sea Level Components (For GMSLR Integration) ---
     # Sea Level Change is strictly subspace 0 of the SLE response!
     barystatic_sl_op = (
-        finger_print_operator.codomain.subspace_projection(0) @ finger_print_operator
+        finger_print_operator.codomain.projection(0) @ finger_print_operator
     )
 
     op2_sl = inf.BlockDiagonalLinearOperator(
-        [barystatic_sl_op, load_space.identity_operator()]
+        [barystatic_sl_op, inf.LinearOperator.identity(load_space)]
     )
 
     continuous_sl_operator = op3 @ op2_sl @ op1
@@ -322,22 +336,20 @@ def build_conditioned_prior(
         dyn_prior_cal = load_measure(ocean_dyn_scale, dyn_std)
         rho_prior_cal = load_measure(ocean_rho_scale, rho_std)
         if ocean_corr > 0.0:
-            from pygeoinf.symmetric_space.symmetric_space import (
-                CorrelatedInvariantGaussianMeasure,
-            )
 
             def pair_correlation(k):
                 r = -ocean_corr * np.exp(-(corr_scale**2) * k)
                 return np.array([[1.0, r], [r, 1.0]])
 
-            pair = CorrelatedInvariantGaussianMeasure.from_invariant_measures(
-                [dyn_prior_cal, rho_prior_cal], pair_correlation
+            unmasked_pair = _correlated_invariant_measure(
+                load_space, [dyn_prior_cal, rho_prior_cal], pair_correlation
             )
         else:
-            pair = inf.GaussianMeasure.from_direct_sum([dyn_prior_cal, rho_prior_cal])
-        pair = pair.affine_mapping(
-            operator=inf.BlockDiagonalLinearOperator([ocean_proj, ocean_proj])
-        )
+            unmasked_pair = inf.GaussianMeasure.from_product(
+                [dyn_prior_cal, rho_prior_cal]
+            )
+        pair_mask = inf.BlockDiagonalLinearOperator([ocean_proj, ocean_proj])
+        pair = unmasked_pair.affine_map(pair_mask)
         pair_space = pair.domain
 
         ocean_weight = state.ocean_projection(value=0.0) / state.ocean_area
@@ -347,18 +359,19 @@ def build_conditioned_prior(
             state, load_space, load_space
         )
         x_fn = load_space.l2_products_operator([ocean_weight]) @ (
-            pair_space.subspace_projection(0)
+            pair_space.projection(0)
         )
-        y_fn = steric_gmsl_functional(state, load_space) @ (
-            pair_space.subspace_projection(1)
-        )
-        g_fn = inf.RowLinearOperator([avg_op @ dyn_to_load, avg_op @ rho_to_load])
-        pair_subspace = inf.AffineSubspace.from_linear_equation(
-            operator=g_fn,
-            value=avg_op.codomain.zero,
-            solver=inf.CholeskySolver(galerkin=True),
-        )
-        sigma_s = _functional_std(pair_subspace.condition_gaussian_measure(pair), y_fn)
+        y_fn = steric_gmsl_functional(state, load_space) @ (pair_space.projection(1))
+        g_fn = inf.RowLinearOperator(
+            [avg_op @ dyn_to_load, avg_op @ rho_to_load]
+        ).with_traits(inf.Traits.SURJECTIVE)
+        # The constraint already carries the ocean function, so it is blind
+        # to the mask (g_fn P = g_fn), and conditioning commutes with masking;
+        # the unmasked pair is positive definite, as exact conditioning needs.
+        conditioned_pair = unmasked_pair.condition(
+            g_fn, avg_op.codomain.zero()
+        ).affine_map(pair_mask)
+        sigma_s = _functional_std(conditioned_pair, y_fn)
         # Narrative constants for the closed-form interpretation.
         d_x = x_fn.adjoint(np.ones(1))
         d_y = y_fn.adjoint(np.ones(1))
@@ -387,18 +400,11 @@ def build_conditioned_prior(
         ice_prior = load_measure(ice_scale, ice_std)
         dyn_prior = load_measure(ocean_dyn_scale, dyn_std)
         rho_prior = load_measure(ocean_rho_scale, rho_std)
-        unmasked = inf.GaussianMeasure.from_direct_sum(
-            [ice_prior, dyn_prior, rho_prior]
-        )
+        unmasked = inf.GaussianMeasure.from_product([ice_prior, dyn_prior, rho_prior])
         if ocean_corr > 0.0 and not is_surrogate:
-            # Correlated (Dyn, Rho) pair with unchanged marginals;
-            # imported lazily so the scripts continue to run on older
-            # pygeoinf when the correlation is disabled. The unmasked
-            # prior (used for the surrogate preconditioner) stays
+            # Correlated (Dyn, Rho) pair with unchanged marginals. The
+            # unmasked prior (used for the surrogate preconditioner) stays
             # uncorrelated.
-            from pygeoinf.symmetric_space.symmetric_space import (
-                CorrelatedInvariantGaussianMeasure,
-            )
 
             def spectral_correlation(k):
                 r = -ocean_corr * np.exp(-(corr_scale**2) * k)
@@ -410,8 +416,8 @@ def build_conditioned_prior(
                     ]
                 )
 
-            joint = CorrelatedInvariantGaussianMeasure.from_invariant_measures(
-                [ice_prior, dyn_prior, rho_prior], spectral_correlation
+            joint = _correlated_invariant_measure(
+                load_space, [ice_prior, dyn_prior, rho_prior], spectral_correlation
             )
         else:
             joint = unmasked
@@ -431,35 +437,37 @@ def build_conditioned_prior(
     ice_proj = ice_projection_operator(state, load_space)
     ocean_proj = ocean_projection_operator(state, load_space)
     proj_op = inf.BlockDiagonalLinearOperator([ice_proj, ocean_proj, ocean_proj])
-    masked = joint.affine_mapping(operator=proj_op)
+    masked = joint.affine_map(proj_op)
 
     avg_op = ocean_average_operator(state, load_space)
     dyn_to_load = sea_level_change_to_load_operator(state, load_space, load_space)
     rho_to_load = ocean_density_change_to_load_operator(state, load_space, load_space)
     mass_constraint_op = inf.RowLinearOperator(
         [
-            load_space.zero_operator(codomain=avg_op.codomain),
+            inf.LinearOperator.zero(load_space, codomain=avg_op.codomain),
             avg_op @ dyn_to_load,
             avg_op @ rho_to_load,
         ]
-    )
-    mass_subspace = inf.AffineSubspace.from_linear_equation(
-        operator=mass_constraint_op,
-        value=avg_op.codomain.zero,
-        solver=inf.CholeskySolver(galerkin=True),
-    )
-    model_prior = mass_subspace.condition_gaussian_measure(masked)
+    ).with_traits(inf.Traits.SURJECTIVE)
+    # The constraint carries the ocean function in every term, so it is blind
+    # to the mask (constraint @ proj_op == constraint) and conditioning
+    # commutes with masking. Conditioning the unmasked prior, which is
+    # positive definite as exact conditioning needs, and masking afterwards
+    # gives the masked prior conditioned on the constraint.
+    model_prior = joint.condition(
+        mass_constraint_op, avg_op.codomain.zero()
+    ).affine_map(proj_op)
 
     if calibrating:
         # Direct verification of the closed forms on the conditioned
         # measure, with the QoI-style functionals used downstream.
         joint_space = masked.domain
         steric_check_fn = steric_gmsl_functional(state, load_space) @ (
-            joint_space.subspace_projection(2)
+            joint_space.projection(2)
         )
         bary_check_fn = load_space.l2_products_operator(
             [barystatic_gmsl_weighting(state)]
-        ) @ joint_space.subspace_projection(0)
+        ) @ joint_space.projection(0)
         calib["gmsl"]["steric_std_check"] = _functional_std(
             model_prior, steric_check_fn
         )
@@ -545,7 +553,7 @@ def gmsl_split_operators(state, load_space, continuous_sl_operator):
     joint_space = continuous_sl_operator.domain
 
     bary_avg_op = load_space.l2_products_operator([barystatic_gmsl_weighting(state)])
-    bary_op = bary_avg_op @ joint_space.subspace_projection(0)
+    bary_op = bary_avg_op @ joint_space.projection(0)
 
     total_op = true_gmsl_operator(state, load_space, continuous_sl_operator)
     steric_op = total_op - bary_op
@@ -555,9 +563,9 @@ def gmsl_split_operators(state, load_space, continuous_sl_operator):
     steric_direct_op = (
         ocean_avg_op
         @ steric_sea_level_operator(state, load_space)
-        @ joint_space.subspace_projection(2)
+        @ joint_space.projection(2)
     )
-    dyn_direct_op = ocean_avg_op @ joint_space.subspace_projection(1)
+    dyn_direct_op = ocean_avg_op @ joint_space.projection(1)
 
     return bary_op, steric_op, steric_direct_op, dyn_direct_op
 
@@ -584,32 +592,30 @@ def regional_decomposition_operators(state, load_space, finger_print_operator, r
     """
     masks = [state.get_projection(r, value=0.0) for r in regions]
     avg_op = averaging_operator(state, load_space, masks)
-    joint_space = inf.HilbertSpaceDirectSum([load_space, load_space, load_space])
+    joint_space = inf.DirectSum([load_space, load_space, load_space])
 
     steric_op_field = steric_sea_level_operator(
         state, load_space
-    ) @ joint_space.subspace_projection(2)
+    ) @ joint_space.projection(2)
     op_sslc = avg_op @ steric_op_field
 
     barystatic_sl_op = (
-        finger_print_operator.codomain.subspace_projection(0) @ finger_print_operator
+        finger_print_operator.codomain.projection(0) @ finger_print_operator
     )
 
     dyn_to_load = sea_level_change_to_load_operator(state, load_space, load_space)
     rho_to_load = ocean_density_change_to_load_operator(state, load_space, load_space)
-    ocean_load_op = dyn_to_load @ joint_space.subspace_projection(
+    ocean_load_op = dyn_to_load @ joint_space.projection(
         1
-    ) + rho_to_load @ joint_space.subspace_projection(2)
+    ) + rho_to_load @ joint_space.projection(2)
 
-    zeta_field_op = joint_space.subspace_projection(1) - steric_op_field
+    zeta_field_op = joint_space.projection(1) - steric_op_field
     op_dmslc = avg_op @ (zeta_field_op + barystatic_sl_op @ ocean_load_op)
 
     ice_to_load = ice_thickness_change_to_load_operator(
         state, load_space, load_space
     ) @ ice_projection_operator(state, load_space)
-    op_bmslc = (
-        avg_op @ barystatic_sl_op @ ice_to_load @ joint_space.subspace_projection(0)
-    )
+    op_bmslc = avg_op @ barystatic_sl_op @ ice_to_load @ joint_space.projection(0)
 
     return op_sslc, op_dmslc, op_bmslc
 
@@ -672,7 +678,7 @@ def build_measures(
 
         r(k) = -ocean_corr * exp(-(corr_scale**2) * k),
 
-    with corr_scale = load_space.scale * ocean_corr_scale_factor and k the
+    with corr_scale = load_space.length_scale * ocean_corr_scale_factor and k the
     Laplacian eigenvalue: a strong anti-correlation at long wavelengths
     (dynamic SSH changes there are predominantly steric) that decays towards
     independence at short wavelengths (mesoscale dynamic perturbations).
@@ -702,7 +708,7 @@ def build_measures(
     the track points, with std noise_std_factor x the sterodynamic pointwise prior std, and
     an optional large-scale correlated error component with std
     noise_corr_std_factor x the sterodynamic pointwise prior std (0 disables) at correlation
-    scale load_space.scale x noise_corr_scale_factor, representing
+    scale load_space.length_scale x noise_corr_scale_factor, representing
     long-wavelength systematics such as orbit and reference-frame errors.
     The correlated component barely averages down and so sets an
     irreducible error floor on large-scale functionals such as GMSLR; the
@@ -741,21 +747,17 @@ def build_measures(
     if prior_kernel == "sobolev":
 
         def load_measure(scale, std):
-            return load_space.point_value_scaled_sobolev_kernel_gaussian_measure(
-                prior_order, scale, std=std
-            )
+            return load_space.sobolev_measure(prior_order, scale, pointwise_std=std)
 
     else:
 
         def load_measure(scale, std):
-            return load_space.point_value_scaled_heat_kernel_gaussian_measure(
-                scale, std=std
-            )
+            return load_space.heat_measure(scale, pointwise_std=std)
 
     # --- PRIORS: amplitude derivation, assembly, masking and conditioning ---
-    ice_scale = load_space.scale * ice_scale_factor
-    ocean_dyn_scale = load_space.scale * ocean_dyn_scale_factor
-    ocean_rho_scale = load_space.scale * ocean_rho_scale_factor
+    ice_scale = load_space.length_scale * ice_scale_factor
+    ocean_dyn_scale = load_space.length_scale * ocean_dyn_scale_factor
+    ocean_rho_scale = load_space.length_scale * ocean_rho_scale_factor
 
     model_prior, _, calib = build_conditioned_prior(
         state,
@@ -769,7 +771,7 @@ def build_measures(
         steric_dyn_std_ratio,
         is_surrogate=is_surrogate,
         ocean_corr=ocean_corr,
-        corr_scale=load_space.scale * ocean_corr_scale_factor,
+        corr_scale=load_space.length_scale * ocean_corr_scale_factor,
         derived_stds=derived_stds,
     )
 
@@ -791,7 +793,7 @@ def build_measures(
         if point_evaluation_operator is None:
             point_evaluation_operator = load_space.point_evaluation_operator(points)
         corr_field_meas = load_measure(
-            load_space.scale * noise_corr_scale_factor,
+            load_space.length_scale * noise_corr_scale_factor,
             noise_corr_std_factor * calib["derived_stds"]["dyn_std"],
         )
         # Irreducible error floor this component sets on GMSL-type
@@ -803,16 +805,14 @@ def build_measures(
         calib.setdefault("noise", {})["alt_corr_gmsl_floor"] = _functional_std(
             corr_field_meas, gmsl_fn
         )
-        corr_noise_meas = corr_field_meas.affine_mapping(
-            operator=point_evaluation_operator
-        )
+        corr_noise_meas = corr_field_meas.affine_map(point_evaluation_operator)
         noise_meas = noise_meas + corr_noise_meas
 
     # Prior shift
     if prior_shift != 0.0:
         offset_shape = model_prior.sample()
-        model_prior = model_prior.affine_mapping(
-            translation=model_prior.domain.multiply(prior_shift, offset_shape)
+        model_prior = model_prior.translate(
+            model_prior.domain.multiply(prior_shift, offset_shape)
         )
 
     return model_prior, noise_meas, calib

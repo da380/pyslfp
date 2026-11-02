@@ -94,7 +94,7 @@ def resolve_noise_amplitude(
         )
 
     space_order = load_space.order
-    space_scale = load_space.scale
+    space_scale = load_space.length_scale
     lmax = load_space.lmax
     radius = load_space.radius
     q_s = prior_order
@@ -262,27 +262,26 @@ def build_measures(
     direct_load_measure_scale = direct_scale_km * 1000 / length_scale
     direct_load_measure_std = water_density * direct_std_m / length_scale
 
-    initial_direct_load_prior = (
-        load_space.point_value_scaled_sobolev_kernel_gaussian_measure(
-            prior_order, direct_load_measure_scale, std=direct_load_measure_std
-        )
+    initial_direct_load_prior = load_space.sobolev_measure(
+        prior_order, direct_load_measure_scale, pointwise_std=direct_load_measure_std
     )
 
     if remove_degree_1:
         constraint_lmax = 1
-        constraint_operator = load_space.to_coefficient_operator(constraint_lmax)
-        constraint_subspace = inf.LinearSubspace.from_kernel(constraint_operator)
-        direct_load_prior = constraint_subspace.condition_gaussian_measure(
-            initial_direct_load_prior
+        # Selecting coefficients is onto, so the exact constraint can be
+        # conditioned on; the prior is invariant and so positive definite.
+        constraint_operator = load_space.coefficient_operator(
+            lmax=constraint_lmax
+        ).with_traits(inf.Traits.SURJECTIVE)
+        direct_load_prior = initial_direct_load_prior.condition(
+            constraint_operator, np.zeros(constraint_operator.codomain.dim)
         )
     else:
         direct_load_prior = initial_direct_load_prior
 
     if prior_shift != 0.0:
         offset_shape = direct_load_prior.sample()
-        direct_load_prior = direct_load_prior.affine_mapping(
-            translation=offset_shape * prior_shift
-        )
+        direct_load_prior = direct_load_prior.translate(offset_shape * prior_shift)
 
     noise_load_measure_scale = noise_scale_factor * direct_load_measure_scale
 
@@ -304,7 +303,7 @@ def build_measures(
     # pointwise normalisation of the rough field.
     _b = noise_info["kernel_amplitude"]
     _q = noise_info["noise_order"]
-    noise_load_measure = load_space.invariant_gaussian_measure(
+    noise_load_measure = load_space.invariant_measure(
         lambda k, b=_b, s=noise_load_measure_scale, q=_q: (
             b * (1.0 + s * s * k) ** (-q)
         )
@@ -321,14 +320,14 @@ def build_measures(
 
 def build_total_load_operator(state, response_space, load_space, finger_print_operator):
     """Builds the operator linking direct load to total physical load (including SLE)."""
-    sea_level_projection = response_space.subspace_projection(0)
+    sea_level_projection = response_space.projection(0)
     sea_level_to_load = sea_level_change_to_load_operator(
         state, sea_level_projection.codomain, load_space
     )
     induced_load_operator = (
         sea_level_to_load @ sea_level_projection @ finger_print_operator
     )
-    return load_space.identity_operator() + induced_load_operator
+    return inf.LinearOperator.identity(load_space) + induced_load_operator
 
 
 def get_regional_averaging(
@@ -355,7 +354,7 @@ def get_regional_averaging(
         smoothing_scale = (
             smoothing_scale_km * 1000 / state.model.parameters.length_scale
         )
-        smoothing_measure = load_space.heat_kernel_gaussian_measure(smoothing_scale)
+        smoothing_measure = load_space.heat_measure(smoothing_scale)
         smoothing_operator = smoothing_measure.covariance
         weighting_functions = [smoothing_operator(wf) for wf in weighting_functions]
 

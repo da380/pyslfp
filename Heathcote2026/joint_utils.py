@@ -77,8 +77,8 @@ def build_physics_components(
     ) @ ice_projection_operator(state, load_space)
 
     if is_surrogate:
-        ocean_dyn_to_load = load_space.zero_operator(load_space)
-        ocean_rho_to_load = load_space.zero_operator(load_space)
+        ocean_dyn_to_load = inf.LinearOperator.zero(load_space, codomain=load_space)
+        ocean_rho_to_load = inf.LinearOperator.zero(load_space, codomain=load_space)
     else:
         ocean_dyn_to_load = sea_level_change_to_load_operator(
             state, load_space, load_space
@@ -93,17 +93,18 @@ def build_physics_components(
     joint_space = joint_to_load.domain
 
     # --- A. ALTIMETRY TRACK (SSH) ---
-    op1_alt = inf.ColumnLinearOperator(
-        [joint_to_load, joint_space.subspace_projection(1)]
-    )
+    op1_alt = inf.ColumnLinearOperator([joint_to_load, joint_space.projection(1)])
     static_ssh_op = sea_surface_height_operator(state, finger_print_operator.codomain)
     barystatic_ssh_op = static_ssh_op @ finger_print_operator
 
     op2_ssh = inf.BlockDiagonalLinearOperator(
-        [barystatic_ssh_op, load_space.identity_operator()]
+        [barystatic_ssh_op, inf.LinearOperator.identity(load_space)]
     )
     op3_alt = inf.RowLinearOperator(
-        [load_space.identity_operator(), load_space.identity_operator()]
+        [
+            inf.LinearOperator.identity(load_space),
+            inf.LinearOperator.identity(load_space),
+        ]
     )
 
     continuous_ssh_operator = op3_alt @ op2_ssh @ op1_alt
@@ -118,10 +119,10 @@ def build_physics_components(
 
     # --- C. TRUE SEA LEVEL TRACK (For GMSLR) ---
     barystatic_sl_op = (
-        finger_print_operator.codomain.subspace_projection(0) @ finger_print_operator
+        finger_print_operator.codomain.projection(0) @ finger_print_operator
     )
     op2_sl = inf.BlockDiagonalLinearOperator(
-        [barystatic_sl_op, load_space.identity_operator()]
+        [barystatic_sl_op, inf.LinearOperator.identity(load_space)]
     )
     continuous_sl_operator = op3_alt @ op2_sl @ op1_alt
 
@@ -183,14 +184,12 @@ def build_measures(
         raise ValueError("alt_noise_corr_std_factor must be non-negative.")
 
     def load_measure(scale, std):
-        return load_space.point_value_scaled_sobolev_kernel_gaussian_measure(
-            prior_order, scale, std=std
-        )
+        return load_space.sobolev_measure(prior_order, scale, pointwise_std=std)
 
     # --- 1. PRIORS: amplitude derivation, assembly, masking and conditioning ---
-    ice_scale = load_space.scale * ice_scale_factor
-    ocean_dyn_scale = load_space.scale * ocean_dyn_scale_factor
-    ocean_rho_scale = load_space.scale * ocean_rho_scale_factor
+    ice_scale = load_space.length_scale * ice_scale_factor
+    ocean_dyn_scale = load_space.length_scale * ocean_dyn_scale_factor
+    ocean_rho_scale = load_space.length_scale * ocean_rho_scale_factor
 
     model_prior, unmasked_prior, calib = build_conditioned_prior(
         state,
@@ -204,14 +203,14 @@ def build_measures(
         steric_dyn_std_ratio,
         is_surrogate=is_surrogate,
         ocean_corr=ocean_corr,
-        corr_scale=load_space.scale * ocean_corr_scale_factor,
+        corr_scale=load_space.length_scale * ocean_corr_scale_factor,
         derived_stds=derived_stds,
     )
     ice_std = calib["derived_stds"]["ice_std"]
 
     if prior_shift != 0.0:
-        model_prior = model_prior.affine_mapping(
-            translation=model_prior.domain.multiply(prior_shift, model_prior.sample())
+        model_prior = model_prior.translate(
+            model_prior.domain.multiply(prior_shift, model_prior.sample())
         )
 
     if is_surrogate:
@@ -231,7 +230,7 @@ def build_measures(
         if point_evaluation_operator is None:
             point_evaluation_operator = load_space.point_evaluation_operator(points)
         alt_corr_field_meas = load_measure(
-            load_space.scale * alt_noise_corr_scale_factor,
+            load_space.length_scale * alt_noise_corr_scale_factor,
             alt_noise_corr_std_factor * calib["derived_stds"]["dyn_std"],
         )
         gmsl_fn = load_space.l2_products_operator(
@@ -242,9 +241,7 @@ def build_measures(
                 alt_corr_field_meas.directional_variance(gmsl_fn.adjoint(np.ones(1)))
             )
         )
-        alt_corr_noise_meas = alt_corr_field_meas.affine_mapping(
-            operator=point_evaluation_operator
-        )
+        alt_corr_noise_meas = alt_corr_field_meas.affine_map(point_evaluation_operator)
         alt_noise_meas = alt_noise_meas + alt_corr_noise_meas
 
     # GRACE Noise
@@ -272,17 +269,17 @@ def build_measures(
 
     _b = grace_noise_info["kernel_amplitude"]
     _q = grace_noise_info["noise_order"]
-    grace_spatial_noise = load_space.invariant_gaussian_measure(
+    grace_spatial_noise = load_space.invariant_measure(
         lambda k, b=_b, s=grace_spatial_scale, q=_q: (b * (1.0 + s * s * k) ** (-q))
     )
 
     wmb = WMBMethod(state.model, obs_degree)
     grace_noise_meas = wmb.load_measure_to_observation_measure(grace_spatial_noise)
 
-    joint_noise_meas = inf.GaussianMeasure.from_direct_sum(
+    joint_noise_meas = inf.GaussianMeasure.from_product(
         [alt_noise_meas, grace_noise_meas]
     )
-    joint_precond_noise_meas = inf.GaussianMeasure.from_direct_sum(
+    joint_precond_noise_meas = inf.GaussianMeasure.from_product(
         [alt_precond_noise_meas, grace_noise_meas]
     )
 
@@ -346,7 +343,7 @@ def plot_gmsl_split_ellipses(
         handles = []
         for name, measure, style in cases:
             mean = np.asarray(measure.expectation, dtype=float).ravel()
-            cov = np.asarray(measure.covariance.matrix(dense=True), dtype=float)
+            cov = np.asarray(measure.covariance.matrix(form="components"), dtype=float)
             vals, vecs = np.linalg.eigh(cov)
             order = np.argsort(vals)[::-1]
             vals, vecs = vals[order], vecs[:, order]

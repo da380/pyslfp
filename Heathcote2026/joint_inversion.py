@@ -54,11 +54,33 @@ plt.rcParams.update(
 )
 
 
+def surrogate_woodbury_preconditioner(normal_operator, forward, prior, noise, solver):
+    """Approximates the inverse of a data-space normal operator A Q A* + R
+    by the Woodbury identity applied to a cheaper surrogate problem,
+
+        R^-1 - R^-1 A (Q^-1 + A* R^-1 A)^-1 A* R^-1,
+
+    with A, Q and R the surrogate's forward operator, prior covariance and
+    noise covariance. Q^-1 and R^-1 are the measures' precisions where they
+    have them, and are otherwise found with `solver`, which also inverts the
+    inner operator on the surrogate's model space.
+    """
+    woodbury = inf.WoodburyPreconditioner(
+        forward,
+        prior.covariance,
+        noise.covariance,
+        solver=solver,
+        prior_inverse=prior.precision,
+        noise_inverse=noise.precision,
+    )
+    return woodbury(normal_operator)
+
+
 def _measure_mean_std(measure: Any) -> tuple[float, float]:
     """Mean and standard deviation of a scalar (1D) measure."""
     if hasattr(measure, "expectation"):  # pygeoinf GaussianMeasure
         mean = float(np.asarray(measure.expectation)[0])
-        var = float(np.asarray(measure.covariance.matrix(dense=True))[0, 0])
+        var = float(np.asarray(measure.covariance.matrix(form="components"))[0, 0])
     else:  # scipy-style frozen distribution
         mean = float(np.asarray(measure.mean)[0])
         var = float(np.asarray(measure.cov)[0, 0])
@@ -78,7 +100,7 @@ def zoom_1d_distributions(
     inset_label: str = "full range",
     **plot_kwargs: Any,
 ) -> plt.Axes | None:
-    """Zoom the x-axis of a `plot_1d_distributions` plot onto the narrow measures."""
+    """Zoom the x-axis of a `plot_densities` plot onto the narrow measures."""
     dist_stats = [_measure_mean_std(m) for m in measures]
     dropped = set(exclude)
     keep = [s for i, s in enumerate(dist_stats) if i not in dropped and s[1] > 0]
@@ -103,10 +125,10 @@ def zoom_1d_distributions(
         return None
 
     ax_in = ax.inset_axes(inset_bounds)
-    inf.plot_1d_distributions(
+    inf.plot_densities(
         list(measures),
         ax=ax_in,
-        true_value=true_value,
+        truth=true_value,
         title="",
         xlabel="",
         **plot_kwargs,
@@ -580,7 +602,7 @@ def main():
 
     print("\nDrawing MASTER synthetic model and dataset...")
     master_forward = inf.LinearForwardProblem(
-        exact_phys["joint_forward"], data_error_measure=exact_meas["joint_noise"]
+        exact_phys["joint_forward"], error=exact_meas["joint_noise"]
     )
     true_model, joint_data = master_forward.synthetic_model_and_data(
         exact_meas["model_prior"]
@@ -589,17 +611,17 @@ def main():
     grace_data = joint_data[1]
 
     # ------------------ 2. SETUP INVERSE PROBLEMS ------------------
-    joint_inv = inf.LinearBayesianInversion(master_forward, exact_meas["model_prior"])
+    joint_inv = inf.LinearGaussianInversion(master_forward, exact_meas["model_prior"])
 
     alt_fwd = inf.LinearForwardProblem(
-        exact_phys["alt_track"], data_error_measure=exact_meas["alt_noise"]
+        exact_phys["alt_track"], error=exact_meas["alt_noise"]
     )
-    alt_inv = inf.LinearBayesianInversion(alt_fwd, exact_meas["model_prior"])
+    alt_inv = inf.LinearGaussianInversion(alt_fwd, exact_meas["model_prior"])
 
     grace_fwd = inf.LinearForwardProblem(
-        exact_phys["grace_track"], data_error_measure=exact_meas["grace_noise"]
+        exact_phys["grace_track"], error=exact_meas["grace_noise"]
     )
-    grace_inv = inf.LinearBayesianInversion(grace_fwd, exact_meas["model_prior"])
+    grace_inv = inf.LinearGaussianInversion(grace_fwd, exact_meas["model_prior"])
 
     # ------------------ 3. PRECONDITIONER SETUP ------------------
     print(
@@ -641,58 +663,53 @@ def main():
         derived_stds=exact_meas["calib"]["derived_stds"],
     )
 
-    woodbury_solver = inf.LUSolver(
-        galerkin=True, parallel=args.parallel, n_jobs=args.max_jobs
-    )
+    woodbury_solver = inf.LUSolver(n_jobs=args.max_jobs if args.parallel else None)
     alpha = 0.1
 
-    P_joint = (1 - alpha) * joint_inv.surrogate_woodbury_data_preconditioner(
+    P_joint = (1 - alpha) * surrogate_woodbury_preconditioner(
+        joint_inv.normal_operator,
+        surr_phys["joint_forward"],
+        surr_meas["unmasked_prior"],
+        exact_meas["joint_precond_noise"],
         woodbury_solver,
-        alternate_forward_operator=surr_phys["joint_forward"],
-        alternate_prior_measure=surr_meas["unmasked_prior"],
-        alternate_data_error_measure=exact_meas["joint_precond_noise"],
-    ) + alpha * exact_meas["joint_precond_noise"].inverse_covariance
+    ) + alpha * exact_meas["joint_precond_noise"].precision
 
-    surr_alt_fwd = inf.LinearForwardProblem(
-        surr_phys["alt_track"], data_error_measure=exact_meas["alt_precond_noise"]
-    )
-    surr_alt_inv = inf.LinearBayesianInversion(
-        surr_alt_fwd, surr_meas["unmasked_prior"]
-    )
-    P_alt = (1 - alpha) * surr_alt_inv.woodbury_data_preconditioner(
-        woodbury_solver
-    ) + alpha * exact_meas["alt_precond_noise"].inverse_covariance
+    P_alt = (1 - alpha) * surrogate_woodbury_preconditioner(
+        alt_inv.normal_operator,
+        surr_phys["alt_track"],
+        surr_meas["unmasked_prior"],
+        exact_meas["alt_precond_noise"],
+        woodbury_solver,
+    ) + alpha * exact_meas["alt_precond_noise"].precision
 
-    surr_grace_fwd = inf.LinearForwardProblem(
-        surr_phys["grace_track"], data_error_measure=exact_meas["grace_noise"]
-    )
-    surr_grace_inv = inf.LinearBayesianInversion(
-        surr_grace_fwd, surr_meas["unmasked_prior"]
-    )
-    P_grace = (1 - alpha) * surr_grace_inv.woodbury_data_preconditioner(
-        woodbury_solver
-    ) + alpha * exact_meas["grace_noise"].inverse_covariance
+    P_grace = (1 - alpha) * surrogate_woodbury_preconditioner(
+        grace_inv.normal_operator,
+        surr_phys["grace_track"],
+        surr_meas["unmasked_prior"],
+        exact_meas["grace_noise"],
+        woodbury_solver,
+    ) + alpha * exact_meas["grace_noise"].precision
 
     # ------------------ 4. SOLVING POSTERIORS ------------------
     print("\nSolving for Posteriors...")
-    callback = inf.ProgressCallback()
+    callback = inf.ProgressCallback(report=print)
     tolerance = 0.01 * min(
         args.alt_noise_std_factor, exact_meas["grace_noise_info"]["std_factor"]
     )
-    solver = inf.CGSolver(callback=callback, rtol=tolerance)
+
+    def preconditioned_cg(preconditioner):
+        return inf.CGSolver(
+            callback=callback, rtol=tolerance, preconditioner=preconditioner
+        )
 
     print(" -> Solving Altimetry-only...")
-    post_alt = alt_inv.model_posterior_measure(alt_data, solver, preconditioner=P_alt)
+    post_alt = alt_inv.with_solver(preconditioned_cg(P_alt))(alt_data)
 
     print(" -> Solving GRACE-only...")
-    post_grace = grace_inv.model_posterior_measure(
-        grace_data, solver, preconditioner=P_grace
-    )
+    post_grace = grace_inv.with_solver(preconditioned_cg(P_grace))(grace_data)
 
     print(" -> Solving Joint Inversion...")
-    post_joint = joint_inv.model_posterior_measure(
-        joint_data, solver, preconditioner=P_joint
-    )
+    post_joint = joint_inv.with_solver(preconditioned_cg(P_joint))(joint_data)
 
     # ------------------ 5. GMSLR ------------------
     if args.plot_pdfs:
@@ -709,34 +726,26 @@ def main():
         alt_avg_op = sl.linear_operators.altimetry_averaging_operator(points) * scale_mm
 
         prior_gmsl_measure = (
-            exact_meas["model_prior"]
-            .affine_mapping(operator=true_gmsl_op)
-            .with_dense_covariance()
+            exact_meas["model_prior"].affine_map(true_gmsl_op).with_dense_covariance()
         )
 
-        alt_data_measure = exact_meas["alt_noise"].affine_mapping(translation=alt_data)
-        alt_gmsl_measure = alt_data_measure.affine_mapping(
-            operator=alt_avg_op
+        alt_data_measure = exact_meas["alt_noise"].translate(alt_data)
+        alt_gmsl_measure = alt_data_measure.affine_map(
+            alt_avg_op
         ).with_dense_covariance()
 
-        post_gmsl_alt = post_alt.affine_mapping(
-            operator=true_gmsl_op
-        ).with_dense_covariance()
+        post_gmsl_alt = post_alt.affine_map(true_gmsl_op).with_dense_covariance()
 
-        post_gmsl_grace = post_grace.affine_mapping(
-            operator=true_gmsl_op
-        ).with_dense_covariance()
+        post_gmsl_grace = post_grace.affine_map(true_gmsl_op).with_dense_covariance()
 
-        post_gmsl_joint = post_joint.affine_mapping(
-            operator=true_gmsl_op
-        ).with_dense_covariance()
+        post_gmsl_joint = post_joint.affine_map(true_gmsl_op).with_dense_covariance()
 
         true_gmsl_val_mm = true_gmsl_op(true_model)[0]
 
-        prior_var = prior_gmsl_measure.covariance.matrix(dense=True)[0, 0]
-        alt_var = post_gmsl_alt.covariance.matrix(dense=True)[0, 0]
-        grace_var = post_gmsl_grace.covariance.matrix(dense=True)[0, 0]
-        joint_var = post_gmsl_joint.covariance.matrix(dense=True)[0, 0]
+        prior_var = prior_gmsl_measure.covariance.matrix(form="components")[0, 0]
+        alt_var = post_gmsl_alt.covariance.matrix(form="components")[0, 0]
+        grace_var = post_gmsl_grace.covariance.matrix(form="components")[0, 0]
+        joint_var = post_gmsl_joint.covariance.matrix(form="components")[0, 0]
 
         alt_red = 100.0 * (1.0 - (alt_var / prior_var))
         grace_red = 100.0 * (1.0 - (grace_var / prior_var))
@@ -761,20 +770,20 @@ def main():
         labels = ["Simple averaging", "Altimetry-Only", "GRACE-Only", "Joint"]
 
         fig_pdf, ax_pdf = plt.subplots(figsize=(10, 6), layout="constrained")
-        inf.plot_1d_distributions(
+        inf.plot_densities(
             measures,
-            true_value=true_gmsl_val_mm,
+            truth=true_gmsl_val_mm,
             ax=ax_pdf,
             title="",
             xlabel="Global Mean Sea Level Rise (mm)",
-            posterior_labels=labels,
+            labels=labels,
         )
         zoom_1d_distributions(
             ax_pdf,
             measures,
             exclude=(labels.index("GRACE-Only"),),
             true_value=true_gmsl_val_mm,
-            posterior_labels=labels,
+            labels=labels,
         )
         figures_to_save["gmslr_pdf"] = fig_pdf
 
@@ -789,29 +798,31 @@ def main():
             )
         )
         split_op = inf.ColumnLinearOperator([bary_op, steric_gmsl_op]) * scale_mm
-        final_split_op = split_op.codomain.coordinate_projection @ split_op
+        final_split_op = split_op.codomain.coordinate_projection() @ split_op
 
         true_split = final_split_op(true_model)
 
         prior_split = (
             exact_meas["model_prior"]
-            .affine_mapping(operator=final_split_op)
-            .with_dense_covariance(parallel=args.parallel, n_jobs=min(2, args.max_jobs))
+            .affine_map(final_split_op)
+            .with_dense_covariance(
+                n_jobs=min(2, args.max_jobs) if args.parallel else None
+            )
         )
-        alt_split = post_alt.affine_mapping(
-            operator=final_split_op
-        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(2, args.max_jobs))
-        grace_split = post_grace.affine_mapping(
-            operator=final_split_op
-        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(2, args.max_jobs))
-        joint_split = post_joint.affine_mapping(
-            operator=final_split_op
-        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(2, args.max_jobs))
+        alt_split = post_alt.affine_map(final_split_op).with_dense_covariance(
+            n_jobs=min(2, args.max_jobs) if args.parallel else None
+        )
+        grace_split = post_grace.affine_map(final_split_op).with_dense_covariance(
+            n_jobs=min(2, args.max_jobs) if args.parallel else None
+        )
+        joint_split = post_joint.affine_map(final_split_op).with_dense_covariance(
+            n_jobs=min(2, args.max_jobs) if args.parallel else None
+        )
 
-        prior_cov_mat = prior_split.covariance.matrix(dense=True)
-        alt_cov_mat = alt_split.covariance.matrix(dense=True)
-        grace_cov_mat = grace_split.covariance.matrix(dense=True)
-        joint_cov_mat = joint_split.covariance.matrix(dense=True)
+        prior_cov_mat = prior_split.covariance.matrix(form="components")
+        alt_cov_mat = alt_split.covariance.matrix(form="components")
+        grace_cov_mat = grace_split.covariance.matrix(form="components")
+        joint_cov_mat = joint_split.covariance.matrix(form="components")
 
         def correlation(cov):
             return cov[0, 1] / np.sqrt(cov[0, 0] * cov[1, 1])
@@ -874,33 +885,33 @@ def main():
 
         split_labels = ["Barystatic SLR (mm)", "Steric SLR (mm)"]
 
-        inf.plot_corner_distributions(
+        inf.plot_corner(
             alt_split,
-            prior_measure=prior_split,
-            true_values=true_split,
+            prior=prior_split,
+            truth=true_split,
             labels=split_labels,
             title="",
-            fill_density=False,
+            fill=False,
         )
         figures_to_save["gmslr_split_corner_altimetry"] = plt.gcf()
 
-        inf.plot_corner_distributions(
+        inf.plot_corner(
             grace_split,
-            prior_measure=prior_split,
-            true_values=true_split,
+            prior=prior_split,
+            truth=true_split,
             labels=split_labels,
             title="",
-            fill_density=False,
+            fill=False,
         )
         figures_to_save["gmslr_split_corner_grace"] = plt.gcf()
 
-        inf.plot_corner_distributions(
+        inf.plot_corner(
             joint_split,
-            prior_measure=prior_split,
-            true_values=true_split,
+            prior=prior_split,
+            truth=true_split,
             labels=split_labels,
             title="",
-            fill_density=False,
+            fill=False,
         )
         figures_to_save["gmslr_split_corner_joint"] = plt.gcf()
 
@@ -962,40 +973,40 @@ def main():
                 )
                 post_ice, post_dyn, post_rho = expectations[name]
                 samples = post.samples(
-                    args.std_samples, parallel=args.parallel, n_jobs=args.max_jobs
+                    args.std_samples, n_jobs=args.max_jobs if args.parallel else None
                 )
                 var_ice, var_dyn, var_rho = (
-                    load_space.zero,
-                    load_space.zero,
-                    load_space.zero,
+                    load_space.zero(),
+                    load_space.zero(),
+                    load_space.zero(),
                 )
 
                 for s_ice, s_dyn, s_rho in samples:
                     diff_ice = load_space.subtract(s_ice, post_ice)
                     load_space.axpy(
                         1.0 / args.std_samples,
-                        load_space.vector_multiply(diff_ice, diff_ice),
+                        load_space.multiply(diff_ice, diff_ice),
                         var_ice,
                     )
 
                     diff_dyn = load_space.subtract(s_dyn, post_dyn)
                     load_space.axpy(
                         1.0 / args.std_samples,
-                        load_space.vector_multiply(diff_dyn, diff_dyn),
+                        load_space.multiply(diff_dyn, diff_dyn),
                         var_dyn,
                     )
 
                     diff_rho = load_space.subtract(s_rho, post_rho)
                     load_space.axpy(
                         1.0 / args.std_samples,
-                        load_space.vector_multiply(diff_rho, diff_rho),
+                        load_space.multiply(diff_rho, diff_rho),
                         var_rho,
                     )
 
                 stds[name] = (
-                    load_space.vector_sqrt(var_ice),
-                    load_space.vector_sqrt(var_dyn),
-                    load_space.vector_sqrt(var_rho),
+                    load_space.sqrt(var_ice),
+                    load_space.sqrt(var_dyn),
+                    load_space.sqrt(var_rho),
                 )
                 print(f"    {label}: samples drawn and std computed.")
             std_vmaxes = (
@@ -1093,8 +1104,8 @@ def main():
         for comp_name, comp_idx, pt, pt_name in scenarios:
             print(f"  Evaluating perturbation in {comp_name} at {pt}...")
 
-            dirac_rep = load_space.dirac_representation(pt)
-            test_vec = [load_space.zero, load_space.zero, load_space.zero]
+            dirac_rep = load_space.dirac(pt).representer
+            test_vec = [load_space.zero(), load_space.zero(), load_space.zero()]
             test_vec[comp_idx] = dirac_rep
 
             covs = [measure.covariance(test_vec) for _, measure in cov_cases]
@@ -1153,27 +1164,29 @@ def main():
             state, load_space, fp_op, regions_to_analyze
         )
         combined_op = inf.ColumnLinearOperator([op_sslc, op_dmslc, op_bmslc]) * scale_mm
-        final_op = combined_op.codomain.coordinate_projection @ combined_op
+        final_op = combined_op.codomain.coordinate_projection() @ combined_op
 
         true_vals_mm = final_op(true_model)
         print("  -> Prior push-forward (3 covariance actions)...")
         prior_meas = (
             exact_meas["model_prior"]
-            .affine_mapping(operator=final_op)
-            .with_dense_covariance(parallel=args.parallel, n_jobs=min(3, args.max_jobs))
+            .affine_map(final_op)
+            .with_dense_covariance(
+                n_jobs=min(3, args.max_jobs) if args.parallel else None
+            )
         )
         print("  -> Altimetry-only push-forward (3 posterior solves)...")
-        post_alt_meas = post_alt.affine_mapping(
-            operator=final_op
-        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(3, args.max_jobs))
+        post_alt_meas = post_alt.affine_map(final_op).with_dense_covariance(
+            n_jobs=min(3, args.max_jobs) if args.parallel else None
+        )
         print("  -> GRACE-only push-forward (3 posterior solves)...")
-        post_grace_meas = post_grace.affine_mapping(
-            operator=final_op
-        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(3, args.max_jobs))
+        post_grace_meas = post_grace.affine_map(final_op).with_dense_covariance(
+            n_jobs=min(3, args.max_jobs) if args.parallel else None
+        )
         print("  -> Joint push-forward (3 posterior solves)...")
-        post_joint_meas = post_joint.affine_mapping(
-            operator=final_op
-        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(3, args.max_jobs))
+        post_joint_meas = post_joint.affine_map(final_op).with_dense_covariance(
+            n_jobs=min(3, args.max_jobs) if args.parallel else None
+        )
 
         labels = [
             "SSLC (mm)",
@@ -1181,10 +1194,10 @@ def main():
             "BMSLC (mm)",
         ]
 
-        prior_cov_mat = prior_meas.covariance.matrix(dense=True)
-        alt_cov_mat = post_alt_meas.covariance.matrix(dense=True)
-        grace_cov_mat = post_grace_meas.covariance.matrix(dense=True)
-        joint_cov_mat = post_joint_meas.covariance.matrix(dense=True)
+        prior_cov_mat = prior_meas.covariance.matrix(form="components")
+        alt_cov_mat = post_alt_meas.covariance.matrix(form="components")
+        grace_cov_mat = post_grace_meas.covariance.matrix(form="components")
+        joint_cov_mat = post_joint_meas.covariance.matrix(form="components")
 
         pr_trace = np.trace(prior_cov_mat)
         alt_trace = np.trace(alt_cov_mat)
@@ -1255,33 +1268,33 @@ def main():
                 )
             f_metrics.write("-" * 135 + "\n")
 
-        inf.plot_corner_distributions(
+        inf.plot_corner(
             post_alt_meas,
-            prior_measure=prior_meas,
-            true_values=true_vals_mm,
+            prior=prior_meas,
+            truth=true_vals_mm,
             labels=labels,
             title="",
-            fill_density=False,
+            fill=False,
         )
         figures_to_save["regional_corner_altimetry"] = plt.gcf()
 
-        inf.plot_corner_distributions(
+        inf.plot_corner(
             post_grace_meas,
-            prior_measure=prior_meas,
-            true_values=true_vals_mm,
+            prior=prior_meas,
+            truth=true_vals_mm,
             labels=labels,
             title="",
-            fill_density=False,
+            fill=False,
         )
         figures_to_save["regional_corner_grace"] = plt.gcf()
 
-        inf.plot_corner_distributions(
+        inf.plot_corner(
             post_joint_meas,
-            prior_measure=prior_meas,
-            true_values=true_vals_mm,
+            prior=prior_meas,
+            truth=true_vals_mm,
             labels=labels,
             title="",
-            fill_density=False,
+            fill=False,
         )
         figures_to_save["regional_corner_joint"] = plt.gcf()
 

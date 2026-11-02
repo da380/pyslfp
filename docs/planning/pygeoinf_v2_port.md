@@ -73,7 +73,7 @@ The area columns count uses in:
 | `LUSolver(galerkin=True, parallel=, n_jobs=)` | `LUSolver(n_jobs=)` | H26 | |
 | `CGSolver(rtol=)` | `CGSolver(rtol=, preconditioner=, callback=, max_iterations=, strict=)` | tut, H26 | The preconditioner goes on the solver. |
 | `solver.iterations` | `SolveResult.iterations`, or a callback | tut, H26 | Solvers keep no state; see §2.5. |
-| `ProgressCallback` | unchanged | H26 | |
+| `ProgressCallback()` | `ProgressCallback(report=print)` | H26 | Prints only when given `report`; `.iterations` counts the last solve. |
 
 ### Measures
 
@@ -83,7 +83,7 @@ The area columns count uses in:
 | `GaussianMeasure.from_direct_sum(ms)` | `GaussianMeasure.from_product(ms, labels=)` | lib, tst, H26 | |
 | `InvariantGaussianMeasure` | no class: `space.invariant_measure(...)` returns a `GaussianMeasure` with a diagonal covariance | lib, tst | The GRACE type check goes; see §3. |
 | `measure.spectral_variances` | none public | lib | GRACE uses a bespoke operator instead; see §2.6 and §3. |
-| `CorrelatedInvariantGaussianMeasure.from_invariant_measures(ms, c)` | `GaussianMeasure.from_product(ms, correlation=)` or `space.correlated_measure_from_correlations(...)` | H26 | |
+| `CorrelatedInvariantGaussianMeasure.from_invariant_measures(ms, c)` | `space.correlated_measure_from_correlations([m.covariance.eigenvalues for m in ms], R)` | H26 | `R` stacks `c(k)` over `space.laplacian_eigenvalues`, the argument v1 passed. |
 | `space.invariant_gaussian_measure(f)` | `space.invariant_measure(f)` | H26 | `f` acts on the Laplacian eigenvalues, as before. |
 | `space.heat_kernel_gaussian_measure(s)` | `space.heat_measure(s)` | lib, tst, H26 | Identical spectrum (*verified*). |
 | `space.point_value_scaled_heat_kernel_gaussian_measure(s, std=)` | `space.heat_measure(s, pointwise_std=)` | H26 | Identical (*verified*). |
@@ -91,7 +91,7 @@ The area columns count uses in:
 | `measure.affine_mapping(operator=, translation=)` | `measure.affine_map(operator, translation=)` | tut, H26 | |
 | `measure.inverse_covariance` | `measure.precision` | H26 | |
 | `measure.with_dense_covariance(parallel=, n_jobs=)` | `measure.with_dense_covariance(n_jobs=)` | tut, H26 | |
-| `measure.sample()`, `.samples(n)` | `measure.sample(rng=)`, `.samples(n, rng=)` | tst, H26 | See §2.7. |
+| `measure.sample()`, `.samples(n, parallel=, n_jobs=)` | `measure.sample(rng=)`, `.samples(n, rng=, n_jobs=)` | tst, H26 | See §2.7. |
 
 ### Inference and geometry
 
@@ -102,10 +102,11 @@ The area columns count uses in:
 | `LinearBayesianInversion(problem, prior)` | `LinearGaussianInversion(problem, prior, solver=)` | tut, H26 | |
 | `inversion.model_posterior_measure(data, solver, preconditioner=)` | `inversion.with_solver(solver)(data)` | tut, H26 | Returns a `GaussianPosterior`. |
 | `inversion.normal_operator` | unchanged | tut | |
-| `inversion.surrogate_woodbury_data_preconditioner(...)` | `WoodburyPreconditioner`, with `inversion.surrogate(...)` | H26 | To be settled when Heathcote2026 is ported. |
+| `inversion.surrogate_woodbury_data_preconditioner(solver, alternate_...)` | `WoodburyPreconditioner(A_s, Q_s.covariance, R_s.covariance, solver=, prior_inverse=Q_s.precision, noise_inverse=R_s.precision)(inversion.normal_operator)` | H26 | The surrogate's pieces; applied to the true normal operator it gives the data form. |
+| `inversion.kalman_operator(solver, preconditioner=)` | `inversion.with_solver(solver).kalman_operator` | H26 | A property; the preconditioner goes on the solver. |
 | `AffineSubspace.from_linear_equation(op, value, solver=)` | unchanged | H26 | |
 | `LinearSubspace.from_kernel(op)` | unchanged | H26 | |
-| `subspace.condition_gaussian_measure(prior)` | `prior.condition(op, value)` | H26 | Conditions on the constraint operator directly. |
+| `subspace.condition_gaussian_measure(prior)` | `prior.condition(op.with_traits(Traits.SURJECTIVE), value)` | H26 | Exact conditioning needs a positive-definite prior; see §3. |
 
 ### Plotting
 
@@ -249,7 +250,17 @@ Unchanged and used: `HilbertSpace` (type hints only), `EuclideanSpace`,
    analytical test states (`EarthState.for_testing`), where the solves
    converge tightly.
 
-2. **A tensor product of spaces.** It is not needed for the port. It is
+2. **Exact conditioning of a semidefinite prior.** `GaussianMeasure.condition`
+   requires A C A* to be known positive definite, and infers that only from
+   a positive-definite C and a surjective A. A masked prior P C P* is
+   semidefinite, so conditioning it is refused even where A C A* is
+   positive definite, and there is no way to claim that. v1 allowed it.
+   Heathcote2026 avoids it because its mass constraint carries the ocean
+   function and so A P = A: conditioning the unmasked prior and masking
+   afterwards gives the same measure. The models submodule will constrain
+   masked components where that identity need not hold.
+
+3. **A tensor product of spaces.** It is not needed for the port. It is
    needed later for model spaces that vary in time and for the viscoelastic
    operators on ice histories.
 

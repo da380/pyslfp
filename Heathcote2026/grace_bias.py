@@ -221,7 +221,7 @@ def main():
     data_err = wmb.load_measure_to_observation_measure(noise)
     data_space = data_err.domain
 
-    sea_level_proj = response_space.subspace_projection(0)
+    sea_level_proj = response_space.projection(0)
 
     sle_to_load = sea_level_change_to_load_operator(
         state, sea_level_proj.codomain, load_space
@@ -298,49 +298,63 @@ def main():
     # ------------------ CORE BIAS EVALUATION ------------------
     op1 = inf.BlockLinearOperator(
         [
-            [load_space.identity_operator(), data_space.zero_operator(load_space)],
-            [fp_op, data_space.zero_operator(response_space)],
-            [load_space.zero_operator(data_space), data_space.identity_operator()],
+            [
+                inf.LinearOperator.identity(load_space),
+                inf.LinearOperator.zero(data_space, codomain=load_space),
+            ],
+            [fp_op, inf.LinearOperator.zero(data_space, codomain=response_space)],
+            [
+                inf.LinearOperator.zero(load_space, codomain=data_space),
+                inf.LinearOperator.identity(data_space),
+            ],
         ]
     )
     op2 = inf.BlockLinearOperator(
         [
             [
-                load_space.identity_operator(),
+                inf.LinearOperator.identity(load_space),
                 sle_to_load @ sea_level_proj,
-                data_space.zero_operator(load_space),
+                inf.LinearOperator.zero(data_space, codomain=load_space),
             ],
             [
-                load_space.zero_operator(data_space),
+                inf.LinearOperator.zero(load_space, codomain=data_space),
                 grace_observation_operator(response_space, args.obs_degree),
-                data_space.identity_operator(),
+                inf.LinearOperator.identity(data_space),
             ],
         ]
     )
 
     avgs_space = avg_op.codomain
     true_op = (
-        inf.RowLinearOperator([avg_op, data_space.zero_operator(avgs_space)])
+        inf.RowLinearOperator(
+            [avg_op, inf.LinearOperator.zero(data_space, codomain=avgs_space)]
+        )
         @ op2
         @ op1
     )
     err_op = inf.RowLinearOperator([avg_op, -1 * wmb_avg_op]) @ op2 @ op1
 
-    joint_meas = inf.GaussianMeasure.from_direct_sum([cond_prior, data_err])
-    true_meas = joint_meas.affine_mapping(operator=true_op)
-    err_meas = joint_meas.affine_mapping(operator=err_op)
+    joint_meas = inf.GaussianMeasure.from_product([cond_prior, data_err])
+    true_meas = joint_meas.affine_map(true_op)
+    err_meas = joint_meas.affine_map(err_op)
 
-    true_stds = np.sqrt(np.diag(true_meas.covariance.matrix(dense=True))) * scale_mm
-    err_stds = np.sqrt(np.diag(err_meas.covariance.matrix(dense=True))) * scale_mm
+    true_stds = (
+        np.sqrt(np.diag(true_meas.covariance.matrix(form="components"))) * scale_mm
+    )
+    err_stds = (
+        np.sqrt(np.diag(err_meas.covariance.matrix(form="components"))) * scale_mm
+    )
     err_means = err_meas.expectation * scale_mm
 
-    wmb_noise_meas = data_err.affine_mapping(operator=wmb_avg_op)
-    wmb_stds = np.sqrt(np.diag(wmb_noise_meas.covariance.matrix(dense=True))) * scale_mm
+    wmb_noise_meas = data_err.affine_map(wmb_avg_op)
+    wmb_stds = (
+        np.sqrt(np.diag(wmb_noise_meas.covariance.matrix(form="components"))) * scale_mm
+    )
 
     if args.samples > 0:
         print(f"Drawing {args.samples} MC samples...")
         joint_samples_list = joint_meas.samples(
-            args.samples, parallel=args.parallel, n_jobs=args.max_jobs
+            args.samples, n_jobs=args.max_jobs if args.parallel else None
         )
         err_samples = np.zeros((args.samples, len(region_names)))
         for idx, sample in enumerate(joint_samples_list):

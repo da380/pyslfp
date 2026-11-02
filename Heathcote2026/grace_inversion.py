@@ -22,7 +22,6 @@ import pygeoinf as inf
 import grace_utils as utils
 from pyslfp.parallel import set_num_threads
 import pyslfp as sl
-from pygeoinf.symmetric_space.sphere import plot_points
 
 
 plt.rcParams.update(
@@ -237,11 +236,11 @@ def main():
 
     print("\nDrawing synthetic model and dataset...")
     forward_problem = inf.LinearForwardProblem(
-        exact_forward_op, data_error_measure=data_error_measure
+        exact_forward_op, error=data_error_measure
     )
     model, data = forward_problem.synthetic_model_and_data(model_prior)
-    data_measure = data_error_measure.affine_mapping(translation=data)
-    inverse_problem = inf.LinearBayesianInversion(forward_problem, model_prior)
+    data_measure = data_error_measure.translate(data)
+    inverse_problem = inf.LinearGaussianInversion(forward_problem, model_prior)
 
     # ------------------ 2. PRECONDITIONER SETUP ------------------
     preconditioner = wmb_method.bayesian_normal_operator_preconditioner(
@@ -250,13 +249,16 @@ def main():
 
     # ------------------ 3. POSTERIOR SOLVE ------------------
     print("\nSolving for posterior expectation...")
-    callback = inf.ProgressCallback()
-    solver = inf.CGSolver(callback=callback, rtol=0.01 * noise_info["std_factor"])
-
-    model_posterior = inverse_problem.model_posterior_measure(
-        data, solver, preconditioner=preconditioner
+    callback = inf.ProgressCallback(report=print)
+    solver = inf.CGSolver(
+        callback=callback,
+        rtol=0.01 * noise_info["std_factor"],
+        preconditioner=preconditioner,
     )
-    print(f"\nSolution reached in {solver.iterations} iterations.")
+    inverse_problem = inverse_problem.with_solver(solver)
+
+    model_posterior = inverse_problem(data)
+    print(f"\nSolution reached in {callback.iterations} iterations.")
 
     # Set up the averaging operators
     tot_avg_op = ewt_mm_scale * avg_op @ total_load_op
@@ -268,17 +270,15 @@ def main():
     if args.plot_pdfs or args.plot_target_degree:
         print("Forming load average estimates")
 
-        wmb_avg_measure = data_measure.affine_mapping(
-            operator=wmb_avg_op
-        ).with_dense_covariance()
+        wmb_avg_measure = data_measure.affine_map(wmb_avg_op).with_dense_covariance()
 
-        post_avg_measure = model_posterior.affine_mapping(
-            operator=tot_avg_op
-        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(4, args.max_jobs))
+        post_avg_measure = model_posterior.affine_map(tot_avg_op).with_dense_covariance(
+            n_jobs=min(4, args.max_jobs) if args.parallel else None
+        )
 
-        prior_avg_measure = model_prior.affine_mapping(
-            operator=tot_avg_op
-        ).with_dense_covariance(parallel=args.parallel, n_jobs=min(4, args.max_jobs))
+        prior_avg_measure = model_prior.affine_map(tot_avg_op).with_dense_covariance(
+            n_jobs=min(4, args.max_jobs) if args.parallel else None
+        )
 
         true_avg = tot_avg_op(model)
 
@@ -305,22 +305,16 @@ def main():
 
                 for i, region in enumerate(region_names):
                     ax = axes_flat[i]
-                    coordinate_projection = post_avg_measure.domain.subspace_projection(
-                        i
+                    coordinate_projection = (
+                        post_avg_measure.domain.coordinate_selection([i])
                     )
 
-                    coord_prior = prior_avg_measure.affine_mapping(
-                        operator=coordinate_projection
-                    )
-                    coord_post = post_avg_measure.affine_mapping(
-                        operator=coordinate_projection
-                    )
+                    coord_prior = prior_avg_measure.affine_map(coordinate_projection)
+                    coord_post = post_avg_measure.affine_map(coordinate_projection)
 
                     kl_div = coord_post.kl_divergence(coord_prior)
 
-                    coord_wmb = wmb_avg_measure.affine_mapping(
-                        operator=coordinate_projection
-                    )
+                    coord_wmb = wmb_avg_measure.affine_map(coordinate_projection)
 
                     basis_vec = coord_prior.domain.basis_vector(0)
                     prior_var = coord_prior.directional_variance(basis_vec)
@@ -332,13 +326,13 @@ def main():
                         f"{region:<16} | {kl_div:<15.2f} | {prior_var:<19.2f} | {post_var:<18.2f} | {var_reduction:>16.2f}%\n"
                     )
 
-                    inf.plot_1d_distributions(
+                    inf.plot_densities(
                         [coord_post, coord_wmb],
                         ax=ax,
-                        true_value=true_avg[i],
+                        truth=true_avg[i],
                         xlabel="Regional Average Total Load (mm EWT)",
                         title=f"{region}",
-                        posterior_labels=["Bayesian", "WMB"],
+                        labels=["Bayesian", "WMB"],
                     )
 
                     if ax.get_legend() is not None and i != 1:
@@ -354,25 +348,27 @@ def main():
         if args.plot_target_degree:
             l = args.target_degree
             print(f"Generating Degree-{l} Corner Plot...")
-            target_deg_op = load_space.to_coefficient_operator(l, lmin=l) * ewt_mm_scale
+            target_deg_op = (
+                ewt_mm_scale / load_space.radius
+            ) * load_space.coefficient_operator(lmax=l, lmin=l)
 
-            target_deg_prior = model_prior.affine_mapping(
-                operator=target_deg_op
+            target_deg_prior = model_prior.affine_map(
+                target_deg_op
             ).with_dense_covariance(
-                parallel=args.parallel, n_jobs=min(2 * l + 1, args.max_jobs)
+                n_jobs=min(2 * l + 1, args.max_jobs) if args.parallel else None,
             )
 
-            target_deg_post = model_posterior.affine_mapping(
-                operator=target_deg_op
+            target_deg_post = model_posterior.affine_map(
+                target_deg_op
             ).with_dense_covariance(
-                parallel=args.parallel, n_jobs=min(2 * l + 1, args.max_jobs)
+                n_jobs=min(2 * l + 1, args.max_jobs) if args.parallel else None,
             )
 
             kl_div = target_deg_post.kl_divergence(target_deg_prior)
 
             # --- Extract Dense Covariance Matrices ---
-            prior_cov_mat = target_deg_prior.covariance.matrix(dense=True)
-            post_cov_mat = target_deg_post.covariance.matrix(dense=True)
+            prior_cov_mat = target_deg_prior.covariance.matrix(form="components")
+            post_cov_mat = target_deg_post.covariance.matrix(form="components")
 
             prior_trace = np.trace(prior_cov_mat)
             post_trace = np.trace(post_cov_mat)
@@ -383,17 +379,11 @@ def main():
             prior_det = np.linalg.det(prior_cov_mat)
             post_det = np.linalg.det(post_cov_mat)
 
-            # Dynamically generate component names and LaTeX labels (order: m=0, m=-1, m=1, etc.)
-            comp_names = [f"({l},0)"]
-            labels = [rf"$\zeta_{{{l},0}}$ (mm EWT)"]
-            for m in range(1, l + 1):
-                comp_names.extend([f"({l},{-m})", f"({l},{m})"])
-                labels.extend(
-                    [
-                        rf"$\zeta_{{{l},{-m}}}$ (mm EWT)",
-                        rf"$\zeta_{{{l},{m}}}$ (mm EWT)",
-                    ]
-                )
+            # Component names and LaTeX labels in the order of the coefficient
+            # vector: m = 0, 1, ..., l, then -1, ..., -l (the sine terms).
+            orders = list(range(0, l + 1)) + list(range(-1, -l - 1, -1))
+            comp_names = [f"({l},{m})" for m in orders]
+            labels = [rf"$\zeta_{{{l},{m}}}$ (mm EWT)" for m in orders]
 
             with open(metrics_file, "a") as f_metrics:
                 f_metrics.write(f"\n\nDegree-{l} Spherical Harmonic Coefficients\n")
@@ -419,9 +409,9 @@ def main():
                     )
                 f_metrics.write("-" * 65 + "\n")
 
-            inf.plot_corner_distributions(
+            inf.plot_corner(
                 target_deg_post,
-                true_values=target_deg_op(model),
+                truth=target_deg_op(model),
                 labels=labels,
                 title="",
             )
@@ -433,14 +423,12 @@ def main():
         metrics_file = os.path.join(output_dir, "grace_metrics.txt")
 
         # 1. Bayesian Resolution Operators
-        kalman_operator = inverse_problem.kalman_operator(
-            solver, preconditioner=preconditioner
-        )
+        kalman_operator = inverse_problem.kalman_operator
         exact_fwd_op = inverse_problem.forward_problem.forward_operator
 
         model_resolution_operator = (
             kalman_operator @ exact_fwd_op
-        ) - load_space.identity_operator()
+        ) - inf.LinearOperator.identity(load_space)
 
         property_resolution_operator = tot_avg_op @ model_resolution_operator
 
@@ -510,9 +498,9 @@ def main():
                     bayes_error_pct = (bayes_res_vector / max_abs_val) * 100
                     wmb_error_pct = (wmb_res_vector / max_abs_val) * 100
                 else:
-                    target_normed = load_space.zero
-                    bayes_error_pct = load_space.zero
-                    wmb_error_pct = load_space.zero
+                    target_normed = load_space.zero()
+                    bayes_error_pct = load_space.zero()
+                    wmb_error_pct = load_space.zero()
 
                 # --- Plot 1: Target Kernel (Left Column) ---
                 _, im_target = sl.plot(
@@ -590,13 +578,15 @@ def main():
         # ------------------ TARGET DEGREE KERNEL ERROR ------------------
         l = args.target_degree
         print(f"  Evaluating Degree-{l} Estimator Kernels...")
-        target_deg_op = load_space.to_coefficient_operator(l, lmin=l) * ewt_mm_scale
+        target_deg_op = (
+            ewt_mm_scale / load_space.radius
+        ) * load_space.coefficient_operator(lmax=l, lmin=l)
         target_deg_resolution_operator = target_deg_op @ model_resolution_operator
 
-        # Dynamically generate component names
-        comp_names = [f"({l},0)"]
-        for m in range(1, l + 1):
-            comp_names.extend([f"({l},{-m})", f"({l},{m})"])
+        # Component names in the order of the coefficient vector:
+        # m = 0, 1, ..., l, then -1, ..., -l (the sine terms).
+        orders = list(range(0, l + 1)) + list(range(-1, -l - 1, -1))
+        comp_names = [f"({l},{m})" for m in orders]
 
         deg_kernel_ratio_rows = []
 
@@ -653,9 +643,9 @@ def main():
                     bayes_kernel_normed = bayes_kernel_vector / max_abs_val
                     bayes_error_pct = (bayes_res_vector / max_abs_val) * 100
                 else:
-                    target_normed = load_space.zero
-                    bayes_kernel_normed = load_space.zero
-                    bayes_error_pct = load_space.zero
+                    target_normed = load_space.zero()
+                    bayes_kernel_normed = load_space.zero()
+                    bayes_error_pct = load_space.zero()
 
                 # --- Plot 1: Target Kernel (Left Column) ---
                 _, im_target = sl.plot(
@@ -737,8 +727,8 @@ def main():
         print("Generating spatial maps...")
         cmap = "seismic"
 
-        total_load_prior = model_prior.affine_mapping(operator=total_load_op)
-        total_load_posterior = model_posterior.affine_mapping(operator=total_load_op)
+        total_load_prior = model_prior.affine_map(total_load_op)
+        total_load_posterior = model_posterior.affine_map(total_load_op)
 
         true_model = total_load_op(model)
         post_model = total_load_posterior.expectation
@@ -750,9 +740,7 @@ def main():
         # with half-power at the SNR crossover degree when available,
         # otherwise the legacy 2 x noise-correlation-scale choice.
         plot_scale = noise_info["plot_smoothing_scale"] or 2 * noise_scale
-        smoothing_operator = load_space.heat_kernel_gaussian_measure(
-            plot_scale
-        ).covariance
+        smoothing_operator = load_space.heat_measure(plot_scale).covariance
         smoothed_wmb_estimate = smoothing_operator(wmb_estimate)
 
         vmax = max(
@@ -865,7 +853,7 @@ def main():
             )
             ax.set_title(title, fontsize=16)
 
-            plot_points([pt], ax=ax, color="black", gridlines=False)
+            sl.plot_points([pt], ax=ax, color="black", gridlines=False, coasts=False)
 
             im_cov.colorbar.set_label("Covariance (mm² EWT)", fontsize=14)
             im_cov.colorbar.ax.tick_params(labelsize=12)

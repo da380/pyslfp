@@ -38,9 +38,7 @@ print("g in these units:", earth_model.parameters.gravitational_acceleration)
 
 ice_model = sl.ice.AnalyticalIceModel(length_scale=parameters.length_scale)
 ice_thickness, sea_level = ice_model.get_ice_thickness_and_sea_level(0, LMAX)
-initial_state = sl.EarthState(
-    ice_thickness, sea_level, earth_model, exclude_caspian=False
-)
+initial_state = sl.EarthState(ice_thickness, sea_level, earth_model)
 
 metre = parameters.length_scale
 

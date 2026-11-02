@@ -55,18 +55,26 @@ class EarthState(Regions):
         model: EarthModel,
         /,
         *,
-        exclude_caspian: bool = True,
+        land: Optional[SHGrid] = None,
         ocean_function: Optional[SHGrid] = None,
     ) -> None:
         """
         Initialises an EarthState container.
 
+        The ocean function is decided by flotation, with no geography
+        assumed: every depression below sea level counts as ocean. Regions
+        to hold as land whatever the flotation -- for the present-day Earth,
+        the landlocked depressions of `landlocked_projection` -- are given as
+        `land`; `from_ice_model` supplies the ice model's own.
+
         Args:
             ice_thickness (SHGrid): The non-dimensional ice thickness grid.
             sea_level (SHGrid): The non-dimensional sea level (topography) grid.
             model (EarthModel): The physical Earth model parameters and Love numbers.
-            exclude_caspian (bool): If True, the Caspian Sea is strictly treated as
-                land in all flotation and ocean function calculations. Defaults to True.
+            land (Optional[SHGrid]): Ones over the regions held as land in
+                every flotation calculation, zeros elsewhere; the non-linear
+                solver and the viscoelastic evolution carry it into the
+                states they create. None (the default) holds nothing.
             ocean_function (Optional[SHGrid]): A prescribed ocean function, ones
                 and zeros, used in place of the one the flotation condition
                 gives. It fixes the shorelines of a frozen-shoreline problem
@@ -86,7 +94,12 @@ class EarthState(Regions):
         self._ice_thickness = ice_thickness
         self._sea_level = sea_level
         self._model = model
-        self._exclude_caspian = exclude_caspian
+        if land is not None:
+            model.check_field(land)
+            if not np.all((land.data == 0.0) | (land.data == 1.0)):
+                raise ValueError("a land mask must be ones and zeros")
+            land = land.copy()
+        self._land = land
         if ocean_function is not None:
             model.check_field(ocean_function)
             if not np.all((ocean_function.data == 0.0) | (ocean_function.data == 1.0)):
@@ -114,7 +127,7 @@ class EarthState(Regions):
         model: EarthModel,
         /,
         *,
-        exclude_caspian: bool = True,
+        land: Union[SHGrid, None, str] = "model",
     ) -> EarthState:
         """
         The state an ice-and-sea-level model records at a date.
@@ -129,8 +142,10 @@ class EarthState(Regions):
                 with the Earth model's length scale.
             date (float): The date in kiloyears before present.
             model (EarthModel): The Earth model of the state.
-            exclude_caspian (bool): Whether the ocean function masks the
-                Caspian Sea.
+            land: The regions held as land (see `EarthState`): "model", the
+                default, for the ice model's own (`get_land`; ICE-NG holds the
+                present-day landlocked depressions), a grid of its own, or None
+                for flotation alone.
         """
         if not isinstance(ice_model, BaseIceSeaLevelModel):
             raise TypeError(
@@ -144,9 +159,16 @@ class EarthState(Regions):
             sampling=model.sampling,
             extend=model.extend,
         )
-        return EarthState(
-            ice_thickness, sea_level, model, exclude_caspian=exclude_caspian
-        )
+        if isinstance(land, str):
+            if land != "model":
+                raise ValueError(f"land must be 'model', a grid or None, got {land!r}")
+            land = ice_model.get_land(
+                model.lmax,
+                grid=model.grid_name,
+                sampling=model.sampling,
+                extend=model.extend,
+            )
+        return EarthState(ice_thickness, sea_level, model, land=land)
 
     @staticmethod
     def for_testing(lmax: int) -> EarthState:
@@ -167,7 +189,7 @@ class EarthState(Regions):
             sampling=earth_model.sampling,
             extend=earth_model.extend,
         )
-        return EarthState(ice_thickness, sea_level, earth_model, exclude_caspian=False)
+        return EarthState(ice_thickness, sea_level, earth_model)
 
     # ---------------------------------------------------------#
     #                 Read-Only Properties                     #
@@ -189,9 +211,10 @@ class EarthState(Regions):
         return self._model
 
     @property
-    def exclude_caspian(self) -> bool:
-        """Returns true if the Caspian Sea is excluded from the global ocean."""
-        return self._exclude_caspian
+    def land(self) -> Optional[SHGrid]:
+        """The regions held as land whatever the flotation, ones and zeros, or
+        None for none. A copy."""
+        return None if self._land is None else self._land.copy()
 
     @property
     def has_prescribed_ocean_function(self) -> bool:
@@ -235,9 +258,8 @@ class EarthState(Regions):
             0.0,
         )
 
-        if self.exclude_caspian:
-            caspian_mask_data = self.caspian_sea_projection(value=0).data
-            ocean_data = np.where(ocean_data - caspian_mask_data > 0, 1.0, 0.0)
+        if self._land is not None:
+            ocean_data = np.where(self._land.data > 0.0, 0.0, ocean_data)
 
         return SHGrid.from_array(ocean_data, grid=self.grid)
 

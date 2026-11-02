@@ -7,7 +7,7 @@ to the pyslfp physical engine.
 """
 
 from abc import ABC, abstractmethod
-from typing import Tuple
+from typing import Optional, Tuple
 from pathlib import Path
 
 import numpy as np
@@ -206,6 +206,29 @@ class BaseIceSeaLevelModel(BaseIceModel):
             scaled by the model's `length_scale`.
         """
         pass
+
+    def get_land(
+        self,
+        lmax: int,
+        /,
+        *,
+        grid: str = "DH",
+        sampling: int = 1,
+        extend: bool = True,
+    ) -> Optional[SHGrid]:
+        """
+        The regions the model's states hold as land whatever the flotation,
+        ones and zeros on the given grid, or None for none; the default of
+        `EarthState.from_ice_model`. A model makes no geographic assumption
+        unless it describes the Earth, so this one returns None.
+
+        Args:
+            lmax (int): The maximum spherical harmonic degree.
+            grid (str): The pyshtools grid format.
+            sampling (int): The grid sampling factor.
+            extend (bool): Whether the grid includes the repeated longitude.
+        """
+        return None
 
     def get_ice_thickness(
         self,

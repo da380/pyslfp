@@ -94,7 +94,7 @@ def _si_outputs(body, scheme):
     material, earth = _setting(body, scheme)
     scales = earth.parameters.scales
     ice_model = AnalyticalIceModel(length_scale=earth.parameters.length_scale)
-    state = EarthState.from_ice_model(ice_model, 10.0, earth, exclude_caspian=False)
+    state = EarthState.from_ice_model(ice_model, 10.0, earth, land=None)
     # the Maxwell time, authored in the geophysical frame, in this
     # scheme's units
     tau = (

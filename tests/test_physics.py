@@ -141,8 +141,8 @@ def test_nonlinear_solver_smoke_test(analytical_state):
     # Verify that solver iteration tracking works
     assert sle.solver_counter > initial_counter
 
-    # Verify the Caspian Sea policy inherited correctly
-    assert new_state.exclude_caspian == analytical_state.exclude_caspian
+    # The final state holds the same regions as land as the initial one
+    assert (new_state.land is None) == (analytical_state.land is None)
 
 
 @pytest.mark.parametrize("grid", ["DH", "DH2"])
@@ -159,7 +159,7 @@ def test_nonlinear_solver_non_extended_grid(grid):
         ice_thickness, sea_level = ice_model.get_ice_thickness_and_sea_level(
             0.0, lmax, grid=model.grid_name, sampling=model.sampling, extend=extend
         )
-        state = EarthState(ice_thickness, sea_level, model, exclude_caspian=False)
+        state = EarthState(ice_thickness, sea_level, model)
 
         ice_melt_nd = -100.0 / model.parameters.length_scale
         ice_thickness_change = model.zero_grid()
@@ -602,7 +602,7 @@ def test_solvers_on_dh2_grid():
     ice, sea_level = ice_model.get_ice_thickness_and_sea_level(
         0.0, 16, grid=model.grid_name, sampling=model.sampling, extend=model.extend
     )
-    state = EarthState(ice, sea_level, model, exclude_caspian=False)
+    state = EarthState(ice, sea_level, model)
     assert state.ocean_function.data.shape == model.zero_grid().data.shape
 
     load = state.northern_hemisphere_load(fraction=0.5)

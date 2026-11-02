@@ -96,12 +96,29 @@ def test_rgi7_glaciers_table(region_engine):
     assert np.all(table["area"].values > 0)
 
 
-def test_caspian_sea_projection(region_engine):
-    """Test the static Caspian Sea mask."""
-    caspian_proj = region_engine.caspian_sea_projection(value=0)
-    assert isinstance(caspian_proj, SHGrid)
-    assert np.all((caspian_proj.data == 0) | (caspian_proj.data == 1))
-    assert np.sum(caspian_proj.data) > 0
+def test_landlocked_projection(region_engine):
+    """The landlocked depressions: the Caspian among them, the named ones a
+    part of the whole, and none of the seas joined to the ocean through
+    narrow straits."""
+    every = region_engine.landlocked_projection(value=0)
+    caspian = region_engine.landlocked_projection(value=0, names=["Caspian Sea"])
+    assert isinstance(every, SHGrid)
+    assert np.all((every.data == 0) | (every.data == 1))
+    assert np.sum(caspian.data) > 0
+    assert np.all(every.data >= caspian.data)
+    lats, lons = region_engine.lats(), region_engine.lons()
+
+    def at(lat, lon):
+        i = np.argmin(np.abs(lats - lat))
+        j = np.argmin(np.abs(lons - lon))
+        return every.data[i, j]
+
+    assert at(42.0, 50.5) == 1  # the Caspian
+    for lat, lon in ((43.0, 34.0), (35.0, 18.0), (20.0, 38.5), (58.0, 20.0)):
+        assert at(lat, lon) == 0  # Black Sea, Mediterranean, Red Sea, Baltic
+    assert "Caspian Sea" in region_engine.list_all_regions()["Landlocked depressions"]
+    with pytest.raises(ValueError, match="landlocked"):
+        region_engine.landlocked_projection(names=["Lake Atlantis"])
 
 
 @pytest.mark.slow
@@ -329,10 +346,11 @@ def test_shapefile_composite_routing(
 @pytest.mark.slow
 def test_get_projection_integration(region_engine):
     """
-    Test the universal router using built-in datasets (AR6 and Caspian)
-    to verify it searches multiple datasets sequentially.
+    Test the universal router using built-in datasets (AR6 and the
+    landlocked depressions) to verify it searches multiple datasets
+    sequentially.
     """
-    # Cross-dataset composite: Caspian (special case) + W.Antarctica (AR6)
+    # Cross-dataset composite: the Caspian (landlocked) + W.Antarctica (AR6)
     composite = region_engine.get_projection(["Caspian Sea", "W.Antarctica"], value=0.0)
 
     # Verify it's a valid binary grid

@@ -14,6 +14,7 @@ from cartopy import crs as ccrs
 from pyshtools import SHGrid
 
 from pyslfp.data import DATADIR, ensure_data
+from pyslfp.water_bodies import landlocked_mask, landlocked_names
 
 
 class Regions:
@@ -190,7 +191,7 @@ class Regions:
             "HydroBASINS (Level 3)": self.list_hydrobasins(),
             "Natural Earth (Oceans)": self.list_ne_oceans(),
             "GTN-G (Glacier Regions)": self.list_gtng_regions(),
-            "Hardcoded Custom": ["Caspian Sea"],
+            "Landlocked depressions": list(landlocked_names()),
         }
 
     def get_projection(
@@ -225,8 +226,8 @@ class Regions:
         for region in regions:
             matched = False
 
-            if region == "Caspian Sea":
-                mask_grid = self.caspian_sea_projection(value=0.0)
+            if region in landlocked_names():
+                mask_grid = self.landlocked_projection(value=0.0, names=[region])
                 accumulated_mask = accumulated_mask | (mask_grid.data == 1.0)
                 continue
 
@@ -273,7 +274,7 @@ class Regions:
         }
 
         for r in regions:
-            if r == "Caspian Sea" or r == "Glaciers":
+            if r in landlocked_names() or r == "Glaciers":
                 warnings.warn(f"'{r}' is a gridded mask and has no boundaries to plot.")
                 continue
 
@@ -568,14 +569,38 @@ class Regions:
             value=value
         ) + self.east_antarctic_projection(value=value)
 
-    def caspian_sea_projection(self, /, *, value: float = np.nan) -> SHGrid:
-        """Simple rectangular projection for the Caspian Sea."""
-        lats, lons = np.meshgrid(self.lats(), self.lons(), indexing="ij")
-        caspian_mask = np.logical_and(
-            np.logical_and(lats > 36, lats < 49.5),
-            np.logical_and(lons > 45.5, lons < 55),
+    def landlocked_projection(
+        self,
+        /,
+        *,
+        value: float = np.nan,
+        names: Optional[List[str]] = None,
+        threshold: float = 0.5,
+    ) -> SHGrid:
+        """
+        Returns a grid that is 1 over the present-day landlocked depressions
+        and `value` elsewhere: land below sea level that is cut off from the
+        ocean, the Caspian, the Dead Sea, Qattara, the beds of lakes below sea
+        level and the rest, from the ETOPO 2022 bedrock at two arc-minutes
+        (`pyslfp.water_bodies`). A node is landlocked when the depressions
+        cover more than `threshold` of its cell. Passed as an `EarthState`'s
+        `land`, it holds them as land whatever the flotation.
+
+        Args:
+            value: The value to assign elsewhere. Defaults to NaN.
+            names: The named depressions to include (the "Landlocked
+                depressions" of `list_all_regions`); all, named or not, if
+                None.
+            threshold: The covered fraction above which a node is landlocked.
+        """
+        mask = landlocked_mask(
+            self.lats(),
+            self.lons(),
+            extend=self.extend,
+            names=names,
+            threshold=threshold,
         )
-        return SHGrid.from_array(np.where(caspian_mask, 1, value), grid=self.grid)
+        return SHGrid.from_array(np.where(mask, 1.0, value), grid=self.grid)
 
     # ==================================================================== #
     #                         5. Plotting Methods                          #

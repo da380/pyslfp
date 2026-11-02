@@ -11,8 +11,8 @@ turns a list of them into an inversion space, with the load operator,
 constraints and GMSL diagnostics derived from each component's role. The design
 is in [models_plan.md](models_plan.md). The component record and the factories
 (WP1), glaciers included, and the assembler, `ModelSetup` (WP2), are built.
-WP3, the ready-made set-ups and the rest of the harvest, remains, and starts
-once the Caspian below is settled.
+WP3, the ready-made set-ups and the rest of the harvest, remains; it follows
+the response classes and horizontal displacement (see below).
 
 It also completes the harvest of physics from the Heathcote2026 scripts: the
 barystatic and steric GMSL split and the regional decomposition after Gregory
@@ -22,32 +22,29 @@ scripts are then replaced by new, simplified ones built on set-ups, tested
 against a local record of the current scripts kept outside the repository;
 the current scripts leave the repository once the new ones reproduce them.
 
-## Hard-coded regions
+## Water bodies
 
-The ice sheets are selected by rule (`EarthState.ice_sheet_projection`) and the
-glaciers come from the Randolph Glacier Inventory 7.0
-(`EarthState.glacier_area_density`). One rectangular mask in `regions.py` still
-stands in for a physical definition, and is to be replaced.
+The ocean function is decided by flotation, with no geography assumed; regions
+held as land whatever the flotation are an `EarthState`'s `land` mask, which
+the non-linear solver and the viscoelastic evolution carry into the states
+they create. The present-day landlocked depressions (`landlocked_projection`)
+come from `pyslfp.water_bodies`, built from the ETOPO 2022 bedrock at two
+arc-minutes by `tools/build_landlocked.py` and shipped as
+`pyslfp/data/landlocked.npz`; ICE-NG supplies them as its default land.
 
-**The Caspian box** (36-49.5N, 45.5-55E), excluded from the ocean function by
-`EarthState(exclude_caspian=True)`, the default, and carried through the
-non-linear solver and the viscoelastic evolution. The underlying fault is that
-the ocean function is decided by flotation alone, so every depression below
-sea level counts as ocean once resolved: the Caspian, the Dead Sea, Qattara,
-Turpan, Death Valley. Two routes were checked and neither is ready as it
-stands:
-
-- HydroBASINS, which pyslfp ships, flags endorheic basins, but HydroSHEDS
-  treats the Caspian as coastline, so the basins around it are not flagged.
-- Connectivity to the open ocean, decided on high-resolution topography
-  rather than the model grid (where Gibraltar and the Bosporus close), would
-  generalise. The shipped ETOPO 2022 bedrock is at 2', which resolves
-  Gibraltar but not the Bosporus, so the Black Sea would need its connection
-  stated.
-
-Changing either default changes the Heathcote2026 results. The clean-up
-comes first, before WP3 of the models submodule and the paper's revision
-runs, so that both use the physical definitions.
+- **Connectivity through time.** The present-day mask is held at every date.
+  At low stands seas were cut off that are joined today (the Black Sea behind
+  the Bosporus at the glacial maximum), and the reverse. Giving the stated
+  channels sill depths, and the resolved straits theirs from the bedrock,
+  would let a state decide which are open at its own sea level: the basins
+  come from one labelling, and each state is then a check over the channels.
+- **Several water bodies.** The extended sea level equation of Coulson,
+  Al-Attar and Mitrovica treats several water bodies with levels and mass
+  budgets of their own, and their exchanges. It needs the bodies and their
+  connections found automatically, which `label_water_bodies` begins.
+- **Near the coast** the two-arc-minute raster cannot tell a narrow tidal
+  channel from a dyke, so bodies within 15 km of the open ocean are joined to
+  it; a finer bedrock, or more stated channels, would settle them.
 
 ## Operator wrappers for the viscoelastic adjoints
 

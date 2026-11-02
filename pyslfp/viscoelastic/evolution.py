@@ -32,7 +32,7 @@ from __future__ import annotations
 import copy
 import warnings
 from collections.abc import Callable, Sequence
-from typing import Optional
+from typing import Optional, Union
 from dataclasses import dataclass, field, replace
 
 import numpy as np
@@ -41,7 +41,7 @@ from pyshtools import SHCoeffs, SHGrid
 from planetmodel import units
 
 from ..core import EarthModel
-from ..ice import BaseIceModel
+from ..ice import BaseIceModel, BaseIceSeaLevelModel
 from ..love_numbers import fluid_tidal_number
 from ..core import AndersonMixer, SeaLevelEquation
 from ..core import EarthState
@@ -1359,7 +1359,7 @@ class SeaLevelEvolution:
                 ice_start,
                 SHGrid.from_array(guess, grid=model.grid),
                 model,
-                exclude_caspian=self.state.exclude_caspian,
+                land=self.state.land,
                 ocean_function=prescribed,
             )
             misfit = self._with_state(start).final_sea_level_misfit(
@@ -1377,7 +1377,7 @@ class SeaLevelEvolution:
                 ice_start,
                 SHGrid.from_array(calibrated, grid=model.grid),
                 model,
-                exclude_caspian=self.state.exclude_caspian,
+                land=self.state.land,
                 ocean_function=start.ocean_function,
             )
             update = float(np.max(np.abs(support * residual)))
@@ -1407,7 +1407,7 @@ class SeaLevelEvolution:
                 ice_start,
                 SHGrid.from_array(guess, grid=model.grid),
                 model,
-                exclude_caspian=self.state.exclude_caspian,
+                land=self.state.land,
             )
             misfit = self._with_state(state).final_sea_level_misfit(
                 dates,
@@ -2210,7 +2210,7 @@ def calibrate_initial_sea_level(
     model: EarthModel,
     *,
     scheme: str = "exponential_trapezoid",
-    exclude_caspian: bool = True,
+    land: Union[SHGrid, None, str] = "model",
     iterations: int = 4,
     rtol: float = 1e-3,
     anderson_memory: int = 5,
@@ -2243,7 +2243,11 @@ def calibrate_initial_sea_level(
             SHGrid in the Earth model's units.
         model: The Earth model of the run.
         scheme, rotational_feedbacks: As for `SeaLevelEvolution`.
-        exclude_caspian: Passed to each trial state.
+        land: The regions held as land in each trial state (see
+            `EarthState`): "model", the default, for the ice model's own
+            when it has a sea level history (ICE-NG holds the present-day
+            landlocked depressions) and none otherwise, a grid of its own,
+            or None for flotation alone.
         iterations: The most passes taken.
         rtol: Convergence, the largest update of the initial sea level
             relative to its largest value.
@@ -2262,9 +2266,20 @@ def calibrate_initial_sea_level(
         sampling=model.sampling,
         extend=model.extend,
     )
-    guess = EarthState(
-        ice_start, present_sea_level, model, exclude_caspian=exclude_caspian
-    )
+    if isinstance(land, str):
+        if land != "model":
+            raise ValueError(f"land must be 'model', a grid or None, got {land!r}")
+        land = (
+            ice_model.get_land(
+                model.lmax,
+                grid=model.grid_name,
+                sampling=model.sampling,
+                extend=model.extend,
+            )
+            if isinstance(ice_model, BaseIceSeaLevelModel)
+            else None
+        )
+    guess = EarthState(ice_start, present_sea_level, model, land=land)
     evolution = SeaLevelEvolution(operator, guess, scheme=scheme)
     return evolution.calibrate_initial_sea_level(
         dates,

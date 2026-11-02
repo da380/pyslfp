@@ -28,7 +28,7 @@ def _state(model: EarthModel) -> EarthState:
         sampling=model.sampling,
         extend=model.extend,
     )
-    return EarthState(h, sl, model, exclude_caspian=False)
+    return EarthState(h, sl, model)
 
 
 def _adjoint_mismatch(model: EarthModel, *, seed: int = 0) -> float:

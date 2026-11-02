@@ -47,7 +47,7 @@ def setting():
     )
     ice = earth.zero_grid()
     sea = earth.constant_grid(3000.0 / earth.parameters.length_scale)
-    state = EarthState(ice, sea, earth, exclude_caspian=False)
+    state = EarthState(ice, sea, earth)
     lats = state.model.lats()[:, None] * np.ones_like(state.model.lons())[None, :]
     thickness = 100.0 / earth.parameters.length_scale
     cap = np.where(lats > 45.0, earth.parameters.ice_density * thickness, 0.0)
@@ -159,7 +159,7 @@ def _history_state(material, earth):
     low-degree tests, Gibbs-free by construction), over whatever
     radial body the caller chose."""
     ice_model = AnalyticalIceModel(length_scale=earth.parameters.length_scale)
-    state = EarthState.from_ice_model(ice_model, 10.0, earth, exclude_caspian=False)
+    state = EarthState.from_ice_model(ice_model, 10.0, earth, land=None)
     return ice_model, state
 
 
@@ -173,7 +173,7 @@ def _marine_history_state(material, earth):
         _MeltingCap.START, LMAX, grid=earth.grid_name, extend=earth.extend
     )
     sea = earth.constant_grid(3000.0 / earth.parameters.length_scale)
-    return ice_model, EarthState(ice, sea, earth, exclude_caspian=False)
+    return ice_model, EarthState(ice, sea, earth)
 
 
 def test_ice_history_run(setting):
@@ -254,7 +254,7 @@ def test_initial_sea_level_calibration(setting):
         dates,
         observed,
         earth,
-        exclude_caspian=False,
+        land=None,
         iterations=5,
         rtol=1e-6,
     )
@@ -268,7 +268,7 @@ def test_initial_sea_level_calibration(setting):
         dates,
         observed,
         earth,
-        exclude_caspian=False,
+        land=None,
         iterations=5,
         rtol=1e-6,
         anderson_memory=0,
@@ -293,7 +293,7 @@ def _marine_truth(material, earth):
         state.ice_thickness,
         SHGrid.from_array(state.sea_level.data + bump, grid=earth.grid),
         earth,
-        exclude_caspian=False,
+        land=None,
     )
     operator = _maxwell_operator(material)
     dates = np.linspace(10.0, 0.0, 6)
@@ -325,7 +325,7 @@ def test_frozen_calibration_is_one_linear_step(setting):
         + (40.0 / metre) * np.cos(np.radians(earth.lats()))[:, None],
         grid=earth.grid,
     )
-    guess = EarthState(state.ice_thickness, target, earth, exclude_caspian=False)
+    guess = EarthState(state.ice_thickness, target, earth)
     evolution = SeaLevelEvolution(operator, guess)
     calibration = evolution.calibrate_initial_sea_level(dates, ice_model, target)
     assert calibration.converged and len(calibration.updates) == 1
@@ -358,7 +358,7 @@ def test_calibration_methods_agree_under_frozen_shorelines(setting):
     )
     results = {}
     for method in ("fixed_point", "gradient"):
-        guess = EarthState(truth.ice_thickness, final, earth, exclude_caspian=False)
+        guess = EarthState(truth.ice_thickness, final, earth)
         evolution = SeaLevelEvolution(operator, guess)
         results[method] = evolution.calibrate_initial_sea_level(
             dates, ice_model, final, method=method, rtol=1e-8
@@ -385,7 +385,7 @@ def test_calibration_recovers_the_initial_sea_level_under_migrating_shorelines(
     operator, ice_model, truth, dates, final, _, _ = _marine_truth(material, earth)
     scale = np.max(np.abs(truth.sea_level.data))
     for method in ("fixed_point", "gradient"):
-        guess = EarthState(truth.ice_thickness, final, earth, exclude_caspian=False)
+        guess = EarthState(truth.ice_thickness, final, earth)
         calibration = SeaLevelEvolution(operator, guess).calibrate_initial_sea_level(
             dates,
             ice_model,
@@ -400,7 +400,7 @@ def test_calibration_recovers_the_initial_sea_level_under_migrating_shorelines(
         assert error < 1e-8 * scale, method
     rates = {}
     for method in ("fixed_point", "gradient"):
-        guess = EarthState(truth.ice_thickness, final, earth, exclude_caspian=False)
+        guess = EarthState(truth.ice_thickness, final, earth)
         with pytest.warns(RuntimeWarning, match="did not converge"):
             plain = SeaLevelEvolution(operator, guess).calibrate_initial_sea_level(
                 dates,
@@ -451,7 +451,7 @@ def test_final_sea_level_misfit_gradient_matches_finite_differences(setting):
                 truth.sea_level.data + sign * eps * direction, grid=earth.grid
             ),
             earth,
-            exclude_caspian=False,
+            land=None,
         )
         assert np.array_equal(state.ocean_function.data, truth.ocean_function.data)
         values.append(
@@ -482,7 +482,7 @@ def test_weighted_calibration_updates_only_where_weighted(setting):
     weights = SHGrid.from_array(
         np.where(np.abs(lats) < 20.0, 0.0, 1.0), grid=earth.grid
     )
-    guess = EarthState(truth.ice_thickness, final, earth, exclude_caspian=False)
+    guess = EarthState(truth.ice_thickness, final, earth)
     calibration = SeaLevelEvolution(operator, guess).calibrate_initial_sea_level(
         dates, ice_model, final, weights=weights, rtol=1e-8
     )
@@ -505,7 +505,7 @@ def test_run_ice_history_with_a_final_sea_level(setting):
     trajectory."""
     material, earth, _, _, _ = setting
     operator, ice_model, truth, dates, final, _, _ = _marine_truth(material, earth)
-    guess = EarthState(truth.ice_thickness, final, earth, exclude_caspian=False)
+    guess = EarthState(truth.ice_thickness, final, earth)
     evolution = SeaLevelEvolution(operator, guess)
     snapshots, _ = evolution.run_ice_history(
         dates,
@@ -545,7 +545,7 @@ def test_migrating_matches_frozen_when_shorelines_cannot_move(setting):
         _MeltingCap.START, LMAX, grid=earth.grid_name, extend=earth.extend
     ).data
     sea = earth.constant_grid(3000.0 / scale)
-    state = EarthState(ice, sea, earth, exclude_caspian=False)
+    state = EarthState(ice, sea, earth)
     evo = SeaLevelEvolution(_maxwell_operator(material), state)
     dates = np.linspace(10.0, 0.0, 5)
     frozen, _ = evo.run_ice_history(dates, ice_model, shorelines="frozen")
@@ -1221,7 +1221,7 @@ def test_initial_state_kernels(setting):
             ice0,
             SHGrid.from_array(state.sea_level.data + delta_sl.data, grid=earth.grid),
             earth,
-            exclude_caspian=False,
+            land=None,
         ),
         ice_model,
     )
@@ -1230,7 +1230,7 @@ def test_initial_state_kernels(setting):
             ice0,
             SHGrid.from_array(state.sea_level.data - delta_sl.data, grid=earth.grid),
             earth,
-            exclude_caspian=False,
+            land=None,
         ),
         ice_model,
     )
@@ -1264,7 +1264,7 @@ def test_initial_state_kernels(setting):
             SHGrid.from_array(ice0.data + sign * delta_ice.data, grid=earth.grid),
             state.sea_level,
             earth,
-            exclude_caspian=False,
+            land=None,
         )
         return functional(shifted_state, _Shifted(length_scale=scale))
 
@@ -1552,7 +1552,7 @@ def test_continuous_viscosity_kernels_unit_covariance():
             LMAX, parameters=parameters, love_numbers=love_numbers(material, LMAX)
         )
         ice_model = AnalyticalIceModel(length_scale=earth.parameters.length_scale)
-        state = EarthState.from_ice_model(ice_model, 10.0, earth, exclude_caspian=False)
+        state = EarthState.from_ice_model(ice_model, 10.0, earth, land=None)
         # a Maxwell layer under an elastic lid, in the resolved regime
         mu = float(np.max(np.asarray(material.moduli.kappa_mu()[1]).real))
         eta = mu * 10.0 * TAU * T_ND / tf

@@ -51,8 +51,8 @@ def ice_thickness_change_to_load_operator(
     l2_ice_space = underlying_space(ice_space)
     l2_load_space = underlying_space(load_space)
 
-    l2_operator = LinearOperator(
-        l2_ice_space, l2_load_space, mapping, adjoint_mapping=mapping
+    l2_operator = LinearOperator.from_callables(
+        l2_ice_space, l2_load_space, mapping, adjoint=mapping
     )
     return LinearOperator.from_formal_adjoint(ice_space, load_space, l2_operator)
 
@@ -81,8 +81,8 @@ def sea_level_change_to_load_operator(
     l2_sea_level_space = underlying_space(sea_level_space)
     l2_load_space = underlying_space(load_space)
 
-    l2_operator = LinearOperator(
-        l2_sea_level_space, l2_load_space, mapping, adjoint_mapping=mapping
+    l2_operator = LinearOperator.from_callables(
+        l2_sea_level_space, l2_load_space, mapping, adjoint=mapping
     )
     return LinearOperator.from_formal_adjoint(sea_level_space, load_space, l2_operator)
 
@@ -111,8 +111,8 @@ def ocean_density_change_to_load_operator(
     l2_density_space = underlying_space(density_space)
     l2_load_space = underlying_space(load_space)
 
-    l2_operator = LinearOperator(
-        l2_density_space, l2_load_space, mapping, adjoint_mapping=mapping
+    l2_operator = LinearOperator.from_callables(
+        l2_density_space, l2_load_space, mapping, adjoint=mapping
     )
     return LinearOperator.from_formal_adjoint(density_space, load_space, l2_operator)
 
@@ -208,7 +208,7 @@ def joint_ice_ocean_to_load_operator(
         load_space: The target Hilbert space for the SLE Fingerprint solver.
 
     Returns:
-        A LinearOperator mapping from a HilbertSpaceDirectSum([ice, ocean])
+        A LinearOperator mapping from a DirectSum([ice, ocean])
         to the combined load_space.
     """
     ice_to_load = ice_thickness_change_to_load_operator(state, ice_space, load_space)

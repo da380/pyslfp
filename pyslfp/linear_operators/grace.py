@@ -10,23 +10,60 @@ gravitational potential changes:
 """
 
 from __future__ import annotations
-from typing import Union
+from typing import Tuple, Union
 
 import numpy as np
 
 from pygeoinf import (
     LinearOperator,
-    HilbertSpaceDirectSum,
+    DirectSum,
     EuclideanSpace,
     GaussianMeasure,
-    DiagonalSparseMatrixLinearOperator,
+    DiagonalLinearOperator,
 )
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
-from pygeoinf.symmetric_space.symmetric_space import InvariantGaussianMeasure
 
 from pyslfp.core import EarthModel
 from pyslfp.linear_operators.utils import check_response_space, check_load_space
 from pyslfp.linear_operators.physics import FingerPrintOperator
+
+
+# ================================================================ #
+#                 Coefficient Convention                           #
+# ================================================================ #
+#
+# The GRACE operators report a field u by the coefficients c_lm of
+#
+#     u = sum_lm c_lm Y_lm,
+#
+# with Y_lm the real spherical harmonics orthonormal on the unit sphere
+# (pyshtools' "ortho" normalisation, int Y_lm^2 dOmega = 1) and without the
+# Condon-Shortley phase: pyslfp's own convention. Coefficients are ordered
+# by degree and, within a degree, m = 0, 1, ..., l, -1, ..., -l, a negative
+# order standing for the sine term of order |m|.
+#
+# A space on a sphere of radius b uses components relative to Y_lm / b,
+# which is orthonormal there, so its components are b c_lm. The factor 1/b
+# below makes the reported coefficients independent of the radius, and so of
+# the units the space is expressed in.
+
+
+def _unit_sphere_coefficient_operator(
+    space: Union[Lebesgue, Sobolev], max_degree: int, min_degree: int, /
+) -> LinearOperator:
+    """Maps a field to its coefficients in the convention above."""
+    return (1.0 / space.radius) * space.coefficient_operator(
+        lmax=max_degree, lmin=min_degree
+    )
+
+
+def _unit_sphere_synthesis_operator(
+    space: Union[Lebesgue, Sobolev], max_degree: int, min_degree: int, /
+) -> LinearOperator:
+    """Maps coefficients in the convention above to the field they define."""
+    return space.radius * space.from_coefficient_operator(
+        lmax=max_degree, lmin=min_degree
+    )
 
 
 # ================================================================ #
@@ -35,7 +72,7 @@ from pyslfp.linear_operators.physics import FingerPrintOperator
 
 
 def grace_observation_operator(
-    response_space: HilbertSpaceDirectSum,
+    response_space: DirectSum,
     max_obs_degree: int,
     /,
     *,
@@ -44,6 +81,10 @@ def grace_observation_operator(
     """
     Maps the physical response fields to a vector of spherical harmonic
     coefficients of the gravitational potential change.
+
+    The coefficients are those of the potential change on the sphere of the
+    response space, orthonormal on the unit sphere and in pyslfp's units;
+    the convention is set out at the head of this module.
 
     Args:
         response_space: The 4-component composite response space.
@@ -56,10 +97,10 @@ def grace_observation_operator(
     """
     check_response_space(response_space, point_values=False)
     gpc_space = response_space.subspace(2)
-    spatial_to_coeffs = gpc_space.to_coefficient_operator(
-        max_obs_degree, lmin=min_obs_degree
+    spatial_to_coeffs = _unit_sphere_coefficient_operator(
+        gpc_space, max_obs_degree, min_obs_degree
     )
-    return spatial_to_coeffs @ response_space.subspace_projection(2)
+    return spatial_to_coeffs @ response_space.projection(2)
 
 
 class GraceObservationModel:
@@ -83,7 +124,7 @@ class GraceObservationModel:
             min_obs_degree: The minimum degree to extract (defaults to 2).
         """
         self._fingerprint_operator = fingerprint_operator
-        self._obs_degree = max_obs_degree
+        self._max_obs_degree = max_obs_degree
         self._min_obs_degree = min_obs_degree
 
         self._response_to_data_operator = grace_observation_operator(
@@ -167,13 +208,23 @@ class WMBMethod:
         """
         return self._observation_dim
 
+    def _observed_labels(self) -> Tuple[np.ndarray, np.ndarray]:
+        """The degree and signed order of each observed coefficient, in the
+        order of the observation vector."""
+        degrees, orders = [], []
+        for l in range(self.min_obs_degree, self.max_obs_degree + 1):
+            signed = list(range(0, l + 1)) + list(range(-1, -l - 1, -1))
+            degrees += [l] * len(signed)
+            orders += signed
+        return np.array(degrees, dtype=int), np.array(orders, dtype=int)
+
     # ---------------------------------------------------------#
     #             Core Euclidean Coefficient Operators         #
     # ---------------------------------------------------------#
 
     def load_coefficient_to_potential_coefficient_operator(
         self,
-    ) -> DiagonalSparseMatrixLinearOperator:
+    ) -> DiagonalLinearOperator:
         """
         Maps load SH coefficients to potential SH coefficients by multiplying
         each degree by its elastic load Love number (k_l).
@@ -186,21 +237,15 @@ class WMBMethod:
             idx_end = (l + 1) ** 2 - self.min_obs_degree**2
             scaling_factors[idx_start:idx_end] = self._model.love_numbers.k[l]
 
-        return DiagonalSparseMatrixLinearOperator.from_diagonal_values(
-            domain, domain, scaling_factors
-        )
+        return DiagonalLinearOperator(domain, scaling_factors)
 
     def potential_coefficient_to_load_coefficient_operator(
         self,
-    ) -> DiagonalSparseMatrixLinearOperator:
+    ) -> DiagonalLinearOperator:
         """Applies the inverse Love number scaling (1 / k_l)."""
         domain = EuclideanSpace(self._observation_dim)
-        values = (
-            self.load_coefficient_to_potential_coefficient_operator().extract_diagonal()
-        )
-        return DiagonalSparseMatrixLinearOperator.from_diagonal_values(
-            domain, domain, np.reciprocal(values)
-        )
+        values = self.load_coefficient_to_potential_coefficient_operator().eigenvalues
+        return DiagonalLinearOperator(domain, np.reciprocal(values))
 
     # ---------------------------------------------------------#
     #               Bridge Spatial/Coefficient Operators       #
@@ -215,8 +260,8 @@ class WMBMethod:
         """
         check_load_space(load_space)
 
-        coeffs_to_load = load_space.from_coefficient_operator(
-            self.max_obs_degree, lmin=self.min_obs_degree
+        coeffs_to_load = _unit_sphere_synthesis_operator(
+            load_space, self.max_obs_degree, self.min_obs_degree
         )
         scaling_operator = self.potential_coefficient_to_load_coefficient_operator()
 
@@ -231,8 +276,8 @@ class WMBMethod:
 
         check_load_space(load_space)
 
-        load_to_coeffs = load_space.to_coefficient_operator(
-            self.max_obs_degree, lmin=self.min_obs_degree
+        load_to_coeffs = _unit_sphere_coefficient_operator(
+            load_space, self.max_obs_degree, self.min_obs_degree
         )
         scaling_operator = self.load_coefficient_to_potential_coefficient_operator()
 
@@ -243,60 +288,125 @@ class WMBMethod:
     # ---------------------------------------------------------#
 
     def load_measure_to_observation_measure(
-        self, load_measure: InvariantGaussianMeasure
+        self, load_measure: GaussianMeasure
     ) -> GaussianMeasure:
         """
-        Pushes a prior Gaussian measure defined on the continuous load space
-        forward into the truncated observation space by scaling with Love numbers.
+        Pushes an invariant Gaussian measure on the load space forward into
+        the observation space, through the WMB map
+        ``load_to_potential_coefficient_operator``.
+
+        An invariant measure has the spherical harmonics as the eigenvectors
+        of its covariance, C Y_k = sigma_k Y_k, the eigenvalues sigma_k being
+        relative to the load space's inner product. In that inner product
+        the harmonics are orthogonal with ||Y_k||^2 = g_k, where g_k = b^2
+        on a Lebesgue space of radius b and b^2 (1 + L^2 l(l+1)/b^2)^s on a
+        Sobolev space of order s and length scale L. The coefficient
+        c_k = (u, Y_k) / g_k of a draw u therefore has variance
+
+            E[c_k^2] = (C Y_k, Y_k) / g_k^2 = sigma_k / g_k,
+
+        not sigma_k. The WMB map multiplies each coefficient by k_l, so the
+        push-forward is the measure with independent observations of
+        variance k_l^2 sigma_k / g_k.
+
+        Above the load space's truncation the WMB operator gives zero, and
+        so does the expectation. The field the measure describes does not
+        stop at the truncation, though, so those observed degrees keep a
+        variance: the coefficient variance of the space's highest degree,
+        times k_l^2. This keeps the measure non-degenerate when it serves as
+        a data error measure.
+
+        Up to the truncation the result is the exact push-forward, formed
+        from the spectrum alone, without applying the covariance.
+
+        Raises:
+            TypeError: if the measure is not invariant, that is, if its
+                covariance is not diagonal in the spherical harmonics of a
+                Lebesgue or Sobolev load space.
         """
-        if not isinstance(load_measure, InvariantGaussianMeasure):
-            raise TypeError("load_measure must be an InvariantGaussianMeasure.")
-
-        prior_variances = load_measure.spectral_variances
-        prior_lmax = load_measure.domain.lmax
-        max_mapped_degree = min(prior_lmax, self.max_obs_degree)
-
-        observed_stds = np.zeros(self._observation_dim)
-
-        for l in range(self.min_obs_degree, max_mapped_degree + 1):
-            in_start = l**2
-            in_end = (l + 1) ** 2
-            out_start = l**2 - self.min_obs_degree**2
-            out_end = (l + 1) ** 2 - self.min_obs_degree**2
-
-            prior_stds = np.sqrt(prior_variances[in_start:in_end])
-            observed_stds[out_start:out_end] = prior_stds * abs(
-                self._model.love_numbers.k[l]
+        load_space = load_measure.domain
+        check_load_space(load_space)
+        covariance = load_measure.covariance
+        if not (
+            isinstance(covariance, DiagonalLinearOperator)
+            and covariance.domain == load_space
+        ):
+            raise TypeError(
+                "load_measure must be an invariant measure: its covariance "
+                "must be diagonal in the spherical harmonics of the load "
+                "space, as for one built by invariant_measure, sobolev_measure "
+                "or heat_measure."
             )
 
+        # The space's components refer to Y_k / b, which carry the metric
+        # weight g_k / b^2; dividing it out, and b^2 for the unit-sphere
+        # convention, leaves sigma_k / g_k.
+        coefficient_variances = (
+            covariance.eigenvalues / load_space.metric_values / load_space.radius**2
+        )
+
+        degrees, orders = self._observed_labels()
+        resolved = degrees <= load_space.lmax
+        variances = np.empty(self._observation_dim)
+        variances[resolved] = coefficient_variances[
+            load_space.component_of(degrees[resolved], orders[resolved])
+        ]
+        variances[~resolved] = coefficient_variances[
+            load_space.component_of(load_space.lmax, 0)
+        ]
+
+        love_scaling = self.load_coefficient_to_potential_coefficient_operator()
+        observed_variances = love_scaling.eigenvalues**2 * variances
+
         observation_space = EuclideanSpace(self._observation_dim)
-        return GaussianMeasure.from_standard_deviations(
-            observation_space, observed_stds
+        expectation = (
+            None
+            if load_measure.has_zero_expectation
+            else self.load_to_potential_coefficient_operator(load_space)(
+                load_measure.expectation
+            )
+        )
+        precision = (
+            DiagonalLinearOperator(observation_space, np.reciprocal(observed_variances))
+            if np.all(observed_variances > 0.0)
+            else None
+        )
+        return GaussianMeasure(
+            observation_space,
+            expectation=expectation,
+            covariance_factor=DiagonalLinearOperator(
+                observation_space, np.sqrt(observed_variances)
+            ),
+            precision=precision,
         )
 
     def bayesian_normal_operator_preconditioner(
         self,
-        prior_measure: InvariantGaussianMeasure,
+        prior_measure: GaussianMeasure,
         data_error_measure: GaussianMeasure,
         /,
         *,
         parallel: bool = False,
         n_jobs: int = -1,
-    ) -> DiagonalSparseMatrixLinearOperator:
+    ) -> DiagonalLinearOperator:
         """
-        Constructs a highly efficient diagonal preconditioner for solving
-        Bayesian normal equations by approximating the forward operator with WMB scaling.
+        Constructs a diagonal preconditioner for the Bayesian normal
+        equations, approximating the forward operator by the WMB scaling.
+
+        The prior must be invariant; see
+        ``load_measure_to_observation_measure``. A data error measure with a
+        diagonal covariance gives up its diagonal at no cost; any other has
+        it probed column by column, which ``parallel`` spreads over
+        ``n_jobs`` workers.
         """
         mapped_prior = self.load_measure_to_observation_measure(prior_measure)
 
-        aqa_diag = mapped_prior.covariance.extract_diagonal(
-            parallel=parallel, n_jobs=n_jobs
-        )
-        r_diag = data_error_measure.covariance.extract_diagonal()
+        aqa_diag = mapped_prior.covariance.diagonals()[0]
+        r_diag = data_error_measure.covariance.diagonals(
+            n_jobs=n_jobs if parallel else None
+        )[0]
 
         normal_diag = aqa_diag + r_diag
-        return DiagonalSparseMatrixLinearOperator.from_diagonal_values(
-            data_error_measure.domain,
-            data_error_measure.domain,
-            np.reciprocal(normal_diag),
+        return DiagonalLinearOperator(
+            data_error_measure.domain, np.reciprocal(normal_diag)
         )

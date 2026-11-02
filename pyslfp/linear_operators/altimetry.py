@@ -17,7 +17,7 @@ from pyshtools import SHGrid
 
 from pygeoinf import (
     LinearOperator,
-    HilbertSpaceDirectSum,
+    DirectSum,
     RowLinearOperator,
     BlockDiagonalLinearOperator,
     EuclideanSpace,
@@ -123,7 +123,7 @@ def ice_altimetry_points(
 
 def sea_surface_height_operator(
     state: EarthState,
-    response_space: HilbertSpaceDirectSum,
+    response_space: DirectSum,
     /,
     *,
     remove_rotational_contribution: bool = True,
@@ -145,14 +145,14 @@ def sea_surface_height_operator(
     field_space = response_space.subspace(0)
     avc_space = response_space.subspace(3)
 
-    id_op = field_space.identity_operator()
-    zero_gpc_op = field_space.zero_operator()
+    id_op = LinearOperator.identity(field_space)
+    zero_gpc_op = LinearOperator.zero(field_space)
 
     if remove_rotational_contribution:
         # Match Sobolev parameters if the response space is regularized
         sobolev_params = (
-            (field_space.order, field_space.scale)
-            if isinstance(field_space, Sobolev)
+            (field_space.order, field_space.length_scale)
+            if field_space.order != 0.0
             else None
         )
 
@@ -164,7 +164,7 @@ def sea_surface_height_operator(
         # Scale the centrifugal potential by 1/g to get the height contribution
         avc_op = cpc_op * (1.0 / g)
     else:
-        avc_op = avc_space.zero_operator(codomain=field_space)
+        avc_op = LinearOperator.zero(avc_space, codomain=field_space)
 
     # SSH = [1.0 * SLC] + [1.0 * Disp] + [0.0 * GPC] + [(CPC / g) * AVC]
     return RowLinearOperator([id_op, id_op, zero_gpc_op, avc_op])
@@ -172,7 +172,7 @@ def sea_surface_height_operator(
 
 def altimetry_point_operator(
     state: EarthState,
-    response_space: HilbertSpaceDirectSum,
+    response_space: DirectSum,
     points: List[Tuple[float, float]],
     /,
     *,
@@ -190,7 +190,7 @@ def altimetry_point_operator(
     )
     point_eval_op = ssh_op.codomain.point_evaluation_operator(
         points,
-        matrix_free=matrix_free,
+        route="local" if matrix_free else "dense",
     )
 
     return point_eval_op @ ssh_op
@@ -220,7 +220,7 @@ def altimetry_averaging_operator(points: List[Tuple[float, float]]) -> LinearOpe
     weights = np.cos(lats_rad)
     weights /= np.sum(weights)
     matrix = weights.reshape(1, n_points)
-    return LinearOperator.from_matrix(domain, codomain, matrix)
+    return LinearOperator.from_matrix(domain, codomain, matrix, form="components")
 
 
 # ================================================================ #
@@ -279,9 +279,9 @@ class JointAltimetryObservationModel:
         # --- Construct the Corrected Full Composite Forward Operator ---
 
         # Map [Ice, Ocean] -> [Total Load, Ocean]
-        joint_space = HilbertSpaceDirectSum([self._ice_space, self._ocean_space])
+        joint_space = DirectSum([self._ice_space, self._ocean_space])
         op1 = ColumnLinearOperator(
-            [self._joint_to_load_operator, joint_space.subspace_projection(1)]
+            [self._joint_to_load_operator, joint_space.projection(1)]
         )
 
         # Map [Total Load, Ocean] -> [Static SSH, Ocean]
@@ -290,23 +290,23 @@ class JointAltimetryObservationModel:
             fingerprint_operator.codomain,
             remove_rotational_contribution=remove_rotational_contribution,
         )
-        ssh_inclusion = static_ssh_op.codomain.order_inclusion_operator(
-            load_space.order
-        )
+        ssh_inclusion = static_ssh_op.codomain.order_inclusion_operator(load_space)
 
         op2 = BlockDiagonalLinearOperator(
             [
                 ssh_inclusion @ static_ssh_op @ self._fingerprint_operator,
-                self._ocean_space.identity_operator(),
+                LinearOperator.identity(self._ocean_space),
             ]
         )
 
         # Map [Static SSH, Ocean] -> Total SSH Field
-        ocean_to_ssh = self._ocean_space.order_inclusion_operator(load_space.order)
-        op3 = RowLinearOperator([load_space.identity_operator(), ocean_to_ssh])
+        ocean_to_ssh = self._ocean_space.order_inclusion_operator(load_space)
+        op3 = RowLinearOperator([LinearOperator.identity(load_space), ocean_to_ssh])
 
         # Evaluate at the discrete altimetry points
-        point_eval = load_space.point_evaluation_operator(self._points)
+        point_eval = load_space.point_evaluation_operator(
+            self._points, route="local" if matrix_free else "dense"
+        )
 
         self._forward_operator = point_eval @ op3 @ op2 @ op1
 

@@ -56,17 +56,15 @@ def build(lmax):
     ice_space = fingerprint.domain
     gauges = TideGaugeObservationModel(fingerprint, points, names=names)
     forward = gauges.forward_operator * params.ice_density
-    prior = ice_space.point_value_scaled_sobolev_kernel_gaussian_measure(
+    prior = ice_space.sobolev_measure(
         PRIOR_ORDER,
         PRIOR_SCALE_KM * 1.0e3 / params.length_scale,
-        std=PRIOR_STD_M / params.length_scale,
-    ).affine_mapping(
-        operator=ice_projection_operator(state, ice_space, exclude_ice_shelves=True)
-    )
+        pointwise_std=PRIOR_STD_M / params.length_scale,
+    ).affine_map(ice_projection_operator(state, ice_space, exclude_ice_shelves=True))
     noise = inf.GaussianMeasure.from_standard_deviation(
         inf.EuclideanSpace(len(points)), NOISE_STD_MM * 1.0e-3 / params.length_scale
     )
-    problem = inf.LinearForwardProblem(forward, data_error_measure=noise)
+    problem = inf.LinearForwardProblem(forward, error=noise)
     return (
         state,
         params,
@@ -74,7 +72,7 @@ def build(lmax):
         ice_space,
         prior,
         problem,
-        inf.LinearBayesianInversion(problem, prior),
+        inf.LinearGaussianInversion(problem, prior),
     )
 
 
@@ -87,8 +85,8 @@ print(f"model space {ice_space.dim} dimensions; data space {problem.data_space.d
 # ## A synthetic truth and its data
 
 # %%
-np.random.seed(4)
-truth, data = problem.synthetic_model_and_data(prior)
+rng = np.random.default_rng(4)
+truth, data = problem.synthetic_model_and_data(prior, rng=rng)
 print(f"truth from {truth.data.min() * metre:.2f} to {truth.data.max() * metre:.2f} m")
 print(
     f"data standard deviation {data.std() * mm:.2f} mm against {NOISE_STD_MM} mm of noise"
@@ -109,22 +107,29 @@ sl.plot_points(
 # ## The posterior
 #
 # The normal equations are solved by conjugate gradients, preconditioned
-# by the factorised normal operator of the coarser problem. Solving twice
-# shows what the preconditioner buys.
+# by the factorised normal operator of the coarser problem. That operator
+# acts on the data space, so its matrix is small: it is assembled once,
+# and the Cholesky solver factorises it on first use. Solving twice shows
+# what the preconditioner buys; the solver reports each iteration to a
+# callback, which counts them.
 
 # %%
 _, _, _, _, _, _, surrogate = build(SURROGATE_LMAX)
 start = time.time()
-preconditioner = inf.CholeskySolver(galerkin=True)(surrogate.normal_operator)
-print(f"surrogate factorised in {time.time() - start:.1f} s")
+preconditioner = inf.CholeskySolver()(surrogate.normal_operator.assembled())
+print(f"surrogate normal matrix assembled in {time.time() - start:.1f} s")
 
 for label, operator in (("without", None), ("with", preconditioner)):
-    solver = inf.CGSolver(rtol=1.0e-5)
+    iterations = [0]
+    solver = inf.CGSolver(
+        rtol=1.0e-5,
+        preconditioner=operator,
+        callback=lambda step: iterations.append(step.iteration),
+    )
     start = time.time()
-    posterior = inversion.model_posterior_measure(data, solver, preconditioner=operator)
-    posterior.expectation
+    posterior = inversion.with_solver(solver)(data)
     print(
-        f"{label} preconditioner: {solver.iterations} iterations in "
+        f"{label} preconditioner: {iterations[-1]} iterations in "
         f"{time.time() - start:.1f} s"
     )
 
@@ -179,7 +184,7 @@ response_space = fingerprint.codomain
 total = (
     (
         ocean_average_operator(state, response_space.subspace(0))
-        @ response_space.subspace_projection(0)
+        @ response_space.projection(0)
         @ fingerprint
     )
     * params.ice_density
@@ -188,11 +193,11 @@ total = (
 
 
 def summarise(operator, labels):
-    post = posterior.affine_mapping(operator=operator).with_dense_covariance()
-    pri = prior.affine_mapping(operator=operator).with_dense_covariance()
+    post = posterior.affine_map(operator).with_dense_covariance()
+    pri = prior.affine_map(operator).with_dense_covariance()
     true = operator(truth)
-    post_cov = post.covariance.matrix(dense=True)
-    pri_cov = pri.covariance.matrix(dense=True)
+    post_cov = post.covariance.matrix(form="components")
+    pri_cov = pri.covariance.matrix(form="components")
     for i, label in enumerate(labels):
         reduction = 100.0 * (1.0 - post_cov[i, i] / pri_cov[i, i])
         print(
@@ -208,10 +213,10 @@ print(
 sheet_posterior, sheet_prior = summarise(contribution, SHEETS)
 summarise(total, ["All grounded ice"])
 
-inf.plot_corner_distributions(
+inf.plot_corner(
     sheet_posterior,
-    prior_measure=sheet_prior,
-    true_values=contribution(truth),
+    prior=sheet_prior,
+    truth=contribution(truth),
     labels=[f"{name} (mm)" for name in SHEETS],
     title="Barystatic sea level contributions",
 )

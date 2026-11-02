@@ -228,8 +228,8 @@ is unset. For a single interactive calculation the default is what is wanted,
 though the transforms scale modestly, giving about a factor of two on eight
 cores at degree 256 to 512.
 
-For many independent solves, as in the ``parallel`` options of the
-``pygeoinf`` operators, processes scale far better than threads. Set
+For many independent solves, as in the ``n_jobs`` options of ``pygeoinf``,
+processes scale far better than threads. Set
 ``OMP_NUM_THREADS=1`` before starting Python, so that each worker runs
 single-threaded and the cores are shared between workers rather than
 oversubscribed. The main process can still use several cores for its serial

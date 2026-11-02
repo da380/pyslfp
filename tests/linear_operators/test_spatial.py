@@ -6,6 +6,7 @@ import pytest
 import numpy as np
 
 import pygeoinf as inf
+from pygeoinf.testing import check_operator
 from pyslfp.core import EarthState
 from pyslfp.linear_operators.physics import lebesgue_load_space, sobolev_load_space
 from pyslfp.linear_operators.spatial import (
@@ -60,15 +61,16 @@ def test_spatial_projection_operators(testing_state, sobolev):
         land_projection_operator(testing_state, space),
     ]
 
-    domain_measure = space.heat_kernel_gaussian_measure(0.5 * b)
+    domain_measure = space.heat_measure(0.5 * b)
 
     for A in ops:
-        A.check(
-            n_checks=2,
-            check_rtol=1e-4,
-            check_atol=1e-4,
-            domain_measure=domain_measure,
-            codomain_measure=domain_measure,
+        check_operator(
+            A,
+            rng=np.random.default_rng(0),
+            measure=domain_measure,
+            trials=2,
+            rtol=1e-4,
+            atol=1e-4,
         )
 
 
@@ -94,16 +96,16 @@ def test_spatial_averaging_operators(testing_state, sobolev):
         land_average_operator(testing_state, space),
     ]
 
-    domain_measure = space.heat_kernel_gaussian_measure(0.5 * b)
-    codomain_measure = inf.GaussianMeasure.from_standard_deviation(ops[0].codomain, 1.0)
+    domain_measure = space.heat_measure(0.5 * b)
 
     for A in ops:
-        A.check(
-            n_checks=2,
-            check_rtol=1e-4,
-            check_atol=1e-4,
-            domain_measure=domain_measure,
-            codomain_measure=codomain_measure,
+        check_operator(
+            A,
+            rng=np.random.default_rng(0),
+            measure=domain_measure,
+            trials=2,
+            rtol=1e-4,
+            atol=1e-4,
         )
 
 
@@ -146,14 +148,15 @@ def test_remove_ocean_average_adjoint(testing_state, sobolev):
 
     A = remove_ocean_average_operator(testing_state, space)
 
-    domain_measure = space.heat_kernel_gaussian_measure(0.5 * b)
+    domain_measure = space.heat_measure(0.5 * b)
 
-    A.check(
-        n_checks=2,
-        check_rtol=1e-4,
-        check_atol=1e-4,
-        domain_measure=domain_measure,
-        codomain_measure=domain_measure,
+    check_operator(
+        A,
+        rng=np.random.default_rng(0),
+        measure=domain_measure,
+        trials=2,
+        rtol=1e-4,
+        atol=1e-4,
     )
 
 
@@ -179,15 +182,15 @@ def test_ice_sheet_basin_operators(testing_state, sobolev):
     B = ice_sheet_basis_operator(testing_state, space, groupings=grouping)
 
     # 1. Adjoint checks for the averager
-    domain_measure = space.heat_kernel_gaussian_measure(0.5 * b)
-    codomain_measure = inf.GaussianMeasure.from_standard_deviation(A.codomain, 1.0)
+    domain_measure = space.heat_measure(0.5 * b)
 
-    A.check(
-        n_checks=2,
-        check_rtol=1e-4,
-        check_atol=1e-4,
-        domain_measure=domain_measure,
-        codomain_measure=codomain_measure,
+    check_operator(
+        A,
+        rng=np.random.default_rng(0),
+        measure=domain_measure,
+        trials=2,
+        rtol=1e-4,
+        atol=1e-4,
     )
 
     # 2. Right-Inverse check
@@ -263,26 +266,24 @@ def test_region_routing_adjoints(testing_state, sobolev):
     proj_regions = ["Greenland/Iceland", "W.Antarctica"]
     proj_op = region_projection_operator(testing_state, space, proj_regions)
 
-    domain_measure = space.heat_kernel_gaussian_measure(0.5 * b)
+    domain_measure = space.heat_measure(0.5 * b)
 
     # 1. Adjoint check for average operator (Space -> Euclidean)
-    avg_codomain_measure = inf.GaussianMeasure.from_standard_deviation(
-        avg_op.codomain, 1.0
-    )
-    avg_op.check(
-        n_checks=2,
-        check_rtol=1e-4,
-        check_atol=1e-4,
-        domain_measure=domain_measure,
-        codomain_measure=avg_codomain_measure,
+    check_operator(
+        avg_op,
+        rng=np.random.default_rng(0),
+        measure=domain_measure,
+        trials=2,
+        rtol=1e-4,
+        atol=1e-4,
     )
 
     # 2. Adjoint check for projection operator (Space -> Space)
-    # Codomain measure is just the domain measure again!
-    proj_op.check(
-        n_checks=2,
-        check_rtol=1e-4,
-        check_atol=1e-4,
-        domain_measure=domain_measure,
-        codomain_measure=domain_measure,
+    check_operator(
+        proj_op,
+        rng=np.random.default_rng(0),
+        measure=domain_measure,
+        trials=2,
+        rtol=1e-4,
+        atol=1e-4,
     )

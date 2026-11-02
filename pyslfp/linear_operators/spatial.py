@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Union, List, Optional
 
 from pyshtools import SHGrid
-from pygeoinf import LinearOperator, CholeskySolver
+from pygeoinf import LinearOperator, CholeskySolver, Traits
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
 from pyslfp.core import EarthState
@@ -38,7 +38,7 @@ def ocean_projection_operator(
     projection_field = state.ocean_projection(
         value=0.0, exclude_ice_shelves=exclude_ice_shelves
     )
-    return space.spatial_multiplication_operator(projection_field)
+    return space.multiplication_operator(projection_field)
 
 
 def ice_projection_operator(
@@ -53,7 +53,7 @@ def ice_projection_operator(
     projection_field = state.ice_projection(
         value=0.0, exclude_ice_shelves=exclude_ice_shelves
     )
-    return space.spatial_multiplication_operator(projection_field)
+    return space.multiplication_operator(projection_field)
 
 
 def land_projection_operator(
@@ -66,7 +66,7 @@ def land_projection_operator(
     """Returns a LinearOperator that projects a field onto background land."""
     check_load_space(space)
     projection_field = state.land_projection(value=0.0, exclude_ice=exclude_ice)
-    return space.spatial_multiplication_operator(projection_field)
+    return space.multiplication_operator(projection_field)
 
 
 # ================================================================ #
@@ -145,8 +145,8 @@ def remove_ocean_average_operator(
         average = state.model.integrate(field)
         return field - average * ocean_function / ocean_area
 
-    l2_operator = LinearOperator(
-        l2_space, l2_space, mapping, adjoint_mapping=adjoint_mapping
+    l2_operator = LinearOperator.from_callables(
+        l2_space, l2_space, mapping, adjoint=adjoint_mapping
     )
 
     return LinearOperator.from_formal_adjoint(space, space, l2_operator)
@@ -184,7 +184,12 @@ def ice_sheet_basis_operator(
     """
     check_load_space(space)
     B = ice_sheet_averaging_operator(state, space, groupings=groupings)
-    M = B @ B.adjoint
+    # B B* is only semidefinite in general. The basins of a grouping are
+    # cells of the IMBIE and Mouginot partitions, so groups that share no
+    # basin have disjoint masks, B has full row rank and B B* is positive
+    # definite. A grouping that repeats a basin breaks this, and the
+    # factorisation then fails rather than returning a wrong inverse.
+    M = (B @ B.adjoint).with_traits(Traits.POSITIVE_DEFINITE)
     M_inv = CholeskySolver()(M)
     return B.adjoint @ M_inv
 
@@ -254,4 +259,4 @@ def region_projection_operator(
     # get_projection automatically flattens a List[str] into a single composite mask
     mask = state.get_projection(regions, value=0.0)
 
-    return space.spatial_multiplication_operator(mask)
+    return space.multiplication_operator(mask)

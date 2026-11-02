@@ -2,13 +2,14 @@
 with pyslfp's defaults (Robinson projection, coastlines, an active
 colour bar), so figures look the same across both libraries."""
 
-from typing import Tuple, Optional, List, Any
+from typing import Tuple, Optional, List, Any, Union
 
 import numpy as np
 import matplotlib.pyplot as plt
 from pyshtools import SHGrid
 
-from pygeoinf.symmetric_space import sphere
+import pygeoinf
+from pygeoinf.symmetric_space.sphere import Lebesgue
 
 import cartopy.crs as ccrs
 from cartopy.crs import Projection
@@ -25,7 +26,7 @@ def subplots(
     Args:
         nrows: Number of rows in the axes grid
         ncols: Number of columns in the axes grid
-        projection: A `cartopy.crs` projection instance. Defaults to PlateCarree.
+        projection: A `cartopy.crs` projection instance. Defaults to Robinson.
         **kwargs: Additional keyword arguments passed to `plt.subplots()`.
 
     Returns:
@@ -49,14 +50,12 @@ def create_map_figure(
     **kwargs,
 ) -> Tuple[Figure, GeoAxes]:
     """
-    Convenience helper to create a Matplotlib Figure and Cartopy GeoAxes.
-    Delegates to pygeoinf's modern constrained_layout engine while keeping
-    the pyslfp default of a Robinson projection.
+    Creates a Matplotlib Figure and a single Cartopy GeoAxes, with
+    constrained layout and pyslfp's default Robinson projection.
     """
-    if projection is None:
-        projection = ccrs.Robinson()
-
-    return sphere.create_map_figure(figsize=figsize, projection=projection, **kwargs)
+    if figsize is not None:
+        kwargs["figsize"] = figsize
+    return subplots(1, 1, projection, **kwargs)
 
 
 def plot(
@@ -72,7 +71,7 @@ def plot(
     borders: bool = False,
     map_extent: Optional[List[float]] = None,
     gridlines: bool = True,
-    symmetric: bool = False,
+    symmetric: Union[bool, float] = False,
     contour_lines: bool = False,
     contour_lines_kwargs: Optional[dict] = None,
     num_levels: int = 10,
@@ -83,18 +82,36 @@ def plot(
     """
     Plots a pyshtools SHGrid object on a map.
 
-    A transparent wrapper around `pygeoinf.symmetric_space.sphere.plot`,
-    sharing its signature -- see there for the parameters -- with
-    pyslfp's defaults: a Robinson projection, coastlines, and an
-    active colour bar.
-    """
-    if projection is None and ax is None:
-        projection = ccrs.Robinson()
+    A wrapper around `pygeoinf.plot` with pyslfp's defaults: a Robinson
+    projection, coastlines, and an active colour bar. Keywords not listed
+    here are passed to it; see there for their meaning.
 
-    return sphere.plot(
+    Args:
+        f: The field to plot.
+        ax: Axes to draw on. A new Robinson map is made if omitted.
+        projection: The projection of the new map, when `ax` is omitted.
+        symmetric: True centres the colour scale on zero, with limits at
+            the largest absolute value. A number s sets the limits to
+            s times that value instead, saturating the scale for s < 1.
+        contour_lines: Overlay contour lines.
+        contour_lines_kwargs: Passed to `ax.contour` for those lines,
+            over the defaults of thin black lines.
+        num_levels: The number of contour levels, for `contour` and
+            `contour_lines`. A `levels` keyword takes precedence.
+
+    Returns:
+        The `(axes, mappable)` pair.
+    """
+    if ax is None:
+        _, ax = create_map_figure(projection=projection)
+
+    symmetric = _apply_symmetric_limits(f.data, symmetric, kwargs)
+    levels = kwargs.pop("levels", num_levels)
+
+    ax, mappable = pygeoinf.plot(
+        _sphere_of(f),
         f,
         ax=ax,
-        projection=projection,
         contour=contour,
         cmap=cmap,
         coasts=coasts,
@@ -103,13 +120,26 @@ def plot(
         map_extent=map_extent,
         gridlines=gridlines,
         symmetric=symmetric,
-        contour_lines=contour_lines,
-        contour_lines_kwargs=contour_lines_kwargs,
-        num_levels=num_levels,
+        levels=levels,
         colorbar=colorbar,
         colorbar_kwargs=colorbar_kwargs,
         **kwargs,
     )
+
+    if contour_lines:
+        line_kwargs = dict(colors="black", linewidths=0.5)
+        line_kwargs.update(contour_lines_kwargs or {})
+        lons, lats, values = _closed_grid(f)
+        ax.contour_set = ax.contour(
+            lons,
+            lats,
+            values,
+            levels=levels,
+            transform=ccrs.PlateCarree(),
+            **line_kwargs,
+        )
+
+    return ax, mappable
 
 
 def plot_points(
@@ -130,7 +160,7 @@ def plot_points(
     borders: bool = False,
     map_extent: Optional[List[float]] = None,
     gridlines: bool = True,
-    symmetric: bool = False,
+    symmetric: Union[bool, float] = False,
     colorbar: bool = False,
     colorbar_kwargs: Optional[dict] = None,
     **kwargs,
@@ -139,33 +169,62 @@ def plot_points(
     Plots discrete observation points (tide gauges, altimetry tracks)
     on a map.
 
-    A transparent wrapper around
-    `pygeoinf.symmetric_space.sphere.plot_points`, sharing its
-    signature -- see there for the parameters -- with pyslfp's
-    defaults: a Robinson projection and coastlines.
-    """
-    if projection is None and ax is None:
-        projection = ccrs.Robinson()
+    A wrapper around `pygeoinf.plot_points` with pyslfp's defaults: a
+    Robinson projection and coastlines. Keywords not listed here are
+    passed to `ax.scatter`.
 
-    return sphere.plot_points(
+    Args:
+        points: (latitude, longitude) pairs in degrees.
+        data: One value per point to colour the markers by.
+        ax: Axes to draw on. A new global Robinson map is made if omitted.
+        projection: The projection of the new map, when `ax` is omitted.
+        s: Marker area.
+        map_extent: (west, east, south, north) in degrees. Without it a
+            new map is global and existing axes keep their extent.
+        gridlines: Add a graticule, unless the axes already carry one.
+        symmetric: As for `plot`, applied to `data`.
+
+    Returns:
+        The `(axes, collection)` pair.
+    """
+    new_axes = ax is None
+    if new_axes:
+        _, ax = create_map_figure(projection=projection)
+
+    if map_extent is not None:
+        ax.set_extent(list(map_extent), crs=ccrs.PlateCarree())
+    elif new_axes:
+        ax.set_global()
+
+    if coasts:
+        ax.coastlines(linewidth=0.5)
+    if borders or rivers:
+        import cartopy.feature as cfeature
+
+        if borders:
+            ax.add_feature(cfeature.BORDERS, linewidth=0.3)
+        if rivers:
+            ax.add_feature(cfeature.RIVERS, linewidth=0.3)
+    if gridlines and getattr(ax, "gridliner", None) is None:
+        ax.gridliner = ax.gridlines(draw_labels=True, linewidth=0.3, alpha=0.5)
+
+    if data is not None:
+        symmetric = _apply_symmetric_limits(np.asarray(data), symmetric, kwargs)
+
+    return pygeoinf.plot_points(
+        _MAP_SPACE,
         points,
         data=data,
         ax=ax,
-        projection=projection,
-        cmap=cmap,
-        color=color,
-        s=s,
         marker=marker,
-        edgecolors=edgecolors,
-        zorder=zorder,
-        coasts=coasts,
-        rivers=rivers,
-        borders=borders,
-        map_extent=map_extent,
-        gridlines=gridlines,
-        symmetric=symmetric,
+        size=s,
+        color=color,
+        cmap=cmap,
+        symmetric=bool(symmetric),
         colorbar=colorbar,
         colorbar_kwargs=colorbar_kwargs,
+        edgecolors=edgecolors,
+        zorder=zorder,
         **kwargs,
     )
 
@@ -209,3 +268,51 @@ def plot_coastline(
     )
 
     return contour_set
+
+
+# ================================================================ #
+#                        Private helpers                           #
+# ================================================================ #
+
+# pygeoinf's renderers dispatch on the space. A scatter of points uses
+# nothing of it beyond its type, so one small sphere serves every call.
+_MAP_SPACE = Lebesgue(1)
+
+
+def _sphere_of(f: SHGrid) -> Lebesgue:
+    """The pygeoinf space whose vectors have this grid's layout.
+
+    A renderer reads the grid through the space, so the truncation, grid
+    type, sampling and wrap column must match the field's. The radius plays
+    no part in a map and is left at its default.
+    """
+    return Lebesgue(
+        f.lmax, grid=f.grid, sampling=getattr(f, "sampling", 1), extend=f.extend
+    )
+
+
+def _apply_symmetric_limits(
+    values: np.ndarray, symmetric: Union[bool, float], kwargs: dict
+) -> bool:
+    """Translates pyslfp's `symmetric` into pygeoinf's.
+
+    A number is a saturation factor: the limits become plus and minus that
+    multiple of the largest absolute value, written into `kwargs` as `vmin`
+    and `vmax` unless the caller gave those. Returns the flag pygeoinf takes.
+    """
+    if isinstance(symmetric, (bool, np.bool_)):
+        return bool(symmetric)
+    extent = float(symmetric) * float(np.nanmax(np.abs(values)))
+    kwargs.setdefault("vmin", -extent)
+    kwargs.setdefault("vmax", extent)
+    return True
+
+
+def _closed_grid(f: SHGrid) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Longitudes, latitudes and values with the seam at 360 degrees closed,
+    so that contour lines run across it."""
+    lons, lats, values = f.lons(), f.lats(), f.data
+    if not f.extend:
+        lons = np.append(lons, lons[0] + 360.0)
+        values = np.concatenate([values, values[:, :1]], axis=1)
+    return lons, lats, values

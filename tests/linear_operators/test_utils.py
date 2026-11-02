@@ -6,6 +6,7 @@ import pytest
 import numpy as np
 
 import pygeoinf as inf
+from pygeoinf.testing import check_operator
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
 from pyslfp.core import EarthState
@@ -44,26 +45,27 @@ def testing_state(operator_lmax):
 
 def test_underlying_space(testing_state):
     """
-    Tests that underlying_space recursively strips mass-weighting
-    (like Sobolev regularizations) from complex Hilbert spaces.
+    Tests that underlying_space resolves Sobolev spaces, and direct sums
+    of them, to the Lebesgue spaces on the same grid.
     """
     model = testing_state.model
     b = model.parameters.mean_sea_floor_radius
 
-    # 1. Base Lebesgue space (should return itself)
+    # 1. Base Lebesgue space (should return an equal space)
     leb = lebesgue_load_space(model)
-    assert underlying_space(leb) is leb
+    assert underlying_space(leb) == leb
 
-    # 2. Sobolev space (should return the underlying Lebesgue space)
+    # 2. Sobolev space (should return the Lebesgue space on its grid)
     sob = sobolev_load_space(model, 1.0, 0.1 * b)
     resolved_sob = underlying_space(sob)
     assert isinstance(resolved_sob, Lebesgue)
     assert not isinstance(resolved_sob, Sobolev)
+    assert resolved_sob == leb
 
     # 3. Direct Sum space
-    ds = inf.HilbertSpaceDirectSum([sob, sob])
+    ds = inf.DirectSum([sob, sob])
     resolved_ds = underlying_space(ds)
-    assert isinstance(resolved_ds, inf.HilbertSpaceDirectSum)
+    assert isinstance(resolved_ds, inf.DirectSum)
     assert isinstance(resolved_ds.subspace(0), Lebesgue)
     assert not isinstance(resolved_ds.subspace(0), Sobolev)
 
@@ -106,23 +108,23 @@ def test_check_response_space(testing_state):
     check_response_space(valid_response)
 
     # Invalid: Not a direct sum
-    with pytest.raises(ValueError, match="must be a HilbertSpaceDirectSum"):
+    with pytest.raises(ValueError, match="must be a DirectSum"):
         check_response_space(lebesgue_load_space(model))
 
     # Invalid: Wrong number of components
     leb = lebesgue_load_space(model)
-    wrong_length = inf.HilbertSpaceDirectSum([leb, leb, leb])
+    wrong_length = inf.DirectSum([leb, leb, leb])
     with pytest.raises(ValueError, match="exactly 4 subspaces"):
         check_response_space(wrong_length)
 
     # Invalid: Subspaces 1 and 2 don't match 0
     sob = sobolev_load_space(model, 1.0, 0.1 * b)
-    mismatched = inf.HilbertSpaceDirectSum([leb, sob, leb, inf.EuclideanSpace(3)])
+    mismatched = inf.DirectSum([leb, sob, leb, inf.EuclideanSpace(3)])
     with pytest.raises(ValueError, match="Subspaces 1 and 2 must match"):
         check_response_space(mismatched)
 
     # Invalid: Rotation space is wrong (the transverse pair without the axial component)
-    bad_rot = inf.HilbertSpaceDirectSum([leb, leb, leb, inf.EuclideanSpace(2)])
+    bad_rot = inf.DirectSum([leb, leb, leb, inf.EuclideanSpace(2)])
     with pytest.raises(ValueError, match="3D Euclidean space for rotation"):
         check_response_space(bad_rot)
 
@@ -155,13 +157,13 @@ def test_averaging_operator(testing_state, sobolev):
     assert np.allclose(averages, [5.0, 5.0])
 
     # Rigorous adjoint check
-    domain_measure = A.domain.heat_kernel_gaussian_measure(0.5 * b)
-    codomain_measure = inf.GaussianMeasure.from_standard_deviation(A.codomain, 1.0)
+    domain_measure = A.domain.heat_measure(0.5 * b)
 
-    A.check(
-        n_checks=2,
-        check_rtol=1e-5,
-        check_atol=1e-5,
-        domain_measure=domain_measure,
-        codomain_measure=codomain_measure,
+    check_operator(
+        A,
+        rng=np.random.default_rng(0),
+        measure=domain_measure,
+        trials=2,
+        rtol=1e-5,
+        atol=1e-5,
     )

@@ -13,7 +13,7 @@ from typing import Callable, List, Optional, Tuple
 
 from pygeoinf import (
     LinearOperator,
-    HilbertSpaceDirectSum,
+    DirectSum,
 )
 
 from pyslfp.data.downloader import ensure_data
@@ -73,7 +73,7 @@ def read_gloss_tide_gauge_data(
 
 
 def tide_gauge_operator(
-    response_space: HilbertSpaceDirectSum, points: List[Tuple[float, float]], /
+    response_space: DirectSum, points: List[Tuple[float, float]], /
 ) -> LinearOperator:
     """
     Maps the response fields to a vector of sea level change values at discrete locations.
@@ -91,10 +91,10 @@ def tide_gauge_operator(
     check_response_space(response_space, point_values=True)
 
     point_evaluation_operator = response_space.subspace(0).point_evaluation_operator(
-        points
+        points, route="dense"
     )
 
-    return point_evaluation_operator @ response_space.subspace_projection(0)
+    return point_evaluation_operator @ response_space.projection(0)
 
 
 # ================================================================ #

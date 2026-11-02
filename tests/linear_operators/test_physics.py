@@ -3,7 +3,9 @@ Test suite for the FingerPrintOperator and core physical mappings.
 """
 
 import pytest
+import numpy as np
 import pygeoinf as inf
+from pygeoinf.testing import check_operator
 
 from pyslfp.core import EarthState
 from pyslfp.linear_operators.physics import (
@@ -109,7 +111,7 @@ def test_fingerprint_operator_rigorous_checks(
 ):
     """
     Tests the mathematical properties of the FingerPrintOperator using
-    pygeoinf's built-in .check() method.
+    pygeoinf.testing.check_operator.
 
     This autonomously verifies:
     1. Linearity: A(x + y) = Ax + Ay
@@ -140,16 +142,16 @@ def test_fingerprint_operator_rigorous_checks(
 
     # 2. Fetch the physically-scaled testing measures directly from the operator
     domain_measure = A.load_measure_for_testing()
-    codomain_measure = A.response_measure_for_testing()
 
     # 3. Run the comprehensive self-checks
     # We use n_checks=2 to keep the test suite fast while still proving consistency
-    A.check(
-        n_checks=2,
-        check_rtol=CHECK_RTOL,
-        check_atol=CHECK_ATOL,
-        domain_measure=domain_measure,
-        codomain_measure=codomain_measure,
+    check_operator(
+        A,
+        rng=np.random.default_rng(0),
+        measure=domain_measure,
+        trials=2,
+        rtol=CHECK_RTOL,
+        atol=CHECK_ATOL,
     )
 
 
@@ -179,12 +181,12 @@ def test_centrifugal_potential_operator(testing_state, sobolev):
 
     amc_std = model.parameters.rotation_frequency * b**4
     domain_measure = inf.GaussianMeasure.from_standard_deviation(A.domain, amc_std)
-    codomain_measure = A.codomain.heat_kernel_gaussian_measure(0.5 * b)
 
-    A.check(
-        n_checks=2,
-        check_rtol=CHECK_RTOL,
-        check_atol=CHECK_ATOL,
-        domain_measure=domain_measure,
-        codomain_measure=codomain_measure,
+    check_operator(
+        A,
+        rng=np.random.default_rng(0),
+        measure=domain_measure,
+        trials=2,
+        rtol=CHECK_RTOL,
+        atol=CHECK_ATOL,
     )

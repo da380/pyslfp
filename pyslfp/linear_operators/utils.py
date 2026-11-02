@@ -22,34 +22,39 @@ from pygeoinf import (
     LinearOperator,
     HilbertSpace,
     EuclideanSpace,
-    HilbertSpaceDirectSum,
-    MassWeightedHilbertSpace,
+    DirectSum,
 )
-from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
+from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev, Sphere
 
 from pyslfp.core import EarthState
 
 
 def underlying_space(space: HilbertSpace, /) -> HilbertSpace:
     """
-    Recursively resolves the underlying unweighted L2 space of a Hilbert space.
+    Recursively resolves the L2 space underlying a Hilbert space.
 
-    If the space is not mass-weighted, the original space is returned. If the
-    space is a direct sum, the method is applied to each subspace recursively
-    to resolve the full L2 base.
+    A Sobolev space on the sphere and the Lebesgue space of the same
+    truncation and grid share their vectors and components, and differ only
+    in the metric. An operator whose action and adjoint are easy to write on
+    the Lebesgue space is written there and carried over to the Sobolev
+    space by ``LinearOperator.from_formal_adjoint``; this function supplies
+    the Lebesgue side of that pairing.
+
+    A space on the sphere is mapped to the Lebesgue space with the same
+    truncation, radius and grid. A direct sum is resolved summand by
+    summand. Any other space, a Euclidean one for instance, is returned as
+    it is.
 
     Args:
         space (HilbertSpace): The space to resolve.
 
     Returns:
-        HilbertSpace: The resolved unweighted L2 space.
+        HilbertSpace: The resolved L2 space.
     """
-    if isinstance(space, MassWeightedHilbertSpace):
-        return space.underlying_space
-    elif isinstance(space, HilbertSpaceDirectSum):
-        return HilbertSpaceDirectSum(
-            [underlying_space(subspace) for subspace in space.subspaces]
-        )
+    if isinstance(space, Sphere):
+        return space.with_order(0.0)
+    elif isinstance(space, DirectSum):
+        return DirectSum([underlying_space(subspace) for subspace in space.subspaces])
     else:
         return space
 
@@ -71,11 +76,11 @@ def check_load_space(
     Raises:
         ValueError: If the space does not meet the requirements.
     """
-    if not isinstance(load_space, (Lebesgue, Sobolev)):
+    if not isinstance(load_space, Sphere):
         raise ValueError("Load space must be a Lebesgue or Sobolev space.")
 
     if point_values:
-        if not isinstance(load_space, Sobolev) or not (load_space.order > 1.0):
+        if not (load_space.order > 1.0):
             raise ValueError(
                 "Load space must be a Sobolev space of order > 1 for point evaluation."
             )
@@ -98,15 +103,15 @@ def check_response_space(
     Raises:
         ValueError: If the space is malformed.
     """
-    if not isinstance(response_space, HilbertSpaceDirectSum):
-        raise ValueError("Response space must be a HilbertSpaceDirectSum.")
+    if not isinstance(response_space, DirectSum):
+        raise ValueError("Response space must be a DirectSum.")
 
-    if not response_space.number_of_subspaces == 4:
+    if not len(response_space.subspaces) == 4:
         raise ValueError("Response space must have exactly 4 subspaces.")
 
     field_space = response_space.subspace(0)
 
-    if not isinstance(field_space, (Lebesgue, Sobolev)):
+    if not isinstance(field_space, Sphere):
         raise ValueError("Subspace 0 must be a Lebesgue or Sobolev space.")
 
     if not all(subspace == field_space for subspace in response_space.subspaces[1:3]):
@@ -117,7 +122,7 @@ def check_response_space(
         raise ValueError("Subspace 3 must be a 3D Euclidean space for rotation.")
 
     if point_values:
-        if not isinstance(field_space, Sobolev) or not (field_space.order > 1.0):
+        if not (field_space.order > 1.0):
             raise ValueError(
                 "Subspace 0 must be a Sobolev space of order > 1 for point evaluation."
             )
@@ -141,7 +146,7 @@ def l2_products_operator(
         DeprecationWarning,
         stacklevel=2,
     )
-    if not isinstance(load_space, (Lebesgue, Sobolev)):
+    if not isinstance(load_space, Sphere):
         raise TypeError("load_space must be a Lebesgue or Sobolev space.")
 
     return load_space.l2_products_operator(weighting_functions)
@@ -170,7 +175,7 @@ def averaging_operator(
     Returns:
         LinearOperator: Mapping from load_space to EuclideanSpace(N_weights).
     """
-    if not isinstance(load_space, (Lebesgue, Sobolev)):
+    if not isinstance(load_space, Sphere):
         raise TypeError("load_space must be a Lebesgue or Sobolev space.")
 
     # Pre-calculate the physical areas for normalization using the EarthState
@@ -187,7 +192,7 @@ def spatial_multiplication_operator(
     space: Union[Lebesgue, Sobolev], v: SHGrid, /
 ) -> LinearOperator:
     """
-    Deprecated: use ``space.spatial_multiplication_operator(v)``.
+    Deprecated: use ``space.multiplication_operator(v)``.
 
     The construction lives on the pygeoinf symmetric-space classes;
     this wrapper delegates to it and will be removed in a future release.
@@ -196,8 +201,8 @@ def spatial_multiplication_operator(
     warnings.warn(
         "pyslfp.linear_operators.spatial_multiplication_operator is "
         "deprecated; use the pygeoinf space method "
-        "space.spatial_multiplication_operator(...) instead.",
+        "space.multiplication_operator(...) instead.",
         DeprecationWarning,
         stacklevel=2,
     )
-    return space.spatial_multiplication_operator(v)
+    return space.multiplication_operator(v)

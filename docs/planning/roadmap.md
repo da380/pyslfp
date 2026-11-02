@@ -22,11 +22,11 @@ scripts stay in the repository until the harvest is complete.
 The viscoelastic kernel drivers (`adjoint_ice_history`,
 `continuous_adjoint_ice_history`, `IceKernels`, `Measurement`,
 `ForwardTrajectory`, the decay-time functionals) are a computational layer. The
-inversion-facing surface is to be `pygeoinf` linear and nonlinear operators
-wrapping them, as `linear_operators` wraps the elastic adjoint, built once
-pygeoinf 2 is released; `linear_operators` itself is reworked for pygeoinf 2 at
-the same time. Until then the drivers should be kept working and documented,
-but not grown into a public API that the wrappers would replace.
+inversion-facing surface is to be pygeoinf 2 `Operator` and `LinearOperator`
+objects wrapping them, as `linear_operators` wraps the elastic adjoint. Until
+then the drivers should be kept working and documented, but not grown into a
+public API that the wrappers would replace. The port of `linear_operators`
+itself is planned in `pygeoinf_v2_port.md`.
 
 ## Glacial-cycle spin-up
 

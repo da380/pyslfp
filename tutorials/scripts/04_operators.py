@@ -14,6 +14,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from cartopy import crs as ccrs
 
+from pygeoinf.testing import check_operator
+
 import pyslfp as sl
 from pyslfp.linear_operators import (
     FingerPrintOperator,
@@ -71,7 +73,7 @@ sl.plot(
 # departure from it. Each is an operator, and `@` composes them.
 
 # %%
-sea_level = response_space.subspace_projection(0)
+sea_level = response_space.projection(0)
 mean_sea_level = ocean_average_operator(state, field_space) @ sea_level @ fingerprint
 print(f"global mean sea level change: {mean_sea_level(load)[0] * metre * 1000:.1f} mm")
 
@@ -126,19 +128,22 @@ for i, label in enumerate(labels):
 # ## Adjoints and kernels
 #
 # The adjoint of a composition is available without further work, and
-# `check` verifies the adjoint identity on random inputs. The adjoint of
+# `check_operator` from `pygeoinf.testing` verifies the adjoint identity
+# on random inputs, raising an error if it fails. The adjoint of
 # the global mean applied to one is its kernel, which is a constant: every
 # unit of mass raises the global mean by the same amount. The kernel of
 # the local anomaly has structure, and is shown in millimetres of local
 # sea level per thousand gigatonnes of mass added.
 
 # %%
-fingerprint.check(
-    n_checks=2,
-    check_rtol=1e-4,
-    domain_measure=fingerprint.load_measure_for_testing(),
-    codomain_measure=fingerprint.response_measure_for_testing(),
+report = check_operator(
+    fingerprint,
+    rng=np.random.default_rng(0),
+    measure=fingerprint.load_measure_for_testing(),
+    trials=2,
+    rtol=1e-4,
 )
+print(report)
 
 kernel = mean_sea_level.adjoint(np.array([1.0]))
 print(f"kernel range: {kernel.data.min():.12e} to {kernel.data.max():.12e}")
@@ -172,7 +177,7 @@ sl.plot(
 # poles towards the equator slows the Earth.
 
 # %%
-rotation = response_space.subspace_projection(3) @ fingerprint
+rotation = response_space.projection(3) @ fingerprint
 omega = rotation(load)
 pole_factor = params.mean_sea_floor_radius / params.rotation_frequency
 shift = omega[:2] * pole_factor * metre

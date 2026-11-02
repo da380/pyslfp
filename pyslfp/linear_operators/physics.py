@@ -9,14 +9,14 @@ inversion consumes.
 
 from __future__ import annotations
 
-from typing import List, Union, Optional, Tuple
+from typing import Union, Optional, Tuple
 import numpy as np
 from pyshtools import SHGrid
 
 from pygeoinf import (
     HilbertSpace,
     LinearOperator,
-    HilbertSpaceDirectSum,
+    DirectSum,
     EuclideanSpace,
     GaussianMeasure,
 )
@@ -121,16 +121,19 @@ class FingerPrintOperator(LinearOperator):
 
         self._cpc_op = centrifugal_potential_operator(state.model)
 
-        l2_operator = LinearOperator(
+        # The solver's forward and adjoint solves are written on the L2
+        # spaces; the Sobolev adjoint follows from the change of metric.
+        l2_operator = LinearOperator.from_callables(
             l2_domain,
             l2_codomain,
             self._l2_mapping_impl,
-            adjoint_mapping=self._l2_adjoint_mapping_impl,
+            adjoint=self._l2_adjoint_mapping_impl,
+        )
+        self._operator = LinearOperator.from_formal_adjoint(
+            domain, codomain, l2_operator
         )
 
-        operator = LinearOperator.from_formal_adjoint(domain, codomain, l2_operator)
-
-        super().__init__(domain, codomain, operator, adjoint_mapping=operator.adjoint)
+        super().__init__(domain, codomain)
 
     @staticmethod
     def from_defaults(
@@ -284,15 +287,13 @@ class FingerPrintOperator(LinearOperator):
         """
         Returns a measure on the load space that is suitable for testing purposes.
         """
-        return self.domain.heat_kernel_gaussian_measure(
-            0.5 * self.parameters.mean_sea_floor_radius
-        )
+        return self.domain.heat_measure(0.5 * self.parameters.mean_sea_floor_radius)
 
     def response_measure_for_testing(self) -> GaussianMeasure:
         """
         Returns a measure on the response space that is suitable for testing purposes.
         """
-        field_measure = self.codomain.subspace(0).heat_kernel_gaussian_measure(
+        field_measure = self.codomain.subspace(0).heat_measure(
             0.5 * self.parameters.mean_sea_floor_radius
         )
 
@@ -305,15 +306,22 @@ class FingerPrintOperator(LinearOperator):
             self.codomain.subspace(3), amc_std
         )
 
-        return GaussianMeasure.from_direct_sum(
-            [field_measure, field_measure, field_measure, amc_measure]
+        return GaussianMeasure.from_product(
+            [field_measure, field_measure, field_measure, amc_measure],
+            domain=self.codomain,
         )
 
     # ================================================================= #
     #                          Private methods                          #
     # ================================================================= #
 
-    def _l2_mapping_impl(self, zeta: SHGrid) -> List[Union[SHGrid, np.ndarray]]:
+    def _value(self, zeta: SHGrid) -> Tuple[Union[SHGrid, np.ndarray], ...]:
+        return self._operator(zeta)
+
+    def _adjoint_value(self, response: Tuple[Union[SHGrid, np.ndarray], ...]) -> SHGrid:
+        return self._operator.adjoint(response)
+
+    def _l2_mapping_impl(self, zeta: SHGrid) -> Tuple[Union[SHGrid, np.ndarray], ...]:
         slc, disp, gpc, avc = self._sle.solve_sea_level_equation(
             zeta,
             rotational_feedbacks=self._rotational_feedbacks,
@@ -322,10 +330,10 @@ class FingerPrintOperator(LinearOperator):
             verbose=self._verbose,
         )
 
-        return [slc, disp, gpc, avc]
+        return (slc, disp, gpc, avc)
 
     def _l2_adjoint_mapping_impl(
-        self, response: List[Union[SHGrid, np.ndarray]]
+        self, response: Tuple[Union[SHGrid, np.ndarray], ...]
     ) -> SHGrid:
         adjoint_direct_load = response[0]
         adjoint_displacement_load = -1 * response[1]
@@ -368,10 +376,12 @@ def lebesgue_load_space(earth_model: EarthModel, /) -> Lebesgue:
         earth_model.lmax,
         radius=earth_model.parameters.mean_sea_floor_radius,
         grid=earth_model.grid,
+        sampling=earth_model.sampling,
+        extend=earth_model.extend,
     )
 
 
-def lebesgue_response_space(earth_model: EarthModel, /) -> HilbertSpaceDirectSum:
+def lebesgue_response_space(earth_model: EarthModel, /) -> DirectSum:
     """
     Defines the composite L2 response space for the physical fields.
 
@@ -379,13 +389,11 @@ def lebesgue_response_space(earth_model: EarthModel, /) -> HilbertSpaceDirectSum
         earth_model: The EarthModel relative to which the space is defined.
 
     Returns:
-        HilbertSpaceDirectSum: A composite space comprising SLC, Displacement,
+        DirectSum: A composite space comprising SLC, Displacement,
             Gravitational Potential, and a 3D Euclidean space for Angular Velocity.
     """
     field_space = lebesgue_load_space(earth_model)
-    return HilbertSpaceDirectSum(
-        [field_space, field_space, field_space, EuclideanSpace(3)]
-    )
+    return DirectSum([field_space, field_space, field_space, EuclideanSpace(3)])
 
 
 def sobolev_load_space(
@@ -408,12 +416,14 @@ def sobolev_load_space(
         scale,
         radius=earth_model.parameters.mean_sea_floor_radius,
         grid=earth_model.grid,
+        sampling=earth_model.sampling,
+        extend=earth_model.extend,
     )
 
 
 def sobolev_response_space(
     earth_model: EarthModel, order: float, scale: float, /
-) -> HilbertSpaceDirectSum:
+) -> DirectSum:
     """
     Defines the response space corresponding to a Sobolev load space.
 
@@ -426,18 +436,10 @@ def sobolev_response_space(
         scale (float): The characteristic length scale.
 
     Returns:
-        HilbertSpaceDirectSum: The composite Sobolev response space.
+        DirectSum: The composite Sobolev response space.
     """
-    field_space = Sobolev(
-        earth_model.lmax,
-        order,
-        scale,
-        radius=earth_model.parameters.mean_sea_floor_radius,
-        grid=earth_model.grid,
-    )
-    return HilbertSpaceDirectSum(
-        [field_space, field_space, field_space, EuclideanSpace(3)]
-    )
+    field_space = sobolev_load_space(earth_model, order, scale)
+    return DirectSum([field_space, field_space, field_space, EuclideanSpace(3)])
 
 
 # ================================================================ #
@@ -493,8 +495,8 @@ def centrifugal_potential_operator(
 
     l2_codomain = underlying_space(codomain)
 
-    l2_operator = LinearOperator(
-        domain, l2_codomain, mapping, adjoint_mapping=adjoint_mapping
+    l2_operator = LinearOperator.from_callables(
+        domain, l2_codomain, mapping, adjoint=adjoint_mapping
     )
 
     return LinearOperator.from_formal_adjoint(domain, codomain, l2_operator)

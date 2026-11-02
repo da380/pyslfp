@@ -5,6 +5,7 @@ Test suite for satellite altimetry observation models and operators.
 import pytest
 import numpy as np
 import pygeoinf as inf
+from pygeoinf.testing import check_operator
 
 from pyslfp.core import EarthState
 from pyslfp.linear_operators.physics import FingerPrintOperator
@@ -98,7 +99,6 @@ def test_sea_surface_height_operator(fingerprint_operator, remove_rot):
     """
     response_space = fingerprint_operator.codomain
     state = fingerprint_operator.state
-    b = state.model.parameters.mean_sea_floor_radius
 
     A = sea_surface_height_operator(
         state, response_space, remove_rotational_contribution=remove_rot
@@ -107,15 +107,13 @@ def test_sea_surface_height_operator(fingerprint_operator, remove_rot):
     # Domain is the composite SLE response space
     domain_measure = fingerprint_operator.response_measure_for_testing()
 
-    # Codomain is a single field (the SSH field)
-    codomain_measure = A.codomain.heat_kernel_gaussian_measure(0.5 * b)
-
-    A.check(
-        n_checks=2,
-        check_rtol=1e-4,
-        check_atol=1e-4,
-        domain_measure=domain_measure,
-        codomain_measure=codomain_measure,
+    check_operator(
+        A,
+        rng=np.random.default_rng(0),
+        measure=domain_measure,
+        trials=2,
+        rtol=1e-4,
+        atol=1e-4,
     )
 
 
@@ -132,14 +130,14 @@ def test_altimetry_point_operator(fingerprint_operator, sample_points, remove_ro
     )
 
     domain_measure = fingerprint_operator.response_measure_for_testing()
-    codomain_measure = inf.GaussianMeasure.from_standard_deviation(A.codomain, 1.0)
 
-    A.check(
-        n_checks=2,
-        check_rtol=1e-4,
-        check_atol=1e-4,
-        domain_measure=domain_measure,
-        codomain_measure=codomain_measure,
+    check_operator(
+        A,
+        rng=np.random.default_rng(0),
+        measure=domain_measure,
+        trials=2,
+        rtol=1e-4,
+        atol=1e-4,
     )
 
 
@@ -159,14 +157,14 @@ def test_altimetry_observation_model_adjoint(fingerprint_operator, sample_points
 
     # Domain is the Ice Parameter space (defaults to the load space of the fingerprint)
     domain_measure = fingerprint_operator.load_measure_for_testing()
-    codomain_measure = inf.GaussianMeasure.from_standard_deviation(A.codomain, 1.0)
 
-    A.check(
-        n_checks=2,
-        check_rtol=1e-4,
-        check_atol=1e-4,
-        domain_measure=domain_measure,
-        codomain_measure=codomain_measure,
+    check_operator(
+        A,
+        rng=np.random.default_rng(0),
+        measure=domain_measure,
+        trials=2,
+        rtol=1e-4,
+        atol=1e-4,
     )
 
 
@@ -181,14 +179,13 @@ def test_joint_altimetry_observation_model_adjoint(fingerprint_operator, sample_
 
     # The domain is a direct sum [Ice, Ocean], so we build a composite measure
     sub_measure = fingerprint_operator.load_measure_for_testing()
-    domain_measure = inf.GaussianMeasure.from_direct_sum([sub_measure, sub_measure])
+    domain_measure = inf.GaussianMeasure.from_product([sub_measure, sub_measure])
 
-    codomain_measure = inf.GaussianMeasure.from_standard_deviation(A.codomain, 1.0)
-
-    A.check(
-        n_checks=2,
-        check_rtol=1e-4,
-        check_atol=1e-4,
-        domain_measure=domain_measure,
-        codomain_measure=codomain_measure,
+    check_operator(
+        A,
+        rng=np.random.default_rng(0),
+        measure=domain_measure,
+        trials=2,
+        rtol=1e-4,
+        atol=1e-4,
     )

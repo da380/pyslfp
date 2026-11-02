@@ -3,8 +3,10 @@ Test suite for tide gauge observation models and operators.
 """
 
 import pytest
+import numpy as np
 
 import pygeoinf as inf
+from pygeoinf.testing import check_operator
 from pyslfp.linear_operators.physics import FingerPrintOperator
 from pyslfp.linear_operators.tide_gauges import (
     read_gloss_tide_gauge_data,
@@ -109,14 +111,14 @@ def test_tide_gauge_operator_adjoint(fingerprint_operator, sample_points):
     A = tide_gauge_operator(fingerprint_operator.codomain, sample_points)
 
     domain_measure = fingerprint_operator.response_measure_for_testing()
-    codomain_measure = inf.GaussianMeasure.from_standard_deviation(A.codomain, 1.0)
 
-    A.check(
-        n_checks=2,
-        check_rtol=1e-4,
-        check_atol=1e-4,
-        domain_measure=domain_measure,
-        codomain_measure=codomain_measure,
+    check_operator(
+        A,
+        rng=np.random.default_rng(0),
+        measure=domain_measure,
+        trials=2,
+        rtol=1e-4,
+        atol=1e-4,
     )
 
 
@@ -152,12 +154,12 @@ def test_tide_gauge_forward_operator_adjoint(fingerprint_operator, sample_points
     A = model.forward_operator
 
     domain_measure = fingerprint_operator.load_measure_for_testing()
-    codomain_measure = inf.GaussianMeasure.from_standard_deviation(A.codomain, 1.0)
 
-    A.check(
-        n_checks=2,
-        check_rtol=1e-4,
-        check_atol=1e-4,
-        domain_measure=domain_measure,
-        codomain_measure=codomain_measure,
+    check_operator(
+        A,
+        rng=np.random.default_rng(0),
+        measure=domain_measure,
+        trials=2,
+        rtol=1e-4,
+        atol=1e-4,
     )

@@ -4,6 +4,7 @@ Test suite for mass load conversions and composite domain operators.
 
 import pytest
 import pygeoinf as inf
+from pygeoinf.testing import check_operator
 
 import numpy as np
 
@@ -60,16 +61,16 @@ def test_mass_conversion_operators(testing_state, sobolev):
         ocean_density_change_to_load_operator(testing_state, param_space, load_space),
     ]
 
-    domain_measure = param_space.heat_kernel_gaussian_measure(0.5 * b)
-    codomain_measure = load_space.heat_kernel_gaussian_measure(0.5 * b)
+    domain_measure = param_space.heat_measure(0.5 * b)
 
     for A in ops:
-        A.check(
-            n_checks=2,
-            check_rtol=1e-4,
-            check_atol=1e-4,
-            domain_measure=domain_measure,
-            codomain_measure=codomain_measure,
+        check_operator(
+            A,
+            rng=np.random.default_rng(0),
+            measure=domain_measure,
+            trials=2,
+            rtol=1e-4,
+            atol=1e-4,
         )
 
 
@@ -99,18 +100,24 @@ def test_steric_and_conservation_operators(testing_state, sobolev):
         testing_state, load_space, param_space
     )
 
-    domain_measure = param_space.heat_kernel_gaussian_measure(0.5 * b)
-    codomain_measure = load_space.heat_kernel_gaussian_measure(0.5 * b)
-    steric.check(
-        n_checks=2,
-        check_rtol=1e-4,
-        check_atol=1e-4,
-        domain_measure=domain_measure,
-        codomain_measure=codomain_measure,
+    domain_measure = param_space.heat_measure(0.5 * b)
+    check_operator(
+        steric,
+        rng=np.random.default_rng(0),
+        measure=domain_measure,
+        trials=2,
+        rtol=1e-4,
+        atol=1e-4,
     )
-    conservation.check(n_checks=2, check_rtol=1e-4, check_atol=1e-4)
+    check_operator(
+        conservation,
+        rng=np.random.default_rng(0),
+        trials=2,
+        rtol=1e-4,
+        atol=1e-4,
+    )
 
-    drho = domain_measure.sample()
+    drho = domain_measure.sample(rng=np.random.default_rng(1))
     eta_s = steric(drho)
     # the steric response loads nothing
     water_load = sea_level_change_to_load_operator(
@@ -122,10 +129,10 @@ def test_steric_and_conservation_operators(testing_state, sobolev):
     scale = np.max(np.abs(density_load.data))
     assert np.allclose(water_load.data + density_load.data, 0.0, atol=1e-12 * scale)
     # and so the pair conserves ocean mass exactly
-    residual = conservation([eta_s, drho])
+    residual = conservation((eta_s, drho))
     assert abs(residual[0]) < 1e-12 * scale
     # while a bare sea surface height change does not
-    violating = conservation([eta_s, param_space.zero])
+    violating = conservation((eta_s, param_space.zero()))
     assert abs(violating[0]) > 1e-6 * scale
 
 
@@ -180,16 +187,15 @@ def test_joint_ice_ocean_to_load_operator(testing_state, sobolev):
     )
 
     # The domain is a HilbertSpaceDirectSum, so we must build a direct sum measure
-    ice_measure = ice_space.heat_kernel_gaussian_measure(0.5 * b)
-    ocean_measure = ocean_space.heat_kernel_gaussian_measure(0.5 * b)
-    domain_measure = inf.GaussianMeasure.from_direct_sum([ice_measure, ocean_measure])
+    ice_measure = ice_space.heat_measure(0.5 * b)
+    ocean_measure = ocean_space.heat_measure(0.5 * b)
+    domain_measure = inf.GaussianMeasure.from_product([ice_measure, ocean_measure])
 
-    codomain_measure = load_space.heat_kernel_gaussian_measure(0.5 * b)
-
-    A.check(
-        n_checks=2,
-        check_rtol=1e-4,
-        check_atol=1e-4,
-        domain_measure=domain_measure,
-        codomain_measure=codomain_measure,
+    check_operator(
+        A,
+        rng=np.random.default_rng(0),
+        measure=domain_measure,
+        trials=2,
+        rtol=1e-4,
+        atol=1e-4,
     )

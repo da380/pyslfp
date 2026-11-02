@@ -812,7 +812,7 @@ def build_measures(
     if prior_shift != 0.0:
         offset_shape = model_prior.sample()
         model_prior = model_prior.translate(
-            model_prior.domain.multiply(prior_shift, offset_shape)
+            model_prior.domain.scale(prior_shift, offset_shape)
         )
 
     return model_prior, noise_meas, calib

@@ -58,6 +58,13 @@ class SeaLevelEquation:
     global sea level, surface displacement, and gravity anomalies.
     """
 
+    # The iteration limits used when a caller sets none. Stopping at one of
+    # these without converging is reported with a RuntimeWarning. Stopping at
+    # a limit the caller set is not: a capped solve, such as the one-pass
+    # surrogate of a preconditioner, is what was asked for.
+    _DEFAULT_MAX_ITERATIONS: int = 1000
+    _DEFAULT_MAX_NONLINEAR_ITERATIONS: int = 50
+
     def __init__(self, model: EarthModel, /) -> None:
         """
         Initialises the sea level equation solver.
@@ -322,7 +329,10 @@ class SeaLevelEquation:
             rtol (float): The relative tolerance for convergence, measured as the
                 change in sea level over the oceans between iterations relative
                 to its magnitude.
-            max_iterations (Optional[int]): Hard limit on iteration count.
+            max_iterations (Optional[int]): Hard limit on iteration count,
+                1000 if omitted. Stopping at the default limit without
+                converging raises a RuntimeWarning; stopping at a limit
+                given here does not.
             verbose (bool): If True, prints iteration metrics.
 
         Returns:
@@ -390,7 +400,10 @@ class SeaLevelEquation:
             rtol (float): The relative tolerance for convergence, measured as the
                 change in sea level over the oceans between iterations relative
                 to its magnitude.
-            max_iterations (Optional[int]): Hard limit on iteration count.
+            max_iterations (Optional[int]): Hard limit on iteration count,
+                1000 if omitted. Stopping at the default limit without
+                converging raises a RuntimeWarning; stopping at a limit
+                given here does not.
             verbose (bool): If True, prints iteration metrics.
 
         Returns:
@@ -540,7 +553,11 @@ class SeaLevelEquation:
 
         load_lm = self._expand(direct_data + water_density * ocean_function * mean_slc)
         mixer = AndersonMixer(self.anderson_memory)
-        iter_limit = max_iterations if max_iterations is not None else 1000
+        iter_limit = (
+            max_iterations
+            if max_iterations is not None
+            else self._DEFAULT_MAX_ITERATIONS
+        )
 
         ocean_slc_prev = None
         err = np.inf
@@ -569,7 +586,7 @@ class SeaLevelEquation:
             load_lm = mixer.update(load_lm, load_new_lm)
             count += 1
 
-        if not converged:
+        if not converged and max_iterations is None:
             self._warn_not_converged("Sea level equation solver", err, count)
 
         # Synthesise the remaining fields from the same load as the sea level
@@ -781,7 +798,11 @@ class SeaLevelEquation:
 
         self._solver_counter += 1
         mixer = AndersonMixer(self.anderson_memory)
-        iter_limit = max_iterations if max_iterations is not None else 1000
+        iter_limit = (
+            max_iterations
+            if max_iterations is not None
+            else self._DEFAULT_MAX_ITERATIONS
+        )
         lam = np.zeros_like(zero_c)
         err = np.inf
         converged = False
@@ -798,7 +819,7 @@ class SeaLevelEquation:
                 break
             lam = mixer.update(lam, new)
             count += 1
-        if not converged:
+        if not converged and max_iterations is None:
             self._warn_not_converged("Adjoint sea level solver", err, count)
 
         # the input duals, read at the converged dual load
@@ -832,7 +853,7 @@ class SeaLevelEquation:
         inertia_moment_change: float = 0.0,
         rotational_feedbacks: bool = True,
         rtol: float = 1e-9,
-        max_iterations: int = 50,
+        max_iterations: Optional[int] = None,
         verbose: bool = False,
     ) -> Tuple[EarthState, SHGrid, SHGrid, SHGrid, np.ndarray]:
         """
@@ -862,7 +883,10 @@ class SeaLevelEquation:
                 "axial" for the axial component alone, False for none; see
                 `solve_generalised_equation`.
             rtol (float): The relative tolerance for convergence.
-            max_iterations (int): Hard limit on non-linear iteration count.
+            max_iterations (Optional[int]): Hard limit on non-linear
+                iteration count, 50 if omitted. Stopping at the default
+                limit without converging raises a RuntimeWarning; stopping
+                at a limit given here does not.
             verbose (bool): If True, prints iteration metrics.
 
         Returns:
@@ -957,7 +981,12 @@ class SeaLevelEquation:
         disp_2 = grav_2 = None
         centrifugal_0 = 0.0
 
-        while count < max_iterations:
+        iter_limit = (
+            max_iterations
+            if max_iterations is not None
+            else self._DEFAULT_MAX_NONLINEAR_ITERATIONS
+        )
+        while count < iter_limit:
             grounded_ice_change = ice_density * (
                 (1.0 - current_ocean_func) * new_ice
                 - (1.0 - initial_ocean_func) * initial_ice
@@ -1044,7 +1073,7 @@ class SeaLevelEquation:
                 converged = True
                 break
 
-        if not converged:
+        if not converged and max_iterations is None:
             self._warn_not_converged("Non-linear sea level equation solver", err, count)
 
         # Displacement and potential for the load of the final iteration

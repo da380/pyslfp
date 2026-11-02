@@ -36,7 +36,8 @@ The area columns count uses in:
 | `space.order_inclusion_operator(order)` | `space.order_inclusion_operator(target)` | lib | Takes the target space, not an order. |
 | `space.identity_operator()` | `LinearOperator.identity(space)` | lib, H26 | |
 | `space.zero_operator(codomain=)` | `LinearOperator.zero(space, codomain=)` | lib, H26 | |
-| `space.vector_multiply(a, b)` | `space.multiply(a, b)` | H26 | |
+| `space.vector_multiply(a, b)` | `space.multiply(a, b)` | H26 | The pointwise product. |
+| `space.multiply(a, x)`, a scalar | `space.scale(a, x)` | H26 | In v1 `multiply` scaled by a number; in v2 it is the pointwise product, and a direct sum has none. |
 | `space.vector_sqrt(a)` | `space.sqrt(a)` | H26 | |
 | `space.dirac_representation(p)` | `space.dirac(p).representer` | H26 | `dirac` returns the functional. |
 | `space.zero` (a property) | `space.zero()` (a method) | tst, H26 | The property form passes the bound method on silently. |
@@ -255,10 +256,17 @@ Unchanged and used: `HilbertSpace` (type hints only), `EuclideanSpace`,
    a positive-definite C and a surjective A. A masked prior P C P* is
    semidefinite, so conditioning it is refused even where A C A* is
    positive definite, and there is no way to claim that. v1 allowed it.
-   Heathcote2026 avoids it because its mass constraint carries the ocean
-   function and so A P = A: conditioning the unmasked prior and masking
-   afterwards gives the same measure. The models submodule will constrain
-   masked components where that identity need not hold.
+   Heathcote2026 avoids it for the mask, because its mass constraint
+   carries the ocean function and so A P = A: conditioning the unmasked
+   prior and masking afterwards gives the same measure. It cannot avoid it
+   for the heat-kernel prior with ocean correlation (`--prior-kernel heat`
+   with `--ocean-corr` above zero). `correlated_measure` claims positive
+   definiteness only when every block's smallest eigenvalue exceeds 1e-10 of
+   the largest, and the heat spectra fall below that by degree 64, so the
+   unmasked prior is itself claimed only semidefinite. That combination
+   stops with pygeoinf's error until the gap is closed. The models
+   submodule will also constrain masked components where A P = A need not
+   hold.
 
 3. **A tensor product of spaces.** It is not needed for the port. It is
    needed later for model spaces that vary in time and for the viscoelastic

@@ -2,6 +2,8 @@
 Test suite for the core Sea Level Equation solvers.
 """
 
+import warnings
+
 import pytest
 import numpy as np
 from pyshtools import SHGrid
@@ -522,11 +524,42 @@ def test_zero_load_outputs_are_independent_objects(linear_solver):
     assert disp.data[0, 0] == 0.0 and potc.data[0, 0] == 0.0
 
 
-def test_non_convergence_warns(linear_solver):
+def test_non_convergence_at_default_limit_warns(linear_solver, monkeypatch):
+    """Stopping at the solver's own iteration limit is a failure, and says so."""
     np.random.seed(6)
     load = random_load(linear_solver.state)
+    monkeypatch.setattr(SeaLevelEquation, "_DEFAULT_MAX_ITERATIONS", 1)
     with pytest.warns(RuntimeWarning, match="did not converge"):
+        linear_solver.solve_sea_level_equation(load, rtol=1e-12)
+
+
+def test_explicit_iteration_limit_is_silent(linear_solver):
+    """Stopping at a limit the caller set is what was asked for: no warning."""
+    np.random.seed(6)
+    load = random_load(linear_solver.state)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
         linear_solver.solve_sea_level_equation(load, max_iterations=1, rtol=1e-12)
+
+
+def test_nonlinear_default_limit_warns(analytical_state, monkeypatch):
+    """The non-linear solver follows the same rule as the linear one."""
+    sle = SeaLevelEquation(analytical_state.model)
+    change = analytical_state.model.zero_grid()
+    change.data[:] = -0.01 * analytical_state.ice_projection(value=0.0).data
+    monkeypatch.setattr(SeaLevelEquation, "_DEFAULT_MAX_NONLINEAR_ITERATIONS", 1)
+    with pytest.warns(RuntimeWarning, match="did not converge"):
+        sle.solve_nonlinear_equation(
+            analytical_state, ice_thickness_change=change, rtol=1e-12
+        )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        sle.solve_nonlinear_equation(
+            analytical_state,
+            ice_thickness_change=change,
+            rtol=1e-12,
+            max_iterations=1,
+        )
 
 
 def test_nonlinear_solver_without_ice_change(analytical_state):

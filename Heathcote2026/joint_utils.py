@@ -210,7 +210,7 @@ def build_measures(
 
     if prior_shift != 0.0:
         model_prior = model_prior.translate(
-            model_prior.domain.multiply(prior_shift, model_prior.sample())
+            model_prior.domain.scale(prior_shift, model_prior.sample())
         )
 
     if is_surrogate:

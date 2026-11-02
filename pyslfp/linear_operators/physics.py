@@ -33,7 +33,7 @@ from pyslfp.core.response import (
 from pyslfp.linear_operators.utils import underlying_space
 
 
-class FingerPrintOperator(LinearOperator):
+class FingerPrintOperator(LinearOperator[SHGrid, GRDResponse]):
     """
     A pygeoinf LinearOperator associated with the solution of the linearised elastic
     sea level equation: from a surface mass load to the response, a

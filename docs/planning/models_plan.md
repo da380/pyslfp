@@ -1,7 +1,7 @@
 # The models submodule: a component vocabulary for inversion spaces
 
 Status: design agreed, revised against pygeoinf 2 (see "Against
-pygeoinf 2" below), and to ship in 3.1.0 with the pygeoinf 2 port. The
+pygeoinf 2" below), and to ship in 4.0.0 with the pygeoinf 2 port. The
 steric and mass-conservation pieces it builds on are in
 pyslfp/linear_operators/loads.py.
 

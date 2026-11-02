@@ -39,7 +39,7 @@ built from its members' spaces, with projections and inclusions by name.
 from __future__ import annotations
 
 from collections.abc import Hashable, Sequence
-from typing import Optional
+from typing import Any, Optional
 
 import ducc0
 import numpy as np
@@ -129,7 +129,7 @@ class SurfaceDisplacement:
         return f"SurfaceDisplacement(lmax={self._space.field_space.lmax}{part})"
 
 
-class SurfaceDisplacementSpace(DiagonalMetricSpace):
+class SurfaceDisplacementSpace(DiagonalMetricSpace[SurfaceDisplacement]):
     """
     The Hilbert space of surface displacements over a pygeoinf sphere space.
 
@@ -229,7 +229,7 @@ class SurfaceDisplacementSpace(DiagonalMetricSpace):
 
     # -- operators ---------------------------------------------------------
 
-    def vertical_projection(self) -> LinearOperator:
+    def vertical_projection(self) -> LinearOperator[SurfaceDisplacement, np.ndarray]:
         """u -> U, into `ComponentView(field_space)`."""
         target = ComponentView(self._field_space)
 
@@ -264,7 +264,7 @@ class SurfaceDisplacementSpace(DiagonalMetricSpace):
         /,
         *,
         directions: Sequence[str] = _DIRECTIONS,
-    ) -> LinearOperator:
+    ) -> LinearOperator[SurfaceDisplacement, np.ndarray]:
         """
         The displacement at points, into a Euclidean space: for each point in
         turn, the components in `directions`, from "east", "north" and "up".
@@ -419,7 +419,7 @@ class GRDResponse:
         return f"GRDResponse({', '.join(self._space.names)})"
 
 
-class GRDSpace(DiagonalMetricSpace):
+class GRDSpace(DiagonalMetricSpace[GRDResponse]):
     """
     The Hilbert space of responses to a load, over a pygeoinf sphere space.
 
@@ -577,7 +577,7 @@ class GRDSpace(DiagonalMetricSpace):
 
     # -- operators ---------------------------------------------------------
 
-    def projection(self, name: str, /) -> LinearOperator:
+    def projection(self, name: str, /) -> LinearOperator[GRDResponse, Any]:
         """The map from a response to one member, into `member_space(name)`."""
         target = self.member_space(name)
         s = self._slices[name]
@@ -592,11 +592,11 @@ class GRDSpace(DiagonalMetricSpace):
 
         return LinearOperator.from_callables(self, target, mapping, adjoint=adjoint)
 
-    def inclusion(self, name: str, /) -> LinearOperator:
+    def inclusion(self, name: str, /) -> LinearOperator[Any, GRDResponse]:
         """The map from one member to the response holding it alone."""
         return self.projection(name).adjoint
 
-    def field_operator(self, name: str, /) -> LinearOperator:
+    def field_operator(self, name: str, /) -> LinearOperator[GRDResponse, SHGrid]:
         """
         The map from a response to one of its fields as a vector of the field
         space: "sea_level_change", "potential_change", or "displacement" for
@@ -630,7 +630,7 @@ class GRDSpace(DiagonalMetricSpace):
 
     def heat_measure(
         self, length_scale: float, /, *, angular_velocity_std: float = 1.0
-    ):
+    ) -> GaussianMeasure[GRDResponse]:
         """
         A smooth Gaussian measure on the space, for tests and examples: the
         components of degree l have standard deviation

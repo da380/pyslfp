@@ -4,7 +4,7 @@ This note maps every pygeoinf 1 name pyslfp uses to its pygeoinf 2
 equivalent. It also lists the changes in behaviour that a rename does not
 cover, and the gaps to be fixed in pygeoinf rather than worked around here.
 
-The port is released as pyslfp 3.1.0. The minimum versions become
+The port is released in pyslfp 4.0.0 (see [release_4.md](release_4.md)). The minimum versions become
 `pygeoinf>=2.1.1` and `planetmodel>=1.4.1`. The release notes should say that
 the spaces, operators and measures pyslfp returns are pygeoinf 2 objects.
 

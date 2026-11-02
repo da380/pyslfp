@@ -69,6 +69,9 @@ exact adjoint, m > 0 coefficients counting twice for a real field.
 
 ## Work packages
 
+Packages 1 and 2 are built: the solver's coefficient engine with V
+(`SeaLevelEquation._solve_generalised`), and `pyslfp.core.response`.
+
 1. **The solver.** Horizontal displacement as a coefficient output of the
    elastic sea level solvers (linear and non-linear), with a test against
    the Love-number definition; the existing grid-returning methods kept.

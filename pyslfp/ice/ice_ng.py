@@ -13,7 +13,7 @@ from scipy.interpolate import RegularGridInterpolator
 from pyshtools import SHGrid
 
 from pyslfp.data import DATADIR, ensure_data
-from pyslfp.water_bodies import landlocked_mask
+from pyslfp.core.water_bodies import landlocked_mask
 from .ice_models import BaseIceSeaLevelModel
 
 
@@ -202,7 +202,7 @@ class IceNG(BaseIceSeaLevelModel):
         sampling: int = 1,
         extend: bool = True,
     ) -> SHGrid:
-        """The present-day landlocked depressions (`pyslfp.water_bodies`),
+        """The present-day landlocked depressions (`pyslfp.core.water_bodies`),
         held as land at every date: ICE-NG describes the Earth, where
         flotation alone would extend the ocean into the Caspian and the other
         basins below sea level that are cut off from it. Arguments as

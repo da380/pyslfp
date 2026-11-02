@@ -46,7 +46,7 @@ __all__ = [
 # The radius used for distances on the raster, km.
 _RADIUS_KM = 6371.0
 
-_PRODUCT = Path(__file__).resolve().parent / "data" / "landlocked.npz"
+_PRODUCT = Path(__file__).resolve().parents[1] / "data" / "landlocked.npz"
 
 
 @dataclass(frozen=True)

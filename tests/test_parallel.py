@@ -6,7 +6,7 @@ import ducc0
 from threadpoolctl import threadpool_info
 import pyshtools.backends.ducc0_wrapper as ducc_wrapper
 
-from pyslfp.parallel import physical_core_count, set_num_threads
+from pyslfp.core.parallel import physical_core_count, set_num_threads
 
 
 def test_physical_core_count_is_positive():

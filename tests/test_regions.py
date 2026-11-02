@@ -12,7 +12,7 @@ from shapely.geometry import Polygon
 
 from unittest.mock import MagicMock
 from pyslfp.core import EarthModel
-from pyslfp.regions import Regions
+from pyslfp.core.regions import Regions
 
 
 # ==================================================================== #
@@ -166,8 +166,8 @@ def test_ne_ocean_projections(region_engine):
 # ==================================================================== #
 
 
-@patch("pyslfp.regions.ensure_data")
-@patch("pyslfp.regions.gpd.read_file")
+@patch("pyslfp.core.regions.ensure_data")
+@patch("pyslfp.core.regions.gpd.read_file")
 def test_shapefile_lazy_loading(mock_read_file, mock_ensure, region_engine, mock_gdf):
     """
     Test that shapefile datasets lazily load and trigger the downloader.
@@ -197,8 +197,8 @@ def test_shapefile_lazy_loading(mock_read_file, mock_ensure, region_engine, mock
         mock_ensure.assert_any_call("MOUGINOT_GRL")
 
 
-@patch("pyslfp.regions.ensure_data")
-@patch("pyslfp.regions.gpd.read_file")
+@patch("pyslfp.core.regions.ensure_data")
+@patch("pyslfp.core.regions.gpd.read_file")
 def test_shapefile_projection_routing(
     mock_read_file, mock_ensure, region_engine, mock_gdf
 ):
@@ -220,8 +220,8 @@ def test_shapefile_projection_routing(
         region_engine.imbie_ant_projection("FakeBasin")
 
 
-@patch("pyslfp.regions.ensure_data")
-@patch("pyslfp.regions.gpd.read_file")
+@patch("pyslfp.core.regions.ensure_data")
+@patch("pyslfp.core.regions.gpd.read_file")
 def test_shapefile_projection_non_extended(
     mock_read_file, mock_ensure, region_engine, non_extended_region_engine, mock_gdf
 ):
@@ -327,8 +327,8 @@ def test_ar6_composite_projection(region_engine):
     )  # Ensures no values of 2.0 (double counting)
 
 
-@patch("pyslfp.regions.ensure_data")
-@patch("pyslfp.regions.gpd.read_file")
+@patch("pyslfp.core.regions.ensure_data")
+@patch("pyslfp.core.regions.gpd.read_file")
 def test_shapefile_composite_routing(
     mock_read_file, mock_ensure, region_engine, mock_gdf
 ):
@@ -474,8 +474,8 @@ def test_real_get_projection_composite(region_engine):
 # ==================================================================== #
 
 
-@patch("pyslfp.regions.ensure_data")
-@patch("pyslfp.regions.gpd.read_file")
+@patch("pyslfp.core.regions.ensure_data")
+@patch("pyslfp.core.regions.gpd.read_file")
 def test_list_all_regions(mock_read_file, mock_ensure, region_engine, mock_gdf):
     """Test that the master dictionary returns the expected structure."""
     # Return the raw mock for HydroBASINS (which doesn't use .to_crs())

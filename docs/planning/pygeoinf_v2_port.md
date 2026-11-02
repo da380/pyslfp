@@ -278,7 +278,7 @@ scales it degree by degree; see §2.6.
    subclass of `LinearOperator` in the v2 form.
 4. `grace.py`, with its bespoke prior operator and the decision in §2.3.
 5. The tests, with explicit generators.
-6. `plot.py`.
+6. `plotting/maps.py`.
 7. Tutorials 04 and 05, then regenerate their notebooks.
 8. The Heathcote2026 scripts, later, against this map.
 

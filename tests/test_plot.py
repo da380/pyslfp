@@ -14,7 +14,7 @@ import cartopy.crs as ccrs
 from matplotlib.contour import QuadContourSet
 
 from pyshtools import SHCoeffs
-from pyslfp.plot import plot, create_map_figure, plot_coastline
+from pyslfp.plotting import plot, create_map_figure, plot_coastline
 
 
 @pytest.fixture(scope="module")

@@ -14,7 +14,7 @@ from cartopy import crs as ccrs
 from pyshtools import SHGrid
 
 from pyslfp.data import DATADIR, ensure_data
-from pyslfp.water_bodies import landlocked_mask, landlocked_names
+from .water_bodies import landlocked_mask, landlocked_names
 
 
 class Regions:
@@ -582,7 +582,7 @@ class Regions:
         and `value` elsewhere: land below sea level that is cut off from the
         ocean, the Caspian, the Dead Sea, Qattara, the beds of lakes below sea
         level and the rest, from the ETOPO 2022 bedrock at two arc-minutes
-        (`pyslfp.water_bodies`). A node is landlocked when the depressions
+        (`pyslfp.core.water_bodies`). A node is landlocked when the depressions
         cover more than `threshold` of its cell. Passed as an `EarthState`'s
         `land`, it holds them as land whatever the flotation.
 

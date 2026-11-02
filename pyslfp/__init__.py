@@ -23,12 +23,12 @@ from .elastic import LinearSeaLevelEquation
 # ---------------------------------------------------------------------------
 # 3. Visualization Utilities
 # ---------------------------------------------------------------------------
-from .plot import plot, plot_points, create_map_figure, plot_coastline, subplots
+from .plotting import plot, plot_points, create_map_figure, plot_coastline, subplots
 
 # ---------------------------------------------------------------------------
 # 4. Thread control for the numerical backends
 # ---------------------------------------------------------------------------
-from .parallel import set_num_threads, physical_core_count
+from .core.parallel import set_num_threads, physical_core_count
 
 # ---------------------------------------------------------------------------
 # 5. Expose Sub-packages for Namespaced Access
@@ -40,6 +40,7 @@ from . import ice
 from . import linear_operators
 from . import love_numbers
 from . import models
+from . import plotting
 from . import viscoelastic
 
 # ---------------------------------------------------------------------------
@@ -70,5 +71,6 @@ __all__ = [
     "linear_operators",
     "love_numbers",
     "models",
+    "plotting",
     "viscoelastic",
 ]

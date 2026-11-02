@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 
 import pygeoinf as inf
 import grace_utils as utils
-from pyslfp.parallel import set_num_threads
+from pyslfp import set_num_threads
 import pyslfp as sl
 
 

@@ -28,7 +28,7 @@ The ocean function is decided by flotation, with no geography assumed; regions
 held as land whatever the flotation are an `EarthState`'s `land` mask, which
 the non-linear solver and the viscoelastic evolution carry into the states
 they create. The present-day landlocked depressions (`landlocked_projection`)
-come from `pyslfp.water_bodies`, built from the ETOPO 2022 bedrock at two
+come from `pyslfp.core.water_bodies`, built from the ETOPO 2022 bedrock at two
 arc-minutes by `tools/build_landlocked.py` and shipped as
 `pyslfp/data/landlocked.npz`; ICE-NG supplies them as its default land.
 
@@ -85,12 +85,11 @@ out.
 
 ## Horizontal displacement
 
-The Love number tables carry the tangential numbers (`l_u`, `l_phi`, `l_t`)
-and the tangential-traction channel whose adjoint a functional of horizontal
-displacement needs, but the sea level solvers return the vertical displacement
-only. Horizontal displacement is wanted as an optional output, with its adjoint,
-and the repackaging of the solver outputs this implies is best designed
-together with the pygeoinf operators.
+Horizontal displacement, and the response to a load as one spectral object
+(`GRDResponse`, `SurfaceDisplacement`, `pyslfp.core.response`), are planned in
+[response_plan.md](response_plan.md). The solver computes V and the classes
+and spaces exist; the fingerprint operator, its consumers and the viscoelastic
+side remain, and come before WP3 of the models submodule.
 
 ## Continuous-in-time measurements
 

@@ -13,9 +13,9 @@ from cartopy.mpl.geoaxes import GeoAxes
 
 
 from .model import EarthModel
-from ..regions import Regions
+from .regions import Regions
 from ..ice import AnalyticalIceModel, BaseIceSeaLevelModel, IceNG
-from ..plot import plot_coastline
+from ..plotting import plot_coastline
 
 # The ice sheets `EarthState.ice_sheet_projection` defines by rule.
 ICE_SHEETS = ("antarctic", "greenland")

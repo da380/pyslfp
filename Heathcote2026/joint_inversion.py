@@ -36,7 +36,7 @@ import pygeoinf as inf
 
 import joint_utils as utils
 
-from pyslfp.parallel import set_num_threads
+from pyslfp import set_num_threads
 import pyslfp as sl
 from pyslfp import EarthState
 from pyslfp.linear_operators import ocean_altimetry_points

@@ -223,15 +223,14 @@ costs and the details.
 
 | Module | Contents |
 | :--- | :--- |
-| `core/` | The shared engine: `EarthModelParameters` and `EarthModel` (physical constants, scales, the spherical harmonic discretisation and the Love numbers), `EarthState` (ice thickness and sea level, the ocean function, projections and ready-made loads), and `SeaLevelEquation`, the linear, generalised, adjoint and nonlinear solvers. |
+| `core/` | The shared engine: `EarthModelParameters` and `EarthModel` (physical constants, scales, the spherical harmonic discretisation and the Love numbers), `EarthState` (ice thickness and sea level, the ocean function, projections and ready-made loads), `SeaLevelEquation`, the linear, generalised, adjoint and nonlinear solvers, and `GRDResponse`, the response to a load as one spectral object with its Hilbert space. Also the regional masks (IMBIE Antarctic basins, Mouginot Greenland basins, IHO seas, HydroBASINS catchments, AR6 and GTN-G regions, Natural Earth oceans), the landlocked depressions and the labelling of water bodies, and the thread control for the transforms and BLAS. |
 | `elastic/` | `LinearSeaLevelEquation`, the fingerprint driver. |
 | `viscoelastic/` | `Rheology`, `ViscoelasticOperator` (the radial time stepping), `SeaLevelEvolution` (the coupled evolution and its adjoints), the kernel and measurement types, decay-time functionals and `calibrate_initial_sea_level`. |
 | `love_numbers/` | `LoveNumbers` and the radial spectral-element solver that computes them from any `planetmodel` model. |
 | `linear_operators/` | The elastic physics as `pygeoinf` operators, spatial projections and averages, load mappings, and the tide gauge, altimetry and GRACE observation models. |
 | `ice/` | The ice model interfaces, `IceNG` for the ICE-5G, ICE-6G and ICE-7G histories, `AnalyticalIceModel` for testing, and export to `planetmodel` surface histories. |
-| `regions.py` | Regional masks: IMBIE Antarctic basins, Mouginot Greenland basins, IHO seas, HydroBASINS catchments, AR6 regions and Natural Earth oceans. |
-| `plot.py` | Plotting of `pyshtools.SHGrid` fields on Cartopy projections. |
-| `parallel.py` | Thread control for the transforms and BLAS. |
+| `models/` | Model spaces for inversions: named load components (ice sheets, glaciers, land water, firn, dynamic topography, ocean density) and `ModelSetup`, which assembles them with their loads, observables and constraints. |
+| `plotting/` | Plotting of `pyshtools.SHGrid` fields on Cartopy projections. |
 | `data/` | Location and retrieval of the external datasets. |
 
 ## Tests

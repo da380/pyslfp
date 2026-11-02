@@ -17,7 +17,7 @@ from matplotlib.animation import FuncAnimation
 import cartopy.crs as ccrs
 from cartopy.mpl.geoaxes import GeoAxes
 
-from pyslfp.plot import plot
+from pyslfp.plotting import plot
 
 
 class BaseIceModel(ABC):

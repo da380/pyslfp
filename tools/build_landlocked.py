@@ -1,7 +1,7 @@
 """Builds `pyslfp/data/landlocked.npz`, the present-day landlocked depressions.
 
 The ETOPO 2022 bedrock and ice thickness at two arc-minutes, as pyslfp ships
-them, are labelled by `pyslfp.water_bodies.label_water_bodies`: water is the
+them, are labelled by `pyslfp.core.water_bodies.label_water_bodies`: water is the
 ice-free bedrock below sea level (under grounded ice flotation decides), the
 Bosporus and the Dardanelles are opened, and bodies within 15 km of the open
 ocean are joined to it, since near a coast the raster cannot tell a narrow
@@ -19,7 +19,7 @@ import numpy as np
 import xarray as xr
 
 from pyslfp.data import ensure_data
-from pyslfp.water_bodies import STATED_CHANNELS, label_water_bodies
+from pyslfp.core.water_bodies import STATED_CHANNELS, label_water_bodies
 
 CONNECT_WITHIN_KM = 15.0
 

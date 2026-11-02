@@ -6,6 +6,11 @@ generalised or nonlinear -- for whatever Love numbers its Earth model
 carries: the elastic table of a fingerprint, or the per-step effective
 table of a viscoelastic evolution.  Nothing in the engine is elastic
 but the table it is handed.
+
+`response` holds the response to a load, the displacement included, as one
+spectral object (`GRDResponse`, `SurfaceDisplacement`) with its Hilbert space,
+and `water_bodies` decides which water below a level is ocean and which is
+landlocked, the regions a state holds as land.
 """
 
 from .model import (
@@ -27,6 +32,12 @@ from .model import (
 from .anderson import AndersonMixer
 from .sea_level import SeaLevelEquation
 from .state import EarthState
+from .response import (
+    GRDResponse,
+    GRDSpace,
+    SurfaceDisplacement,
+    SurfaceDisplacementSpace,
+)
 
 __all__ = [
     "EarthModel",
@@ -34,6 +45,10 @@ __all__ = [
     "EarthState",
     "AndersonMixer",
     "SeaLevelEquation",
+    "GRDResponse",
+    "GRDSpace",
+    "SurfaceDisplacement",
+    "SurfaceDisplacementSpace",
     "EQUATORIAL_RADIUS",
     "POLAR_RADIUS",
     "MEAN_RADIUS",

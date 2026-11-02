@@ -9,7 +9,7 @@ import pytest
 from pyslfp.core import EarthState
 from pyslfp.ice import AnalyticalIceModel, IceNG
 from pyslfp.core import EarthModel
-from pyslfp.water_bodies import Channel, label_water_bodies
+from pyslfp.core.water_bodies import Channel, label_water_bodies
 
 
 @pytest.fixture(scope="module")

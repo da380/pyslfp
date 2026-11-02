@@ -182,7 +182,7 @@ def test_ice_sheet_basin_operators(testing_state, sobolev):
     else:
         space = lebesgue_load_space(model)
 
-    # One of the grouping schemes defined in regions.py
+    # One of the grouping schemes defined in pyslfp.core.regions
     grouping = "ice_sheets"
 
     A = ice_sheet_averaging_operator(testing_state, space, groupings=grouping)

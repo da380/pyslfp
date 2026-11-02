@@ -119,7 +119,8 @@ def build_physics_components(
 
     # --- C. TRUE SEA LEVEL TRACK (For GMSLR) ---
     barystatic_sl_op = (
-        finger_print_operator.codomain.projection(0) @ finger_print_operator
+        finger_print_operator.codomain.field_operator("sea_level_change")
+        @ finger_print_operator
     )
     op2_sl = inf.BlockDiagonalLinearOperator(
         [barystatic_sl_op, inf.LinearOperator.identity(load_space)]

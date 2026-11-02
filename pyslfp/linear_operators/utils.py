@@ -21,12 +21,12 @@ from pyshtools import SHGrid
 from pygeoinf import (
     LinearOperator,
     HilbertSpace,
-    EuclideanSpace,
     DirectSum,
 )
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev, Sphere
 
 from pyslfp.core import EarthState
+from pyslfp.core.response import GRDSpace
 
 
 def underlying_space(space: HilbertSpace, /) -> HilbertSpace:
@@ -92,40 +92,28 @@ def check_response_space(
     response_space: HilbertSpace, /, *, point_values: bool = False
 ) -> None:
     """
-    Validates that a response space is correctly structured for the SLE response.
-
-    The response space must be a 4-component direct sum [SLC, Disp, GPC, AVC].
+    Validates that a space is a response space, a `GRDSpace` over a sphere
+    space.
 
     Args:
-        response_space (HilbertSpace): The composite space to validate.
-        point_values (bool): If True, verifies field components support point evaluation.
+        response_space (HilbertSpace): The space to validate.
+        point_values (bool): If True, verifies that the fields support point
+            evaluation, a Sobolev order above 1.
 
     Raises:
-        ValueError: If the space is malformed.
+        ValueError: If the space is not a response space, or its fields do
+            not support point evaluation when asked.
     """
-    if not isinstance(response_space, DirectSum):
-        raise ValueError("Response space must be a DirectSum.")
-
-    if not len(response_space.subspaces) == 4:
-        raise ValueError("Response space must have exactly 4 subspaces.")
-
-    field_space = response_space.subspace(0)
-
+    if not isinstance(response_space, GRDSpace):
+        raise ValueError("The response space must be a GRDSpace.")
+    field_space = response_space.field_space
     if not isinstance(field_space, Sphere):
-        raise ValueError("Subspace 0 must be a Lebesgue or Sobolev space.")
-
-    if not all(subspace == field_space for subspace in response_space.subspaces[1:3]):
-        raise ValueError("Subspaces 1 and 2 must match the field type of subspace 0.")
-
-    rot_space = response_space.subspace(3)
-    if not isinstance(rot_space, EuclideanSpace) or not (rot_space.dim == 3):
-        raise ValueError("Subspace 3 must be a 3D Euclidean space for rotation.")
-
-    if point_values:
-        if not (field_space.order > 1.0):
-            raise ValueError(
-                "Subspace 0 must be a Sobolev space of order > 1 for point evaluation."
-            )
+        raise ValueError("The response fields must be a Lebesgue or Sobolev space.")
+    if point_values and not field_space.order > 1.0:
+        raise ValueError(
+            "The response fields must be a Sobolev space of order > 1 for point "
+            "evaluation."
+        )
 
 
 def l2_products_operator(

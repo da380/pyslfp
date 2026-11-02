@@ -48,6 +48,7 @@ from pyshtools import SHCoeffs, SHGrid
 from pygeoinf import (
     DiagonalMetricSpace,
     EuclideanSpace,
+    GaussianMeasure,
     HilbertSpace,
     LinearOperator,
 )
@@ -594,6 +595,67 @@ class GRDSpace(DiagonalMetricSpace):
     def inclusion(self, name: str, /) -> LinearOperator:
         """The map from one member to the response holding it alone."""
         return self.projection(name).adjoint
+
+    def field_operator(self, name: str, /) -> LinearOperator:
+        """
+        The map from a response to one of its fields as a vector of the field
+        space: "sea_level_change", "potential_change", or "displacement" for
+        the vertical displacement U.
+
+        The field space and a scalar member share their metric, so the map is
+        an isometry onto the field and its adjoint reads the field's
+        components back.
+        """
+        if name not in (SEA_LEVEL_CHANGE, POTENTIAL_CHANGE, DISPLACEMENT):
+            raise ValueError(
+                f"'{name}' is not a field of the response; the fields are "
+                f"{SEA_LEVEL_CHANGE}, {POTENTIAL_CHANGE} and {DISPLACEMENT}"
+            )
+        field_space = self._field_space
+        s = self._slices[name]
+        start = s.start
+        stop = start + field_space.dim
+
+        def mapping(x: GRDResponse):
+            return field_space.from_components(self.to_components(x)[start:stop])
+
+        def adjoint(y):
+            c = np.zeros(self.dim)
+            c[start:stop] = field_space.to_components(y)
+            return self.from_components(c)
+
+        return LinearOperator.from_callables(
+            self, field_space, mapping, adjoint=adjoint
+        )
+
+    def heat_measure(
+        self, length_scale: float, /, *, angular_velocity_std: float = 1.0
+    ):
+        """
+        A smooth Gaussian measure on the space, for tests and examples: the
+        components of degree l have standard deviation
+        exp(-l(l + 1) (length_scale / radius)^2 / 2), floored at about 1e-100
+        to stay positive, those of V divided by
+        sqrt(l(l + 1)) so that grad_1 V is as large as U, and the angular
+        velocity components `angular_velocity_std`.
+        """
+        radius = self._field_space.radius
+        degrees = self._field_space.degrees
+
+        def decay(ell):
+            # floored well above underflow, so every deviation stays positive
+            exponent = -0.5 * ell * (ell + 1.0) * (length_scale / radius) ** 2
+            return np.exp(np.maximum(exponent, -230.0))
+
+        parts = [decay(degrees)]
+        parts.append(decay(degrees))
+        if self.has_horizontal:
+            ell = self._displacement_space.horizontal_degrees
+            parts.append(decay(ell) / np.sqrt(ell * (ell + 1.0)))
+        parts.append(decay(degrees))
+        if self._rotation:
+            parts.append(np.full(3, angular_velocity_std))
+        return GaussianMeasure.from_standard_deviations(self, np.concatenate(parts))
 
 
 # ================================================================ #

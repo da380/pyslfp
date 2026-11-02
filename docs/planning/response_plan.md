@@ -69,8 +69,12 @@ exact adjoint, m > 0 coefficients counting twice for a real field.
 
 ## Work packages
 
-Packages 1 and 2 are built: the solver's coefficient engine with V
-(`SeaLevelEquation._solve_generalised`), and `pyslfp.core.response`.
+Packages 1 to 4 are built: the solver's coefficient engine with V
+(`SeaLevelEquation._solve_generalised`, and `solve_response` returning a
+`GRDResponse`), `pyslfp.core.response`, the fingerprint operator onto a
+`GRDSpace` with the horizontal part on request, and its consumers (sea surface
+height, GRACE, tide gauges, the altimetry models), which reach the fields by
+name through `GRDSpace.field_operator`.
 
 1. **The solver.** Horizontal displacement as a coefficient output of the
    elastic sea level solvers (linear and non-linear), with a test against

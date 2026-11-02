@@ -320,7 +320,7 @@ def build_measures(
 
 def build_total_load_operator(state, response_space, load_space, finger_print_operator):
     """Builds the operator linking direct load to total physical load (including SLE)."""
-    sea_level_projection = response_space.projection(0)
+    sea_level_projection = response_space.field_operator("sea_level_change")
     sea_level_to_load = sea_level_change_to_load_operator(
         state, sea_level_projection.codomain, load_space
     )

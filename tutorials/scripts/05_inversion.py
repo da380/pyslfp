@@ -185,8 +185,8 @@ contribution = ice_space.l2_products_operator(masks) * (
 response_space = fingerprint.codomain
 total = (
     (
-        ocean_average_operator(state, response_space.subspace(0))
-        @ response_space.projection(0)
+        ocean_average_operator(state, response_space.field_space)
+        @ response_space.field_operator("sea_level_change")
         @ fingerprint
     )
     * params.ice_density

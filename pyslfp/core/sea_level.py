@@ -47,6 +47,7 @@ from pyshtools import SHCoeffs, SHGrid
 from .anderson import AndersonMixer
 from .model import EarthModel
 from .state import EarthState
+from .response import GRDResponse, GRDSpace
 
 
 class _Solution(NamedTuple):
@@ -709,6 +710,67 @@ class SeaLevelEquation:
             potential_lm=potential_lm,
             horizontal_lm=horizontal_lm,
             angular_velocity_change=angular_velocity_change,
+        )
+
+    def solve_response(
+        self,
+        state: EarthState,
+        direct_load: SHGrid,
+        space: GRDSpace,
+        /,
+        *,
+        rotational_feedbacks: bool = True,
+        rtol: float = 1e-9,
+        max_iterations: Optional[int] = None,
+        verbose: bool = False,
+    ) -> GRDResponse:
+        """
+        Solves the linear sea level equation for a surface mass load, and
+        returns the response as a vector of `space`, its fields held as
+        coefficients: the horizontal displacement when the space holds it,
+        and the angular velocity change when it holds that.
+
+        Args:
+            state (EarthState): The unperturbed background Earth state.
+            direct_load (SHGrid): The surface mass load.
+            space (GRDSpace): The response space, over this model's grid and
+                radius; it holds the angular velocity change exactly when
+                there is rotational feedback.
+            rotational_feedbacks (bool | str): True for the full feedback,
+                "axial" for the axial component alone, False for none.
+            rtol, max_iterations, verbose: As for `solve_sea_level_equation`.
+
+        Raises:
+            ValueError: If the space does not match the model or the feedback.
+        """
+        field_space = space.field_space
+        b = self._model.parameters.mean_sea_floor_radius
+        if field_space.lmax != self._model.lmax or not np.isclose(
+            field_space.radius, b, rtol=1e-12, atol=0.0
+        ):
+            raise ValueError("the response space is not over this model's sphere")
+        if space.has_rotation != (rotational_feedbacks is not False):
+            raise ValueError(
+                "the response space holds the angular velocity change exactly "
+                "when there is rotational feedback"
+            )
+        solution = self._solve_generalised(
+            state,
+            direct_load=direct_load,
+            rotational_feedbacks=rotational_feedbacks,
+            horizontal=space.has_horizontal,
+            rtol=rtol,
+            max_iterations=max_iterations,
+            verbose=verbose,
+        )
+        return space.from_coefficients(
+            solution.sea_level_lm,
+            solution.displacement_lm,
+            solution.potential_lm,
+            horizontal=solution.horizontal_lm,
+            angular_velocity_change=(
+                solution.angular_velocity_change if space.has_rotation else None
+            ),
         )
 
     def adjoint_generalised_solve(

@@ -7,6 +7,7 @@ import numpy as np
 import pygeoinf as inf
 from pygeoinf.testing import check_operator
 
+from pyslfp.core.response import POTENTIAL_CHANGE
 from pyslfp.core import EarthState
 from pyslfp.linear_operators.physics import (
     FingerPrintOperator,
@@ -202,13 +203,13 @@ def test_grace_coefficients_are_unit_sphere_coefficients(fingerprint_operator):
     would show at the 5e-4 level.
     """
     response_space = fingerprint_operator.codomain
-    field_space = response_space.subspace(2)
+    field_space = response_space.field_space
     model = fingerprint_operator.model
 
     A = grace_observation_operator(response_space, 6, min_obs_degree=2)
 
     gpc = field_space.random(rng=np.random.default_rng(2))
-    response = (field_space.zero(), field_space.zero(), gpc, np.zeros(3))
+    response = response_space.field_operator(POTENTIAL_CHANGE).adjoint(gpc)
     coefficients = A(response)
 
     expected_lm = model.expand_field(gpc).coeffs
@@ -336,7 +337,7 @@ def test_stokes_coefficients_match_pyshtools(fingerprint_operator):
     """
     model = fingerprint_operator.model
     response_space = fingerprint_operator.codomain
-    field_space = response_space.subspace(2)
+    field_space = response_space.field_space
     scales = model.parameters.scales
     max_degree = 10
 
@@ -367,7 +368,7 @@ def test_stokes_coefficients_match_pyshtools(fingerprint_operator):
     A = stokes_coefficient_operator(model, max_degree) @ grace_observation_operator(
         response_space, max_degree
     )
-    response = (field_space.zero(), field_space.zero(), phi, np.zeros(3))
+    response = response_space.field_operator(POTENTIAL_CHANGE).adjoint(phi)
     recovered = A(response)
 
     expected = np.array(

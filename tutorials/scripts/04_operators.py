@@ -34,9 +34,11 @@ LMAX = 128
 # ## The fingerprint operator
 #
 # The operator carries its domain, the space of loads, and its codomain,
-# a direct sum of three fields and a three-vector: sea level change,
-# vertical displacement, potential change and angular velocity change.
-# Applying it solves the sea level equation.
+# the response space. A response holds the sea level change, the surface
+# displacement, the gravitational potential change and the angular
+# velocity change, each by name; the fields are held as spherical harmonic
+# coefficients, all of them band-limited, and `field` gives one as a grid.
+# Applying the operator solves the sea level equation.
 
 # %%
 fingerprint = FingerPrintOperator.from_defaults(lmax=LMAX)
@@ -45,7 +47,7 @@ params = state.model.parameters
 metre = params.length_scale
 
 response_space = fingerprint.codomain
-field_space = response_space.subspace(0)
+field_space = response_space.field_space
 print(
     "domain dimension",
     fingerprint.domain.dim,
@@ -54,7 +56,9 @@ print(
 )
 
 load = state.west_antarctic_load(fraction=0.1)
-sea_level_change, displacement, potential_change, angular_velocity = fingerprint(load)
+response = fingerprint(load)
+print("members of the response:", response_space.names)
+sea_level_change = response.field("sea_level_change")
 
 fig, ax = sl.create_map_figure(figsize=(10, 5))
 sl.plot(
@@ -68,12 +72,12 @@ sl.plot(
 # %% [markdown]
 # ## Composition
 #
-# A projection picks the sea level out of the response, an ocean average
+# `field_operator` picks the sea level out of the response, an ocean average
 # turns it into the global mean, and removing that average leaves the
 # departure from it. Each is an operator, and `@` composes them.
 
 # %%
-sea_level = response_space.projection(0)
+sea_level = response_space.field_operator("sea_level_change")
 mean_sea_level = ocean_average_operator(state, field_space) @ sea_level @ fingerprint
 print(f"global mean sea level change: {mean_sea_level(load)[0] * metre * 1000:.1f} mm")
 
@@ -170,7 +174,7 @@ sl.plot(
 # %% [markdown]
 # ## Polar wander and the length of day
 #
-# The fourth component of the response is the change in angular velocity.
+# The angular velocity change is the response's last member.
 # Its two components orthogonal to the rotation axis give the shift of the
 # pole, and their kernels are spherical harmonics of degree two and order
 # one. The component along the axis gives the change in the length of day,
@@ -178,7 +182,7 @@ sl.plot(
 # poles towards the equator slows the Earth.
 
 # %%
-rotation = response_space.projection(3) @ fingerprint
+rotation = response_space.projection("angular_velocity_change") @ fingerprint
 omega = rotation(load)
 pole_factor = params.mean_sea_floor_radius / params.rotation_frequency
 shift = omega[:2] * pole_factor * metre
@@ -212,6 +216,33 @@ sl.plot(
     symmetric=True,
     colorbar_kwargs={"label": "Length of day change (ms per 1000 Gt)"},
 )
+
+# %% [markdown]
+# ## Horizontal displacement
+#
+# A load moves the surface sideways as well as up and down. The
+# displacement is one field, u = U r + grad V, where V is the potential
+# of the horizontal part; a surface load drives no rotation of the
+# surface about the vertical, so V is all the horizontal part there is.
+# Built with `horizontal=True`, the operator's response holds V as well,
+# and the displacement gives east, north and up at points and the
+# horizontal part on the grid.
+
+# %%
+horizontal_fingerprint = FingerPrintOperator.from_defaults(lmax=LMAX, horizontal=True)
+displacement = horizontal_fingerprint(load).displacement
+sites = [(-75.0, 250.0), (-80.0, 200.0), (-70.0, 290.0)]
+for (lat, lon), (east, north, up) in zip(sites, displacement.at(sites) * metre * 1000):
+    print(
+        f"{lat:6.1f}N {lon:6.1f}E: east {east:7.2f} mm, north {north:7.2f} mm, "
+        f"up {up:7.2f} mm"
+    )
+
+east, north = displacement.horizontal_fields()
+magnitude = east.copy()
+magnitude.data = np.hypot(east.data, north.data) * metre * 1000
+fig, ax = sl.create_map_figure(figsize=(10, 5))
+sl.plot(magnitude, ax=ax, colorbar_kwargs={"label": "Horizontal displacement (mm)"})
 
 # %% [markdown]
 # ## Sobolev spaces and point observations

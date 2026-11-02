@@ -30,6 +30,7 @@ from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 from planetmodel import units
 
 from pyslfp.core import EarthModel
+from pyslfp.core.response import POTENTIAL_CHANGE
 from pyslfp.linear_operators.utils import check_response_space, check_load_space
 from pyslfp.linear_operators.physics import FingerPrintOperator
 
@@ -169,8 +170,8 @@ def grace_observation_operator(
     the convention is set out at the head of this module.
 
     Args:
-        response_space: The 4-component composite response space.
-       max_obs_degree: The maximum spherical harmonic degree of the observations.
+        response_space: The response space.
+        max_obs_degree: The maximum spherical harmonic degree of the observations.
         min_obs_degree: The minimum degree (usually 2, dropping degrees 0 and 1).
 
     Returns:
@@ -178,11 +179,10 @@ def grace_observation_operator(
         EuclideanSpace.
     """
     check_response_space(response_space, point_values=False)
-    gpc_space = response_space.subspace(2)
     spatial_to_coeffs = _unit_sphere_coefficient_operator(
-        gpc_space, max_obs_degree, min_obs_degree
+        response_space.field_space, max_obs_degree, min_obs_degree
     )
-    return spatial_to_coeffs @ response_space.projection(2)
+    return spatial_to_coeffs @ response_space.field_operator(POTENTIAL_CHANGE)
 
 
 class GraceObservationModel:

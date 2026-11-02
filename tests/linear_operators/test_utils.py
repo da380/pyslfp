@@ -20,6 +20,7 @@ from pyslfp.linear_operators.physics import (
     lebesgue_load_space,
     sobolev_load_space,
     lebesgue_response_space,
+    sobolev_response_space,
 )
 
 
@@ -98,35 +99,20 @@ def test_check_load_space(testing_state):
 
 
 def test_check_response_space(testing_state):
-    """Tests the strict structural validation of the 4-component SLE response space."""
+    """A response space is a GRDSpace over a sphere space, of Sobolev order
+    above 1 when its fields are evaluated at points."""
     model = testing_state.model
     b = model.parameters.mean_sea_floor_radius
 
-    valid_response = lebesgue_response_space(model)
-
-    # Valid
-    check_response_space(valid_response)
-
-    # Invalid: Not a direct sum
-    with pytest.raises(ValueError, match="must be a DirectSum"):
+    check_response_space(lebesgue_response_space(model))
+    check_response_space(
+        sobolev_response_space(model, 2.0, 0.1 * b, horizontal=True),
+        point_values=True,
+    )
+    with pytest.raises(ValueError, match="must be a GRDSpace"):
         check_response_space(lebesgue_load_space(model))
-
-    # Invalid: Wrong number of components
-    leb = lebesgue_load_space(model)
-    wrong_length = inf.DirectSum([leb, leb, leb])
-    with pytest.raises(ValueError, match="exactly 4 subspaces"):
-        check_response_space(wrong_length)
-
-    # Invalid: Subspaces 1 and 2 don't match 0
-    sob = sobolev_load_space(model, 1.0, 0.1 * b)
-    mismatched = inf.DirectSum([leb, sob, leb, inf.EuclideanSpace(3)])
-    with pytest.raises(ValueError, match="Subspaces 1 and 2 must match"):
-        check_response_space(mismatched)
-
-    # Invalid: Rotation space is wrong (the transverse pair without the axial component)
-    bad_rot = inf.DirectSum([leb, leb, leb, inf.EuclideanSpace(2)])
-    with pytest.raises(ValueError, match="3D Euclidean space for rotation"):
-        check_response_space(bad_rot)
+    with pytest.raises(ValueError, match="order > 1"):
+        check_response_space(lebesgue_response_space(model), point_values=True)
 
 
 # ==================================================================== #

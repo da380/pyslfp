@@ -26,6 +26,12 @@ from pygeoinf import (
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
 from pyslfp.core import EarthState
+from pyslfp.core.response import (
+    ANGULAR_VELOCITY_CHANGE,
+    DISPLACEMENT,
+    SEA_LEVEL_CHANGE,
+    GRDSpace,
+)
 from pyslfp.linear_operators.utils import check_response_space
 from pyslfp.linear_operators.physics import (
     FingerPrintOperator,
@@ -122,32 +128,34 @@ def ice_altimetry_points(
 
 def sea_surface_height_operator(
     state: EarthState,
-    response_space: DirectSum,
+    response_space: GRDSpace,
     /,
     *,
     remove_rotational_contribution: bool = True,
 ) -> LinearOperator:
     """
-    Returns an operator mapping the SLE response space to Sea Surface Height (SSH).
+    Returns an operator mapping the response to the sea surface height change,
+    a field of the response's field space.
 
-    Mathematically, SSH = Sea Level Change + Vertical Displacement.
-    If rotational feedbacks are removed, it also adds (Centrifugal Potential / g).
+    The sea surface height change is the sea level change plus the vertical
+    displacement. With the rotational contribution removed, the centrifugal
+    potential over g is added, which needs the response to hold the angular
+    velocity change.
 
     Args:
         state: The EarthState providing the physical parameters.
-        response_space: The 4-component composite response space.
+        response_space: The response space.
         remove_rotational_contribution: If True, adds the centrifugal potential
             correction to the SSH calculation.
     """
     check_response_space(response_space)
 
-    field_space = response_space.subspace(0)
-    avc_space = response_space.subspace(3)
+    field_space = response_space.field_space
+    ssh = response_space.field_operator(
+        SEA_LEVEL_CHANGE
+    ) + response_space.field_operator(DISPLACEMENT)
 
-    id_op = LinearOperator.identity(field_space)
-    zero_gpc_op = LinearOperator.zero(field_space)
-
-    if remove_rotational_contribution:
+    if remove_rotational_contribution and response_space.has_rotation:
         # Match Sobolev parameters if the response space is regularized
         sobolev_params = (
             (field_space.order, field_space.length_scale)
@@ -160,13 +168,11 @@ def sea_surface_height_operator(
         )
         g = state.model.parameters.gravitational_acceleration
 
-        # Scale the centrifugal potential by 1/g to get the height contribution
-        avc_op = cpc_op * (1.0 / g)
-    else:
-        avc_op = LinearOperator.zero(avc_space, codomain=field_space)
-
-    # SSH = [1.0 * SLC] + [1.0 * Disp] + [0.0 * GPC] + [(CPC / g) * AVC]
-    return RowLinearOperator([id_op, id_op, zero_gpc_op, avc_op])
+        # The centrifugal potential over g is its height contribution.
+        ssh = ssh + (1.0 / g) * cpc_op @ response_space.projection(
+            ANGULAR_VELOCITY_CHANGE
+        )
+    return ssh
 
 
 def altimetry_point_operator(

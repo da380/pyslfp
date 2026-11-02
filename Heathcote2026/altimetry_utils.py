@@ -136,9 +136,9 @@ def build_physics_components(
     continuous_ssh_operator = op3 @ op2_ssh @ op1
 
     # --- B. Resolve the True Sea Level Components (For GMSLR Integration) ---
-    # Sea Level Change is strictly subspace 0 of the SLE response!
     barystatic_sl_op = (
-        finger_print_operator.codomain.projection(0) @ finger_print_operator
+        finger_print_operator.codomain.field_operator("sea_level_change")
+        @ finger_print_operator
     )
 
     op2_sl = inf.BlockDiagonalLinearOperator(
@@ -600,7 +600,8 @@ def regional_decomposition_operators(state, load_space, finger_print_operator, r
     op_sslc = avg_op @ steric_op_field
 
     barystatic_sl_op = (
-        finger_print_operator.codomain.projection(0) @ finger_print_operator
+        finger_print_operator.codomain.field_operator("sea_level_change")
+        @ finger_print_operator
     )
 
     dyn_to_load = sea_level_change_to_load_operator(state, load_space, load_space)

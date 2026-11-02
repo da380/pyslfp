@@ -13,7 +13,7 @@ from typing import Optional, Tuple
 import numpy as np
 from pyshtools import SHCoeffs, SHGrid
 
-from ..core import EarthState, SeaLevelEquation
+from ..core import EarthState, GRDResponse, GRDSpace, SeaLevelEquation
 
 __all__ = ["LinearSeaLevelEquation"]
 
@@ -98,6 +98,32 @@ class LinearSeaLevelEquation:
         return self._sle.solve_sea_level_equation(
             self.state,
             direct_load,
+            rotational_feedbacks=rotational_feedbacks,
+            rtol=rtol,
+            max_iterations=max_iterations,
+            verbose=verbose,
+        )
+
+    def solve_response(
+        self,
+        direct_load: SHGrid,
+        space: GRDSpace,
+        /,
+        *,
+        rotational_feedbacks: bool = True,
+        rtol: float = 1e-9,
+        max_iterations: Optional[int] = None,
+        verbose: bool = False,
+    ) -> GRDResponse:
+        """
+        Solves the linear sea level equation for a surface mass load, the
+        response returned as a vector of `space`; see
+        `SeaLevelEquation.solve_response`.
+        """
+        return self._sle.solve_response(
+            self._state,
+            direct_load,
+            space,
             rotational_feedbacks=rotational_feedbacks,
             rtol=rtol,
             max_iterations=max_iterations,

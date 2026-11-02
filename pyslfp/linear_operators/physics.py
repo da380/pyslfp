@@ -9,14 +9,13 @@ inversion consumes.
 
 from __future__ import annotations
 
-from typing import Union, Optional, Tuple
+from typing import Optional, Tuple
 import numpy as np
-from pyshtools import SHGrid
+from pyshtools import SHCoeffs, SHGrid
 
 from pygeoinf import (
     HilbertSpace,
     LinearOperator,
-    DirectSum,
     EuclideanSpace,
     GaussianMeasure,
 )
@@ -25,6 +24,11 @@ from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 from pyslfp.core import EarthModelParameters, EarthModel
 from pyslfp.elastic import LinearSeaLevelEquation
 from pyslfp.core import EarthState
+from pyslfp.core.response import (
+    ANGULAR_VELOCITY_CHANGE,
+    GRDResponse,
+    GRDSpace,
+)
 
 from pyslfp.linear_operators.utils import underlying_space
 
@@ -32,7 +36,17 @@ from pyslfp.linear_operators.utils import underlying_space
 class FingerPrintOperator(LinearOperator):
     """
     A pygeoinf LinearOperator associated with the solution of the linearised elastic
-    sea level equation.
+    sea level equation: from a surface mass load to the response, a
+    `GRDResponse` of a `GRDSpace`.
+
+    The response holds the sea level change, the displacement -- its
+    horizontal part on request -- the gravitational potential change and,
+    with rotational feedback, the angular velocity change. The adjoint is one
+    adjoint solve whatever the response holds: a dual s on the coefficients of
+    the horizontal potential V pairs with the total load through d = l s, the
+    tangential Love numbers, and the total load is the direct load plus
+    rho_w C xi, so it enters as a further sea level dual rho_w C d, a direct
+    term d, and through the centrifugal potential an angular velocity dual.
     """
 
     def __init__(
@@ -43,6 +57,7 @@ class FingerPrintOperator(LinearOperator):
         load_parameters: Tuple[float, float] = None,
         response_parameters: Tuple[float, float] = None,
         rotational_feedbacks: bool = True,
+        horizontal: bool = False,
         rtol: float = 1e-9,
         max_iterations: Optional[int] = None,
         verbose: bool = False,
@@ -56,7 +71,11 @@ class FingerPrintOperator(LinearOperator):
             response_parameters: A tuple of the Sobolev order and scale for the
                 response fields. If not provided, defaults to a Lebesgue space.
             rotational_feedbacks (bool | str): True for the full feedback,
-                "axial" for the axial component alone, False for none.
+                "axial" for the axial component alone, False for none. The
+                response holds the angular velocity change unless it is
+                False.
+            horizontal (bool): Whether the response's displacement holds its
+                horizontal part.
             rtol (float): The relative tolerance for convergence.
             max_iterations (Optional[int]): Hard limit on iteration count.
             verbose (bool): If True, prints iteration metrics.
@@ -100,10 +119,19 @@ class FingerPrintOperator(LinearOperator):
             else lebesgue_load_space(state.model)
         )
 
+        rotation = rotational_feedbacks is not False
         codomain = (
-            sobolev_response_space(state.model, response_order, response_scale)
+            sobolev_response_space(
+                state.model,
+                response_order,
+                response_scale,
+                horizontal=horizontal,
+                rotation=rotation,
+            )
             if sobolev_response
-            else lebesgue_response_space(state.model)
+            else lebesgue_response_space(
+                state.model, horizontal=horizontal, rotation=rotation
+            )
         )
 
         self._sle = LinearSeaLevelEquation(state)
@@ -117,7 +145,11 @@ class FingerPrintOperator(LinearOperator):
         self._b = self.parameters.mean_sea_floor_radius
 
         l2_domain = underlying_space(domain)
-        l2_codomain = underlying_space(codomain)
+        self._l2_field_space = underlying_space(codomain.field_space)
+        l2_codomain = GRDSpace(
+            self._l2_field_space, horizontal=horizontal, rotation=rotation
+        )
+        self._l2_codomain = l2_codomain
 
         self._cpc_op = centrifugal_potential_operator(state.model)
 
@@ -142,6 +174,7 @@ class FingerPrintOperator(LinearOperator):
         load_parameters: Optional[Tuple[float, float]] = None,
         response_parameters: Optional[Tuple[float, float]] = None,
         rotational_feedbacks: bool = True,
+        horizontal: bool = False,
         rtol: float = 1e-9,
         max_iterations: Optional[int] = None,
         verbose: bool = False,
@@ -161,6 +194,7 @@ class FingerPrintOperator(LinearOperator):
             response_parameters: Tuple of (Sobolev order, relative length scale).
             rotational_feedbacks: True for the full feedback, "axial" for
                 the axial component alone, False for none.
+            horizontal: Whether the response holds the horizontal displacement.
             rtol: The relative tolerance for convergence.
             max_iterations: Hard limit on iteration count.
             verbose: If True, prints iteration metrics.
@@ -184,6 +218,7 @@ class FingerPrintOperator(LinearOperator):
             load_parameters=abs_load,
             response_parameters=abs_resp,
             rotational_feedbacks=rotational_feedbacks,
+            horizontal=horizontal,
             rtol=rtol,
             max_iterations=max_iterations,
             verbose=verbose,
@@ -197,6 +232,7 @@ class FingerPrintOperator(LinearOperator):
         load_parameters: Optional[Tuple[float, float]] = None,
         response_parameters: Optional[Tuple[float, float]] = None,
         rotational_feedbacks: bool = True,
+        horizontal: bool = False,
         rtol: float = 1e-9,
         max_iterations: Optional[int] = None,
         verbose: bool = False,
@@ -216,6 +252,7 @@ class FingerPrintOperator(LinearOperator):
             response_parameters: Tuple of (Sobolev order, relative length scale).
             rotational_feedbacks: True for the full feedback, "axial" for
                 the axial component alone, False for none.
+            horizontal: Whether the response holds the horizontal displacement.
             rtol: The relative tolerance for convergence.
             max_iterations: Hard limit on iteration count.
             verbose: If True, prints iteration metrics.
@@ -239,6 +276,7 @@ class FingerPrintOperator(LinearOperator):
             load_parameters=abs_load,
             response_parameters=abs_resp,
             rotational_feedbacks=rotational_feedbacks,
+            horizontal=horizontal,
             rtol=rtol,
             max_iterations=max_iterations,
             verbose=verbose,
@@ -268,16 +306,16 @@ class FingerPrintOperator(LinearOperator):
     @property
     def field_space(self) -> HilbertSpace:
         """
-        Returns the space for the response fields.
+        Returns the sphere space of the response fields.
         """
-        return self.codomain.subspace(0)
+        return self.codomain.field_space
 
     @property
     def avc_space(self) -> HilbertSpace:
         """
-        Retutns the space for the angular velocity changes
+        Returns the space of the angular velocity change, EuclideanSpace(3).
         """
-        return self.codomain.subspace(3)
+        return self.codomain.member_space(ANGULAR_VELOCITY_CHANGE)
 
     # ================================================================ #
     #                Measures for convenience in testing               #
@@ -293,54 +331,58 @@ class FingerPrintOperator(LinearOperator):
         """
         Returns a measure on the response space that is suitable for testing purposes.
         """
-        field_measure = self.codomain.subspace(0).heat_measure(
-            0.5 * self.parameters.mean_sea_floor_radius
-        )
-
         amc_std = (
             self.parameters.rotation_frequency
             * self.parameters.mean_sea_floor_radius**4
         )
-
-        amc_measure = GaussianMeasure.from_standard_deviation(
-            self.codomain.subspace(3), amc_std
-        )
-
-        return GaussianMeasure.from_product(
-            [field_measure, field_measure, field_measure, amc_measure],
-            domain=self.codomain,
+        return self.codomain.heat_measure(
+            0.5 * self.parameters.mean_sea_floor_radius,
+            angular_velocity_std=amc_std,
         )
 
     # ================================================================= #
     #                          Private methods                          #
     # ================================================================= #
 
-    def _value(self, zeta: SHGrid) -> Tuple[Union[SHGrid, np.ndarray], ...]:
+    def _value(self, zeta: SHGrid) -> GRDResponse:
         return self._operator(zeta)
 
-    def _adjoint_value(self, response: Tuple[Union[SHGrid, np.ndarray], ...]) -> SHGrid:
+    def _adjoint_value(self, response: GRDResponse) -> SHGrid:
         return self._operator.adjoint(response)
 
-    def _l2_mapping_impl(self, zeta: SHGrid) -> Tuple[Union[SHGrid, np.ndarray], ...]:
-        slc, disp, gpc, avc = self._sle.solve_sea_level_equation(
+    def _l2_mapping_impl(self, zeta: SHGrid) -> GRDResponse:
+        return self._sle.solve_response(
             zeta,
+            self._l2_codomain,
             rotational_feedbacks=self._rotational_feedbacks,
             rtol=self._rtol,
             max_iterations=self._max_iterations,
             verbose=self._verbose,
         )
 
-        return (slc, disp, gpc, avc)
+    def _l2_adjoint_mapping_impl(self, response: GRDResponse) -> SHGrid:
+        field = self._l2_field_space
+        sea_level_dual = field.from_components(response.sea_level_change)
+        displacement_dual = field.from_components(response.displacement.vertical)
+        potential_dual = field.from_components(response.potential_change)
+        angular_velocity_dual = (
+            response.angular_velocity_change if self._rotational_feedbacks else None
+        )
 
-    def _l2_adjoint_mapping_impl(
-        self, response: Tuple[Union[SHGrid, np.ndarray], ...]
-    ) -> SHGrid:
-        adjoint_direct_load = response[0]
-        adjoint_displacement_load = -1 * response[1]
-        adjoint_grav_pot_load = -self._g * response[2]
+        direct_term = None
+        if self._l2_codomain.has_horizontal:
+            sea_level_dual, angular_velocity_dual, direct_term = self._horizontal_dual(
+                response, sea_level_dual, angular_velocity_dual
+            )
+
+        adjoint_direct_load = sea_level_dual
+        adjoint_displacement_load = -1 * displacement_dual
+        adjoint_grav_pot_load = -self._g * potential_dual
 
         if self._rotational_feedbacks:
-            adjoint_avc = -self._g * (response[3] - self._cpc_op.adjoint(response[2]))
+            adjoint_avc = -self._g * (
+                angular_velocity_dual - self._cpc_op.adjoint(potential_dual)
+            )
         else:
             adjoint_avc = None
 
@@ -354,7 +396,52 @@ class FingerPrintOperator(LinearOperator):
             max_iterations=self._max_iterations,
             verbose=self._verbose,
         )
+        if direct_term is not None:
+            adjoint_sea_level = adjoint_sea_level + direct_term
         return adjoint_sea_level
+
+    def _horizontal_dual(self, response, sea_level_dual, angular_velocity_dual):
+        """The horizontal displacement's dual carried onto the others.
+
+        In the L2 response metric the V components c pair as
+        sum l(l + 1) c c', which is sum_lm s_lm V_lm with
+        s_lm = b l(l + 1) c' on the coefficients. With d = l s, the tangential
+        Love numbers, that is (1 / b^2) [int zeta d + <rho_w C d, xi>], plus,
+        with rotational feedback, the pairing of the centrifugal potential
+        with e = l^t s at degree 2. Returns the sea level and angular velocity
+        duals with these added, and the direct term d / b^2.
+        """
+        model = self.model
+        b = self._b
+        b2 = b**2
+        field = self._l2_field_space
+        ell = field.degrees[field.degrees >= 1]
+        orders = field.orders[field.degrees >= 1]
+        s_lm = np.zeros((2, model.lmax + 1, model.lmax + 1))
+        s_lm[(orders < 0).astype(int), ell, np.abs(orders)] = (
+            b * ell * (ell + 1.0) * response.displacement.horizontal
+        )
+        love = model.love_numbers
+
+        def synthesise(coefficients):
+            return model.expand_coefficient(
+                SHCoeffs.from_array(
+                    coefficients,
+                    normalization=model.normalization,
+                    csphase=model.csphase,
+                )
+            )
+
+        d = synthesise(love.l[None, :, None] * s_lm)
+        rho_w = self.parameters.water_density
+        sea_level_dual = sea_level_dual + (rho_w / b2) * self.state.ocean_function * d
+        if self._rotational_feedbacks:
+            e_lm = np.zeros_like(s_lm)
+            e_lm[:, 2, :2] = love.l_t[2] * s_lm[:, 2, :2]
+            angular_velocity_dual = (
+                angular_velocity_dual + self._cpc_op.adjoint(synthesise(e_lm)) / b2
+            )
+        return sea_level_dual, angular_velocity_dual, d * (1.0 / b2)
 
 
 # ==================================================================== #
@@ -381,19 +468,20 @@ def lebesgue_load_space(earth_model: EarthModel, /) -> Lebesgue:
     )
 
 
-def lebesgue_response_space(earth_model: EarthModel, /) -> DirectSum:
+def lebesgue_response_space(
+    earth_model: EarthModel, /, *, horizontal: bool = False, rotation: bool = True
+) -> GRDSpace:
     """
-    Defines the composite L2 response space for the physical fields.
+    The L2 response space: a `GRDSpace` over the Lebesgue field space.
 
     Args:
         earth_model: The EarthModel relative to which the space is defined.
-
-    Returns:
-        DirectSum: A composite space comprising SLC, Displacement,
-            Gravitational Potential, and a 3D Euclidean space for Angular Velocity.
+        horizontal: Whether the displacement holds its horizontal part.
+        rotation: Whether the angular velocity change is held.
     """
-    field_space = lebesgue_load_space(earth_model)
-    return DirectSum([field_space, field_space, field_space, EuclideanSpace(3)])
+    return GRDSpace(
+        lebesgue_load_space(earth_model), horizontal=horizontal, rotation=rotation
+    )
 
 
 def sobolev_load_space(
@@ -422,24 +510,31 @@ def sobolev_load_space(
 
 
 def sobolev_response_space(
-    earth_model: EarthModel, order: float, scale: float, /
-) -> DirectSum:
+    earth_model: EarthModel,
+    order: float,
+    scale: float,
+    /,
+    *,
+    horizontal: bool = False,
+    rotation: bool = True,
+) -> GRDSpace:
     """
-    Defines the response space corresponding to a Sobolev load space.
-
-    Due to elliptic regularity, the response fields are one order smoother
-    than the applied load (order + 1).
+    A Sobolev response space: a `GRDSpace` over the Sobolev field space of
+    the given order and scale. The sea level equation gains one order, so the
+    response's order is at most the load's plus one.
 
     Args:
         earth_model: The EarthModel relative to which the space is defined.
-        order (float): The Sobolev order of the load space.
+        order (float): The Sobolev order of the response fields.
         scale (float): The characteristic length scale.
-
-    Returns:
-        DirectSum: The composite Sobolev response space.
+        horizontal: Whether the displacement holds its horizontal part.
+        rotation: Whether the angular velocity change is held.
     """
-    field_space = sobolev_load_space(earth_model, order, scale)
-    return DirectSum([field_space, field_space, field_space, EuclideanSpace(3)])
+    return GRDSpace(
+        sobolev_load_space(earth_model, order, scale),
+        horizontal=horizontal,
+        rotation=rotation,
+    )
 
 
 # ================================================================ #

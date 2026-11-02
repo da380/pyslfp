@@ -106,7 +106,10 @@ fixed, the usual assumption for present-day and near-future problems. The
 engine beneath it, :class:`~pyslfp.core.sea_level.SeaLevelEquation`, also solves
 the nonlinear equation with migrating shorelines, and the generalised equation
 that adjoint calculations need. The same physics is exposed as a ``pygeoinf``
-operator by :class:`~pyslfp.linear_operators.physics.FingerPrintOperator`.
+operator by :class:`~pyslfp.linear_operators.physics.FingerPrintOperator`, from a
+load to a :class:`~pyslfp.core.response.GRDResponse`: the sea level change, the
+surface displacement (its horizontal part on request), the gravitational
+potential change and the angular velocity change, held spectrally and named.
 
 
 A glacial isostatic adjustment run

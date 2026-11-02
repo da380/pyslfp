@@ -6,7 +6,7 @@ adjoint of the map from a load to V that the fingerprint adjoint gives.
 
 import numpy as np
 import pytest
-from pyshtools import SHCoeffs, SHGrid
+from pyshtools import SHGrid
 
 from pyslfp.core import EarthState, SeaLevelEquation
 from pyslfp.linear_operators import FingerPrintOperator, centrifugal_potential_operator
@@ -66,44 +66,20 @@ def test_horizontal_potential_follows_the_tangential_love_numbers(setting):
     assert sle._solve_generalised(state, direct_load=load).horizontal_lm is None
 
 
-def test_the_adjoint_of_the_horizontal_potential(setting):
-    """For a dual s on the coefficients of V, with d = l s and e the
-    synthesis of l^t s at degree 2,
-
-        <V(zeta), s> = (1 / b^2) [ int zeta d + <zeta, F*(rho_w C d, 0, 0, P* e)> ],
-
-    with F the fingerprint operator and P the centrifugal potential operator,
-    the coefficient pairing being the surface integral over b^2."""
-    state, sle, load, rng = setting
-    model = state.model
-    b2 = model.parameters.mean_sea_floor_radius**2
-    rho_w = model.parameters.water_density
-    love = model.love_numbers
-
-    shape = _coefficients(model, load).shape
-    s = rng.standard_normal(shape)
-    s[1, :, 0] = 0.0
-    s[:, np.arange(shape[1])[:, None] < np.arange(shape[2])[None, :]] = 0.0
-    s[:, 0, 0] = 0.0
-
-    forward = sle._solve_generalised(state, direct_load=load, horizontal=True)
-    lhs = np.sum(forward.horizontal_lm * s)
-
-    def field(coeffs):
-        clm = SHCoeffs.from_array(
-            coeffs, normalization=model.normalization, csphase=model.csphase
-        )
-        return model.expand_coefficient(clm)
-
-    d = field(love.l[None, :, None] * s)
-    block = np.zeros(shape)
-    block[:, 2, :2] = love.l_t[2] * s[:, 2, :2]
-    e = field(block)
-    fingerprint = FingerPrintOperator(state, rtol=1e-12)
-    zero = model.zero_grid()
-    rotation = centrifugal_potential_operator(model).adjoint(e)
-    pulled = fingerprint.adjoint(
-        (rho_w * state.ocean_function * d, zero, zero, rotation)
+@pytest.mark.parametrize("rotation", [True, False])
+def test_the_adjoint_of_the_horizontal_potential(setting, rotation):
+    """The fingerprint operator's adjoint for a dual on the horizontal
+    displacement alone, carried by the extra sea level, angular velocity and
+    direct terms, satisfies the adjoint identity."""
+    state, _, load, rng = setting
+    fingerprint = FingerPrintOperator(
+        state, horizontal=True, rotational_feedbacks=rotation, rtol=1e-12
     )
-    rhs = (model.integrate(load * d) + model.integrate(load * pulled)) / b2
+    space = fingerprint.codomain
+    dual = space.zero()
+    dual.displacement.horizontal = rng.standard_normal(
+        dual.displacement.horizontal.size
+    )
+    lhs = space.inner_product(fingerprint(load), dual)
+    rhs = fingerprint.domain.inner_product(load, fingerprint.adjoint(dual))
     assert abs(lhs - rhs) <= 1e-7 * max(abs(lhs), abs(rhs))

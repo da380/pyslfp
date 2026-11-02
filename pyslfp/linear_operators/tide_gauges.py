@@ -13,10 +13,10 @@ from typing import Callable, List, Optional, Tuple
 
 from pygeoinf import (
     LinearOperator,
-    DirectSum,
 )
 
 from pyslfp.data.downloader import ensure_data
+from pyslfp.core.response import SEA_LEVEL_CHANGE, GRDSpace
 from pyslfp.linear_operators.utils import check_response_space
 from pyslfp.linear_operators.physics import FingerPrintOperator
 
@@ -73,16 +73,14 @@ def read_gloss_tide_gauge_data(
 
 
 def tide_gauge_operator(
-    response_space: DirectSum, points: List[Tuple[float, float]], /
+    response_space: GRDSpace, points: List[Tuple[float, float]], /
 ) -> LinearOperator:
     """
-    Maps the response fields to a vector of sea level change values at discrete locations.
-
-    Tide gauges measure relative sea level change, which corresponds to the
-    first component (subspace 0) of the response space.
+    Maps the response to the sea level change at discrete locations: tide
+    gauges measure the relative sea level change.
 
     Args:
-        response_space: The 4-component response space [SLC, Disp, GPC, AVC].
+        response_space: The response space, its fields of Sobolev order above 1.
         points: A list of (latitude, longitude) observation coordinates in degrees.
 
     Returns:
@@ -90,11 +88,11 @@ def tide_gauge_operator(
     """
     check_response_space(response_space, point_values=True)
 
-    point_evaluation_operator = response_space.subspace(0).point_evaluation_operator(
+    point_evaluation_operator = response_space.field_space.point_evaluation_operator(
         points, route="dense"
     )
 
-    return point_evaluation_operator @ response_space.projection(0)
+    return point_evaluation_operator @ response_space.field_operator(SEA_LEVEL_CHANGE)
 
 
 # ================================================================ #

@@ -87,9 +87,11 @@ out.
 
 Horizontal displacement, and the response to a load as one spectral object
 (`GRDResponse`, `SurfaceDisplacement`, `pyslfp.core.response`), are planned in
-[response_plan.md](response_plan.md). The solver computes V and the classes
-and spaces exist; the fingerprint operator, its consumers and the viscoelastic
-side remain, and come before WP3 of the models submodule.
+[response_plan.md](response_plan.md). The elastic side is done: the solver
+computes V, and the fingerprint operator returns a `GRDResponse`, the
+horizontal part on request, with its adjoint. The viscoelastic side (snapshots
+holding a `GRDResponse`, the horizontal memory field, the adjoints) and GNSS
+observation models, with the frame of the data, remain.
 
 ## Continuous-in-time measurements
 

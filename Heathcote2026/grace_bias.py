@@ -221,7 +221,7 @@ def main():
     data_err = wmb.load_measure_to_observation_measure(noise)
     data_space = data_err.domain
 
-    sea_level_proj = response_space.projection(0)
+    sea_level_proj = response_space.field_operator("sea_level_change")
 
     sle_to_load = sea_level_change_to_load_operator(
         state, sea_level_proj.codomain, load_space

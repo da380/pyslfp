@@ -23,7 +23,6 @@ from pyslfp.linear_operators.loads import (
 from pyslfp.linear_operators.physics import lebesgue_load_space, sobolev_load_space
 from pyslfp.linear_operators.spatial import (
     ice_sheet_projection_operator,
-    ocean_average_operator,
 )
 from pyslfp.models import (
     ICE_SURFACE_HEIGHT,
@@ -242,13 +241,20 @@ def test_three_component_space_reproduces_the_hand_built_operators(
     compared in action and adjoint. The scripts' barystatic functional
     leaves the ice unmasked, relying on a masked prior; for global fields
     its weighting carries the support. Their sea surface height takes eta
-    unmasked, as a set-up does."""
+    unmasked, as a set-up does. The scripts take the ocean averages of the
+    mass constraint and of the steric sea level as L2 products with C / A_O,
+    which pair the truncations of two rough fields; a set-up integrates the
+    fields themselves, which already carry the ocean function, over the
+    ocean area, as the sea level equation integrates a load's mass, and the
+    comparison is with that form."""
     joint = three.space
     ice = state.ice_sheet_projection(value=0.0)
     ice_to_load = ice_thickness_change_to_load_operator(state, field_space, load_space)
     dyn_to_load = sea_level_change_to_load_operator(state, field_space, load_space)
     rho_to_load = ocean_density_change_to_load_operator(state, field_space, load_space)
-    average = ocean_average_operator(state, load_space)
+    ones = state.model.zero_grid()
+    ones.data[:] = 1.0
+    average = (1.0 / state.ocean_area) * load_space.l2_products_operator([ones])
 
     scripts_row = RowLinearOperator(
         [
@@ -276,9 +282,8 @@ def test_three_component_space_reproduces_the_hand_built_operators(
             average @ rho_to_load,
         ]
     )
-    ocean_weight = state.ocean_projection(value=0.0) / state.ocean_area
     steric = (
-        load_space.l2_products_operator([ocean_weight])
+        average
         @ steric_sea_level_operator(state, field_space, load_space)
         @ joint.projection(2)
     )

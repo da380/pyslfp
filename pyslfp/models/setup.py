@@ -14,7 +14,11 @@ space needs from the physics:
 - the barystatic global mean sea level change of each mass source and in
   total, the steric change from the steric sea level contributions, and the
   two together as the barystatic/steric split;
-- the ocean mass constraint over the ocean-internal components.
+- the ocean mass constraint over the ocean-internal components;
+- through the sea level equation, given a fingerprint operator: the relative
+  sea level change, its global mean, and its regional decomposition into
+  steric, dynamic manometric and barystatic manometric parts after Gregory et
+  al. (2019).
 
 Adding a component never means changing the assembler. A set-up is passive:
 it holds spaces and operators, and leaves priors, conditioning and solvers to
@@ -39,7 +43,7 @@ from __future__ import annotations
 from functools import reduce
 from operator import add
 from types import MappingProxyType
-from typing import Iterable, Mapping, Optional, Tuple
+from typing import Iterable, List, Mapping, NamedTuple, Optional, Sequence, Tuple, Union
 
 from pygeoinf import (
     BlockDiagonalLinearOperator,
@@ -51,9 +55,18 @@ from pygeoinf import (
     Traits,
 )
 
+from pyshtools import SHGrid
+
 from pyslfp.core import EarthState
-from pyslfp.linear_operators.spatial import ocean_average_operator
+from pyslfp.core.response import SEA_LEVEL_CHANGE
+from pyslfp.linear_operators.physics import FingerPrintOperator
+from pyslfp.linear_operators.spatial import (
+    ocean_average_operator,
+    region_average_operator,
+)
+from pyslfp.linear_operators.utils import averaging_operator
 from pyslfp.models.components import (
+    SEA_SURFACE_HEIGHT,
     STERIC_SEA_LEVEL,
     LoadComponent,
     Role,
@@ -62,6 +75,31 @@ from pyslfp.models.components import (
 )
 
 OCEAN_MASS = "ocean_mass"
+
+# Regions as `region_average_operator` takes them (a name, a flat list for one
+# composite region, a list of lists for several), or as masks.
+Regions = Union[str, List[str], List[List[str]], Sequence[SHGrid]]
+
+
+class RegionalDecomposition(NamedTuple):
+    """The regional averages of the relative sea level change, split after
+    Gregory et al. (2019); each an operator from the joint space into
+    EuclideanSpace(number of regions), the three summing to the average of
+    `ModelSetup.sea_level_change`.
+
+    Attributes:
+        steric: The steric sea level change, which loads nothing.
+        dynamic_manometric: The rest of the sea surface height's direct
+            contributions (dynamic topography less its steric part), plus
+            the sea level equation's response to the ocean-internal loads.
+        barystatic_manometric: The sea level equation's response to the
+            mass sources' loads, their gravitational, rotational and
+            deformational fingerprint.
+    """
+
+    steric: LinearOperator
+    dynamic_manometric: LinearOperator
+    barystatic_manometric: LinearOperator
 
 
 class ModelSetup:
@@ -142,7 +180,7 @@ class ModelSetup:
 
         if STERIC_SEA_LEVEL in self._observables:
             steric = self._observables[STERIC_SEA_LEVEL]
-            self._steric = ocean_average_operator(state, steric.codomain) @ steric
+            self._steric = self._ocean_mean(steric.codomain) @ steric
         else:
             self._steric = None
         if self._total_barystatic is not None and self._steric is not None:
@@ -151,7 +189,7 @@ class ModelSetup:
         else:
             self._split = None
 
-        ocean_average = ocean_average_operator(state, self._load_space)
+        ocean_average = self._ocean_mean(self._load_space)
         ocean_internal = {
             c.name: ocean_average @ c.to_load
             for c in components
@@ -266,7 +304,10 @@ class ModelSetup:
     def steric_gmsl(self) -> Optional[LinearOperator]:
         """The steric global mean sea level change, the ocean average of the
         steric sea level, into EuclideanSpace(1); None without a steric
-        contribution."""
+        contribution. The steric sea level carries the ocean function, so its
+        ocean average is its integral over the sphere over the ocean area,
+        taken by the grid's quadrature, as the sea level equation takes the
+        mass of a load."""
         return self._steric
 
     @property
@@ -277,8 +318,132 @@ class ModelSetup:
         return self._split
 
     # ---------------------------------------------------------#
+    #            Through the sea level equation                #
+    # ---------------------------------------------------------#
+
+    def sea_level_change(self, fingerprint: FingerPrintOperator, /) -> LinearOperator:
+        """
+        The relative sea level change, into the fingerprint operator's field
+        space: the sea level equation's response to the total load, plus the
+        direct contributions to the sea surface height (dynamic topography's),
+        which raise the sea surface over an unmoved solid surface.
+
+        Args:
+            fingerprint: The fingerprint operator, on the set-up's load space;
+                the sea surface height contributions must lie in its field
+                space (the components' `observable_space`).
+
+        Raises:
+            ValueError: If the spaces do not match.
+        """
+        response = self._response_space(fingerprint)
+        change = (
+            response.field_operator(SEA_LEVEL_CHANGE)
+            @ fingerprint
+            @ (self._load_operator)
+        )
+        if SEA_SURFACE_HEIGHT in self._observables:
+            direct = self._observables[SEA_SURFACE_HEIGHT]
+            if direct.codomain != response.field_space:
+                raise ValueError(
+                    "the sea surface height contributions must lie in the "
+                    "fingerprint operator's field space"
+                )
+            change = change + direct
+        return change
+
+    def gmsl(self, fingerprint: FingerPrintOperator, /) -> LinearOperator:
+        """
+        The global mean sea level change, the ocean average of
+        `sea_level_change`, into EuclideanSpace(1). Mass conservation makes it
+        the barystatic change plus the steric change of `gmsl_split`, the
+        ocean-internal loads' own response cancelling the mean of the dynamic
+        topography; the difference measures the sea level equation's mass
+        balance.
+        """
+        field_space = self._response_space(fingerprint).field_space
+        return ocean_average_operator(self._state, field_space) @ (
+            self.sea_level_change(fingerprint)
+        )
+
+    def regional_decomposition(
+        self, fingerprint: FingerPrintOperator, regions: Regions, /
+    ) -> RegionalDecomposition:
+        """
+        The regional averages of the relative sea level change, split into
+        steric, dynamic manometric and barystatic manometric parts after
+        Gregory et al. (2019), through the components' roles: the response to
+        the mass sources' loads is barystatic, the response to the
+        ocean-internal loads and the sea surface height's direct contributions
+        less the steric sea level are dynamic, and the steric sea level is
+        steric. The three sum to the average of `sea_level_change`.
+
+        Args:
+            fingerprint: The fingerprint operator, as for `sea_level_change`.
+            regions: Region names, as `region_average_operator` takes them, or
+                a sequence of masks.
+        """
+        response = self._response_space(fingerprint)
+        field_space = response.field_space
+        on_fields = self._averaging(field_space, regions)
+        on_loads = self._averaging(self._load_space, regions)
+        codomain = on_fields.codomain
+        sea_level = response.field_operator(SEA_LEVEL_CHANGE) @ fingerprint
+
+        def of_role(role: Role) -> LinearOperator:
+            return self._row(
+                {
+                    c.name: c.to_load
+                    for c in self._components
+                    if c.role is role and c.to_load is not None
+                },
+                self._load_space,
+            )
+
+        barystatic = on_fields @ sea_level @ of_role(Role.MASS_SOURCE)
+        dynamic = on_fields @ sea_level @ of_role(Role.OCEAN_INTERNAL)
+        if SEA_SURFACE_HEIGHT in self._observables:
+            dynamic = dynamic + on_fields @ self._observables[SEA_SURFACE_HEIGHT]
+        if STERIC_SEA_LEVEL in self._observables:
+            steric = on_loads @ self._observables[STERIC_SEA_LEVEL]
+            dynamic = dynamic - steric
+        else:
+            steric = LinearOperator.zero(self._space, codomain=codomain)
+        return RegionalDecomposition(steric, dynamic, barystatic)
+
+    # ---------------------------------------------------------#
     #                     Private helpers                      #
     # ---------------------------------------------------------#
+
+    def _ocean_mean(self, space: Space) -> LinearOperator:
+        """A field's integral over the sphere over the ocean area, into
+        EuclideanSpace(1): the ocean average of a field the ocean function
+        already confines to the ocean, such as an ocean-internal load or the
+        steric sea level. The weight is the constant 1, which is band-limited,
+        so the pairing is the grid's quadrature of the field itself, exactly
+        the integral the sea level equation's mass conservation takes."""
+        ones = self._state.model.zero_grid()
+        ones.data[:] = 1.0
+        return (1.0 / self._state.ocean_area) * space.l2_products_operator([ones])
+
+    def _response_space(self, fingerprint: FingerPrintOperator):
+        """The fingerprint operator's response space, checked against the
+        set-up's load space."""
+        if fingerprint.domain != self._load_space:
+            raise ValueError(
+                "the fingerprint operator must act on the set-up's load space"
+            )
+        return fingerprint.codomain
+
+    def _averaging(self, space: Space, regions: Regions) -> LinearOperator:
+        """Regional averages on a space, from names or masks."""
+        if (
+            isinstance(regions, (list, tuple))
+            and regions
+            and all(isinstance(r, SHGrid) for r in regions)
+        ):
+            return averaging_operator(self._state, space, list(regions))
+        return region_average_operator(self._state, space, regions)
 
     def _observable(self, name: str) -> LinearOperator:
         """The row of the components' contributions to an observable, which

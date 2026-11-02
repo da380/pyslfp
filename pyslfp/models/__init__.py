@@ -5,7 +5,7 @@ Model spaces for sea level inversions, built from named load components.
 roles, and the factories for ice sheets, glaciers, land water storage,
 firn, dynamic topography and ocean density. `setup` holds the assembler,
 `ModelSetup`, which derives a model space and its operators from a list of
-components.
+components, and `setups` the set-ups in common use.
 """
 
 from .components import (
@@ -22,7 +22,8 @@ from .components import (
     land_water_storage,
     ocean_density,
 )
-from .setup import OCEAN_MASS, ModelSetup
+from .setup import OCEAN_MASS, ModelSetup, RegionalDecomposition
+from .setups import ice_and_firn, ice_and_ocean, ice_ocean_and_density, sea_level_budget
 
 __all__ = [
     "LoadComponent",
@@ -39,4 +40,9 @@ __all__ = [
     "barystatic_gmsl_operator",
     "ModelSetup",
     "OCEAN_MASS",
+    "RegionalDecomposition",
+    "ice_and_ocean",
+    "ice_ocean_and_density",
+    "sea_level_budget",
+    "ice_and_firn",
 ]

@@ -240,7 +240,9 @@ while the set-up's is the grid integral of the load, the mass the sea
 level equation sees; at worst over H^2 fields the two differ by 7% at
 lmax 32, 1.5% at 64, 0.5% at 128 and 0.09% at 256.
 
-**WP3 — the pre-built set-ups and the remaining harvest**: the
+**WP3 — the pre-built set-ups and the remaining harvest** (the set-ups and
+the diagnostics through the sea level equation are built; the scripts
+remain): the
 scripts' `gmsl_split_operators` and the SSLC/DMSLC/BMSLC regional
 decomposition land as derived diagnostics of a `ModelSetup` rather
 than free functions, completing the Heathcote2026 harvest list. The

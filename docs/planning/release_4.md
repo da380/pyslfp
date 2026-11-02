@@ -45,7 +45,9 @@ the documentation, each entry giving the old form and the new.
 
 ## Additions so far
 
-The models submodule (`pyslfp.models`); horizontal displacement and the
+The models submodule (`pyslfp.models`), with its ready-made set-ups and the
+diagnostics through the sea level equation (`gmsl`, `regional_decomposition`);
+horizontal displacement and the
 response classes; the water bodies (`pyslfp.core.water_bodies`) and the GTN-G
 regions; the RGI 7.0 glaciers; Stokes coefficients for GRACE
 (`convention="stokes"`); `prem_maxwell`, `maxwell_mantle` and
@@ -56,8 +58,7 @@ regions; the RGI 7.0 glaciers; Stokes coefficients for GRACE
 - The viscoelastic side of the response: snapshots holding a `GRDResponse`,
   the horizontal memory field, the adjoints; GNSS observation models with the
   frame of the data ([response_plan.md](response_plan.md), packages 5 and 6).
-- WP3 of the models submodule: ready-made set-ups, the diagnostics that take
-  the fingerprint operator, new simplified scripts in place of
+- WP3 of the models submodule: new simplified scripts in place of
   `Heathcote2026/` ([models_plan.md](models_plan.md)).
 - The deprecations: the wrappers in `linear_operators/utils.py`
   (`l2_products_operator`, `spatial_multiplication_operator`) and the

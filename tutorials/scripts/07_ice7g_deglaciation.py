@@ -121,7 +121,7 @@ def ocean_mean(field):
     return metre * earth_model.integrate(field * ocean) / area
 
 
-run_curve = np.array([ocean_mean(snap.sea_level_change) for snap in snapshots])
+run_curve = np.array([ocean_mean(snap.relative_sea_level_change) for snap in snapshots])
 sl26 = ice_model.get_sea_level(
     26.0, LMAX, grid=earth_model.grid_name, extend=earth_model.extend
 )
@@ -151,7 +151,8 @@ i = int(np.argmin(np.abs(lats - 56.5)))
 j = int(np.argmin(np.abs(lons - (360.0 - 76.2))))
 site = metre * np.array(
     [
-        snap.sea_level_change.data[i, j] - snapshots[-1].sea_level_change.data[i, j]
+        snap.relative_sea_level_change.data[i, j]
+        - snapshots[-1].relative_sea_level_change.data[i, j]
         for snap in snapshots
     ]
 )

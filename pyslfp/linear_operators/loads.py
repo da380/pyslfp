@@ -2,7 +2,7 @@
 Mass load conversions and composite domain operators for the pyslfp library.
 
 This module provides pygeoinf LinearOperators that convert physical fields
-(like ice thickness or ocean dynamic topography) into equivalent surface
+(like ice thickness or the sterodynamic sea level change) into equivalent surface
 mass loads. It also includes factories for combining disjoint parameter spaces
 into unified loads for joint inversions.
 """
@@ -62,7 +62,7 @@ def sea_level_change_to_load_operator(
     sea_level_space: Union[Lebesgue, Sobolev],
     load_space: Union[Lebesgue, Sobolev],
 ) -> LinearOperator:
-    """Maps a sea level change (or ocean dynamic topography) to its
+    """Maps a sea level change (or a sterodynamic sea level change) to its
     surface mass load, rho_w C delta xi: ocean only.
 
     Args:
@@ -160,7 +160,7 @@ def ocean_mass_conservation_operator(
 
         < rho_w C eta + D C delta rho >_O = 0.
 
-    A sea surface height change and a density change that carry no net
+    A sterodynamic sea level change and a density change that carry no net
     water mass must satisfy this; conditioning a prior on the kernel
     (for example through an affine subspace, with the solver of the
     caller's choosing) enforces it. The operator only states the
@@ -204,7 +204,7 @@ def joint_ice_ocean_to_load_operator(
     Args:
         state: The EarthState providing geometry and physical parameters.
         ice_space: The Hilbert space defining the ice thickness prior.
-        ocean_space: The Hilbert space defining the ocean dynamic topography prior.
+        ocean_space: The Hilbert space defining the sterodynamic sea level prior.
         load_space: The target Hilbert space for the SLE Fingerprint solver.
 
     Returns:

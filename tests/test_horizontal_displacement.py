@@ -34,7 +34,7 @@ def test_sea_level_coefficients_are_those_of_the_grid(setting):
     solution = sle._solve_generalised(state, direct_load=load, horizontal=True)
     expected = _coefficients(
         state.model,
-        SHGrid.from_array(solution.sea_level_change, grid=state.model.grid),
+        SHGrid.from_array(solution.relative_sea_level_change, grid=state.model.grid),
     )
     np.testing.assert_allclose(
         solution.sea_level_lm,

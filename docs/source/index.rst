@@ -87,7 +87,7 @@ resulting sea level change:
 
    # Sea level change, vertical displacement, potential change, and the angular
    # velocity change (polar wander and length of day).
-   sea_level_change, displacement, potential_change, angular_velocity_change = (
+   relative_sea_level_change, displacement, potential_change, angular_velocity_change = (
        sle.solve_sea_level_equation(direct_load)
    )
 
@@ -95,7 +95,7 @@ resulting sea level change:
    metre = sle.state.model.parameters.length_scale
    fig, ax = sl.create_map_figure(figsize=(12, 6))
    sl.plot(
-       sea_level_change * sle.state.ocean_projection() * metre,
+       relative_sea_level_change * sle.state.ocean_projection() * metre,
        ax=ax,
        colorbar_kwargs={"label": "Sea level change (m)"},
    )

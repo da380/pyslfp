@@ -58,11 +58,11 @@ print(
 load = state.west_antarctic_load(fraction=0.1)
 response = fingerprint(load)
 print("members of the response:", response_space.names)
-sea_level_change = response.field("sea_level_change")
+relative_sea_level_change = response.field("relative_sea_level_change")
 
 fig, ax = sl.create_map_figure(figsize=(10, 5))
 sl.plot(
-    sea_level_change * state.ocean_projection() * metre,
+    relative_sea_level_change * state.ocean_projection() * metre,
     ax=ax,
     vmin=-1.0,
     vmax=1.0,
@@ -77,7 +77,7 @@ sl.plot(
 # departure from it. Each is an operator, and `@` composes them.
 
 # %%
-sea_level = response_space.field_operator("sea_level_change")
+sea_level = response_space.field_operator("relative_sea_level_change")
 mean_sea_level = ocean_average_operator(state, field_space) @ sea_level @ fingerprint
 print(f"global mean sea level change: {mean_sea_level(load)[0] * metre * 1000:.1f} mm")
 
@@ -226,7 +226,9 @@ sl.plot(
 # surface about the vertical, so V is all the horizontal part there is.
 # Built with `horizontal=True`, the operator's response holds V as well,
 # and the displacement gives east, north and up at points and the
-# horizontal part on the grid.
+# horizontal part on the grid. `plot_displacement` draws both parts: the
+# vertical in colour and the horizontal as arrows, here outward from the
+# uplift where the ice was lost.
 
 # %%
 horizontal_fingerprint = FingerPrintOperator.from_defaults(lmax=LMAX, horizontal=True)
@@ -238,11 +240,16 @@ for (lat, lon), (east, north, up) in zip(sites, displacement.at(sites) * metre *
         f"up {up:7.2f} mm"
     )
 
-east, north = displacement.horizontal_fields()
-magnitude = east.copy()
-magnitude.data = np.hypot(east.data, north.data) * metre * 1000
-fig, ax = sl.create_map_figure(figsize=(10, 5))
-sl.plot(magnitude, ax=ax, colorbar_kwargs={"label": "Horizontal displacement (mm)"})
+fig, ax = sl.create_map_figure(figsize=(7, 7), projection=ccrs.SouthPolarStereo())
+sl.plot_displacement(
+    displacement,
+    ax=ax,
+    scale=metre * 1000,
+    units="mm",
+    arrows=25,
+    map_extent=[-180, 180, -90, -60],
+    colorbar_kwargs={"label": "Vertical displacement (mm)"},
+)
 
 # %% [markdown]
 # ## Sobolev spaces and point observations

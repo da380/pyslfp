@@ -2,7 +2,7 @@
 Physically named load components, the vocabulary of model spaces.
 
 A model space for a sea level inversion is a direct sum of fields: an ice
-thickness change, a dynamic topography, an ocean density change, and so
+thickness change, a sterodynamic sea level change, an ocean density change, and so
 on. Each field is a `LoadComponent`, a frozen record of what the field is
 and how it enters the physics:
 
@@ -11,8 +11,8 @@ and how it enters the physics:
   level equation;
 - its support, the region where the field has physical meaning;
 - its direct contributions to named observables, the parts of an
-  observable that bypass the sea level equation, such as dynamic
-  topography's own term in the sea surface height;
+  observable that bypass the sea level equation, such as the sterodynamic
+  sea level change's own term in the geocentric sea level;
 - its role, which says how it changes the ocean's mass.
 
 **The fields are defined globally, and the supports are part of the
@@ -99,12 +99,12 @@ from pyslfp.linear_operators.loads import (
 
 Space = Union[Lebesgue, Sobolev]
 
-# The observables a component can contribute to directly. The sea and ice
-# surface heights are sampled at points, so a contribution to them is the
+# The observables a component can contribute to directly. The geocentric sea
+# level and the ice surface height are sampled at points, so a contribution to them is the
 # field itself, unmasked, in an observable space of order above 1; the
 # steric sea level is rough like a load and lands in the load space.
 # Contributions to one observable share its space, where they are added.
-SEA_SURFACE_HEIGHT = "sea_surface_height"
+GEOCENTRIC_SEA_LEVEL = "geocentric_sea_level"
 ICE_SURFACE_HEIGHT = "ice_surface_height"
 STERIC_SEA_LEVEL = "steric_sea_level"
 
@@ -364,21 +364,25 @@ def glaciers(
 # ================================================================ #
 
 
-def dynamic_topography(
+def sterodynamic_sea_level(
     state: EarthState,
     load_space: Space,
     /,
     *,
     space: Optional[Space] = None,
     observable_space: Optional[Space] = None,
-    name: str = "dynamic_topography",
+    name: str = "sterodynamic_sea_level",
 ) -> LoadComponent:
     """
-    A dynamic sea surface height change eta over the oceans.
+    A sterodynamic sea level change eta over the oceans, after Gregory et al.
+    (2019): the ocean dynamic sea level change plus any global-mean steric
+    change. With an ocean density component the latter is the density's
+    steric global mean; without one, the ocean mass constraint makes the
+    ocean mean of eta vanish.
 
     The support is the ocean. The load is the water the change moves,
     rho_w C eta, the ocean function C being the support. The change
-    contributes directly, unmasked, to the sea surface height, a term that
+    contributes directly, unmasked, to the geocentric sea level, a term that
     bypasses the sea level equation; altimetry samples it at points in the
     ocean.
 
@@ -387,7 +391,7 @@ def dynamic_topography(
         load_space: The space of the loads.
         space: The component's space, on the load space's grid. The load
             space if omitted.
-        observable_space: The space of the sea surface height, on the same
+        observable_space: The space of the geocentric sea level, on the same
             grid, of order no higher than the component's and above 1 if
             it is to be sampled at points; the field space of the response
             it is added to. The component's space if omitted.
@@ -401,7 +405,7 @@ def dynamic_topography(
         support=_mask(space, state.ocean_projection(value=0.0)),
         role=Role.OCEAN_INTERNAL,
         observables={
-            SEA_SURFACE_HEIGHT: _inclusion(space, observable_space, load_space)
+            GEOCENTRIC_SEA_LEVEL: _inclusion(space, observable_space, load_space)
         },
     )
 

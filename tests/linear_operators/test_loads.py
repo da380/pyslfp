@@ -133,7 +133,7 @@ def test_steric_and_conservation_operators(testing_state, sobolev):
     # and so the pair conserves ocean mass exactly
     residual = conservation((eta_s, drho))
     assert abs(residual[0]) < 1e-12 * scale
-    # while a bare sea surface height change does not
+    # while a bare sterodynamic sea level change does not
     violating = conservation((eta_s, param_space.zero()))
     assert abs(violating[0]) > 1e-6 * scale
 

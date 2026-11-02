@@ -109,7 +109,7 @@ ocean = state.ocean_projection()
 
 fig, ax = sl.create_map_figure(figsize=(12, 8))
 sl.plot(
-    final.sea_level_change * ocean * metre,
+    final.relative_sea_level_change * ocean * metre,
     ax=ax,
     vmin=-20.0,
     vmax=20.0,
@@ -143,7 +143,7 @@ uplift = metre * np.array(
 )
 mean_sea_level = metre * np.array(
     [
-        earth_model.integrate(snap.sea_level_change * state.ocean_function)
+        earth_model.integrate(snap.relative_sea_level_change * state.ocean_function)
         / state.ocean_area
         for snap in snapshots
     ]

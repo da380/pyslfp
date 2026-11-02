@@ -186,7 +186,7 @@ response_space = fingerprint.codomain
 total = (
     (
         ocean_average_operator(state, response_space.field_space)
-        @ response_space.field_operator("sea_level_change")
+        @ response_space.field_operator("relative_sea_level_change")
         @ fingerprint
     )
     * params.ice_density

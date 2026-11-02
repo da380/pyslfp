@@ -213,7 +213,7 @@ class SeaLevelSnapshot:
     by an ice history also records `date`, in kiloyears before present."""
 
     t: float
-    sea_level_change: SHGrid = field(repr=False)
+    relative_sea_level_change: SHGrid = field(repr=False)
     displacement: SHGrid = field(repr=False)
     gravity_potential_change: SHGrid = field(repr=False)
     angular_velocity_change: np.ndarray = field(repr=False)
@@ -1198,7 +1198,7 @@ class SeaLevelEvolution:
         )
         residual = (
             self.state.sea_level.data
-            + snapshots[-1].sea_level_change.data
+            + snapshots[-1].relative_sea_level_change.data
             - final_sea_level.data
         )
         w = 1.0 if weights is None else weights.data

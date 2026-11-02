@@ -23,7 +23,14 @@ from .elastic import LinearSeaLevelEquation
 # ---------------------------------------------------------------------------
 # 3. Visualization Utilities
 # ---------------------------------------------------------------------------
-from .plotting import plot, plot_points, create_map_figure, plot_coastline, subplots
+from .plotting import (
+    plot,
+    plot_displacement,
+    plot_points,
+    create_map_figure,
+    plot_coastline,
+    subplots,
+)
 
 # ---------------------------------------------------------------------------
 # 4. Thread control for the numerical backends
@@ -57,6 +64,7 @@ __all__ = [
     "LinearSeaLevelEquation",
     # Visualization
     "plot",
+    "plot_displacement",
     "plot_points",
     "create_map_figure",
     "plot_coastline",

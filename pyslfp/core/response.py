@@ -59,13 +59,13 @@ __all__ = [
     "SurfaceDisplacementSpace",
     "GRDResponse",
     "GRDSpace",
-    "SEA_LEVEL_CHANGE",
+    "RELATIVE_SEA_LEVEL_CHANGE",
     "DISPLACEMENT",
     "POTENTIAL_CHANGE",
     "ANGULAR_VELOCITY_CHANGE",
 ]
 
-SEA_LEVEL_CHANGE = "sea_level_change"
+RELATIVE_SEA_LEVEL_CHANGE = "relative_sea_level_change"
 DISPLACEMENT = "displacement"
 POTENTIAL_CHANGE = "potential_change"
 ANGULAR_VELOCITY_CHANGE = "angular_velocity_change"
@@ -373,7 +373,7 @@ class GRDResponse:
 
     __slots__ = (
         "_space",
-        "sea_level_change",
+        "relative_sea_level_change",
         "displacement",
         "potential_change",
         "angular_velocity_change",
@@ -382,14 +382,16 @@ class GRDResponse:
     def __init__(
         self,
         space: GRDSpace,
-        sea_level_change: np.ndarray,
+        relative_sea_level_change: np.ndarray,
         displacement: SurfaceDisplacement,
         potential_change: np.ndarray,
         angular_velocity_change: Optional[np.ndarray] = None,
         /,
     ) -> None:
         self._space = space
-        self.sea_level_change = np.asarray(sea_level_change, dtype=float)
+        self.relative_sea_level_change = np.asarray(
+            relative_sea_level_change, dtype=float
+        )
         self.displacement = displacement
         self.potential_change = np.asarray(potential_change, dtype=float)
         self.angular_velocity_change = (
@@ -404,11 +406,11 @@ class GRDResponse:
         return self._space
 
     def field(self, name: str, /) -> SHGrid:
-        """A scalar member, "sea_level_change" or "potential_change", or the
+        """A scalar member, "relative_sea_level_change" or "potential_change", or the
         vertical displacement, "displacement", on the field space's grid."""
         space = self._space.field_space
-        if name == SEA_LEVEL_CHANGE:
-            return space.from_components(self.sea_level_change)
+        if name == RELATIVE_SEA_LEVEL_CHANGE:
+            return space.from_components(self.relative_sea_level_change)
         if name == POTENTIAL_CHANGE:
             return space.from_components(self.potential_change)
         if name == DISPLACEMENT:
@@ -448,7 +450,7 @@ class GRDSpace(DiagonalMetricSpace[GRDResponse]):
         self._scalar_space = ComponentView(field_space)
         n = field_space.dim
         self._sizes = {
-            SEA_LEVEL_CHANGE: n,
+            RELATIVE_SEA_LEVEL_CHANGE: n,
             DISPLACEMENT: self._displacement_space.dim,
             POTENTIAL_CHANGE: n,
         }
@@ -492,7 +494,7 @@ class GRDSpace(DiagonalMetricSpace[GRDResponse]):
     def member_space(self, name: str, /) -> HilbertSpace:
         """The space of a member: `ComponentView(field_space)` for the scalar
         fields, the `SurfaceDisplacementSpace`, and EuclideanSpace(3)."""
-        if name in (SEA_LEVEL_CHANGE, POTENTIAL_CHANGE):
+        if name in (RELATIVE_SEA_LEVEL_CHANGE, POTENTIAL_CHANGE):
             return self._scalar_space
         if name == DISPLACEMENT:
             return self._displacement_space
@@ -512,7 +514,7 @@ class GRDSpace(DiagonalMetricSpace[GRDResponse]):
 
     def to_components(self, x: GRDResponse) -> np.ndarray:
         parts = [
-            x.sea_level_change,
+            x.relative_sea_level_change,
             self._displacement_space.to_components(x.displacement),
             x.potential_change,
         ]
@@ -527,7 +529,7 @@ class GRDSpace(DiagonalMetricSpace[GRDResponse]):
         part = {name: c[s].copy() for name, s in self._slices.items()}
         return GRDResponse(
             self,
-            part[SEA_LEVEL_CHANGE],
+            part[RELATIVE_SEA_LEVEL_CHANGE],
             self._displacement_space.from_components(part[DISPLACEMENT]),
             part[POTENTIAL_CHANGE],
             part.get(ANGULAR_VELOCITY_CHANGE),
@@ -537,7 +539,7 @@ class GRDSpace(DiagonalMetricSpace[GRDResponse]):
         return self.from_components(self.to_components(x))
 
     def axpy(self, a: float, x: GRDResponse, y: GRDResponse) -> GRDResponse:
-        y.sea_level_change += a * x.sea_level_change
+        y.relative_sea_level_change += a * x.relative_sea_level_change
         self._displacement_space.axpy(a, x.displacement, y.displacement)
         y.potential_change += a * x.potential_change
         if self._rotation:
@@ -545,7 +547,7 @@ class GRDSpace(DiagonalMetricSpace[GRDResponse]):
         return y
 
     def scale_inplace(self, a: float, x: GRDResponse) -> GRDResponse:
-        x.sea_level_change *= a
+        x.relative_sea_level_change *= a
         self._displacement_space.scale_inplace(a, x.displacement)
         x.potential_change *= a
         if self._rotation:
@@ -554,7 +556,7 @@ class GRDSpace(DiagonalMetricSpace[GRDResponse]):
 
     def from_coefficients(
         self,
-        sea_level_change: np.ndarray,
+        relative_sea_level_change: np.ndarray,
         displacement: np.ndarray,
         potential_change: np.ndarray,
         /,
@@ -569,7 +571,7 @@ class GRDSpace(DiagonalMetricSpace[GRDResponse]):
             raise ValueError("this space holds the angular velocity change; give it")
         return GRDResponse(
             self,
-            _components(sea_level_change, self._field_space),
+            _components(relative_sea_level_change, self._field_space),
             self._displacement_space.from_coefficients(displacement, horizontal),
             _components(potential_change, self._field_space),
             angular_velocity_change if self._rotation else None,
@@ -599,17 +601,17 @@ class GRDSpace(DiagonalMetricSpace[GRDResponse]):
     def field_operator(self, name: str, /) -> LinearOperator[GRDResponse, SHGrid]:
         """
         The map from a response to one of its fields as a vector of the field
-        space: "sea_level_change", "potential_change", or "displacement" for
+        space: "relative_sea_level_change", "potential_change", or "displacement" for
         the vertical displacement U.
 
         The field space and a scalar member share their metric, so the map is
         an isometry onto the field and its adjoint reads the field's
         components back.
         """
-        if name not in (SEA_LEVEL_CHANGE, POTENTIAL_CHANGE, DISPLACEMENT):
+        if name not in (RELATIVE_SEA_LEVEL_CHANGE, POTENTIAL_CHANGE, DISPLACEMENT):
             raise ValueError(
                 f"'{name}' is not a field of the response; the fields are "
-                f"{SEA_LEVEL_CHANGE}, {POTENTIAL_CHANGE} and {DISPLACEMENT}"
+                f"{RELATIVE_SEA_LEVEL_CHANGE}, {POTENTIAL_CHANGE} and {DISPLACEMENT}"
             )
         field_space = self._field_space
         s = self._slices[name]

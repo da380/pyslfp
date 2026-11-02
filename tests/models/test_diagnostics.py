@@ -15,7 +15,7 @@ from pyslfp.linear_operators.utils import averaging_operator
 from pyslfp.models import (
     ICE_SURFACE_HEIGHT,
     OCEAN_MASS,
-    SEA_SURFACE_HEIGHT,
+    GEOCENTRIC_SEA_LEVEL,
     STERIC_SEA_LEVEL,
     Role,
     ice_and_firn,
@@ -77,7 +77,8 @@ def _hemispheres(state):
 def test_the_global_mean_is_barystatic_plus_steric(budget, fingerprint):
     """Mass conservation: the ocean average of the relative sea level change
     is the barystatic change plus the steric change, the ocean-internal
-    loads' own response cancelling the mean of the dynamic topography."""
+    loads' own response cancelling the mean of the sterodynamic sea level
+    change less its steric part."""
     x = _sample(budget, 1)
     total = budget.gmsl(fingerprint)(x)[0]
     split = budget.barystatic_gmsl()(x)[0] + budget.steric_gmsl(x)[0]
@@ -89,7 +90,7 @@ def test_the_decomposition_sums_to_the_regional_sea_level(budget, fingerprint, s
     parts = budget.regional_decomposition(fingerprint, regions)
     x = _sample(budget, 2)
     whole = averaging_operator(state, fingerprint.field_space, regions) @ (
-        budget.sea_level_change(fingerprint)
+        budget.relative_sea_level_change(fingerprint)
     )
     total = (
         parts.steric(x) + parts.dynamic_manometric(x) + parts.barystatic_manometric(x)
@@ -118,7 +119,7 @@ def test_the_diagnostics_pass_the_adjoint_check(budget, fingerprint, state):
             rtol=1e-7,
         )
     check_operator(
-        budget.sea_level_change(fingerprint),
+        budget.relative_sea_level_change(fingerprint),
         rng=rng,
         measure=measure,
         codomain_measure=fingerprint.field_space.heat_measure(0.3 * b),
@@ -149,7 +150,7 @@ def test_the_spaces_must_match(state, scale, fingerprint, budget):
     field_space = sobolev_load_space(state.model, 2.0, scale)
     mismatched = ice_and_ocean(state, fingerprint.domain, space=field_space)
     with pytest.raises(ValueError, match="field space"):
-        mismatched.sea_level_change(fingerprint)
+        mismatched.relative_sea_level_change(fingerprint)
 
 
 # ==================================================================== #
@@ -161,23 +162,27 @@ def test_the_ready_made_set_ups(state, scale, fingerprint):
     load_space = fingerprint.domain
     density = 0.6 * state.model.parameters.ice_density
     expectations = {
-        ice_and_ocean: ("ice_sheets", "dynamic_topography"),
-        ice_ocean_and_density: ("ice_sheets", "dynamic_topography", "ocean_density"),
+        ice_and_ocean: ("ice_sheets", "sterodynamic_sea_level"),
+        ice_ocean_and_density: (
+            "ice_sheets",
+            "sterodynamic_sea_level",
+            "ocean_density",
+        ),
         sea_level_budget: (
             "ice_sheets",
             "glaciers",
             "land_water",
-            "dynamic_topography",
+            "sterodynamic_sea_level",
             "ocean_density",
         ),
     }
     for factory, names in expectations.items():
         setup = factory(state, load_space)
         assert setup.names == names
-        assert (OCEAN_MASS in setup.constraints) == ("dynamic_topography" in names)
+        assert (OCEAN_MASS in setup.constraints) == ("sterodynamic_sea_level" in names)
     budget = sea_level_budget(state, load_space)
     assert set(budget.observables) == {
-        SEA_SURFACE_HEIGHT,
+        GEOCENTRIC_SEA_LEVEL,
         ICE_SURFACE_HEIGHT,
         STERIC_SEA_LEVEL,
     }

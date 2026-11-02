@@ -11,7 +11,7 @@ Give the library a vocabulary of physically named load components and
 an assembler that turns a list of them into a ready inversion space,
 so that common set-ups are one-liners while full generality stays
 where it already lives, in pygeoinf. The three-component space of the
-Heathcote2026 scripts — grounded ice, dynamic topography, ocean
+Heathcote2026 scripts — grounded ice, sterodynamic sea level, ocean
 density — is one instance, not the design: land water storage,
 glaciers separated from ice sheets, and firn separated from ice (the
 ice-altimetry case, where the two load with different densities but
@@ -240,9 +240,7 @@ while the set-up's is the grid integral of the load, the mass the sea
 level equation sees; at worst over H^2 fields the two differ by 7% at
 lmax 32, 1.5% at 64, 0.5% at 128 and 0.09% at 256.
 
-**WP3 — the pre-built set-ups and the remaining harvest** (the set-ups and
-the diagnostics through the sea level equation are built; the scripts
-remain): the
+**WP3 — the pre-built set-ups and the remaining harvest** (built): the
 scripts' `gmsl_split_operators` and the SSLC/DMSLC/BMSLC regional
 decomposition land as derived diagnostics of a `ModelSetup` rather
 than free functions, completing the Heathcote2026 harvest list. The
@@ -255,17 +253,20 @@ pairing, and puts their loads in a space of order below 1/2.
   take the fingerprint operator as an argument; a set-up holds none and
   stays passive. The decomposition is written through the roles: BMSLC
   is the response to the mass sources' loads, DMSLC the response to the
-  ocean-internal loads plus dynamic topography less its steric part,
+  ocean-internal loads plus the sterodynamic sea level change less its
+  steric part,
   SSLC the steric sea level. The scripts' zeta (dynamic manometric
   change) is renamed, zeta being the load in the library.
 - **Ready-made set-ups**: ice + eta; ice + eta + delta rho; ice + firn;
   the budget (ice + glaciers + land water + eta + delta rho). Each takes
   the load space, the field space and the observable space, as the
   factories do.
-- **The scripts are replaced by new, simplified ones** built on
-  set-ups. The current scripts are kept as a local record, outside the
-  repository, and the new ones are tested against it; the old scripts
-  leave the repository once the new ones reproduce them.
+- **The scripts are replaced by new, simplified ones** built on set-ups,
+  sharing `Heathcote2026/common.py` and `figures.py`. They were checked in
+  quick mode against a local record of the old ones; every difference
+  traces to a fix or to the change of formulation. The formulation is in
+  `Heathcote2026/FORMULATION.md`, and the points the paper's revision must
+  take up are in `Heathcote2026/PAPER_NOTES.md`.
 - **Order.** WP3 follows the clean-up of the hard-coded regions (see the
   roadmap), so that the ready-made set-ups and the paper's revision runs
   use the physical definitions of the ice sheets, the glaciers and the

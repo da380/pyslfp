@@ -1,26 +1,65 @@
+Run: joint_inversion.py, 2026-11-02T20:56:16, pyslfp 3.0.0 (commit 3177b74 with local changes)
+Settings:
+  --all True
+  --alt-noise-corr-scale-factor 4.0
+  --alt-noise-corr-std-factor 0.01
+  --alt-noise-std-factor 0.5
+  --field-order 2.0
+  --gmsl-bary-steric-ratio 1.7
+  --grace-noise-scale-km 250.0
+  --grace-snr-crossover-degree 64.0
+  --grace-snr-low-degree 10.0
+  --grace-snr-reference-degree 2.0
+  --ice-scale-factor 1.0
+  --lmax 64
+  --load-order 0.25
+  --load-scale-km 500.0
+  --map-all-cases False
+  --max-jobs 7
+  --obs-degree 32
+  --ocean-corr 0.9
+  --ocean-corr-scale-factor 0.4
+  --ocean-dyn-scale-factor 0.2
+  --ocean-dyn-std-mm 4.0
+  --ocean-rho-scale-factor 1.0
+  --parallel True
+  --plot-gmsl-split True
+  --plot-maps True
+  --plot-pdfs True
+  --plot-regions True
+  --prior-order 3.0
+  --prior-shift 0.0
+  --qoi-rtol 1e-06
+  --seed None
+  --serial-threads 7
+  --spacing 8.0
+  --std-samples 100
+  --steric-dyn-std-ratio 0.75
+  --surrogate-degree 32
+
 Joint Inversion (Alt + GRACE) Metrics
 ======================================
 
 Target       | Estimator    | KL Div     | Prior Var    | Post Var     | Reduction
 --------------------------------------------------------------------------------
-GMSLR        | Alt-Only     | 3.0426     | 0.5123       | 0.0152       |  97.03%
-GMSLR        | GRACE-Only   | 1.1019     | 0.5123       | 0.2589       |  49.45%
-GMSLR        | Joint        | 3.0999     | 0.5123       | 0.0146       |  97.16%
+GMSLR        | Alt-Only     | 1.3629     | 0.5422       | 0.0161       |  97.04%
+GMSLR        | GRACE-Only   | 0.4979     | 0.5422       | 0.0897       |  83.46%
+GMSLR        | Joint        | 1.5354     | 0.5422       | 0.0102       |  98.12%
 
 
 GMSLR Split: Barystatic vs Steric
 =============================================================================================================================
 Metric                 | Prior        | Alt-Only     | GRACE-Only   | Joint       
 -----------------------------------------------------------------------------------------------------------------------------
-KL Div vs prior        | -            | 3.0925       | 1.4419       | 3.3261      
-Barystatic-Steric corr | -0.0147      | -0.9199      | -0.0124      | -0.8869     
-SLE mass-balance check:  steric residual = 0.699922 mm | steric direct = 0.695097 mm | diff = 4.825e-03 mm
-Constraint check:        <sterodynamic SL>_O = 0.695097 mm | <DMSLC>_O = -1.332e-15 mm (should be ~0)
+KL Div vs prior        | -            | 1.3785       | 2.6385       | 3.3368      
+Barystatic-Steric corr | +0.0000      | -0.9257      | -0.0686      | -0.4939     
+SLE mass-balance check:  steric residual = 0.128504 mm | steric direct = 0.128504 mm | diff = 9.992e-16 mm
+Constraint check:        <sterodynamic SL>_O = 0.128504 mm | <DMSLC>_O = 2.776e-17 mm (should be ~0)
 -----------------------------------------------------------------------------------------------------------------------------
 Component              | Prior Var    | Alt Var      | Alt Red%   | GRACE Var    | GRACE Red% | Joint Var    | Joint Red%
 -----------------------------------------------------------------------------------------------------------------------------
-Barystatic             | 0.3835       | 0.0962       |     74.90% | 0.1301       |     66.08% | 0.0646       |     83.17%
-Steric                 | 0.1307       | 0.0863       |     33.99% | 0.1301       |      0.48% | 0.0623       |     52.32%
+Barystatic             | 0.4028       | 0.1118       |     72.24% | 0.0029       |     99.28% | 0.0028       |     99.31%
+Steric                 | 0.1394       | 0.1009       |     27.60% | 0.0890       |     36.16% | 0.0135       |     90.32%
 -----------------------------------------------------------------------------------------------------------------------------
 
 
@@ -31,13 +70,13 @@ Regional Signal Separation (Tasman Sea)
 =======================================================================================================================================
 Metric                 | Prior        | Alt-Only     | Alt Red%   | GRACE-Only   | GRACE Red% | Joint        | Joint Red%
 ---------------------------------------------------------------------------------------------------------------------------------------
-Joint KL Div (nats)    | -            | 2.7063       | -          | 1.4302       | -          | 3.1552       | -
-Total Var (Trace) mm²  | 8.4234       | 3.8101       |     54.77% | 8.1392       |      3.37% | 3.7219       |     55.81%
-Generalised Var (Det)  | 4.5670e+00   | 9.6132e-02   |     97.90% | 1.5599e+00   |     65.84% | 6.2357e-02   |     98.63%
+Joint KL Div (nats)    | -            | 1.9341       | -          | 2.7094       | -          | 4.4274       | -
+Total Var (Trace) mm²  | 8.5617       | 3.7874       |     55.76% | 4.3299       |     49.43% | 1.9332       |     77.42%
+Generalised Var (Det)  | 5.0688e+00   | 1.0772e-01   |     97.87% | 1.1158e-02   |     99.78% | 1.1289e-03   |     99.98%
 ---------------------------------------------------------------------------------------------------------------------------------------
 Component              | Prior Var    | Alt Var      | Alt Red%   | GRACE Var    | GRACE Red% | Joint Var    | Joint Red%
 ---------------------------------------------------------------------------------------------------------------------------------------
-SSLC                   | 5.4955       | 1.8479       |     66.37% | 5.4474       |      0.87% | 1.8068       |     67.12%
-DMSLC                  | 2.5987       | 1.8726       |     27.94% | 2.5776       |      0.81% | 1.8560       |     28.58%
-BMSLC                  | 0.3292       | 0.0896       |     72.78% | 0.1143       |     65.29% | 0.0591       |     82.05%
+SSLC                   | 5.5128       | 1.8114       |     67.14% | 2.6356       |     52.19% | 0.9401       |     82.95%
+DMSLC                  | 2.7033       | 1.8728       |     30.72% | 1.6918       |     37.42% | 0.9907       |     63.35%
+BMSLC                  | 0.3456       | 0.1031       |     70.18% | 0.0025       |     99.28% | 0.0024       |     99.30%
 ---------------------------------------------------------------------------------------------------------------------------------------

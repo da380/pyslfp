@@ -58,7 +58,7 @@ from pygeoinf import (
 from pyshtools import SHGrid
 
 from pyslfp.core import EarthState
-from pyslfp.core.response import SEA_LEVEL_CHANGE
+from pyslfp.core.response import RELATIVE_SEA_LEVEL_CHANGE
 from pyslfp.linear_operators.physics import FingerPrintOperator
 from pyslfp.linear_operators.spatial import (
     ocean_average_operator,
@@ -66,7 +66,7 @@ from pyslfp.linear_operators.spatial import (
 )
 from pyslfp.linear_operators.utils import averaging_operator
 from pyslfp.models.components import (
-    SEA_SURFACE_HEIGHT,
+    GEOCENTRIC_SEA_LEVEL,
     STERIC_SEA_LEVEL,
     LoadComponent,
     Role,
@@ -85,12 +85,13 @@ class RegionalDecomposition(NamedTuple):
     """The regional averages of the relative sea level change, split after
     Gregory et al. (2019); each an operator from the joint space into
     EuclideanSpace(number of regions), the three summing to the average of
-    `ModelSetup.sea_level_change`.
+    `ModelSetup.relative_sea_level_change`.
 
     Attributes:
         steric: The steric sea level change, which loads nothing.
-        dynamic_manometric: The rest of the sea surface height's direct
-            contributions (dynamic topography less its steric part), plus
+        dynamic_manometric: The rest of the direct contributions to the
+            geocentric sea level (the sterodynamic sea level change less its
+            steric part), plus
             the sea level equation's response to the ocean-internal loads.
         barystatic_manometric: The sea level equation's response to the
             mass sources' loads, their gravitational, rotational and
@@ -321,16 +322,19 @@ class ModelSetup:
     #            Through the sea level equation                #
     # ---------------------------------------------------------#
 
-    def sea_level_change(self, fingerprint: FingerPrintOperator, /) -> LinearOperator:
+    def relative_sea_level_change(
+        self, fingerprint: FingerPrintOperator, /
+    ) -> LinearOperator:
         """
         The relative sea level change, into the fingerprint operator's field
         space: the sea level equation's response to the total load, plus the
-        direct contributions to the sea surface height (dynamic topography's),
-        which raise the sea surface over an unmoved solid surface.
+        direct contributions to the geocentric sea level (the sterodynamic
+        sea level change's), which raise the sea surface over an unmoved solid
+        surface.
 
         Args:
             fingerprint: The fingerprint operator, on the set-up's load space;
-                the sea surface height contributions must lie in its field
+                the geocentric sea level contributions must lie in its field
                 space (the components' `observable_space`).
 
         Raises:
@@ -338,15 +342,15 @@ class ModelSetup:
         """
         response = self._response_space(fingerprint)
         change = (
-            response.field_operator(SEA_LEVEL_CHANGE)
+            response.field_operator(RELATIVE_SEA_LEVEL_CHANGE)
             @ fingerprint
             @ (self._load_operator)
         )
-        if SEA_SURFACE_HEIGHT in self._observables:
-            direct = self._observables[SEA_SURFACE_HEIGHT]
+        if GEOCENTRIC_SEA_LEVEL in self._observables:
+            direct = self._observables[GEOCENTRIC_SEA_LEVEL]
             if direct.codomain != response.field_space:
                 raise ValueError(
-                    "the sea surface height contributions must lie in the "
+                    "the geocentric sea level contributions must lie in the "
                     "fingerprint operator's field space"
                 )
             change = change + direct
@@ -355,15 +359,15 @@ class ModelSetup:
     def gmsl(self, fingerprint: FingerPrintOperator, /) -> LinearOperator:
         """
         The global mean sea level change, the ocean average of
-        `sea_level_change`, into EuclideanSpace(1). Mass conservation makes it
+        `relative_sea_level_change`, into EuclideanSpace(1). Mass conservation makes it
         the barystatic change plus the steric change of `gmsl_split`, the
-        ocean-internal loads' own response cancelling the mean of the dynamic
-        topography; the difference measures the sea level equation's mass
+        ocean-internal loads' own response cancelling the mean of the
+        sterodynamic sea level change less its steric part; the difference measures the sea level equation's mass
         balance.
         """
         field_space = self._response_space(fingerprint).field_space
         return ocean_average_operator(self._state, field_space) @ (
-            self.sea_level_change(fingerprint)
+            self.relative_sea_level_change(fingerprint)
         )
 
     def regional_decomposition(
@@ -374,12 +378,13 @@ class ModelSetup:
         steric, dynamic manometric and barystatic manometric parts after
         Gregory et al. (2019), through the components' roles: the response to
         the mass sources' loads is barystatic, the response to the
-        ocean-internal loads and the sea surface height's direct contributions
+        ocean-internal loads and the direct contributions to the geocentric sea
+        level
         less the steric sea level are dynamic, and the steric sea level is
-        steric. The three sum to the average of `sea_level_change`.
+        steric. The three sum to the average of `relative_sea_level_change`.
 
         Args:
-            fingerprint: The fingerprint operator, as for `sea_level_change`.
+            fingerprint: The fingerprint operator, as for `relative_sea_level_change`.
             regions: Region names, as `region_average_operator` takes them, or
                 a sequence of masks.
         """
@@ -388,7 +393,7 @@ class ModelSetup:
         on_fields = self._averaging(field_space, regions)
         on_loads = self._averaging(self._load_space, regions)
         codomain = on_fields.codomain
-        sea_level = response.field_operator(SEA_LEVEL_CHANGE) @ fingerprint
+        sea_level = response.field_operator(RELATIVE_SEA_LEVEL_CHANGE) @ fingerprint
 
         def of_role(role: Role) -> LinearOperator:
             return self._row(
@@ -402,8 +407,8 @@ class ModelSetup:
 
         barystatic = on_fields @ sea_level @ of_role(Role.MASS_SOURCE)
         dynamic = on_fields @ sea_level @ of_role(Role.OCEAN_INTERNAL)
-        if SEA_SURFACE_HEIGHT in self._observables:
-            dynamic = dynamic + on_fields @ self._observables[SEA_SURFACE_HEIGHT]
+        if GEOCENTRIC_SEA_LEVEL in self._observables:
+            dynamic = dynamic + on_fields @ self._observables[GEOCENTRIC_SEA_LEVEL]
         if STERIC_SEA_LEVEL in self._observables:
             steric = on_loads @ self._observables[STERIC_SEA_LEVEL]
             dynamic = dynamic - steric

@@ -2,9 +2,9 @@
 Observation models and operators for satellite altimetry networks.
 
 This module provides the raw mathematical operators for mapping physical
-response fields to Sea Surface Height (SSH) anomalies, utilities for generating
+response fields to the geocentric sea level change, utilities for generating
 independent observation grids, and high-level observation models linking
-physical parameter spaces to discrete SSH observations.
+physical parameter spaces to discrete altimetry observations.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from pyslfp.core import EarthState
 from pyslfp.core.response import (
     ANGULAR_VELOCITY_CHANGE,
     DISPLACEMENT,
-    SEA_LEVEL_CHANGE,
+    RELATIVE_SEA_LEVEL_CHANGE,
     GRDSpace,
 )
 from pyslfp.linear_operators.utils import check_response_space
@@ -126,7 +126,7 @@ def ice_altimetry_points(
 # ================================================================ #
 
 
-def sea_surface_height_operator(
+def geocentric_sea_level_operator(
     state: EarthState,
     response_space: GRDSpace,
     /,
@@ -134,10 +134,10 @@ def sea_surface_height_operator(
     remove_rotational_contribution: bool = True,
 ) -> LinearOperator:
     """
-    Returns an operator mapping the response to the sea surface height change,
+    Returns an operator mapping the response to the geocentric sea level change,
     a field of the response's field space.
 
-    The sea surface height change is the sea level change plus the vertical
+    The geocentric sea level change is the relative sea level change plus the vertical
     displacement. With the rotational contribution removed, the centrifugal
     potential over g is added, which needs the response to hold the angular
     velocity change.
@@ -146,13 +146,13 @@ def sea_surface_height_operator(
         state: The EarthState providing the physical parameters.
         response_space: The response space.
         remove_rotational_contribution: If True, adds the centrifugal potential
-            correction to the SSH calculation.
+            correction to the geocentric sea level.
     """
     check_response_space(response_space)
 
     field_space = response_space.field_space
-    ssh = response_space.field_operator(
-        SEA_LEVEL_CHANGE
+    geocentric = response_space.field_operator(
+        RELATIVE_SEA_LEVEL_CHANGE
     ) + response_space.field_operator(DISPLACEMENT)
 
     if remove_rotational_contribution and response_space.has_rotation:
@@ -169,10 +169,10 @@ def sea_surface_height_operator(
         g = state.model.parameters.gravitational_acceleration
 
         # The centrifugal potential over g is its height contribution.
-        ssh = ssh + (1.0 / g) * cpc_op @ response_space.projection(
+        geocentric = geocentric + (1.0 / g) * cpc_op @ response_space.projection(
             ANGULAR_VELOCITY_CHANGE
         )
-    return ssh
+    return geocentric
 
 
 def altimetry_point_operator(
@@ -185,10 +185,10 @@ def altimetry_point_operator(
     matrix_free: bool = False,
 ) -> LinearOperator:
     """
-    Returns an operator mapping the SLE response space directly to SSH values
+    Returns an operator mapping the SLE response space directly to geocentric sea level values
     at discrete altimetry observation points.
     """
-    ssh_op = sea_surface_height_operator(
+    ssh_op = geocentric_sea_level_operator(
         state,
         response_space,
         remove_rotational_contribution=remove_rotational_contribution,
@@ -235,8 +235,9 @@ def altimetry_averaging_operator(points: List[Tuple[float, float]]) -> LinearOpe
 
 class JointAltimetryObservationModel:
     """
-    An observation model that links satellite altimetry measurements (SSH)
-    to a joint parameter space of [Ice Thickness Change, Ocean Dynamic Topography].
+    An observation model that links satellite altimetry measurements (the
+    geocentric sea level change) to a joint parameter space of [Ice Thickness
+    Change, Sterodynamic Sea Level Change].
     """
 
     def __init__(
@@ -257,7 +258,7 @@ class JointAltimetryObservationModel:
             ice_space: The Hilbert space for the ice prior. Defaults to the SLE load space.
             ocean_space: The Hilbert space for the ocean prior. Defaults to the SLE load space.
             remove_rotational_contribution: If True, adds the centrifugal potential
-                correction to the SSH calculation.
+                correction to the geocentric sea level.
             matrix_free: If True, point evaluation is done using a matrix-free implementation.
                 This is slower, but avoids building a potentially large matrix internally.
         """
@@ -289,8 +290,8 @@ class JointAltimetryObservationModel:
             [self._joint_to_load_operator, joint_space.projection(1)]
         )
 
-        # Map [Total Load, Ocean] -> [Static SSH, Ocean]
-        static_ssh_op = sea_surface_height_operator(
+        # Map [Total Load, Ocean] -> [Response's geocentric sea level, Ocean]
+        static_ssh_op = geocentric_sea_level_operator(
             state,
             fingerprint_operator.codomain,
             remove_rotational_contribution=remove_rotational_contribution,
@@ -304,7 +305,7 @@ class JointAltimetryObservationModel:
             ]
         )
 
-        # Map [Static SSH, Ocean] -> Total SSH Field
+        # Map [Response's geocentric sea level, Ocean] -> Total geocentric sea level
         ocean_to_ssh = self._ocean_space.order_inclusion_operator(load_space)
         op3 = RowLinearOperator([LinearOperator.identity(load_space), ocean_to_ssh])
 
@@ -338,7 +339,8 @@ class JointAltimetryObservationModel:
 
 class AltimetryObservationModel:
     """
-    An observation model that links satellite altimetry measurements (SSH)
+    An observation model that links satellite altimetry measurements (the
+    geocentric sea level change)
     strictly to an Ice Thickness Change parameter space.
     """
 
@@ -357,7 +359,7 @@ class AltimetryObservationModel:
             points: A list of (latitude, longitude) observation coordinates in degrees.
             ice_space: The Hilbert space for the ice prior. Defaults to the SLE load space.
             remove_rotational_contribution: If True, adds the centrifugal potential
-                correction to the SSH calculation.
+                correction to the geocentric sea level.
         """
         self._fingerprint_operator = fingerprint_operator
         self._points = points
@@ -371,7 +373,7 @@ class AltimetryObservationModel:
             state, self._ice_space, load_space
         )
 
-        # 2. The Post-Physics Operator: SLE Response -> Discrete SSH Points
+        # 2. The Post-Physics Operator: SLE Response -> Discrete Altimetry Points
         self._response_to_data_operator = altimetry_point_operator(
             state,
             fingerprint_operator.codomain,
@@ -379,7 +381,7 @@ class AltimetryObservationModel:
             remove_rotational_contribution=remove_rotational_contribution,
         )
 
-        # 3. The Full Composite Forward Operator (No Ocean Dynamic Topography to add here)
+        # 3. The Full Composite Forward Operator (no sterodynamic sea level to add here)
         self._forward_operator = (
             self._response_to_data_operator
             @ self._fingerprint_operator

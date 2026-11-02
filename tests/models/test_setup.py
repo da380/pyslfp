@@ -27,10 +27,10 @@ from pyslfp.linear_operators.spatial import (
 from pyslfp.models import (
     ICE_SURFACE_HEIGHT,
     OCEAN_MASS,
-    SEA_SURFACE_HEIGHT,
+    GEOCENTRIC_SEA_LEVEL,
     STERIC_SEA_LEVEL,
     ModelSetup,
-    dynamic_topography,
+    sterodynamic_sea_level,
     firn,
     glaciers,
     ice_sheets,
@@ -66,7 +66,7 @@ def three(state, load_space, field_space):
         state,
         [
             ice_sheets(state, load_space, space=field_space, name="ice"),
-            dynamic_topography(state, load_space, space=field_space, name="eta"),
+            sterodynamic_sea_level(state, load_space, space=field_space, name="eta"),
             ocean_density(state, load_space, space=field_space, name="rho"),
         ],
     )
@@ -84,7 +84,7 @@ def budget(state, load_space, field_space):
             glaciers(state, load_space, name="glaciers", **on_fields),
             firn(state, load_space, density=density, name="firn", **on_fields),
             land_water_storage(state, load_space, name="water", **on_fields),
-            dynamic_topography(state, load_space, name="eta", **on_fields),
+            sterodynamic_sea_level(state, load_space, name="eta", **on_fields),
             ocean_density(state, load_space, name="rho", **on_fields),
         ],
     )
@@ -154,15 +154,15 @@ def test_observables_add_up_the_contributions(budget):
     x = _random(budget, 3)
     assert set(budget.observables) == {
         ICE_SURFACE_HEIGHT,
-        SEA_SURFACE_HEIGHT,
+        GEOCENTRIC_SEA_LEVEL,
         STERIC_SEA_LEVEL,
     }
     ice = budget.space.projection("ice")(x).data
     snow = budget.space.projection("firn")(x).data
     height = budget.observables[ICE_SURFACE_HEIGHT](x).data
     np.testing.assert_allclose(height, ice + snow, rtol=0.0, atol=1e-14)
-    ssh = budget.observables[SEA_SURFACE_HEIGHT](x).data
-    np.testing.assert_array_equal(ssh, budget.space.projection("eta")(x).data)
+    geocentric = budget.observables[GEOCENTRIC_SEA_LEVEL](x).data
+    np.testing.assert_array_equal(geocentric, budget.space.projection("eta")(x).data)
 
 
 def test_contributions_to_one_observable_must_share_its_space(
@@ -240,7 +240,7 @@ def test_three_component_space_reproduces_the_hand_built_operators(
     mask folded into the ice load's multiplier, as a set-up builds it, is
     compared in action and adjoint. The scripts' barystatic functional
     leaves the ice unmasked, relying on a masked prior; for global fields
-    its weighting carries the support. Their sea surface height takes eta
+    its weighting carries the support. Their geocentric sea level takes eta
     unmasked, as a set-up does. The scripts take the ocean averages of the
     mass constraint and of the steric sea level as L2 products with C / A_O,
     which pair the truncations of two rough fields; a set-up integrates the
@@ -306,7 +306,7 @@ def test_three_component_space_reproduces_the_hand_built_operators(
     _assert_same_operator(three.barystatic_gmsl(), barystatic, three)
     _assert_same_operator(three.barystatic_gmsl("ice"), barystatic, three)
     _assert_same_operator(
-        three.observables[SEA_SURFACE_HEIGHT], sea_surface_height, three
+        three.observables[GEOCENTRIC_SEA_LEVEL], sea_surface_height, three
     )
 
 
@@ -375,11 +375,11 @@ def test_set_up_without_ocean_components(state, load_space):
 
 
 def test_set_up_without_mass_sources(state, load_space):
-    setup = ModelSetup(state, [dynamic_topography(state, load_space)])
+    setup = ModelSetup(state, [sterodynamic_sea_level(state, load_space)])
     with pytest.raises(ValueError, match="no mass source"):
         setup.barystatic_gmsl()
     with pytest.raises(ValueError, match="not a mass source"):
-        setup.barystatic_gmsl("dynamic_topography")
+        setup.barystatic_gmsl("sterodynamic_sea_level")
     assert setup.gmsl_split is None
 
 
@@ -397,6 +397,6 @@ def test_invalid_set_ups_are_refused(state, load_space):
             state,
             [
                 ice_sheets(state, load_space),
-                dynamic_topography(state, other),
+                sterodynamic_sea_level(state, other),
             ],
         )

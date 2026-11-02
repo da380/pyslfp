@@ -3,6 +3,20 @@
 The Love numbers have plots of their own, in `pyslfp.love_numbers`.
 """
 
-from .maps import create_map_figure, plot, plot_coastline, plot_points, subplots
+from .maps import (
+    create_map_figure,
+    plot,
+    plot_coastline,
+    plot_displacement,
+    plot_points,
+    subplots,
+)
 
-__all__ = ["plot", "plot_points", "create_map_figure", "plot_coastline", "subplots"]
+__all__ = [
+    "plot",
+    "plot_displacement",
+    "plot_points",
+    "create_map_figure",
+    "plot_coastline",
+    "subplots",
+]

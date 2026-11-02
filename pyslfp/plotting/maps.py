@@ -16,6 +16,8 @@ from cartopy.crs import Projection
 from cartopy.mpl.geoaxes import GeoAxes
 from matplotlib.figure import Figure
 
+from pyslfp.core.response import SurfaceDisplacement
+
 
 def subplots(
     nrows: int = 1, ncols: int = 1, projection: Optional[Projection] = None, /, **kwargs
@@ -140,6 +142,96 @@ def plot(
         )
 
     return ax, mappable
+
+
+def plot_displacement(
+    displacement: SurfaceDisplacement,
+    /,
+    *,
+    ax: Optional[GeoAxes] = None,
+    projection: Optional[Projection] = None,
+    scale: float = 1.0,
+    arrows: int = 30,
+    key: Optional[float] = None,
+    units: str = "",
+    arrow_kwargs: Optional[dict] = None,
+    symmetric: Union[bool, float] = True,
+    **kwargs,
+) -> Tuple[GeoAxes, Any, Any]:
+    """
+    Plots a surface displacement: the vertical part in colour, the horizontal
+    part as arrows over it.
+
+    The arrows are regridded to a regular grid in the map's own projection,
+    so they are evenly spaced whatever the projection, and turned into its
+    directions. Their lengths are to one scale, shown by a key arrow beneath
+    the map. Without a horizontal part only the colours are drawn.
+
+    Args:
+        displacement: The displacement, as a `GRDResponse` holds it.
+        ax: Axes to draw on. A new Robinson map is made if omitted.
+        projection: The projection of the new map, when `ax` is omitted.
+        scale: A factor applied to both parts, to give them units; for a
+            non-dimensional displacement in millimetres, the length scale
+            in metres times 1000.
+        arrows: The number of arrows across the map, and down it.
+        key: The length of the key arrow, in the scaled units. A round
+            number near the largest horizontal displacement if omitted.
+        units: The units, for the key's label.
+        arrow_kwargs: Passed to `ax.quiver`, over the defaults of black
+            arrows pivoting at their middles and drawn to a scale at which
+            the longest is one arrow spacing, so that none overruns its
+            neighbours. A `scale` there sets the scale instead, in scaled
+            units per width of the axes.
+        symmetric: As for `plot`; the colour scale is centred on zero by
+            default, uplift and subsidence being of either sign.
+        **kwargs: Passed to `plot` for the vertical part.
+
+    Returns:
+        The axes, the colour mappable, and the quiver (None without a
+        horizontal part).
+    """
+    vertical = displacement.vertical_field() * scale
+    ax, mappable = plot(
+        vertical, ax=ax, projection=projection, symmetric=symmetric, **kwargs
+    )
+    if displacement.horizontal is None:
+        return ax, mappable, None
+
+    east, north = displacement.horizontal_fields()
+    lons, lats = np.meshgrid(east.lons(), east.lats())
+    # East and north are undefined at the poles; the rows there are dropped.
+    rows = np.abs(east.lats()) < 90.0
+    u = east.data[rows] * scale
+    v = north.data[rows] * scale
+    largest = float(np.max(np.hypot(u, v)))
+    quiver_kwargs = dict(color="black", pivot="middle", scale_units="width")
+    if largest > 0.0:
+        quiver_kwargs["scale"] = largest * arrows
+    quiver_kwargs.update(arrow_kwargs or {})
+    quiver = ax.quiver(
+        lons[rows],
+        lats[rows],
+        u,
+        v,
+        transform=ccrs.PlateCarree(),
+        regrid_shape=arrows,
+        **quiver_kwargs,
+    )
+    if key is None:
+        key = _round_down(largest)
+    if key > 0.0:
+        label = f"{key:g} {units}".strip()
+        ax.quiverkey(quiver, 0.9, -0.06, key, label, labelpos="E", coordinates="axes")
+    return ax, mappable, quiver
+
+
+def _round_down(value: float) -> float:
+    """The value rounded down to one significant figure."""
+    if value <= 0.0 or not np.isfinite(value):
+        return 0.0
+    power = 10.0 ** np.floor(np.log10(value))
+    return float(np.floor(value / power) * power)
 
 
 def plot_points(

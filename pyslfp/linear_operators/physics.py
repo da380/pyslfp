@@ -362,7 +362,7 @@ class FingerPrintOperator(LinearOperator[SHGrid, GRDResponse]):
 
     def _l2_adjoint_mapping_impl(self, response: GRDResponse) -> SHGrid:
         field = self._l2_field_space
-        sea_level_dual = field.from_components(response.sea_level_change)
+        sea_level_dual = field.from_components(response.relative_sea_level_change)
         displacement_dual = field.from_components(response.displacement.vertical)
         potential_dual = field.from_components(response.potential_change)
         angular_velocity_dual = (

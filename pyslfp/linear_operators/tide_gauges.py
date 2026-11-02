@@ -16,7 +16,7 @@ from pygeoinf import (
 )
 
 from pyslfp.data.downloader import ensure_data
-from pyslfp.core.response import SEA_LEVEL_CHANGE, GRDSpace
+from pyslfp.core.response import RELATIVE_SEA_LEVEL_CHANGE, GRDSpace
 from pyslfp.linear_operators.utils import check_response_space
 from pyslfp.linear_operators.physics import FingerPrintOperator
 
@@ -92,7 +92,9 @@ def tide_gauge_operator(
         points, route="dense"
     )
 
-    return point_evaluation_operator @ response_space.field_operator(SEA_LEVEL_CHANGE)
+    return point_evaluation_operator @ response_space.field_operator(
+        RELATIVE_SEA_LEVEL_CHANGE
+    )
 
 
 # ================================================================ #

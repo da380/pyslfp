@@ -11,12 +11,12 @@ from pyslfp.linear_operators.physics import lebesgue_load_space, sobolev_load_sp
 from pyslfp.linear_operators.loads import steric_sea_level_operator
 from pyslfp.models import (
     ICE_SURFACE_HEIGHT,
-    SEA_SURFACE_HEIGHT,
+    GEOCENTRIC_SEA_LEVEL,
     STERIC_SEA_LEVEL,
     LoadComponent,
     Role,
     barystatic_gmsl_operator,
-    dynamic_topography,
+    sterodynamic_sea_level,
     firn,
     glaciers,
     ice_sheets,
@@ -43,7 +43,7 @@ FACTORIES = {
     "glaciers": glaciers,
     "land_water_storage": land_water_storage,
     "firn": _firn,
-    "dynamic_topography": dynamic_topography,
+    "sterodynamic_sea_level": sterodynamic_sea_level,
     "ocean_density": ocean_density,
 }
 
@@ -52,7 +52,7 @@ ROLES = {
     "glaciers": Role.MASS_SOURCE,
     "land_water_storage": Role.MASS_SOURCE,
     "firn": Role.MASS_SOURCE,
-    "dynamic_topography": Role.OCEAN_INTERNAL,
+    "sterodynamic_sea_level": Role.OCEAN_INTERNAL,
     "ocean_density": Role.OCEAN_INTERNAL,
 }
 
@@ -75,7 +75,7 @@ def _spaces(state, kind):
 POINTWISE = {
     "ice_sheets": ICE_SURFACE_HEIGHT,
     "firn": ICE_SURFACE_HEIGHT,
-    "dynamic_topography": SEA_SURFACE_HEIGHT,
+    "sterodynamic_sea_level": GEOCENTRIC_SEA_LEVEL,
 }
 
 
@@ -208,7 +208,7 @@ def test_barystatic_gmsl_is_the_bathtub_answer(
     np.testing.assert_allclose(got, expected, rtol=1e-10, atol=0.0)
 
 
-@pytest.mark.parametrize("factory", ["dynamic_topography", "ocean_density"])
+@pytest.mark.parametrize("factory", ["sterodynamic_sea_level", "ocean_density"])
 def test_ocean_internal_components_have_no_barystatic_change(state, factory):
     load_space, _ = _spaces(state, "lebesgue")
     with pytest.raises(ValueError, match="not a mass source"):
@@ -216,15 +216,16 @@ def test_ocean_internal_components_have_no_barystatic_change(state, factory):
 
 
 def test_direct_contributions(state):
-    """Dynamic topography adds itself, unmasked, to the sea surface height,
+    """The sterodynamic sea level change adds itself, unmasked, to the
+    geocentric sea level,
     and the density change contributes its steric sea level."""
     load_space, _ = _spaces(state, "lebesgue")
     field = load_space.random(rng=np.random.default_rng(2))
 
-    eta = dynamic_topography(state, load_space)
-    assert set(eta.observables) == {SEA_SURFACE_HEIGHT}
+    eta = sterodynamic_sea_level(state, load_space)
+    assert set(eta.observables) == {GEOCENTRIC_SEA_LEVEL}
     np.testing.assert_array_equal(
-        eta.observables[SEA_SURFACE_HEIGHT](field).data, field.data
+        eta.observables[GEOCENTRIC_SEA_LEVEL](field).data, field.data
     )
 
     rho = ocean_density(state, load_space)
@@ -255,7 +256,7 @@ def test_component_and_observable_spaces_must_share_the_load_grid(state):
     with pytest.raises(ValueError, match="grid"):
         ice_sheets(state, load_space, space=coarser)
     with pytest.raises(ValueError, match="grid"):
-        dynamic_topography(state, load_space, observable_space=coarser)
+        sterodynamic_sea_level(state, load_space, observable_space=coarser)
 
 
 def test_record_checks_its_operators(state):

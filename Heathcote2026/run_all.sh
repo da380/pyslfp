@@ -132,14 +132,14 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 4. Common arguments
+# 4. Arguments
 # ---------------------------------------------------------------------------
+# Each array below goes only to the scripts that accept every option in it.
 
 # Shared by all five scripts (identical names and defaults everywhere).
 COMMON=(
     --lmax "$LMAX"
-    --load-order 2.0
-    --load-scale-km 500.0    
+    --load-scale-km 500.0
     --prior-order 3.0
     --prior-shift 0.0
 )
@@ -150,9 +150,18 @@ OBS_DEGREE=(--obs-degree "$OBS_DEGREE_VAL")
 # Preconditioner truncation: altimetry_inversion, joint_inversion only.
 SURROGATE=(--surrogate-degree 32)
 
-# Altimetry-side model priors: altimetry_bias, altimetry_inversion,
-# joint_inversion (identical names and defaults in all three).
-ALT_PRIOR=(
+# Tolerance of the solves that push the posterior covariance onto the
+# quantities of interest, the estimator kernels and the covariance maps:
+# grace_inversion, altimetry_inversion, joint_inversion. The posterior
+# expectation and samples keep the scripts' own tolerance.
+QOI=(--qoi-rtol 1e-6)
+
+# Ocean model and prior: altimetry_bias, altimetry_inversion,
+# joint_inversion (identical names and defaults in all three). The fields
+# lie in H^2; the loads, discontinuous at the supports' edges, in H^(1/4).
+OCEAN_PRIOR=(
+    --field-order 2.0
+    --load-order 0.25
     --spacing "$SPACING"
     --ice-scale-factor 1.0
     --gmsl-bary-steric-ratio 1.7
@@ -164,8 +173,8 @@ ALT_PRIOR=(
     --ocean-corr-scale-factor 0.4
 )
 
-# Altimetry noise: same numbers, but joint_inversion prefixes the flags
-# with "alt-". Single source of truth here keeps the runs consistent.
+# Altimetry noise: the same numbers, but joint_inversion prefixes the flags
+# with "alt-".
 ALT_NOISE_STD=0.5
 ALT_NOISE_CORR_STD=0.01
 ALT_NOISE_CORR_SCALE=4.0
@@ -181,14 +190,15 @@ JOINT_ALT_NOISE=(
     --alt-noise-corr-scale-factor "$ALT_NOISE_CORR_SCALE"
 )
 
-# GRACE-family prior/noise parameterisation: grace_bias, grace_inversion.
-# The noise exponent and amplitude are solved from the amplitude SNR at
-# degree 2 and the degree where the spectral SNR crosses one (against the
-# direct load prior); the solved exponent and the implied pointwise and
-# observation-band stds are printed. 
+# GRACE prior and noise: grace_bias, grace_inversion. The model is the direct
+# load, in H^2. The noise order and amplitude are solved from the amplitude
+# SNR at degree 2 and the degree where the SNR crosses one, against the
+# direct-load prior; the solved order and the implied pointwise and
+# observation-band stds are printed.
 # Optional: --smoothing-scale-km <km> [defaults to --load-scale-km],
 # --remove-degree-1.
 GRACE_PRIOR=(
+    --load-order 2.0
     --direct-scale-km 250
     --direct-std-m 0.01
     --noise-scale-factor 0.5
@@ -196,10 +206,8 @@ GRACE_PRIOR=(
     --snr-crossover-degree 64
 )
 
-# joint_inversion's own GRACE noise parameterisation (deliberately
-# independent of GRACE_PRIOR above). The SNR conditions are stated
-# against the UNMASKED ice-load marginal, the dominant load; the solved
-# exponent is printed. 
+# joint_inversion's GRACE noise, solved by the same two conditions against
+# the ice load, rho_i times the ice thickness change.
 JOINT_GRACE_NOISE=(
     --grace-noise-scale-km 250.0
     --grace-snr-low-degree 10.0
@@ -212,8 +220,8 @@ JOINT_GRACE_NOISE=(
 ALTIMETRY_BIAS_EXTRA=(--plot-maps)  # e.g. --samples 1000
 GRACE_BIAS_EXTRA=(--plot-maps)      # e.g. --samples 1000
 ALTIMETRY_INV_EXTRA=(--all)         # e.g. --std-samples 100
-GRACE_INV_EXTRA=(--all)             # e.g. --prior-sensitivity
-JOINT_INV_EXTRA=(--all --std-samples 100)             # e.g. --map-all-cases --std-samples 100
+GRACE_INV_EXTRA=(--all --std-samples 100) # e.g. --prior-sensitivity
+JOINT_INV_EXTRA=(--all --std-samples 100) # e.g. --map-all-cases
 
 # ---------------------------------------------------------------------------
 # 5. Run
@@ -237,23 +245,23 @@ for s in "${SCRIPTS[@]}"; do
             ${GRACE_BIAS_EXTRA[@]+"${GRACE_BIAS_EXTRA[@]}"}
         ;;
     altimetry_bias)
-        run "$s" "${COMMON[@]}" "${ALT_PRIOR[@]}" "${ALT_NOISE[@]}" \
+        run "$s" "${COMMON[@]}" "${OCEAN_PRIOR[@]}" "${ALT_NOISE[@]}" \
             ${PAR_ARGS[@]+"${PAR_ARGS[@]}"} \
             ${ALTIMETRY_BIAS_EXTRA[@]+"${ALTIMETRY_BIAS_EXTRA[@]}"}
         ;;
     grace_inversion)
-        run "$s" "${COMMON[@]}" "${OBS_DEGREE[@]}" "${GRACE_PRIOR[@]}" \
+        run "$s" "${COMMON[@]}" "${OBS_DEGREE[@]}" "${GRACE_PRIOR[@]}" "${QOI[@]}" \
             ${PAR_ARGS[@]+"${PAR_ARGS[@]}"} \
             ${GRACE_INV_EXTRA[@]+"${GRACE_INV_EXTRA[@]}"}
         ;;
     altimetry_inversion)
-        run "$s" "${COMMON[@]}" "${SURROGATE[@]}" "${ALT_PRIOR[@]}" "${ALT_NOISE[@]}" \
+        run "$s" "${COMMON[@]}" "${SURROGATE[@]}" "${OCEAN_PRIOR[@]}" "${ALT_NOISE[@]}" "${QOI[@]}" \
             ${PAR_ARGS[@]+"${PAR_ARGS[@]}"} \
             ${ALTIMETRY_INV_EXTRA[@]+"${ALTIMETRY_INV_EXTRA[@]}"}
         ;;
     joint_inversion)
         run "$s" "${COMMON[@]}" "${SURROGATE[@]}" "${OBS_DEGREE[@]}" \
-            "${ALT_PRIOR[@]}" "${JOINT_ALT_NOISE[@]}" "${JOINT_GRACE_NOISE[@]}" \
+            "${OCEAN_PRIOR[@]}" "${JOINT_ALT_NOISE[@]}" "${JOINT_GRACE_NOISE[@]}" "${QOI[@]}" \
             ${PAR_ARGS[@]+"${PAR_ARGS[@]}"} \
             ${JOINT_INV_EXTRA[@]+"${JOINT_INV_EXTRA[@]}"}
         ;;

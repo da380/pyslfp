@@ -8,7 +8,7 @@ the documentation, each entry giving the old form and the new.
 ## Breaking changes so far
 
 - **pygeoinf 2.** The spaces, operators and measures pyslfp returns are
-  pygeoinf 2 objects; the minimum versions are `pygeoinf>=2.1.1` and
+  pygeoinf 2 objects; the minimum versions are `pygeoinf>=2.1.2` and
   `planetmodel>=1.4.1`. The name map is in
   [pygeoinf_v2_port.md](pygeoinf_v2_port.md).
 - **The fingerprint operator's response.** `FingerPrintOperator` maps a load
@@ -16,11 +16,16 @@ the documentation, each entry giving the old form and the new.
   tuple (sea level, displacement, potential, angular velocity) of a
   `DirectSum`. Old: `slc, disp, gpc, omega = fingerprint(load)`,
   `codomain.projection(0)`, `codomain.subspace(0)`. New:
-  `response.field("sea_level_change")`, `codomain.field_operator(...)`,
+  `response.field("relative_sea_level_change")`, `codomain.field_operator(...)`,
   `codomain.projection("angular_velocity_change")`, `codomain.field_space`.
   The angular velocity change is a member only with rotational feedback.
   `lebesgue_response_space` and `sobolev_response_space` return a `GRDSpace`,
   and `check_response_space` checks for one.
+- **Terms.** The names follow Gregory et al. (2019), with no aliases for the
+  old ones. `sea_surface_height_operator` is `geocentric_sea_level_operator`.
+  The relative sea level change is `relative_sea_level_change` wherever it is
+  named: the response's member and `RELATIVE_SEA_LEVEL_CHANGE`, and the
+  viscoelastic snapshots' field (old: `sea_level_change`).
 - **The Caspian.** `EarthState(exclude_caspian=...)` becomes
   `EarthState(land=...)`, a mask held as land whatever the flotation, default
   none; the `exclude_caspian` property becomes `land`.
@@ -48,7 +53,7 @@ the documentation, each entry giving the old form and the new.
 The models submodule (`pyslfp.models`), with its ready-made set-ups and the
 diagnostics through the sea level equation (`gmsl`, `regional_decomposition`);
 horizontal displacement and the
-response classes; the water bodies (`pyslfp.core.water_bodies`) and the GTN-G
+response classes, with `plot_displacement` (arrows over colour); the water bodies (`pyslfp.core.water_bodies`) and the GTN-G
 regions; the RGI 7.0 glaciers; Stokes coefficients for GRACE
 (`convention="stokes"`); `prem_maxwell`, `maxwell_mantle` and
 `viscoelastic_earth`; `EarthModel.integration_weights`.
@@ -58,8 +63,6 @@ regions; the RGI 7.0 glaciers; Stokes coefficients for GRACE
 - The viscoelastic side of the response: snapshots holding a `GRDResponse`,
   the horizontal memory field, the adjoints; GNSS observation models with the
   frame of the data ([response_plan.md](response_plan.md), packages 5 and 6).
-- WP3 of the models submodule: new simplified scripts in place of
-  `Heathcote2026/` ([models_plan.md](models_plan.md)).
 - The deprecations: the wrappers in `linear_operators/utils.py`
   (`l2_products_operator`, `spatial_multiplication_operator`) and the
   altimetry observation models the models plan replaces, removed or kept as

@@ -40,7 +40,7 @@ from .tide_gauges import (
 from .altimetry import (
     ocean_altimetry_points,
     ice_altimetry_points,
-    sea_surface_height_operator,
+    geocentric_sea_level_operator,
     altimetry_point_operator,
     altimetry_averaging_operator,
     JointAltimetryObservationModel,
@@ -101,7 +101,7 @@ __all__ = [
     # .altimetry
     "ocean_altimetry_points",
     "ice_altimetry_points",
-    "sea_surface_height_operator",
+    "geocentric_sea_level_operator",
     "altimetry_point_operator",
     "altimetry_averaging_operator",
     "AltimetryObservationModel",

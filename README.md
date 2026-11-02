@@ -83,7 +83,7 @@ direct_load = sle.state.west_antarctic_load(fraction=0.1)
 
 # Sea level change, vertical displacement, potential change, and the angular
 # velocity change (polar wander and length of day).
-sea_level_change, displacement, potential_change, angular_velocity_change = (
+relative_sea_level_change, displacement, potential_change, angular_velocity_change = (
     sle.solve_sea_level_equation(direct_load)
 )
 
@@ -91,7 +91,7 @@ sea_level_change, displacement, potential_change, angular_velocity_change = (
 metre = sle.state.model.parameters.length_scale
 fig, ax = sl.create_map_figure(figsize=(12, 6))
 sl.plot(
-    sea_level_change * sle.state.ocean_projection() * metre,
+    relative_sea_level_change * sle.state.ocean_projection() * metre,
     ax=ax,
     colorbar_kwargs={"label": "Sea level change (m)"},
 )
@@ -229,7 +229,7 @@ costs and the details.
 | `love_numbers/` | `LoveNumbers` and the radial spectral-element solver that computes them from any `planetmodel` model. |
 | `linear_operators/` | The elastic physics as `pygeoinf` operators, spatial projections and averages, load mappings, and the tide gauge, altimetry and GRACE observation models. |
 | `ice/` | The ice model interfaces, `IceNG` for the ICE-5G, ICE-6G and ICE-7G histories, `AnalyticalIceModel` for testing, and export to `planetmodel` surface histories. |
-| `models/` | Model spaces for inversions: named load components (ice sheets, glaciers, land water, firn, dynamic topography, ocean density) and `ModelSetup`, which assembles them with their loads, observables and constraints. |
+| `models/` | Model spaces for inversions: named load components (ice sheets, glaciers, land water, firn, sterodynamic sea level, ocean density) and `ModelSetup`, which assembles them with their loads, observables and constraints. |
 | `plotting/` | Plotting of `pyshtools.SHGrid` fields on Cartopy projections. |
 | `data/` | Location and retrieval of the external datasets. |
 

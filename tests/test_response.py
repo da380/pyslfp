@@ -14,7 +14,7 @@ from pyslfp.core.response import (
     ANGULAR_VELOCITY_CHANGE,
     DISPLACEMENT,
     POTENTIAL_CHANGE,
-    SEA_LEVEL_CHANGE,
+    RELATIVE_SEA_LEVEL_CHANGE,
     GRDSpace,
     SurfaceDisplacementSpace,
 )
@@ -68,7 +68,7 @@ def test_response_space_axioms(state, horizontal, rotation):
         rebuild=lambda: GRDSpace(field_space, horizontal=horizontal, rotation=rotation),
     )
     check_coordinates(space, rng=rng)
-    expected = (SEA_LEVEL_CHANGE, DISPLACEMENT, POTENTIAL_CHANGE) + (
+    expected = (RELATIVE_SEA_LEVEL_CHANGE, DISPLACEMENT, POTENTIAL_CHANGE) + (
         (ANGULAR_VELOCITY_CHANGE,) if rotation else ()
     )
     assert space.names == expected
@@ -139,7 +139,13 @@ def test_point_evaluation_passes_the_adjoint_check(state, kind, directions):
 
 
 @pytest.mark.parametrize(
-    "name", [SEA_LEVEL_CHANGE, DISPLACEMENT, POTENTIAL_CHANGE, ANGULAR_VELOCITY_CHANGE]
+    "name",
+    [
+        RELATIVE_SEA_LEVEL_CHANGE,
+        DISPLACEMENT,
+        POTENTIAL_CHANGE,
+        ANGULAR_VELOCITY_CHANGE,
+    ],
 )
 def test_projections_and_inclusions_are_adjoint(state, name):
     space = GRDSpace(_field_space(state, "sobolev"), horizontal=True)
@@ -176,7 +182,7 @@ def test_the_solver_coefficients_make_a_response(state):
         angular_velocity_change=solution.angular_velocity_change,
     )
     for name, grid in zip(
-        (SEA_LEVEL_CHANGE, DISPLACEMENT, POTENTIAL_CHANGE), grids[:3]
+        (RELATIVE_SEA_LEVEL_CHANGE, DISPLACEMENT, POTENTIAL_CHANGE), grids[:3]
     ):
         got = response.field(name).data
         np.testing.assert_allclose(

@@ -125,7 +125,7 @@ site_dual = (metre / earth_model.integrate(patch)) * patch
 window = dates[dates <= 4.0 + 1e-9]
 series = np.array(
     [
-        earth_model.integrate(site_dual * snap.sea_level_change)
+        earth_model.integrate(site_dual * snap.relative_sea_level_change)
         for snap in snapshots
         if snap.date <= 4.0 + 1e-9
     ]

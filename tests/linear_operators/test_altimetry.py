@@ -12,7 +12,7 @@ from pyslfp.linear_operators.physics import FingerPrintOperator
 from pyslfp.linear_operators.altimetry import (
     ocean_altimetry_points,
     ice_altimetry_points,
-    sea_surface_height_operator,
+    geocentric_sea_level_operator,
     altimetry_point_operator,
     AltimetryObservationModel,
     JointAltimetryObservationModel,
@@ -95,13 +95,13 @@ def test_ice_altimetry_points(testing_state):
 def test_sea_surface_height_operator(fingerprint_operator, remove_rot):
     """
     Tests the operator that collapses the 4-component physical response
-    into a single Sea Surface Height anomaly field.
+    into a single geocentric sea level change.
     """
     response_space = fingerprint_operator.codomain
     state = fingerprint_operator.state
     b = state.model.parameters.mean_sea_floor_radius
 
-    A = sea_surface_height_operator(
+    A = geocentric_sea_level_operator(
         state, response_space, remove_rotational_contribution=remove_rot
     )
 
@@ -122,7 +122,7 @@ def test_sea_surface_height_operator(fingerprint_operator, remove_rot):
 @pytest.mark.parametrize("remove_rot", [True, False])
 def test_altimetry_point_operator(fingerprint_operator, sample_points, remove_rot):
     """
-    Tests the adjoint of SSH field calculation combined with point evaluation.
+    Tests the adjoint of the geocentric sea level combined with point evaluation.
     """
     response_space = fingerprint_operator.codomain
     state = fingerprint_operator.state
@@ -151,7 +151,7 @@ def test_altimetry_point_operator(fingerprint_operator, sample_points, remove_ro
 
 def test_altimetry_observation_model_adjoint(fingerprint_operator, sample_points):
     """
-    Rigorously tests the full Ice -> Load -> SLE -> SSH -> Points adjoint chain.
+    Rigorously tests the full Ice -> Load -> SLE -> geocentric sea level -> Points adjoint chain.
     """
     model = AltimetryObservationModel(
         fingerprint_operator, sample_points, remove_rotational_contribution=True
@@ -174,7 +174,7 @@ def test_altimetry_observation_model_adjoint(fingerprint_operator, sample_points
 
 def test_joint_altimetry_observation_model_adjoint(fingerprint_operator, sample_points):
     """
-    Rigorously tests the Joint [Ice, Ocean] -> Load -> SLE -> SSH -> Points chain.
+    Rigorously tests the Joint [Ice, Ocean] -> Load -> SLE -> geocentric sea level -> Points chain.
     """
     model = JointAltimetryObservationModel(
         fingerprint_operator, sample_points, remove_rotational_contribution=True

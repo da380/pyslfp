@@ -14,7 +14,8 @@ import cartopy.crs as ccrs
 from matplotlib.contour import QuadContourSet
 
 from pyshtools import SHCoeffs
-from pyslfp.plotting import plot, create_map_figure, plot_coastline
+from pyslfp.linear_operators import FingerPrintOperator
+from pyslfp.plotting import plot, create_map_figure, plot_coastline, plot_displacement
 
 
 @pytest.fixture(scope="module")
@@ -117,3 +118,42 @@ def test_plot_coastline_smoke_test(sample_grid):
     finally:
         if fig:
             plt.close(fig)
+
+
+# ==================================================================== #
+#                         Surface displacement                         #
+# ==================================================================== #
+
+
+@pytest.fixture(scope="module")
+def displacements():
+    """The displacement under a West Antarctic load, with and without its
+    horizontal part."""
+    with_horizontal = FingerPrintOperator.from_defaults(lmax=16, horizontal=True)
+    load = with_horizontal.state.west_antarctic_load(fraction=0.1)
+    without = FingerPrintOperator.from_defaults(lmax=16)
+    return with_horizontal(load).displacement, without(load).displacement
+
+
+def test_plot_displacement_draws_arrows_over_colours(displacements):
+    full, _ = displacements
+    fig, ax = create_map_figure()
+    ax, mappable, quiver = plot_displacement(full, ax=ax, scale=1000.0, units="mm")
+    assert mappable is not None
+    assert quiver is not None
+    # The longest arrow is one spacing: the scale is the largest horizontal
+    # displacement times the number of arrows across.
+    east, north = full.horizontal_fields()
+    rows = np.abs(east.lats()) < 90.0
+    largest = np.max(np.hypot(east.data[rows], north.data[rows])) * 1000.0
+    assert quiver.scale == pytest.approx(largest * 30)
+    plt.close(fig)
+
+
+def test_plot_displacement_without_horizontal_part(displacements):
+    _, vertical_only = displacements
+    fig, ax = create_map_figure()
+    _, mappable, quiver = plot_displacement(vertical_only, ax=ax)
+    assert mappable is not None
+    assert quiver is None
+    plt.close(fig)

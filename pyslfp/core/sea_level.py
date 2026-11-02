@@ -55,7 +55,7 @@ class _Solution(NamedTuple):
     model's normalisation, with the sea level change also on the grid; the
     horizontal displacement potential V is None unless asked for."""
 
-    sea_level_change: np.ndarray
+    relative_sea_level_change: np.ndarray
     sea_level_lm: np.ndarray
     displacement_lm: np.ndarray
     potential_lm: np.ndarray
@@ -445,7 +445,9 @@ class SeaLevelEquation:
         )
         grid = self._model.grid
         return (
-            SHGrid.from_array(solution.sea_level_change, grid=grid, copy=False),
+            SHGrid.from_array(
+                solution.relative_sea_level_change, grid=grid, copy=False
+            ),
             SHGrid.from_array(
                 self._synthesise(solution.displacement_lm), grid=grid, copy=False
             ),
@@ -563,7 +565,7 @@ class SeaLevelEquation:
         if not loads_present or not non_zero_rhs:
             zero_lm = np.zeros_like(model.zero_grid().expand().coeffs)
             return _Solution(
-                sea_level_change=np.zeros_like(model.zero_grid().data),
+                relative_sea_level_change=np.zeros_like(model.zero_grid().data),
                 sea_level_lm=zero_lm,
                 displacement_lm=zero_lm.copy(),
                 potential_lm=zero_lm.copy(),
@@ -649,10 +651,10 @@ class SeaLevelEquation:
         count = 0
 
         while count < iter_limit:
-            sea_level_change, angular_velocity_change, sea_level_lm = (
+            relative_sea_level_change, angular_velocity_change, sea_level_lm = (
                 sea_level_from_load(load_lm)
             )
-            ocean_slc = ocean_function * sea_level_change
+            ocean_slc = ocean_function * relative_sea_level_change
 
             if ocean_slc_prev is not None:
                 scale = np.max(np.abs(ocean_slc))
@@ -704,7 +706,7 @@ class SeaLevelEquation:
                 horizontal_lm[:, 2, :2] += self._lt2 * centrifugal
 
         return _Solution(
-            sea_level_change=sea_level_change,
+            relative_sea_level_change=relative_sea_level_change,
             sea_level_lm=sea_level_lm,
             displacement_lm=displacement_lm,
             potential_lm=potential_lm,

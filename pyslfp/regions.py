@@ -540,20 +540,30 @@ class Regions:
         region_names: Optional[Union[str, List[str]]],
         **kwargs,
     ) -> Any:
-        """Internal helper to filter and plot GeoDataFrame boundaries."""
+        """Internal helper to filter and plot GeoDataFrame boundaries.
+
+        The merged boundary is handed to cartopy as a geometry, which
+        projects it into the axes' projection once and reuses the result
+        each time the figure is drawn. Drawn as a collection of paths
+        instead, every vertex of these detailed coastlines would be
+        projected again at every draw, and a figure with constrained layout
+        is drawn several times. Returns the axes.
+        """
         if region_names is not None:
             gdf = gdf[gdf[name_column].isin(np.atleast_1d(region_names))]
 
-        merged_geom = gdf.geometry.unary_union
-        merged_series = gpd.GeoSeries([merged_geom], crs=gdf.crs)
+        boundary = gdf.geometry.union_all().boundary
 
         kwargs.pop("line_kws", None)
+        if "color" in kwargs:
+            kwargs.setdefault("edgecolor", kwargs.pop("color"))
         kwargs.setdefault("edgecolor", "black")
         kwargs.setdefault("linewidth", 1.0)
 
-        return merged_series.boundary.plot(
-            ax=ax, transform=ccrs.PlateCarree(), aspect=None, **kwargs
+        ax.add_geometries(
+            [boundary], crs=ccrs.PlateCarree(), facecolor="none", **kwargs
         )
+        return ax
 
     def plot_ar6_boundaries(
         self,

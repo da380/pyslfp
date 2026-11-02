@@ -13,13 +13,18 @@ from pyslfp.linear_operators.physics import (
     lebesgue_load_space,
     sobolev_load_space,
 )
+import pyshtools as sh
+from planetmodel import units
 from pygeoinf.symmetric_space.sphere import Lebesgue
 
 from pyslfp.linear_operators.spatial import ice_projection_operator
 from pyslfp.linear_operators.grace import (
     grace_observation_operator,
+    stokes_coefficient_operator,
     GraceObservationModel,
     WMBMethod,
+    GRACE_GRAVITATIONAL_PARAMETER,
+    GRACE_REFERENCE_RADIUS,
 )
 
 
@@ -84,12 +89,15 @@ def test_grace_observation_operator_adjoint(fingerprint_operator):
     )
 
 
-def test_grace_observation_model_adjoint(fingerprint_operator):
+@pytest.mark.parametrize("convention", ["orthonormal", "stokes"])
+def test_grace_observation_model_adjoint(fingerprint_operator, convention):
     """
     Tests the full composite forward operator mapping from Mass Load
     straight to GRACE potential coefficients.
     """
-    model = GraceObservationModel(fingerprint_operator, 10, min_obs_degree=2)
+    model = GraceObservationModel(
+        fingerprint_operator, 10, min_obs_degree=2, convention=convention
+    )
     A = model.forward_operator
 
     domain_measure = fingerprint_operator.load_measure_for_testing()
@@ -301,3 +309,105 @@ def test_wmb_observation_measure_refuses_non_invariant(testing_state):
 
     with pytest.raises(TypeError, match="invariant"):
         wmb.load_measure_to_observation_measure(restricted)
+
+
+# ==================================================================== #
+#                  4. Stokes Coefficients                              #
+# ==================================================================== #
+
+
+def test_stokes_coefficients_match_pyshtools(fingerprint_operator):
+    """
+    Stokes coefficients recovered from a potential that pyshtools
+    synthesises from them. pyshtools evaluates the geodetic potential
+    V = (GM/r) sum (a/r)^l (C cos + S sin) P_lm, with fully normalised
+    harmonics, on the sphere of radius b; pyslfp's potential is -V. The
+    test covers the normalisation, the sign, GM / a, the upward
+    continuation and the placing of the sine terms at negative orders.
+
+    pyshtools always includes the degree-0 term GM/r, so the synthesised
+    potential carries its rounding, about 1e-16 of GM/b, which bounds the
+    agreement. The coefficients are taken large for that reason; the map is
+    linear, and the tolerance still separates reference radii that differ
+    in the eighth figure.
+    """
+    model = fingerprint_operator.model
+    response_space = fingerprint_operator.codomain
+    field_space = response_space.subspace(2)
+    scales = model.parameters.scales
+    max_degree = 10
+
+    rng = np.random.default_rng(5)
+    cilm = np.zeros((2, max_degree + 1, max_degree + 1))
+    for l in range(2, max_degree + 1):
+        cilm[0, l, : l + 1] = 1e-6 * rng.standard_normal(l + 1)
+        cilm[1, l, 1 : l + 1] = 1e-6 * rng.standard_normal(l)
+
+    b_si = model.parameters.mean_sea_floor_radius * scales.factor(units.LENGTH)
+    geopotential = sh.SHGravCoeffs.from_array(
+        cilm,
+        gm=GRACE_GRAVITATIONAL_PARAMETER,
+        r0=GRACE_REFERENCE_RADIUS,
+        normalization="4pi",
+        csphase=1,
+    ).expand(
+        a=b_si,
+        f=0.0,
+        lmax=field_space.lmax,
+        sampling=1,
+        extend=True,
+        normal_gravity=False,
+    )
+    potential_scale = scales.factor(units.Dimensions(length=2, time=-2))
+    phi = sh.SHGrid.from_array(-geopotential.pot.data / potential_scale, grid="DH")
+
+    A = stokes_coefficient_operator(model, max_degree) @ grace_observation_operator(
+        response_space, max_degree
+    )
+    response = (field_space.zero(), field_space.zero(), phi, np.zeros(3))
+    recovered = A(response)
+
+    expected = np.array(
+        [
+            cilm[0, l, m] if m >= 0 else cilm[1, l, -m]
+            for l, m in _observed_labels(2, max_degree)
+        ]
+    )
+    np.testing.assert_allclose(
+        recovered, expected, rtol=0.0, atol=1e-8 * np.max(np.abs(expected))
+    )
+
+
+def test_wmb_stokes_convention(testing_state):
+    """The WMB operators in the Stokes convention are the orthonormal ones
+    followed by the conversion, and the observation measure scales with
+    the square of the conversion."""
+    model = testing_state.model
+    b = model.parameters.mean_sea_floor_radius
+    load_space = lebesgue_load_space(model)
+
+    plain = WMBMethod(model, 8)
+    stokes = WMBMethod(model, 8, convention="stokes")
+    conversion = stokes_coefficient_operator(model, 8)
+
+    load = load_space.random(rng=np.random.default_rng(6))
+    np.testing.assert_allclose(
+        stokes.load_to_potential_coefficient_operator(load_space)(load),
+        conversion(plain.load_to_potential_coefficient_operator(load_space)(load)),
+        rtol=1e-12,
+        atol=0.0,
+    )
+
+    prior = load_space.heat_measure(0.3 * b)
+    np.testing.assert_allclose(
+        stokes.load_measure_to_observation_measure(prior).covariance.diagonals()[0],
+        conversion.eigenvalues**2
+        * plain.load_measure_to_observation_measure(prior).covariance.diagonals()[0],
+        rtol=1e-12,
+        atol=0.0,
+    )
+
+
+def test_unknown_convention_is_refused(testing_state):
+    with pytest.raises(ValueError, match="convention"):
+        WMBMethod(testing_state.model, 8, convention="geodetic")

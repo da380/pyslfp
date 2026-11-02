@@ -272,42 +272,51 @@ scales it degree by degree; see §2.6.
 7. Tutorials 04 and 05, then regenerate their notebooks.
 8. The Heathcote2026 scripts, later, against this map.
 
-## 5. Follow-on: GRACE output as Stokes coefficients
+## 5. GRACE output as Stokes coefficients
 
-An option for the GRACE operators to return what Level-2 products and
-ICGEM files publish: dimensionless Stokes coefficients ΔC̄_lm, ΔS̄_lm. The
-geopotential is written as
+The GRACE operators can return what Level-2 products and ICGEM files
+publish: dimensionless Stokes coefficients ΔC̄_lm, ΔS̄_lm. Those products
+write the geopotential as
 
     V(r, θ, λ) = (GM/a) Σ_l (a/r)^(l+1) Σ_m P̄_lm(cos θ) (C̄_lm cos mλ + S̄_lm sin mλ).
 
-The operator's current output is the coefficient Φ_lm of pyslfp's potential
-change on the sphere of radius b, orthonormal on the unit sphere and in
-pyslfp's units. It differs from ΔC̄_lm in four ways:
+The default output is the coefficient Φ_lm of pyslfp's potential change on
+the sphere of radius b, orthonormal on the unit sphere and in pyslfp's
+units. It differs from ΔC̄_lm in four ways:
 
-1. **Normalisation.** Geodesy's "fully normalised" harmonics satisfy
-   ∫ Ȳ_lm² dΩ = 4π, which is pyshtools' `"4pi"`, against `"ortho"`'s 1. A
-   coefficient therefore divides by √(4π). Schmidt semi-normalisation
-   (∫ Y² dΩ = 4π/(2l+1)) is the geomagnetic convention, not the geodetic
-   one. Check this against a product header when this is built.
-2. **Sign.** pyslfp's potential is Φ = −G ∫ ρ/|x − x′| dV′, negative near
-   added mass. The geodetic V is positive.
+1. **Normalisation.** "Fully normalised" harmonics have mean square one
+   over the sphere, pyshtools' `"4pi"`, against `"ortho"`'s
+   ∫ Y_lm² dΩ = 1, so a coefficient divides by √(4π). ICGEM files take
+   `norm fully_normalized` by default (ICGEM format, 2023), GRACE Level-2
+   headers state "fully normalized", and pyshtools reads ICGEM files as
+   `"4pi"`, without the Condon-Shortley phase. Schmidt semi-normalisation
+   is the geomagnetic convention.
+2. **Sign.** pyslfp's potential is negative near added mass; the geodetic
+   V is positive, with C̄_00 = 1 giving V = GM/r.
 3. **Units.** Stokes coefficients are dimensionless: divide by GM/a. The
-   result is then also independent of pyslfp's non-dimensional scales.
+   result does not depend on pyslfp's units.
 4. **Radius.** The coefficients refer to the product's reference radius a,
-   6378136.3 m for the CSR, GFZ and JPL releases, while pyslfp's potential
-   is on r = b. Upward continuation gives a factor (b/a)^(l+1), which
-   depends on degree: about 0.91 at degree 60. This factor is not small.
+   while pyslfp's potential is on r = b. Upward continuation gives a
+   factor (b/a)^(l+1): about 0.91 at degree 60.
 
 Together:
 
-    ΔC̄_lm = −(a / GM) (b/a)^(l+1) Φ_lm / √(4π).
+    ΔC̄_lm = −(a / GM) (b/a)^(l+1) Φ_lm / √(4π),
 
-Here a and GM are the product's constants, so they are parameters rather
-than pyslfp's own. Negative m in the component ordering corresponds to
-S̄_l|m|, so no reordering is needed.
+with ΔS̄_l|m| at the negative orders, so no reordering is needed.
 
-The conversion is one diagonal operator, one value per degree, applied
-after the existing output. The WMB operator and the GRACE prior
-push-forward pick it up by composition, as do the errors pushed forward to
-synthetic data. In 3.1.0 it is opt-in, through a convention keyword, and the
-default stays as it is.
+`stokes_coefficient_operator` is this diagonal operator. `GraceObservationModel`
+and `WMBMethod` take `convention="stokes"`, with `gravitational_parameter`
+and `reference_radius` in SI. The defaults are GM = 3.986004415e14 m³ s⁻²
+and a = 6378136.3 m, those of GGM05C, to which the CSR and JPL releases
+refer; GFZ's EIGEN-based releases use a = 6378136.46 m. These are not yet
+checked against a CSR or JPL file header, and a product's header gives
+its own. In `WMBMethod` the
+conversion is folded into the per-degree scaling, so its operators, its
+observation measure and its preconditioner all follow. The default
+convention is unchanged.
+
+A test synthesises the geopotential with pyshtools from chosen Stokes
+coefficients, evaluates it on r = b, and recovers them through the GRACE
+operator. It fails if the sign is flipped or if GFZ's reference radius is
+used against CSR's.

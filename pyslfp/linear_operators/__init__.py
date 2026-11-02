@@ -55,7 +55,14 @@ from .loads import (
     joint_ice_ocean_to_load_operator,
 )
 
-from .grace import grace_observation_operator, GraceObservationModel, WMBMethod
+from .grace import (
+    grace_observation_operator,
+    stokes_coefficient_operator,
+    GraceObservationModel,
+    WMBMethod,
+    GRACE_GRAVITATIONAL_PARAMETER,
+    GRACE_REFERENCE_RADIUS,
+)
 
 
 __all__ = [
@@ -106,6 +113,9 @@ __all__ = [
     "joint_ice_ocean_to_load_operator",
     # .grace
     "grace_observation_operator",
+    "stokes_coefficient_operator",
+    "GRACE_GRAVITATIONAL_PARAMETER",
+    "GRACE_REFERENCE_RADIUS",
     "GraceObservationModel",
     "WMBMethod",
 ]

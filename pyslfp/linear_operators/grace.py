@@ -7,6 +7,10 @@ gravitational potential changes:
 1. GraceObservationModel: The exact, iterative elastic Sea Level Equation.
 2. WMBMethod: The fast, purely spectral approximation (Wahr, Molenaar, & Bryan, 1998),
    highly effective for building data-space preconditioners.
+
+Both report the potential change either in pyslfp's own coefficient
+convention, the default, or as the dimensionless Stokes coefficients that
+GRACE Level-2 products publish; see ``stokes_coefficient_operator``.
 """
 
 from __future__ import annotations
@@ -22,6 +26,8 @@ from pygeoinf import (
     DiagonalLinearOperator,
 )
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
+
+from planetmodel import units
 
 from pyslfp.core import EarthModel
 from pyslfp.linear_operators.utils import check_response_space, check_load_space
@@ -64,6 +70,82 @@ def _unit_sphere_synthesis_operator(
     return space.radius * space.from_coefficient_operator(
         lmax=max_degree, lmin=min_degree
     )
+
+
+# ================================================================ #
+#                 Stokes Coefficients                              #
+# ================================================================ #
+
+# The constants to which the CSR and JPL GRACE and GRACE-FO Level-2
+# releases refer their Stokes coefficients, in SI. GFZ uses the same GM
+# with a reference radius of 6378136.46 m; a product's header gives its own.
+GRACE_GRAVITATIONAL_PARAMETER: float = 3.986004415e14  # m^3 s^-2
+GRACE_REFERENCE_RADIUS: float = 6378136.3  # m
+
+_CONVENTIONS = ("orthonormal", "stokes")
+
+
+def stokes_coefficient_operator(
+    model: EarthModel,
+    max_obs_degree: int,
+    /,
+    *,
+    min_obs_degree: int = 2,
+    gravitational_parameter: float = GRACE_GRAVITATIONAL_PARAMETER,
+    reference_radius: float = GRACE_REFERENCE_RADIUS,
+) -> DiagonalLinearOperator:
+    """
+    Converts coefficients of the potential change, in this module's
+    convention, into the Stokes coefficients of GRACE Level-2 products.
+
+    Those products write the geopotential outside the Earth as
+
+        V(r) = (GM/a) sum_lm (a/r)^(l+1) (dC_lm cos m lambda + dS_lm sin m lambda) P_lm,
+
+    with a and GM the product's reference radius and gravitational
+    parameter, and P_lm fully normalised in the geodetic sense: the
+    harmonics have mean square one over the sphere (pyshtools' "4pi"
+    normalisation), without the Condon-Shortley phase. V is positive, while
+    pyslfp's potential phi is negative near added mass, so V = -phi. Given
+    the coefficients phi_lm of phi on the sphere of radius b, orthonormal on
+    the unit sphere, matching the two at r = b gives
+
+        dC_lm = -(a / GM) (b / a)^(l+1) phi_lm / sqrt(4 pi),
+
+    and the same for dS_lm, which sits at the negative orders. The factor
+    (b / a)^(l+1) continues the potential up from b to the reference
+    radius. Here b is the model's mean sea floor radius, the radius of
+    pyslfp's field spaces and of its Love numbers. The result is
+    dimensionless, so it does not depend on pyslfp's units.
+
+    Args:
+        model: The Earth model, supplying b and the units.
+        max_obs_degree: The maximum degree of the observations.
+        min_obs_degree: The minimum degree of the observations.
+        gravitational_parameter: The product's GM, in m^3 s^-2.
+        reference_radius: The product's reference radius a, in metres.
+
+    Returns:
+        The diagonal operator on the observation vector, one factor per
+        degree.
+    """
+    scales = model.parameters.scales
+    gm = gravitational_parameter / scales.factor(units.Dimensions(length=3, time=-2))
+    a = reference_radius / scales.factor(units.LENGTH)
+    b = model.parameters.mean_sea_floor_radius
+
+    degrees = np.concatenate(
+        [np.full(2 * l + 1, l) for l in range(min_obs_degree, max_obs_degree + 1)]
+    )
+    factors = -(a / gm) * (b / a) ** (degrees + 1) / np.sqrt(4.0 * np.pi)
+    return DiagonalLinearOperator(EuclideanSpace(degrees.size), factors)
+
+
+def _check_convention(convention: str, /) -> None:
+    if convention not in _CONVENTIONS:
+        raise ValueError(
+            f"convention must be one of {_CONVENTIONS}, not {convention!r}."
+        )
 
 
 # ================================================================ #
@@ -116,22 +198,45 @@ class GraceObservationModel:
         /,
         *,
         min_obs_degree: int = 2,
+        convention: str = "orthonormal",
+        gravitational_parameter: float = GRACE_GRAVITATIONAL_PARAMETER,
+        reference_radius: float = GRACE_REFERENCE_RADIUS,
     ):
         """
         Args:
             fingerprint_operator: The physics operator mapping loads to responses.
-           max_obs_degree: The maximum spherical harmonic degree of the observations.
+            max_obs_degree: The maximum spherical harmonic degree of the observations.
             min_obs_degree: The minimum degree to extract (defaults to 2).
+            convention: "orthonormal" for the potential change's coefficients
+                in pyslfp's convention, "stokes" for the Stokes coefficients
+                of GRACE Level-2 products; see ``stokes_coefficient_operator``.
+            gravitational_parameter: The product's GM in m^3 s^-2, for
+                "stokes".
+            reference_radius: The product's reference radius in metres, for
+                "stokes".
         """
+        _check_convention(convention)
         self._fingerprint_operator = fingerprint_operator
         self._max_obs_degree = max_obs_degree
         self._min_obs_degree = min_obs_degree
+        self._convention = convention
 
         self._response_to_data_operator = grace_observation_operator(
             self.fingerprint_operator.codomain,
             max_obs_degree,
             min_obs_degree=min_obs_degree,
         )
+        if convention == "stokes":
+            self._response_to_data_operator = (
+                stokes_coefficient_operator(
+                    fingerprint_operator.model,
+                    max_obs_degree,
+                    min_obs_degree=min_obs_degree,
+                    gravitational_parameter=gravitational_parameter,
+                    reference_radius=reference_radius,
+                )
+                @ self._response_to_data_operator
+            )
 
         self._forward_operator = (
             self._response_to_data_operator @ self.fingerprint_operator
@@ -152,9 +257,19 @@ class GraceObservationModel:
         return self._max_obs_degree
 
     @property
+    def convention(self) -> str:
+        """The coefficient convention of the observations."""
+        return self._convention
+
+    @property
     def fingerprint_operator(self) -> FingerPrintOperator:
         """The underlying fingerprint operator."""
         return self._fingerprint_operator
+
+    @property
+    def response_to_data_operator(self) -> LinearOperator:
+        """The operator from the response space to the observations."""
+        return self._response_to_data_operator
 
     @property
     def forward_operator(self) -> LinearOperator:
@@ -175,17 +290,61 @@ class WMBMethod:
     load Love numbers ($k_l$) to directly map between surface mass loads and
     gravitational potential coefficients. It is highly optimized for building
     data-space preconditioners in Bayesian inversions.
+
+    With ``convention="stokes"`` the potential coefficients are the Stokes
+    coefficients of GRACE Level-2 products throughout: the conversion is
+    folded into the per-degree scaling, so every operator and measure below
+    reports them.
     """
 
     def __init__(
-        self, model: EarthModel, max_obs_degree: int, /, *, min_obs_degree: int = 2
+        self,
+        model: EarthModel,
+        max_obs_degree: int,
+        /,
+        *,
+        min_obs_degree: int = 2,
+        convention: str = "orthonormal",
+        gravitational_parameter: float = GRACE_GRAVITATIONAL_PARAMETER,
+        reference_radius: float = GRACE_REFERENCE_RADIUS,
     ):
+        """
+        Args:
+            model: The Earth model, supplying the Love numbers.
+            max_obs_degree: The maximum spherical harmonic degree of the observations.
+            min_obs_degree: The minimum degree of the observations.
+            convention: "orthonormal" or "stokes", as for
+                ``GraceObservationModel``.
+            gravitational_parameter: The product's GM in m^3 s^-2, for
+                "stokes".
+            reference_radius: The product's reference radius in metres, for
+                "stokes".
+        """
+        _check_convention(convention)
         self._model = model
         self._max_obs_degree = max_obs_degree
         self._min_obs_degree = min_obs_degree
+        self._convention = convention
 
         # Total number of spherical harmonic coefficients in the observation vector
         self._observation_dim = (max_obs_degree + 1) ** 2 - min_obs_degree**2
+
+        self._output_scaling = (
+            stokes_coefficient_operator(
+                model,
+                max_obs_degree,
+                min_obs_degree=min_obs_degree,
+                gravitational_parameter=gravitational_parameter,
+                reference_radius=reference_radius,
+            ).eigenvalues
+            if convention == "stokes"
+            else np.ones(self._observation_dim)
+        )
+
+    @property
+    def convention(self) -> str:
+        """The coefficient convention of the observations."""
+        return self._convention
 
     @property
     def min_obs_degree(self) -> int:
@@ -227,7 +386,8 @@ class WMBMethod:
     ) -> DiagonalLinearOperator:
         """
         Maps load SH coefficients to potential SH coefficients by multiplying
-        each degree by its elastic load Love number (k_l).
+        each degree by its elastic load Love number (k_l), and, for the
+        "stokes" convention, by the conversion to Stokes coefficients.
         """
         domain = EuclideanSpace(self._observation_dim)
         scaling_factors = np.zeros(self._observation_dim)
@@ -237,7 +397,7 @@ class WMBMethod:
             idx_end = (l + 1) ** 2 - self.min_obs_degree**2
             scaling_factors[idx_start:idx_end] = self._model.love_numbers.k[l]
 
-        return DiagonalLinearOperator(domain, scaling_factors)
+        return DiagonalLinearOperator(domain, scaling_factors * self._output_scaling)
 
     def potential_coefficient_to_load_coefficient_operator(
         self,

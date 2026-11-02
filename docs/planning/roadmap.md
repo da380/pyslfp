@@ -10,7 +10,9 @@ water storage, firn, dynamic topography, ocean density) and an assembler that
 turns a list of them into an inversion space, with the load operator,
 constraints and GMSL diagnostics derived from each component's role. The design
 is in [models_plan.md](models_plan.md). The component record and the factories
-(WP1) are built; the glacier factory waits for the glacier inventory below.
+(WP1) and the assembler, `ModelSetup` (WP2), are built; the glacier factory
+waits for the clean-up of the hard-coded regions below. WP3, the ready-made
+set-ups and the rest of the harvest, remains.
 
 It also completes the harvest of physics from the Heathcote2026 scripts: the
 barystatic and steric GMSL split and the regional decomposition after Gregory

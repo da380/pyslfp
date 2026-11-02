@@ -9,11 +9,44 @@ and how it enters the physics:
 - its Hilbert space;
 - the operator taking it to a surface mass load, the input of the sea
   level equation;
-- the projection onto its support, the region where it can be non-zero;
+- its support, the region where the field has physical meaning;
 - its direct contributions to named observables, the parts of an
   observable that bypass the sea level equation, such as dynamic
   topography's own term in the sea surface height;
 - its role, which says how it changes the ocean's mass.
+
+**The fields are defined globally, and the supports are part of the
+physics.** Each component's space holds functions on the whole sphere,
+and a prior is a measure on that space as it stands. Masking the prior
+instead, by pushing it forward through a support projection, gives
+samples that jump at the support's edge; that is not a measure on a
+Sobolev space of order 1/2 or more, and it is only semidefinite. The
+support enters through the operators, in the way their regularity
+allows:
+
+- **Loads carry the support.** Multiplication by the indicator of a
+  region with a Lipschitz boundary is bounded on H^s for -1/2 < s < 1/2 and
+  on no H^s with s >= 1/2. Every load carries the ocean function or a
+  support's indicator, so it lies in H^s only for s < 1/2, and the load
+  space should have an order in [0, 1/2). The sea level equation gains
+  one order, so a load space of order above 0 puts the response above
+  order 1, where evaluation at points is bounded.
+- **Pointwise observables leave the support to their points.** The sea
+  and ice surface heights are sampled at points, and a masked field is
+  too rough for that. Their direct contributions pass the field through
+  unmasked, into an observable space of order above 1: the field space
+  of the response they are added to. At a point inside the support a
+  field and its masked version agree, so the observation points carry
+  the support.
+- **Integrated diagnostics carry the support.** The steric sea level
+  carries the ocean function and the depth and is rough like a load, so
+  it lands in the load space; it serves the ocean averages a set-up
+  derives from it, which are bounded on L^2.
+
+Loads, integrals and averages see a field only on its support, and point
+observations do when their points lie in it, so all of them have the same
+posterior as under a masked prior. The `support` field serves display and
+diagnostics: plot `support(u)` to show a field where it is physical.
 
 There are two roles. A mass source lives on land and adds mass to the
 ocean or takes it away, so it has a barystatic global mean sea level
@@ -22,12 +55,25 @@ rearranges the ocean's mass without changing it, and is what the ocean
 mass-conservation constraint couples.
 
 The factories below build the components in use; glaciers will join them
-once the library has a glacier inventory. Every component's space
-must share the load space's grid, so that its field and its load are
-fields on the same grid; its Sobolev order may differ. The load operators
-are written on the Lebesgue spaces, where their adjoints are plain
-multiplications, and carried to the given spaces by
-`LinearOperator.from_formal_adjoint`.
+once the library has a glacier inventory. Every component's space, and
+every observable space, must share the load space's grid, so that a
+field, its load and its contributions are fields on the same grid; their
+Sobolev orders differ. The load operators are written on the Lebesgue
+spaces, where their adjoints are plain multiplications, and carried to
+the given spaces by `LinearOperator.from_formal_adjoint`.
+
+Each load is one pointwise product, the support's indicator folded into
+its multiplier, not a support projection followed by a product. A
+product is left on the grid, untruncated, and the next product in a
+composition acts on all of it, while a lifted operator's adjoint passes
+through the space's components, which keep only the part up to the
+truncation degree. So the computed adjoint of g (f u) is the exact
+adjoint of g T(f u), with T the truncation, and the composition fails
+the adjoint identity by the pairing of the two products' parts above the
+truncation degree. That is a discretisation error which falls with the
+degree, to about 1e-5 of the norms at degree 256 for a support's
+indicator; a single product satisfies the identity to rounding at every
+degree.
 """
 
 from __future__ import annotations
@@ -45,7 +91,6 @@ from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 from pyslfp.core import EarthState
 from pyslfp.linear_operators.utils import check_load_space, underlying_space
 from pyslfp.linear_operators.loads import (
-    ice_thickness_change_to_load_operator,
     ocean_density_change_to_load_operator,
     sea_level_change_to_load_operator,
     steric_sea_level_operator,
@@ -53,9 +98,11 @@ from pyslfp.linear_operators.loads import (
 
 Space = Union[Lebesgue, Sobolev]
 
-# The observables a component can contribute to directly. A contribution
-# maps the component's space into the load space, which is where the
-# contributions of different components are added.
+# The observables a component can contribute to directly. The sea and ice
+# surface heights are sampled at points, so a contribution to them is the
+# field itself, unmasked, in an observable space of order above 1; the
+# steric sea level is rough like a load and lands in the load space.
+# Contributions to one observable share its space, where they are added.
 SEA_SURFACE_HEIGHT = "sea_surface_height"
 ICE_SURFACE_HEIGHT = "ice_surface_height"
 STERIC_SEA_LEVEL = "steric_sea_level"
@@ -78,18 +125,21 @@ class LoadComponent:
         space: The Hilbert space of the field.
         to_load: The operator from `space` to the load space, or None for
             a component that loads nothing.
-        projection: The projection onto the field's support, an operator
-            on `space`.
+        support: Multiplication by the indicator of the field's support,
+            an idempotent operator on `space`. The load accounts for it,
+            and the pointwise contributions leave it to their observation
+            points; it is for display and diagnostics, not for masking a
+            prior.
         role: Whether the component is a mass source or ocean-internal.
         observables: The component's direct contributions to named
-            observables, each an operator from `space` into the load
-            space. Read-only.
+            observables, each an operator from `space` into that
+            observable's space. Read-only.
     """
 
     name: str
     space: Space
     to_load: Optional[LinearOperator]
-    projection: LinearOperator
+    support: LinearOperator
     role: Role
     observables: Mapping[str, LinearOperator] = field(default_factory=dict)
 
@@ -102,11 +152,9 @@ class LoadComponent:
             raise ValueError(
                 f"The load operator of '{self.name}' must act on its space."
             )
-        if self.projection.domain != self.space or self.projection.codomain != (
-            self.space
-        ):
+        if self.support.domain != self.space or self.support.codomain != self.space:
             raise ValueError(
-                f"The projection of '{self.name}' must map its space to itself."
+                f"The support of '{self.name}' must map its space to itself."
             )
         for observable, operator in self.observables.items():
             if operator.domain != self.space:
@@ -135,33 +183,45 @@ def ice_sheets(
     /,
     *,
     space: Optional[Space] = None,
+    observable_space: Optional[Space] = None,
     name: str = "ice_sheets",
 ) -> LoadComponent:
     """
     An ice thickness change over the ice sheets.
 
-    The load is rho_i (1 - C) delta I, the grounded part only: floating
-    ice displaces its own weight of water and loads nothing. The support
-    is the ice the state attributes to the ice sheets,
+    The support is the ice the state attributes to the ice sheets,
     `EarthState.ice_projection`, shelves included, so the component follows
-    the library's definition of the ice sheets. The thickness change
-    contributes directly to the ice surface height.
+    the library's definition of the ice sheets. On it the load is
+    rho_i (1 - C) delta I, the grounded part only: floating ice displaces
+    its own weight of water and loads nothing. The thickness change
+    contributes directly, unmasked, to the ice surface height, which ice
+    altimetry samples at points on the ice sheets.
 
     Args:
         state: The Earth state supplying the ocean function and the masks.
         load_space: The space of the loads.
         space: The component's space, on the load space's grid. The load
             space if omitted.
+        observable_space: The space of the ice surface height, on the same
+            grid, of order no higher than the component's and above 1 if
+            it is to be sampled at points. The component's space if
+            omitted.
         name: The component's name.
     """
     space = _component_space(space, load_space)
+    ice = state.ice_projection(value=0.0)
+    rho_i = state.model.parameters.ice_density
     return LoadComponent(
         name=name,
         space=space,
-        to_load=ice_thickness_change_to_load_operator(state, space, load_space),
-        projection=_mask_projection(space, state.ice_projection(value=0.0)),
+        to_load=_multiplication_into(
+            space, load_space, rho_i * state.one_minus_ocean_function * ice
+        ),
+        support=_mask(space, ice),
         role=Role.MASS_SOURCE,
-        observables={ICE_SURFACE_HEIGHT: _inclusion(space, load_space)},
+        observables={
+            ICE_SURFACE_HEIGHT: _inclusion(space, observable_space, load_space)
+        },
     )
 
 
@@ -176,8 +236,9 @@ def land_water_storage(
     """
     A change in land water storage, as a water-equivalent thickness.
 
-    The load is rho_w w on the land that carries no ice, the support of the
-    component; the ice-covered land belongs to the ice components.
+    The support is the land that carries no ice; the ice-covered land
+    belongs to the ice components. The load is rho_w w on the support, the
+    mask entering as part of the multiplier.
 
     Args:
         state: The Earth state supplying the masks.
@@ -194,7 +255,7 @@ def land_water_storage(
         to_load=_multiplication_into(
             space, load_space, state.model.parameters.water_density * land
         ),
-        projection=_mask_projection(space, land),
+        support=_mask(space, land),
         role=Role.MASS_SOURCE,
     )
 
@@ -206,6 +267,7 @@ def firn(
     *,
     density: float,
     space: Optional[Space] = None,
+    observable_space: Optional[Space] = None,
     name: str = "firn",
 ) -> LoadComponent:
     """
@@ -213,8 +275,10 @@ def firn(
 
     Firn and ice are observed together, as one change in surface height,
     but load differently, which is why firn is a component of its own.
-    The load is rho_f (1 - C) delta F with the given firn density, on the
-    ice sheets' support.
+    The support is the ice sheets'. On it the load is rho_f (1 - C) delta F
+    with the given firn density. The thickness change contributes
+    directly, unmasked, to the ice surface height, as the ice thickness
+    change does.
 
     Args:
         state: The Earth state supplying the ocean function and the masks.
@@ -224,18 +288,23 @@ def firn(
             default.
         space: The component's space, on the load space's grid. The load
             space if omitted.
+        observable_space: The space of the ice surface height, as for
+            `ice_sheets`. The component's space if omitted.
         name: The component's name.
     """
     space = _component_space(space, load_space)
+    ice = state.ice_projection(value=0.0)
     return LoadComponent(
         name=name,
         space=space,
         to_load=_multiplication_into(
-            space, load_space, density * state.one_minus_ocean_function
+            space, load_space, density * state.one_minus_ocean_function * ice
         ),
-        projection=_mask_projection(space, state.ice_projection(value=0.0)),
+        support=_mask(space, ice),
         role=Role.MASS_SOURCE,
-        observables={ICE_SURFACE_HEIGHT: _inclusion(space, load_space)},
+        observables={
+            ICE_SURFACE_HEIGHT: _inclusion(space, observable_space, load_space)
+        },
     )
 
 
@@ -250,19 +319,27 @@ def dynamic_topography(
     /,
     *,
     space: Optional[Space] = None,
+    observable_space: Optional[Space] = None,
     name: str = "dynamic_topography",
 ) -> LoadComponent:
     """
     A dynamic sea surface height change eta over the oceans.
 
-    The load is the water it moves, rho_w C eta. It contributes directly to
-    the sea surface height, a term that bypasses the sea level equation.
+    The support is the ocean. The load is the water the change moves,
+    rho_w C eta, the ocean function C being the support. The change
+    contributes directly, unmasked, to the sea surface height, a term that
+    bypasses the sea level equation; altimetry samples it at points in the
+    ocean.
 
     Args:
         state: The Earth state supplying the ocean function.
         load_space: The space of the loads.
         space: The component's space, on the load space's grid. The load
             space if omitted.
+        observable_space: The space of the sea surface height, on the same
+            grid, of order no higher than the component's and above 1 if
+            it is to be sampled at points; the field space of the response
+            it is added to. The component's space if omitted.
         name: The component's name.
     """
     space = _component_space(space, load_space)
@@ -270,9 +347,11 @@ def dynamic_topography(
         name=name,
         space=space,
         to_load=sea_level_change_to_load_operator(state, space, load_space),
-        projection=_mask_projection(space, state.ocean_projection(value=0.0)),
+        support=_mask(space, state.ocean_projection(value=0.0)),
         role=Role.OCEAN_INTERNAL,
-        observables={SEA_SURFACE_HEIGHT: _inclusion(space, load_space)},
+        observables={
+            SEA_SURFACE_HEIGHT: _inclusion(space, observable_space, load_space)
+        },
     )
 
 
@@ -287,9 +366,12 @@ def ocean_density(
     """
     A vertically averaged ocean density change delta rho.
 
-    The load is C D delta rho, with D the water depth. Its steric sea level
-    change, -(D / rho_w) C delta rho, is its direct contribution to the
-    steric sea level, from which a set-up derives the steric global mean.
+    The support is the ocean. The load is C D delta rho, with D the water
+    depth, and the steric sea level change, -(D / rho_w) C delta rho, is
+    the direct contribution to the steric sea level, from which a set-up
+    derives the steric global mean. The ocean function C in both is the
+    support; with the depth it makes the steric sea level rough like a
+    load, so it lands in the load space.
 
     Args:
         state: The Earth state supplying the ocean function and the depth.
@@ -303,7 +385,7 @@ def ocean_density(
         name=name,
         space=space,
         to_load=ocean_density_change_to_load_operator(state, space, load_space),
-        projection=_mask_projection(space, state.ocean_projection(value=0.0)),
+        support=_mask(space, state.ocean_projection(value=0.0)),
         role=Role.OCEAN_INTERNAL,
         observables={
             STERIC_SEA_LEVEL: steric_sea_level_operator(state, space, load_space)
@@ -372,17 +454,26 @@ def _component_space(space: Optional[Space], load_space: Space) -> Space:
     return space
 
 
-def _mask_projection(space: Space, mask: SHGrid) -> LinearOperator:
-    """Multiplication by a 0/1 mask, which is idempotent on any space."""
-    projection = space.multiplication_operator(mask)
-    return projection.with_traits(projection.traits | Traits.IDEMPOTENT)
-
-
-def _inclusion(space: Space, target: Space) -> LinearOperator:
-    """The identity from a component's space into the load space."""
-    if space == target:
+def _inclusion(
+    space: Space, observable_space: Optional[Space], load_space: Space
+) -> LinearOperator:
+    """The field itself, read from its space into an observable space on
+    the load space's grid; the identity on its own space if none is given."""
+    if observable_space is None or observable_space == space:
         return LinearOperator.identity(space)
-    return space.order_inclusion_operator(target)
+    check_load_space(observable_space)
+    if underlying_space(observable_space) != underlying_space(load_space):
+        raise ValueError(
+            "An observable space must be on the load space's grid: the same "
+            "truncation, radius, grid type, sampling and wrap column."
+        )
+    return space.order_inclusion_operator(observable_space)
+
+
+def _mask(space: Space, indicator: SHGrid) -> LinearOperator:
+    """Multiplication by a 0/1 indicator, which is idempotent on any space."""
+    mask = space.multiplication_operator(indicator)
+    return mask.with_traits(mask.traits | Traits.IDEMPOTENT)
 
 
 def _multiplication_into(

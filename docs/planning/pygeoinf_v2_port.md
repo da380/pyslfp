@@ -256,8 +256,8 @@ Unchanged and used: `HilbertSpace` (type hints only), `EuclideanSpace`,
    the largest, and the heat spectra fall below that by degree 64, so the
    unmasked prior is itself claimed only semidefinite. That combination
    stops with pygeoinf's error until the gap is closed. The models
-   submodule will also constrain masked components where A P = A need not
-   hold.
+   submodule does not meet the masked case: its fields are global and
+   their supports are in the operators, so its priors are not masked.
 
 2. **A tensor product of spaces.** It is not needed for the port. It is
    needed later for model spaces that vary in time and for the viscoelastic

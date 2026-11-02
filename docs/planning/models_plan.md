@@ -75,6 +75,40 @@ without touching the assembler.
    covariances as they do now. pygeoinf's `LinearFunctional` is not
    used here.
 
+8. **Fields are global; supports are part of the physics.** A
+   component's space holds functions on the whole sphere, and a prior is
+   a measure on that space as it stands. A prior is never masked by
+   pushing it forward through a support projection: the masked samples
+   jump at the support's edge, so the result is not a measure on a
+   Sobolev space of order 1/2 or more, and it is only semidefinite. The
+   support enters through the operators, as their regularity allows.
+   Multiplication by the indicator of a Lipschitz region is bounded on
+   H^s for |s| < 1/2 and on no H^s with s >= 1/2, and the sea level
+   equation gains one order, so the spaces follow the chain
+
+       components H^t --load--> H^s, 0 <= s < 1/2 --SLE--> H^(s+1)
+
+   with s above 0 when the response is sampled at points.
+   - Loads carry the supports (the ocean function, the ice and land
+     indicators), so the load space has an order below 1/2.
+   - Pointwise observables (sea and ice surface heights) take the field
+     unmasked, into an observable space of order above 1, normally the
+     response's field space; the observation points carry the support,
+     since a field and its masked version agree inside it.
+   - Integrated diagnostics (GMSL, regional averages, the steric sea
+     level they are taken of) carry the supports; they are bounded on
+     L^2.
+
+   Loads, integrals and averages see a field only on its support, and
+   point observations do when their points lie in it, so posteriors are
+   those of a masked prior. The field off its support keeps its prior,
+   and plots show `support(u)`. The intermediate spaces' metrics cancel
+   in the adjoint of a chain from the fields to data, so the choice of
+   load and response orders changes no result: the chain from H^2 fields
+   to altimetry points built with H^2 loads and response, and with
+   H^(1/4) loads and an H^(5/4) response, agrees exactly in the forward
+   map and to 1e-13 in the adjoint at lmax 32 and 64.
+
 ## Against pygeoinf 2
 
 - **Component names are labels.** The joint space is
@@ -85,15 +119,27 @@ without touching the assembler.
   the row and block operators, which carry none, compose with it.
 - **Constraints claim surjectivity.** Exact conditioning in pygeoinf 2
   needs the constraint operator to claim `SURJECTIVE`, so the set-up's
-  constraints carry it. The ocean mass constraint also satisfies
-  A P = A for the block support projection P, because every ocean-internal
-  load carries the ocean function; a caller can therefore condition an
-  unmasked prior and mask afterwards. pygeoinf does not yet condition a
-  semidefinite prior exactly, so that order is the one that works today.
-- **Support projections are multiplications by a mask**
+  constraints carry it. A prior on the global fields is positive
+  definite (decision 8), so it is conditioned on a constraint as it
+  stands; pygeoinf's refusal to condition a semidefinite prior does not
+  arise.
+- **Supports are multiplications by an indicator**
   (`multiplication_operator`), idempotent on any space and self-adjoint on
-  a Lebesgue space. The traits they claim are verified with
-  `testing.check_traits`.
+  a Lebesgue space; the traits they claim are verified with
+  `testing.check_traits`. They serve display and diagnostics.
+- **One product per load.** Each load is a single pointwise product,
+  the support's indicator folded into its multiplier, never a support
+  projection composed with a product. A product is left on the grid
+  untruncated, and the next product acts on all of it, while a lifted
+  operator's adjoint passes through the space's components, which keep
+  only the part up to the truncation degree. The computed adjoint of
+  g (f u) is therefore the exact adjoint of g T(f u), with T the
+  truncation, and the composition fails the adjoint identity by the
+  pairing of the two products' parts above the truncation degree. For
+  the ice mask and load the failure, relative to the norms, is about
+  2e-3 at lmax 32, 3e-4 at 64, 1e-4 at 128 and 1e-5 at 256: a
+  discretisation error that falls with the degree. A single product
+  satisfies the identity to rounding at every degree.
 - **The steric map is a direct observable contribution.** The density
   component contributes to the observable `steric_sea_level` through
   `steric_sea_level_operator`, so the assembler derives the steric GMSL
@@ -109,8 +155,9 @@ without touching the assembler.
 
 **The component record.** A frozen `LoadComponent`: name, Hilbert
 space, the to-load operator (None for a component that loads nothing),
-the support projection, its direct contributions to named observables
-(decision 6), and its role. The role is the organising principle and
+its support (decision 8), its direct contributions to named observables
+(decision 6), each into that observable's space, and its role. The
+pointwise factories take the observable space as an argument. The role is the organising principle and
 takes one of two values:
 
 - **mass source** (grounded ice, glaciers, land water storage, firn):
@@ -128,11 +175,12 @@ takes one of two values:
 **Component factories**, each a few lines on the existing lego
 (state projections plus the load operators):
 
-- grounded ice sheets: rho_i (1 - C), on the state's ice-sheet projection;
+- grounded ice sheets: rho_i (1 - C) times the state's ice-sheet
+  indicator;
 - glaciers: the same rule on the glacier support, once the library has a
   glacier inventory (see the roadmap's hard-coded regions);
-- land water storage: rho_w on the land mask, water-equivalent
-  thickness;
+- land water storage: rho_w times the ice-free land indicator,
+  water-equivalent thickness;
 - firn: the ice rule with a caller-supplied firn density — the reason
   it exists as a separate component is exactly that altimetry observes
   the height sum while the loads differ;
@@ -141,7 +189,7 @@ takes one of two values:
 
 **The assembler.** `ModelSetup(components)` derives: the joint space
 (direct sum in the given order), the row load operator, the block
-projection operator, the per-component and total barystatic GMSL
+support, the per-component and total barystatic GMSL
 functionals, the steric GMSL functional and barystatic/steric split
 where the roles admit them, and the available constraints. Everything
 is derived from the components' roles; adding a component never means
@@ -170,12 +218,27 @@ uniform change to the bathtub answer.
 assembled three-component set-up reproduces the hand-built operators
 of the harvest exactly; a steric (eta, delta rho) pair lies in the
 assembled constraint's kernel; the per-component GMSL functionals sum
-to the total.
+to the total; a global prior conditions exactly on the mass
+constraint. Built as `pyslfp.models.ModelSetup`. On the real state at
+lmax 32 and 64, on the scripts' own spaces, the continuous sea level and
+sea surface height operators and the steric GMSL agree with the
+scripts' exactly in the forward map. The adjoints differ: the scripts
+compose the ice mask with the ice load, and their sea level and sea
+surface height operators fail the adjoint identity, relative to the
+norms, by 2e-3 and 1e-3 at lmax 32 and by 2e-4 and 6e-5 at lmax 64,
+where the set-up's hold to the solver's tolerance. The scripts'
+barystatic GMSL pairs the weighting with the masked field spectrally,
+while the set-up's is the grid integral of the load, the mass the sea
+level equation sees; at worst over H^2 fields the two differ by 7% at
+lmax 32, 1.5% at 64, 0.5% at 128 and 0.09% at 256.
 
 **WP3 — the pre-built set-ups and the remaining harvest**: the
 scripts' `gmsl_split_operators` and the SSLC/DMSLC/BMSLC regional
 decomposition land as derived diagnostics of a `ModelSetup` rather
-than free functions, completing the Heathcote2026 harvest list.
+than free functions, completing the Heathcote2026 harvest list. The
+scripts move onto set-ups, which drops their prior masking (decision 8)
+and with it the composed mask-and-load rows and the spectral barystatic
+pairing, and puts their loads in a space of order below 1/2.
 
 ## Non-goals
 
@@ -189,7 +252,7 @@ than free functions, completing the Heathcote2026 harvest list.
 ## Risks
 
 - Record scope creep: the component holds name, space, load,
-  projection, role and direct observable contributions — nothing
+  support, role and direct observable contributions — nothing
   else. Sampling, averaging and noise belong to the observation
   operators.
 - The firn density is a modelling choice, so it is an argument, never

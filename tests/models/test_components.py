@@ -55,23 +55,32 @@ ROLES = {
 
 def _spaces(state, kind):
     """The load space and the component space for a case: both Lebesgue,
-    both Sobolev, or a Sobolev component loading a Lebesgue space."""
+    both Sobolev, or, as the regularity of the physics has it, an H^2
+    component loading an H^(1/4) space."""
     b = state.model.parameters.mean_sea_floor_radius
     lebesgue = lebesgue_load_space(state.model)
     sobolev = sobolev_load_space(state.model, 2.0, 0.1 * b)
+    rough = sobolev_load_space(state.model, 0.25, 0.1 * b)
     return {
         "lebesgue": (lebesgue, lebesgue),
         "sobolev": (sobolev, sobolev),
-        "mixed": (lebesgue, sobolev),
+        "mixed": (rough, sobolev),
     }[kind]
+
+
+POINTWISE = {
+    "ice_sheets": ICE_SURFACE_HEIGHT,
+    "firn": ICE_SURFACE_HEIGHT,
+    "dynamic_topography": SEA_SURFACE_HEIGHT,
+}
 
 
 @pytest.mark.parametrize("kind", ["lebesgue", "sobolev", "mixed"])
 @pytest.mark.parametrize("factory", list(FACTORIES))
 def test_component_operators(state, factory, kind):
-    """The load operator, the support projection and every direct
-    contribution pass the adjoint check; the projection's claimed traits
-    hold; the role is the one the physics gives."""
+    """The load operator, the support and every direct contribution pass
+    the adjoint check; the support's claimed traits hold; the role is the
+    one the physics gives."""
     load_space, space = _spaces(state, kind)
     component = FACTORIES[factory](state, load_space, space=space)
     b = state.model.parameters.mean_sea_floor_radius
@@ -81,22 +90,62 @@ def test_component_operators(state, factory, kind):
     assert component.role is ROLES[factory]
     assert component.load_space == load_space
     check_operator(component.to_load, rng=rng, measure=measure, rtol=1e-9)
-    check_operator(component.projection, rng=rng, measure=measure, rtol=1e-9)
-    check_traits(component.projection, rng=rng, measure=measure, rtol=1e-9)
+    check_operator(component.support, rng=rng, measure=measure, rtol=1e-9)
+    check_traits(component.support, rng=rng, measure=measure, rtol=1e-9)
     for operator in component.observables.values():
         check_operator(operator, rng=rng, measure=measure, rtol=1e-9)
 
 
 @pytest.mark.parametrize("factory", list(FACTORIES))
-def test_projection_selects_the_support(state, factory):
-    """The projection keeps a field on its support and removes it elsewhere."""
+def test_support_is_an_indicator(state, factory):
+    """The support keeps a field on its support and removes it elsewhere."""
     load_space, space = _spaces(state, "lebesgue")
     component = FACTORIES[factory](state, load_space)
     ones = state.model.zero_grid()
     ones.data[:] = 1.0
-    support = component.projection(ones).data
+    support = component.support(ones).data
     assert set(np.unique(support)) <= {0.0, 1.0}
     assert support.sum() > 0
+
+
+@pytest.mark.parametrize("factory", list(FACTORIES))
+def test_a_field_outside_the_support_loads_nothing(state, factory):
+    """The fields are global and the loads carry the supports: a field
+    living off a component's support loads nothing and has no steric sea
+    level, while a pointwise contribution passes it through unmasked, the
+    observation points carrying the support."""
+    load_space, _ = _spaces(state, "lebesgue")
+    component = FACTORIES[factory](state, load_space)
+    field = load_space.random(rng=np.random.default_rng(7))
+    outside = field - component.support(field)
+    assert np.max(np.abs(outside.data)) > 0
+    assert np.max(np.abs(component.to_load(outside).data)) == 0.0
+    for observable, operator in component.observables.items():
+        expected = outside.data if observable in POINTWISE.values() else 0.0
+        np.testing.assert_array_equal(operator(outside).data, expected)
+
+
+@pytest.mark.parametrize("factory", list(POINTWISE))
+def test_pointwise_contributions_land_in_the_observable_space(state, factory):
+    """Given an observable space of order above 1, a pointwise contribution
+    is the field itself read into it, and passes the adjoint check there."""
+    load_space, space = _spaces(state, "mixed")
+    b = state.model.parameters.mean_sea_floor_radius
+    observable_space = sobolev_load_space(state.model, 1.5, 0.1 * b)
+    component = FACTORIES[factory](
+        state, load_space, space=space, observable_space=observable_space
+    )
+    operator = component.observables[POINTWISE[factory]]
+    assert operator.codomain == observable_space
+    field = space.heat_measure(0.3 * b).sample(rng=np.random.default_rng(4))
+    np.testing.assert_array_equal(operator(field).data, field.data)
+    check_operator(
+        operator,
+        rng=np.random.default_rng(5),
+        measure=space.heat_measure(0.3 * b),
+        codomain_measure=observable_space.heat_measure(0.3 * b),
+        rtol=1e-9,
+    )
 
 
 def test_ice_and_firn_load_with_their_own_densities(state):
@@ -123,8 +172,9 @@ def test_ice_and_firn_load_with_their_own_densities(state):
 def test_barystatic_gmsl_is_the_bathtub_answer(
     state, factory, density, loaded_fraction
 ):
-    """A uniform change h over a mass source's support moves the global
-    mean sea level by -rho h (loaded area) / (rho_w A_O), computed here
+    """A uniform change h everywhere moves the global mean sea level by
+    -rho h (loaded area) / (rho_w A_O), the loaded area lying within the
+    source's support, which the operator applies itself; computed here
     with the model's own quadrature."""
     load_space, _ = _spaces(state, "lebesgue")
     component = FACTORIES[factory](state, load_space)
@@ -137,8 +187,8 @@ def test_barystatic_gmsl_is_the_bathtub_answer(
     h = 0.01
     ones = state.model.zero_grid()
     ones.data[:] = 1.0
-    support = component.projection(ones)
-    uniform = support * h
+    support = component.support(ones)
+    uniform = ones * h
     weight = state.one_minus_ocean_function if loaded_fraction == "grounded" else ones
     loaded_area = state.model.integrate(support * weight)
 
@@ -156,8 +206,8 @@ def test_ocean_internal_components_have_no_barystatic_change(state, factory):
 
 
 def test_direct_contributions(state):
-    """Dynamic topography adds itself to the sea surface height, and the
-    density change contributes its steric sea level."""
+    """Dynamic topography adds itself, unmasked, to the sea surface height,
+    and the density change contributes its steric sea level."""
     load_space, _ = _spaces(state, "lebesgue")
     field = load_space.random(rng=np.random.default_rng(2))
 
@@ -186,26 +236,28 @@ def test_component_record_is_frozen(state):
     with pytest.raises(AttributeError):
         component.name = "other"
     with pytest.raises(TypeError):
-        component.observables["new"] = component.projection
+        component.observables["new"] = component.support
 
 
-def test_component_space_must_share_the_load_grid(state):
+def test_component_and_observable_spaces_must_share_the_load_grid(state):
     load_space, _ = _spaces(state, "lebesgue")
     coarser = lebesgue_load_space(EarthState.for_testing(8).model)
     with pytest.raises(ValueError, match="grid"):
         ice_sheets(state, load_space, space=coarser)
+    with pytest.raises(ValueError, match="grid"):
+        dynamic_topography(state, load_space, observable_space=coarser)
 
 
 def test_record_checks_its_operators(state):
     load_space, _ = _spaces(state, "lebesgue")
     component = ice_sheets(state, load_space)
     other = lebesgue_load_space(EarthState.for_testing(8).model)
-    with pytest.raises(ValueError, match="projection"):
+    with pytest.raises(ValueError, match="support"):
         LoadComponent(
             name="broken",
             space=other,
             to_load=None,
-            projection=component.projection,
+            support=component.support,
             role=Role.MASS_SOURCE,
         )
     with pytest.raises(ValueError, match="name"):
@@ -213,6 +265,6 @@ def test_record_checks_its_operators(state):
             name="",
             space=load_space,
             to_load=component.to_load,
-            projection=component.projection,
+            support=component.support,
             role=Role.MASS_SOURCE,
         )

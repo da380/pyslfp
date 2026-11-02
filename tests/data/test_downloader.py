@@ -162,6 +162,7 @@ ZENODO_FILES = {
     "IMBIE_ANT": "pyslfp_imbie_ant.zip",
     "MOUGINOT_GRL": "pyslfp_mouginot_grl.zip",
     "ETOPO": "pyslfp_etopo.zip",
+    "RGI7": "pyslfp_rgi7.zip",
 }
 
 

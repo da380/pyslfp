@@ -195,8 +195,9 @@ in Google Colab. They read the real datasets, so the first run downloads them.
 ## Data
 
 The package needs a number of external datasets: a table of Love numbers for
-PREM, the ICE-NG ice histories, the GLOSS tide gauge network, and shapefiles for
-the regional definitions. They are not distributed with the package, but
+PREM, the ICE-NG ice histories, ETOPO 2022 topography, the GLOSS tide gauge
+network, the Randolph Glacier Inventory, and shapefiles for the regional
+definitions. They are not distributed with the package, but
 downloaded from [Zenodo](https://zenodo.org/records/19494463) on first use and
 cached locally, so the first call that needs a dataset pauses while it is
 fetched. Datasets are fetched individually, so only what is used is downloaded.
@@ -269,8 +270,9 @@ If you use `pyslfp` in published work, please cite:
 - D.A. Heathcote, T.Holland, A.M. Mag, M.E. Tamisiea, S. Coulson, S. Dangendorf, A.J. Lloyd, A. Mashayek, J.X. Mitrovica, D. Al-Attar, 2026.
   *A scalable Bayesian framework for modern sea-level inference*. arXiv, 2608.22336, https://arxiv.org/abs/2608.22336.
 
-The datasets that `pyslfp` downloads (the ice histories, Love numbers, tide
-gauge network and regional definitions) are the work of others and are
+The datasets that `pyslfp` downloads (the ice histories, topography, tide
+gauge network, glacier inventory and regional definitions) are the work of
+others and are
 redistributed here only for convenience. If you use them, please cite their
 original sources, which are recorded on the
 [Zenodo record](https://zenodo.org/records/19494463).

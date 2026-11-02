@@ -1,9 +1,9 @@
 # The models submodule: a component vocabulary for inversion spaces
 
-Drafted 16 October 2026 from the model-spaces discussion with David.
-Status: design agreed in outline, not started; the steric and
-mass-conservation lego it builds on landed with the Heathcote2026
-harvest (see pyslfp/linear_operators/loads.py).
+Status: design agreed, revised against pygeoinf 2 (see "Against
+pygeoinf 2" below), and to ship in 3.1.0 with the pygeoinf 2 port. The
+steric and mass-conservation pieces it builds on are in
+pyslfp/linear_operators/loads.py.
 
 ## Goal
 
@@ -68,6 +68,43 @@ without touching the assembler.
    Observation models remain consumers of the set-up — they add
    sampling, averaging and noise, never physics.
 
+7. **Scalar diagnostics map into Euclidean space.** GMSL functionals and
+   the other scalar diagnostics are operators into `EuclideanSpace(1)`
+   (or `EuclideanSpace(k)` for a split), pyslfp's existing convention,
+   so that they compose with operators, push-forwards and dense
+   covariances as they do now. pygeoinf's `LinearFunctional` is not
+   used here.
+
+## Against pygeoinf 2
+
+- **Component names are labels.** The joint space is
+  `DirectSum(spaces, labels=names)`, so `projection(name)`,
+  `inclusion(name)`, `subspace(name)` and a product measure's
+  `marginal(name)` work by name, and the assembler keeps no name-to-index
+  bookkeeping of its own. Labels do not enter a direct sum's identity, so
+  the row and block operators, which carry none, compose with it.
+- **Constraints claim surjectivity.** Exact conditioning in pygeoinf 2
+  needs the constraint operator to claim `SURJECTIVE`, so the set-up's
+  constraints carry it. The ocean mass constraint also satisfies
+  A P = A for the block support projection P, because every ocean-internal
+  load carries the ocean function; a caller can therefore condition an
+  unmasked prior and mask afterwards. pygeoinf does not yet condition a
+  semidefinite prior exactly, so that order is the one that works today.
+- **Support projections are multiplications by a mask**
+  (`multiplication_operator`), idempotent on any space and self-adjoint on
+  a Lebesgue space. The traits they claim are verified with
+  `testing.check_traits`.
+- **The steric map is a direct observable contribution.** The density
+  component contributes to the observable `steric_sea_level` through
+  `steric_sea_level_operator`, so the assembler derives the steric GMSL
+  the way it derives every other observable, from the components alone.
+- **Reference operators.** The Heathcote2026 scripts run on pygeoinf 2,
+  so WP2 is cross-checked against their hand-built operators at small
+  lmax by a one-off script, outside the test suite since the folder is
+  to go; the suite tests the assembler against the same operators built
+  from `loads.py`. Their `gmsl_split_operators` and
+  `regional_decomposition_operators` are ported and ready for WP3.
+
 ## Design
 
 **The component record.** A frozen `LoadComponent`: name, Hilbert
@@ -91,8 +128,9 @@ takes one of two values:
 **Component factories**, each a few lines on the existing lego
 (state projections plus the load operators):
 
-- grounded ice sheets: rho_i (1 - C), ice mask excluding glaciers;
-- glaciers: the same rule on the glacier mask;
+- grounded ice sheets: rho_i (1 - C), on the state's ice-sheet projection;
+- glaciers: the same rule on the glacier support, once the library has a
+  glacier inventory (see the roadmap's hard-coded regions);
 - land water storage: rho_w on the land mask, water-equivalent
   thickness;
 - firn: the ice rule with a caller-supplied firn density — the reason
@@ -145,6 +183,8 @@ than free functions, completing the Heathcote2026 harvest list.
 - Observation models: they consume a set-up's spaces and components,
   they are not part of one.
 - Time dependence; the set-ups describe single-epoch (rate) spaces.
+  Revisit once pygeoinf has a tensor product of spaces.
+- Priors: a separate layer that takes a set-up, built later.
 
 ## Risks
 
@@ -157,3 +197,7 @@ than free functions, completing the Heathcote2026 harvest list.
 - Land-mask subtleties (the Caspian, lakes) are inherited from the
   state's projections; the factories reuse them rather than redefining
   masks.
+- The glacier factory waits for a glacier inventory (RGI 7.0; see the
+  roadmap's hard-coded regions). A support supplied by the caller (a mask,
+  or named regions) would also serve any component whose support the
+  state's projections do not describe.

@@ -59,7 +59,8 @@ The git hooks, the documentation build and the release process are described in
 `CONTRIBUTING.md <https://github.com/da380/pyslfp/blob/main/CONTRIBUTING.md>`_.
 
 The datasets the package needs (a table of Love numbers for PREM, the ICE-NG ice
-histories, the GLOSS tide gauge network and the regional shapefiles) are
+histories, ETOPO 2022 topography, the GLOSS tide gauge network, the Randolph
+Glacier Inventory and the regional shapefiles) are
 downloaded from Zenodo_ on first use and cached in ``~/.pyslfp_data``, or
 wherever the ``PYSLFP_DATA`` environment variable points.
 ``pyslfp.data.ensure_data(key, refresh=True)`` fetches a dataset afresh.

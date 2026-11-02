@@ -4,8 +4,9 @@ pyslfp: A physical engine for sea-level fingerprinting and glacial isostatic adj
 One sea-level engine, two drivers: `core` holds the Earth model, the
 background state and the sea level equation solvers; `elastic` wraps
 them as instantaneous fingerprints and `viscoelastic` as forward GIA in
-time.  `love_numbers` solves the radial problem that serves both, and
-`linear_operators` is the inference layer over the elastic side.
+time.  `love_numbers` solves the radial problem that serves both,
+`linear_operators` is the inference layer over the elastic side, and
+`models` builds model spaces for inversions from named load components.
 """
 
 # ---------------------------------------------------------------------------
@@ -38,6 +39,7 @@ from . import elastic
 from . import ice
 from . import linear_operators
 from . import love_numbers
+from . import models
 from . import viscoelastic
 
 # ---------------------------------------------------------------------------
@@ -67,5 +69,6 @@ __all__ = [
     "ice",
     "linear_operators",
     "love_numbers",
+    "models",
     "viscoelastic",
 ]

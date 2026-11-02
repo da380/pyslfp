@@ -113,27 +113,25 @@ about half a minute.
 
 ```python
 import numpy as np
-from planetmodel import PREM, units
 
 import pyslfp as sl
 from pyslfp.ice import IceNG
-from pyslfp.love_numbers import Material, graded_mesh
-from pyslfp.viscoelastic import Rheology, SeaLevelEvolution, ViscoelasticOperator
+from pyslfp.viscoelastic import (
+    SeaLevelEvolution,
+    ViscoelasticOperator,
+    prem_maxwell,
+    viscoelastic_earth,
+)
 
 lmax = 64
 
-# PREM, made isotropic and converted into the library's units.
-scales = sl.EarthModelParameters.from_defaults().scales
-model = PREM(ocean=False).isotropic().converted(scales)
-mesh = graded_mesh(model, lmax)
-
-# A Maxwell mantle (PREM's layers 2 to 8), the top 77 km left elastic.
-viscosity = 1.0e21 / scales.factor(units.VISCOSITY)
-rheology = Rheology.maxwell(Material(mesh, model), {i: viscosity for i in range(2, 9)})
+# PREM with a Maxwell mantle of 10^21 Pa s, its top 77 km left elastic,
+# made into the Earth model and the rheology in the library's units.
+model = prem_maxwell(upper_mantle=1.0e21, lower_mantle=1.0e21)
+earth_model, rheology = viscoelastic_earth(model, lmax)
 operator = ViscoelasticOperator(rheology, lmax)
 
 # The background state that ICE-7G records at 26 ka.
-earth_model = sl.EarthModel.from_planet_model(model, lmax, mesh=mesh)
 ice_model = IceNG(length_scale=earth_model.parameters.length_scale)
 state = sl.EarthState.from_ice_model(ice_model, 26.0, earth_model)
 

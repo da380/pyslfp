@@ -26,9 +26,10 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-from planetmodel import PREM, constant_field, frozen
+from planetmodel import PREM, frozen
 
 import pyslfp as sl
+from pyslfp.viscoelastic import maxwell_mantle
 from pyslfp.love_numbers import (
     plot_degree_solution,
     plot_love_numbers,
@@ -187,7 +188,10 @@ print("and computed on the fly to degree 64:", quick.love_numbers)
 # Below, PREM with its own Q at the semidiurnal tide, and then a Maxwell
 # mantle of viscosity 1e21 Pa s across periods from minutes to hundreds
 # of thousands of years: the degree-2 tidal k runs from the elastic value
-# to the fluid limit, with the loss peaking in between.
+# to the fluid limit, with the loss peaking in between. The mantle is
+# placed by `maxwell_mantle`, which puts a viscosity on every solid layer
+# from the core up to a given radius, here the surface, so that no
+# elastic lithosphere is left.
 
 # %%
 semidiurnal = 2.0 * np.pi / 43200.0
@@ -195,14 +199,7 @@ attenuating = sl.LoveNumbers.from_model(frozen(prem, semidiurnal), 2)
 print("PREM with its Q at 12 h:", attenuating)
 print("k_2^T =", attenuating.tidal()["k"][2], "vs elastic", tidal["k"][2])
 
-visco = prem
-for layer in prem.layers:
-    if layer.interval[0] >= 3480e3:
-        visco = visco.with_field(
-            layer.index,
-            "viscosity",
-            constant_field(layer.interval, 1e21, name="viscosity"),
-        )
+visco = maxwell_mantle(prem, 1e21, lithosphere=prem.layers[-1].interval[1])
 periods = np.logspace(2, 13, 40)
 k2 = np.empty(periods.size, dtype=complex)
 for i, period in enumerate(periods):

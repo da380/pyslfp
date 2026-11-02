@@ -28,33 +28,28 @@
 # %%
 import matplotlib.pyplot as plt
 import numpy as np
-from planetmodel import PREM, units
 
 import pyslfp as sl
 from pyslfp.ice import IceNG
-from pyslfp.love_numbers import Material, graded_mesh
-from pyslfp.viscoelastic import Rheology, SeaLevelEvolution, ViscoelasticOperator
+from pyslfp.viscoelastic import (
+    SeaLevelEvolution,
+    ViscoelasticOperator,
+    prem_maxwell,
+    viscoelastic_earth,
+)
 
 LMAX = 64
 
 # %% [markdown]
 # ## The earth model
 #
-# As in tutorial 7: PREM collapsed to isotropy and converted into the
-# library's frame, 5 x 10^20 Pa s above the 670 km discontinuity and
-# 2 x 10^21 Pa s below, the top 77 km elastic.
+# As in tutorial 7: `prem_maxwell`, PREM collapsed to isotropy with
+# 5 x 10^20 Pa s above the 670 km discontinuity and 2 x 10^21 Pa s below,
+# the top 77 km elastic, in the library's frame.
 
 # %%
-scales = sl.EarthModelParameters.from_defaults().scales
-model = PREM(ocean=False).isotropic().converted(scales)
-mesh = graded_mesh(model, LMAX)
-material = Material(mesh, model)
-
-pascal_second = 1.0 / scales.factor(units.VISCOSITY)
-viscosity = {i: 2.0e21 * pascal_second for i in (2, 3, 4)}
-viscosity.update({i: 5.0e20 * pascal_second for i in (5, 6, 7, 8)})
-operator = ViscoelasticOperator(Rheology.maxwell(material, viscosity), LMAX)
-earth_model = sl.EarthModel.from_planet_model(model, LMAX, mesh=mesh)
+earth_model, rheology = viscoelastic_earth(prem_maxwell(), LMAX)
+operator = ViscoelasticOperator(rheology, LMAX)
 metre = earth_model.parameters.length_scale
 
 # %% [markdown]

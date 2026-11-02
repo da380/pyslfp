@@ -25,21 +25,25 @@
 # %%
 import matplotlib.pyplot as plt
 import numpy as np
-from planetmodel import PREM, units
 
 import pyslfp as sl
-from pyslfp.viscoelastic import Rheology, SeaLevelEvolution, ViscoelasticOperator
+from pyslfp.viscoelastic import (
+    SeaLevelEvolution,
+    ViscoelasticOperator,
+    prem_maxwell,
+    viscoelastic_earth,
+)
 from pyslfp.ice import IceNG
-from pyslfp.love_numbers import Material, graded_mesh
 
 LMAX = 128
 
 # %% [markdown]
 # ## The earth model and rheology
 #
-# As in the previous tutorial: PREM collapsed to isotropy and converted
-# into the library's frame, 5 x 10^20 Pa s above the 670 km
-# discontinuity and 2 x 10^21 Pa s below, the top 77 km elastic. PREM
+# As in the previous tutorial: `prem_maxwell`, PREM collapsed to
+# isotropy with 5 x 10^20 Pa s above the 670 km discontinuity and
+# 2 x 10^21 Pa s below, the top 77 km elastic, made into the Earth model
+# and rheology in the library's frame by `viscoelastic_earth`. PREM
 # with Earth's observed moments of inertia is a consistent pairing for
 # the rotational feedback: the oblateness the moments sustain exceeds
 # the model's hydrostatic fluid limit, so the transverse (polar wander)
@@ -47,15 +51,8 @@ LMAX = 128
 # `EarthModelParameters.with_hydrostatic_moments`.
 
 # %%
-scales = sl.EarthModelParameters.from_defaults().scales
-model = PREM(ocean=False).isotropic().converted(scales)
-mesh = graded_mesh(model, LMAX)
-material = Material(mesh, model)
-
-pascal_second = 1.0 / scales.factor(units.VISCOSITY)
-viscosity = {i: 2.0e21 * pascal_second for i in (2, 3, 4)}
-viscosity.update({i: 5.0e20 * pascal_second for i in (5, 6, 7, 8)})
-operator = ViscoelasticOperator(Rheology.maxwell(material, viscosity), LMAX)
+earth_model, rheology = viscoelastic_earth(prem_maxwell(), LMAX)
+operator = ViscoelasticOperator(rheology, LMAX)
 
 # %% [markdown]
 # ## The background state
@@ -69,7 +66,6 @@ operator = ViscoelasticOperator(Rheology.maxwell(material, viscosity), LMAX)
 # `SeaLevelEvolution.calibrate_initial_sea_level`.
 
 # %%
-earth_model = sl.EarthModel.from_planet_model(model, LMAX, mesh=mesh)
 ice_model = IceNG(length_scale=earth_model.parameters.length_scale)
 state = sl.EarthState.from_ice_model(ice_model, 26.0, earth_model)
 

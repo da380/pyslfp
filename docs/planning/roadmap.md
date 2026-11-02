@@ -69,12 +69,22 @@ sawtooth; a helper for either is wanted.
 
 ## SI entry points for the rheology
 
-The `Rheology` constructors take viscosities and relaxation times in the
-library's frame, so user code converts from Pa s and years. Constructors that
-accept SI would remove that step, but changing the meaning of the existing
-arguments would break callers silently, so they need new keyword names
-(`eta_si=`, `tau_years=`, say) or planetmodel-style tagged quantities. The API
-is undecided.
+A viscosity placed on the radial model (`maxwell_mantle`, `prem_maxwell`) is
+given in Pa s and converts with the model, and `viscoelastic_earth` and
+`Rheology.from_model` read it in the library's frame, so the common path needs
+no conversion. The `Rheology` constructors that take values directly
+(`maxwell`, `from_relaxation_time`) still take them in the library's frame, so
+user code converts from Pa s and years there. Constructors that accept SI
+would remove that step, but changing the meaning of the existing arguments
+would break callers silently, so they need new keyword names (`eta_si=`,
+`tau_years=`, say) or planetmodel-style tagged quantities. The API is
+undecided.
+
+A GIA deck (planetmodel's `GIA` format: `r rho vpv vsv vph vsh eta viscosity`
+in SI) has no model type to read it into; planetmodel has one only for mineos
+decks. A `GIAModel` there, and `to_deck` for models not read from a deck,
+would let published viscosity profiles be loaded and `prem_maxwell` be written
+out.
 
 ## Horizontal displacement
 

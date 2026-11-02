@@ -43,17 +43,16 @@
 # %%
 import matplotlib.pyplot as plt
 import numpy as np
-from planetmodel import PREM, units
 from pyshtools import SHGrid
 
 import pyslfp as sl
 from pyslfp.ice import BaseIceModel, IceNG
-from pyslfp.love_numbers import Material, graded_mesh
 from pyslfp.viscoelastic import (
-    Rheology,
     SeaLevelEvolution,
     ViscoelasticOperator,
     decay_time_measurement,
+    prem_maxwell,
+    viscoelastic_earth,
 )
 
 LMAX = 64
@@ -61,22 +60,14 @@ LMAX = 64
 # %% [markdown]
 # ## The earth model and rheology
 #
-# Those of the forward tutorial, converted into the library's frame, with
-# the viscosities converted once.
+# Those of the forward tutorial, in the library's frame. The kernel
+# below lives on the rheology's mesh.
 
 # %%
-scales = sl.EarthModelParameters.from_defaults().scales
-model = PREM(ocean=False).isotropic().converted(scales)
-mesh = graded_mesh(model, LMAX)
-material = Material(mesh, model)
-
-pascal_second = 1.0 / scales.factor(units.VISCOSITY)
-viscosity = {i: 2.0e21 * pascal_second for i in (2, 3, 4)}
-viscosity.update({i: 5.0e20 * pascal_second for i in (5, 6, 7, 8)})
-rheology = Rheology.maxwell(material, viscosity)
+earth_model, rheology = viscoelastic_earth(prem_maxwell(), LMAX)
 operator = ViscoelasticOperator(rheology, LMAX)
+mesh = rheology.material.mesh
 
-earth_model = sl.EarthModel.from_planet_model(model, LMAX, mesh=mesh)
 background = IceNG(length_scale=earth_model.parameters.length_scale)
 state = sl.EarthState.from_ice_model(background, 0.0, earth_model)
 evolution = SeaLevelEvolution(operator, state)

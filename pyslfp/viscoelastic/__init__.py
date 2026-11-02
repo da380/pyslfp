@@ -12,6 +12,7 @@ they return kernels as plain grids and nodal arrays, without a
 Hilbert-space structure of their own.
 """
 
+from .earth_models import maxwell_mantle, prem_maxwell, viscoelastic_earth
 from .functionals import (
     DecayTimeFit,
     decay_time_measurement,
@@ -55,4 +56,7 @@ __all__ = [
     "ViscoelasticStep",
     "backward_euler_weight",
     "exponential_trapezoid_weights",
+    "maxwell_mantle",
+    "prem_maxwell",
+    "viscoelastic_earth",
 ]

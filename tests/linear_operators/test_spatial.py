@@ -12,6 +12,7 @@ from pyslfp.linear_operators.physics import lebesgue_load_space, sobolev_load_sp
 from pyslfp.linear_operators.spatial import (
     ocean_projection_operator,
     ice_projection_operator,
+    ice_sheet_projection_operator,
     land_projection_operator,
     ocean_average_operator,
     ice_average_operator,
@@ -58,6 +59,7 @@ def test_spatial_projection_operators(testing_state, sobolev):
     ops = [
         ocean_projection_operator(testing_state, space),
         ice_projection_operator(testing_state, space),
+        ice_sheet_projection_operator(testing_state, space),
         land_projection_operator(testing_state, space),
     ]
 

@@ -10,43 +10,24 @@ water storage, firn, dynamic topography, ocean density) and an assembler that
 turns a list of them into an inversion space, with the load operator,
 constraints and GMSL diagnostics derived from each component's role. The design
 is in [models_plan.md](models_plan.md). The component record and the factories
-(WP1) and the assembler, `ModelSetup` (WP2), are built; the glacier factory
-waits for the clean-up of the hard-coded regions below. WP3, the ready-made
-set-ups and the rest of the harvest, remains.
+(WP1), glaciers included, and the assembler, `ModelSetup` (WP2), are built.
+WP3, the ready-made set-ups and the rest of the harvest, remains, and starts
+once the Caspian below is settled.
 
 It also completes the harvest of physics from the Heathcote2026 scripts: the
 barystatic and steric GMSL split and the regional decomposition after Gregory
 et al. (2019) are to land as diagnostics of a set-up. The steric and
 mass-conservation operators are already in `linear_operators/loads.py`. The
-scripts stay in the repository until the harvest is complete.
+scripts are then replaced by new, simplified ones built on set-ups, tested
+against a local record of the current scripts kept outside the repository;
+the current scripts leave the repository once the new ones reproduce them.
 
 ## Hard-coded regions
 
-Two rectangular masks in `regions.py` stand in for physical definitions, and
-are to be replaced.
-
-**The glacier box** (30-70N, 180-270E). The ice-ng models carry present-day
-ice outside the ice sheets, and a synthetic inversion whose prior has a
-constant standard deviation over the ice gives those small regions an
-unphysically large signal, so they were cut out. The aim was right but the box
-is not: it is the default of `EarthState.ice_projection` (`exclude_glaciers`),
-and through that reaches `ice_projection_operator`, the ice altimetry points,
-the "Glaciers" region name, the Heathcote2026 ice priors and the models
-`ice_sheets` component. The replacement has two parts:
-
-- **The ice sheets, defined by rule.** The IMBIE (Antarctic) and Mouginot
-  (Greenland) basin outlines alone do not do: at lmax 64, 802 of 2186 ice
-  cells fall outside them, 686 south of 60S (ice shelves, which the IMBIE
-  basins leave out, and margin cells whose centres fall outside the
-  outlines), 59 at Greenland's margins and 57 elsewhere (24 of them in the
-  box). A rule along the lines of all ice south of 60S plus the ice of
-  Greenland, margins included, is needed, and is to be settled.
-- **The glaciers, from the Randolph Glacier Inventory 7.0** (NSIDC-0770),
-  packaged for the pyslfp Zenodo record like the other datasets, as
-  simplified glacier-complex outlines or a fine gridded glacier fraction,
-  with the first-order regions for grouping. Whether the Greenland and
-  Antarctic peripheral glaciers count as glaciers, as in RGI, or as ice
-  sheet is to be decided with the ice-sheet rule.
+The ice sheets are selected by rule (`EarthState.ice_sheet_projection`) and the
+glaciers come from the Randolph Glacier Inventory 7.0
+(`EarthState.glacier_area_density`). One rectangular mask in `regions.py` still
+stands in for a physical definition, and is to be replaced.
 
 **The Caspian box** (36-49.5N, 45.5-55E), excluded from the ocean function by
 `EarthState(exclude_caspian=True)`, the default, and carried through the
@@ -64,8 +45,9 @@ stands:
   Gibraltar but not the Bosporus, so the Black Sea would need its connection
   stated.
 
-Changing either default changes the Heathcote2026 results, so the timing is
-tied to the paper's revision runs.
+Changing either default changes the Heathcote2026 results. The clean-up
+comes first, before WP3 of the models submodule and the paper's revision
+runs, so that both use the physical definitions.
 
 ## Operator wrappers for the viscoelastic adjoints
 

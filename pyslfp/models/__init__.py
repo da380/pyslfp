@@ -2,8 +2,8 @@
 Model spaces for sea level inversions, built from named load components.
 
 `components` holds the vocabulary: the `LoadComponent` record, its two
-roles, and the factories for ice sheets, land water storage, firn,
-dynamic topography and ocean density. `setup` holds the assembler,
+roles, and the factories for ice sheets, glaciers, land water storage,
+firn, dynamic topography and ocean density. `setup` holds the assembler,
 `ModelSetup`, which derives a model space and its operators from a list of
 components.
 """
@@ -17,6 +17,7 @@ from .components import (
     barystatic_gmsl_operator,
     dynamic_topography,
     firn,
+    glaciers,
     ice_sheets,
     land_water_storage,
     ocean_density,
@@ -30,6 +31,7 @@ __all__ = [
     "ICE_SURFACE_HEIGHT",
     "STERIC_SEA_LEVEL",
     "ice_sheets",
+    "glaciers",
     "land_water_storage",
     "firn",
     "dynamic_topography",

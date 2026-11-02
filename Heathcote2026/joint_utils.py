@@ -35,7 +35,7 @@ from pyslfp.linear_operators import (
     sea_level_change_to_load_operator,
     ocean_density_change_to_load_operator,
     sea_surface_height_operator,
-    ice_projection_operator,
+    ice_sheet_projection_operator,
     grace_observation_operator,
     WMBMethod,
 )
@@ -74,7 +74,7 @@ def build_physics_components(
 
     ice_to_load = ice_thickness_change_to_load_operator(
         state, load_space, load_space
-    ) @ ice_projection_operator(state, load_space)
+    ) @ ice_sheet_projection_operator(state, load_space)
 
     if is_surrogate:
         ocean_dyn_to_load = inf.LinearOperator.zero(load_space, codomain=load_space)

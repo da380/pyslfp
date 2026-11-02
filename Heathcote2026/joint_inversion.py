@@ -596,9 +596,9 @@ def main():
         )
 
     ocean_mask_mm = scale_mm * exact_phys["state"].ocean_projection(value=0.0)
-    ice_mask_mm = scale_mm * exact_phys["state"].ice_projection(value=0.0)
+    ice_mask_mm = scale_mm * exact_phys["state"].ice_sheet_projection(value=0.0)
     ocean_mask = exact_phys["state"].ocean_projection(value=0.0)
-    ice_mask = exact_phys["state"].ice_projection(value=0.0)
+    ice_mask = exact_phys["state"].ice_sheet_projection(value=0.0)
 
     print("\nDrawing MASTER synthetic model and dataset...")
     master_forward = inf.LinearForwardProblem(

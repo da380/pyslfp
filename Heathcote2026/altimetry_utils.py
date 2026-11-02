@@ -55,7 +55,7 @@ from pyslfp.linear_operators import (
     sea_level_change_to_load_operator,
     ocean_density_change_to_load_operator,
     sea_surface_height_operator,
-    ice_projection_operator,
+    ice_sheet_projection_operator,
     ocean_projection_operator,
     ocean_average_operator,
     averaging_operator,
@@ -97,7 +97,7 @@ def build_physics_components(
     # 1. Operators to convert each component to a surface mass load
     ice_to_load = ice_thickness_change_to_load_operator(
         state, load_space, load_space
-    ) @ ice_projection_operator(state, load_space)
+    ) @ ice_sheet_projection_operator(state, load_space)
 
     if is_surrogate:
         ocean_dyn_to_load = inf.LinearOperator.zero(load_space, codomain=load_space)
@@ -321,7 +321,7 @@ def build_conditioned_prior(
         es = effective_steric_scale(state)
         rho_std = steric_dyn_std_ratio * dyn_std / es
 
-        ice_proj = ice_projection_operator(state, load_space)
+        ice_proj = ice_sheet_projection_operator(state, load_space)
         ocean_proj = ocean_projection_operator(state, load_space)
         bary_fn = (
             load_space.l2_products_operator([barystatic_gmsl_weighting(state)])
@@ -434,7 +434,7 @@ def build_conditioned_prior(
         return joint, unmasked_prior, calib
 
     # --- masking and mass-conservation conditioning (exact model) ---
-    ice_proj = ice_projection_operator(state, load_space)
+    ice_proj = ice_sheet_projection_operator(state, load_space)
     ocean_proj = ocean_projection_operator(state, load_space)
     proj_op = inf.BlockDiagonalLinearOperator([ice_proj, ocean_proj, ocean_proj])
     masked = joint.affine_map(proj_op)
@@ -614,7 +614,7 @@ def regional_decomposition_operators(state, load_space, finger_print_operator, r
 
     ice_to_load = ice_thickness_change_to_load_operator(
         state, load_space, load_space
-    ) @ ice_projection_operator(state, load_space)
+    ) @ ice_sheet_projection_operator(state, load_space)
     op_bmslc = avg_op @ barystatic_sl_op @ ice_to_load @ joint_space.projection(0)
 
     return op_sslc, op_dmslc, op_bmslc

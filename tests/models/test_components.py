@@ -18,6 +18,7 @@ from pyslfp.models import (
     barystatic_gmsl_operator,
     dynamic_topography,
     firn,
+    glaciers,
     ice_sheets,
     land_water_storage,
     ocean_density,
@@ -28,7 +29,8 @@ FIRN_DENSITY_FRACTION = 0.6
 
 @pytest.fixture(scope="module")
 def state():
-    return EarthState.for_testing(16)
+    """A real state: the supports follow the Earth's geography."""
+    return EarthState.from_defaults(lmax=16)
 
 
 def _firn(state, load_space, **kwargs):
@@ -38,6 +40,7 @@ def _firn(state, load_space, **kwargs):
 
 FACTORIES = {
     "ice_sheets": ice_sheets,
+    "glaciers": glaciers,
     "land_water_storage": land_water_storage,
     "firn": _firn,
     "dynamic_topography": dynamic_topography,
@@ -46,6 +49,7 @@ FACTORIES = {
 
 ROLES = {
     "ice_sheets": Role.MASS_SOURCE,
+    "glaciers": Role.MASS_SOURCE,
     "land_water_storage": Role.MASS_SOURCE,
     "firn": Role.MASS_SOURCE,
     "dynamic_topography": Role.OCEAN_INTERNAL,
@@ -166,6 +170,7 @@ def test_ice_and_firn_load_with_their_own_densities(state):
     [
         ("ice_sheets", "ice", "grounded"),
         ("firn", "firn", "grounded"),
+        ("glaciers", "ice", "glacier area"),
         ("land_water_storage", "water", "all"),
     ],
 )
@@ -175,7 +180,8 @@ def test_barystatic_gmsl_is_the_bathtub_answer(
     """A uniform change h everywhere moves the global mean sea level by
     -rho h (loaded area) / (rho_w A_O), the loaded area lying within the
     source's support, which the operator applies itself; computed here
-    with the model's own quadrature."""
+    with the model's own quadrature. A glacier's whole area loads, ocean
+    nodes included."""
     load_space, _ = _spaces(state, "lebesgue")
     component = FACTORIES[factory](state, load_space)
     params = state.model.parameters
@@ -189,7 +195,11 @@ def test_barystatic_gmsl_is_the_bathtub_answer(
     ones.data[:] = 1.0
     support = component.support(ones)
     uniform = ones * h
-    weight = state.one_minus_ocean_function if loaded_fraction == "grounded" else ones
+    weight = {
+        "grounded": state.one_minus_ocean_function,
+        "glacier area": state.glacier_area_density(),
+        "all": ones,
+    }[loaded_fraction]
     loaded_area = state.model.integrate(support * weight)
 
     expected = -rho * h * loaded_area / (params.water_density * state.ocean_area)

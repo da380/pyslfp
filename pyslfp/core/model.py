@@ -445,6 +445,13 @@ class EarthModel:
         return self._extend
 
     @property
+    def integration_weights(self) -> np.ndarray:
+        """The latitudinal quadrature weights w_j of the grid, as used by
+        `integrate`: the surface integral of a field is sum_j w_j sum_i f_ji
+        over the unextended grid. A copy."""
+        return self._integration_weights.copy()
+
+    @property
     def parameters(self) -> EarthModelParameters:
         """The fundamental, non-dimensionalised Earth parameters."""
         return self._parameters

@@ -176,9 +176,17 @@ takes one of two values:
 (state projections plus the load operators):
 
 - grounded ice sheets: rho_i (1 - C) times the state's ice-sheet
-  indicator;
-- glaciers: the same rule on the glacier support, once the library has a
-  glacier inventory (see the roadmap's hard-coded regions);
+  indicator, the ice sheets selected by rule (`ice_sheet_projection`):
+  all ice south of 60S, and all ice within GTN-G region 5 (Greenland);
+- glaciers: the RGI 7.0 glaciers as point masses at their grid nodes,
+  rho_i a h with a the glacier area density and h a regional thickness
+  change. Glaciers are far smaller than the grid's resolution and sea
+  level is wanted well away from them; the whole area loads, with no
+  (1 - C), since the glaciers are grounded whatever the ocean function
+  says of their node. Glaciers at ice-sheet nodes belong to the ice
+  sheets, which hold them in the ice model. Spreading the largest
+  glaciers over their own area is the refinement to make if degree 512
+  needs it;
 - land water storage: rho_w times the ice-free land indicator,
   water-equivalent thickness;
 - firn: the ice rule with a caller-supplied firn density — the reason
@@ -240,6 +248,27 @@ scripts move onto set-ups, which drops their prior masking (decision 8)
 and with it the composed mask-and-load rows and the spectral barystatic
 pairing, and puts their loads in a space of order below 1/2.
 
+- **Diagnostics that need the sea level equation** (the true GMSL, the
+  residual form of the steric GMSL, the SSLC/DMSLC/BMSLC decomposition)
+  take the fingerprint operator as an argument; a set-up holds none and
+  stays passive. The decomposition is written through the roles: BMSLC
+  is the response to the mass sources' loads, DMSLC the response to the
+  ocean-internal loads plus dynamic topography less its steric part,
+  SSLC the steric sea level. The scripts' zeta (dynamic manometric
+  change) is renamed, zeta being the load in the library.
+- **Ready-made set-ups**: ice + eta; ice + eta + delta rho; ice + firn;
+  the budget (ice + glaciers + land water + eta + delta rho). Each takes
+  the load space, the field space and the observable space, as the
+  factories do.
+- **The scripts are replaced by new, simplified ones** built on
+  set-ups. The current scripts are kept as a local record, outside the
+  repository, and the new ones are tested against it; the old scripts
+  leave the repository once the new ones reproduce them.
+- **Order.** WP3 follows the clean-up of the hard-coded regions (see the
+  roadmap), so that the ready-made set-ups and the paper's revision runs
+  use the physical definitions of the ice sheets, the glaciers and the
+  ocean.
+
 ## Non-goals
 
 - Priors, calibration chains, solver and conditioning choices.
@@ -260,7 +289,6 @@ pairing, and puts their loads in a space of order below 1/2.
 - Land-mask subtleties (the Caspian, lakes) are inherited from the
   state's projections; the factories reuse them rather than redefining
   masks.
-- The glacier factory waits for a glacier inventory (RGI 7.0; see the
-  roadmap's hard-coded regions). A support supplied by the caller (a mask,
-  or named regions) would also serve any component whose support the
-  state's projections do not describe.
+- A support supplied by the caller (a mask, named regions or custom
+  glacier positions) would serve any component whose support the state's
+  projections do not describe.

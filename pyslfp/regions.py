@@ -9,6 +9,7 @@ from typing import Optional, List, Union, Any, Tuple
 import numpy as np
 import geopandas as gpd
 import regionmask
+import xarray as xr
 from cartopy import crs as ccrs
 from pyshtools import SHGrid
 
@@ -49,15 +50,20 @@ class Regions:
         self._iho_seas_gdf: Optional[gpd.GeoDataFrame] = None
         self._iho_seas_regions: Optional[regionmask.Regions] = None
         self._ne_ocean_regions: Optional[regionmask.Regions] = None
+        self._gtng_gdf: Optional[gpd.GeoDataFrame] = None
+        self._gtng_regions: Optional[regionmask.Regions] = None
+        self._rgi7_glaciers: Optional[xr.Dataset] = None
 
         # Per-dataset cache of rasterised masks on this grid (see _dataset_masks).
         # Excluded from pickling so that worker processes receive a small object.
         self._mask_cache: dict[str, Tuple[List[Any], np.ndarray]] = {}
 
     def __getstate__(self) -> dict:
-        """Drops the mask cache when pickling; it is rebuilt on demand."""
+        """Drops the mask cache and the glacier table when pickling; both are
+        rebuilt on demand."""
         state = self.__dict__.copy()
         state["_mask_cache"] = {}
+        state["_rgi7_glaciers"] = None
         return state
 
     @property
@@ -119,6 +125,43 @@ class Regions:
         return self._iho_seas_regions
 
     @property
+    def gtng_regions(self) -> regionmask.Regions:
+        """GTN-G first-order glacier regions (GTN-G, 2023), the regions of the
+        Randolph Glacier Inventory 7.0.
+
+        Numbered 1 to 20 and named by their full names. Region 5, Greenland,
+        covers the ice sheet as well as its periphery; region 19 takes in the
+        Antarctic islands and the floating shelves, region 20 the grounded
+        mainland.
+        """
+        if self._gtng_regions is None:
+            ensure_data("RGI7")
+            path = DATADIR / "RGI7" / "regions" / "RGI2000-v7.0-o1regions.shp"
+            gdf = gpd.read_file(path).to_crs(epsg=4326)
+            # Region 10 is stored in two parts, either side of the antimeridian.
+            gdf = gdf.dissolve(by="o1region").reset_index()
+            gdf["number"] = gdf["o1region"].astype(int)
+            self._gtng_gdf = gdf
+            self._gtng_regions = regionmask.from_geopandas(
+                gdf, numbers="number", names="full_name", name="GTN-G"
+            )
+        return self._gtng_regions
+
+    @property
+    def rgi7_glaciers(self) -> xr.Dataset:
+        """The glaciers of the Randolph Glacier Inventory 7.0 (RGI 7.0
+        Consortium, 2023), one record each: centroid `latitude` and `longitude`
+        in degrees, `area` in square metres and GTN-G first-order region
+        `o1region`, among others."""
+        if self._rgi7_glaciers is None:
+            ensure_data("RGI7")
+            with xr.open_dataset(DATADIR / "RGI7" / "rgi7_glaciers.nc") as table:
+                self._rgi7_glaciers = table[
+                    ["latitude", "longitude", "area", "o1region"]
+                ].load()
+        return self._rgi7_glaciers
+
+    @property
     def ne_ocean_regions(self) -> regionmask.Regions:
         """Built-in Natural Earth ocean basins (v5.1.2)."""
         if self._ne_ocean_regions is None:
@@ -146,7 +189,8 @@ class Regions:
             "IHO (World Seas)": self.list_iho_seas(),
             "HydroBASINS (Level 3)": self.list_hydrobasins(),
             "Natural Earth (Oceans)": self.list_ne_oceans(),
-            "Hardcoded Custom": ["Caspian Sea", "Glaciers"],
+            "GTN-G (Glacier Regions)": self.list_gtng_regions(),
+            "Hardcoded Custom": ["Caspian Sea"],
         }
 
     def get_projection(
@@ -155,7 +199,8 @@ class Regions:
         """
         A universal projection router. Takes a single region name or a list of
         region names, automatically locates them across all available datasets
-        (AR6, IHO, HydroBASINS, IMBIE, Mouginot), and returns a unified mask.
+        (AR6, IHO, HydroBASINS, IMBIE, Mouginot, Natural Earth, GTN-G), and
+        returns a unified mask.
 
         Args:
             regions: A single region name or list of region names.
@@ -174,6 +219,7 @@ class Regions:
             self.imbie_ant_projection,
             self.mouginot_grl_projection,
             self.ne_ocean_projection,
+            self.gtng_projection,
         ]
 
         for region in regions:
@@ -181,10 +227,6 @@ class Regions:
 
             if region == "Caspian Sea":
                 mask_grid = self.caspian_sea_projection(value=0.0)
-                accumulated_mask = accumulated_mask | (mask_grid.data == 1.0)
-                continue
-            if region == "Glaciers":
-                mask_grid = self.glacier_projection(value=0.0)
                 accumulated_mask = accumulated_mask | (mask_grid.data == 1.0)
                 continue
 
@@ -200,7 +242,8 @@ class Regions:
             if not matched:
                 raise ValueError(
                     f"Universal lookup failed: Region '{region}' could not be found "
-                    f"in AR6, IHO, HydroBASINS, IMBIE, Mouginot, or Natural Earth."
+                    f"in AR6, IHO, HydroBASINS, IMBIE, Mouginot, Natural Earth or "
+                    f"GTN-G."
                 )
 
         final_data = np.where(accumulated_mask, 1.0, value)
@@ -226,13 +269,12 @@ class Regions:
             "ANT": [],
             "GRL": [],
             "NE_OCEAN": [],
+            "GTNG": [],
         }
 
         for r in regions:
             if r == "Caspian Sea" or r == "Glaciers":
-                warnings.warn(
-                    f"'{r}' is a hardcoded array mask and has no vector boundaries to plot."
-                )
+                warnings.warn(f"'{r}' is a gridded mask and has no boundaries to plot.")
                 continue
 
             def check_and_add(dataset_obj, key, name):
@@ -254,6 +296,8 @@ class Regions:
             if check_and_add(self.mouginot_grl_regions, "GRL", r):
                 continue
             if check_and_add(self.ne_ocean_regions, "NE_OCEAN", r):
+                continue
+            if check_and_add(self.gtng_regions, "GTNG", r):
                 continue
 
             raise ValueError(
@@ -303,6 +347,8 @@ class Regions:
             self.plot_imbie_ant_boundaries(ax, region_names=grouped["ANT"], **kwargs)
         if grouped["GRL"]:
             self.plot_mouginot_grl_boundaries(ax, region_names=grouped["GRL"], **kwargs)
+        if grouped["GTNG"]:
+            self.plot_gtng_boundaries(ax, region_names=grouped["GTNG"], **kwargs)
 
     # ==================================================================== #
     #                         3. Listing Methods                           #
@@ -328,6 +374,10 @@ class Regions:
         """List available Natural Earth ocean basins."""
         return sorted(self.ne_ocean_regions.names)
 
+    def list_gtng_regions(self) -> List[str]:
+        """List the GTN-G first-order glacier regions, in numerical order."""
+        return list(self.gtng_regions.names)
+
     # ==================================================================== #
     #                        4. Projection Methods                         #
     # ==================================================================== #
@@ -346,9 +396,12 @@ class Regions:
             rm_obj = self.iho_seas_regions
         elif dataset_key == "NE_OCEAN":
             rm_obj = self.ne_ocean_regions
+        elif dataset_key == "GTNG":
+            rm_obj = self.gtng_regions
         else:
             raise ValueError(
-                "dataset_key must be 'ANT', 'GRL', 'HYDRO', 'OCEAN', or 'NE_OCEAN'"
+                "dataset_key must be 'ANT', 'GRL', 'HYDRO', 'OCEAN', 'NE_OCEAN' "
+                "or 'GTNG'"
             )
 
         if isinstance(region_names, str):
@@ -491,6 +544,10 @@ class Regions:
         """Project a Natural Earth ocean basin."""
         return self._apply_regionmask("NE_OCEAN", region_name, value)
 
+    def gtng_projection(self, region_name: str, /, *, value: float = np.nan) -> SHGrid:
+        """Project a GTN-G first-order glacier region."""
+        return self._apply_regionmask("GTNG", region_name, value)
+
     # --- Static & Convenience Projections ---
 
     def greenland_projection(self, /, *, value: float = np.nan) -> SHGrid:
@@ -519,14 +576,6 @@ class Regions:
             np.logical_and(lons > 45.5, lons < 55),
         )
         return SHGrid.from_array(np.where(caspian_mask, 1, value), grid=self.grid)
-
-    def glacier_projection(self, /, *, value: float = np.nan) -> SHGrid:
-        """Glacier projection for North American mountain glaciers."""
-        lats, lons = np.meshgrid(self.lats(), self.lons(), indexing="ij")
-        glacier_mask = np.logical_and(
-            np.logical_and(lats > 30, lats < 70), np.logical_and(lons > 180, lons < 270)
-        )
-        return SHGrid.from_array(np.where(glacier_mask, 1, value), grid=self.grid)
 
     # ==================================================================== #
     #                         5. Plotting Methods                          #
@@ -623,6 +672,20 @@ class Regions:
         _ = self.mouginot_grl_regions  # Trigger lazy loading
         return self._plot_gdf_boundaries(
             ax, self._mouginot_grl_gdf, "SUBREGION1", region_names, **kwargs
+        )
+
+    def plot_gtng_boundaries(
+        self,
+        ax: Any,
+        /,
+        *,
+        region_names: Optional[Union[str, List[str]]] = None,
+        **kwargs,
+    ) -> Any:
+        """Plot GTN-G glacier region boundaries onto a Cartopy axis."""
+        _ = self.gtng_regions  # Trigger lazy loading
+        return self._plot_gdf_boundaries(
+            ax, self._gtng_gdf, "full_name", region_names, **kwargs
         )
 
     def plot_hydrobasin_boundaries(

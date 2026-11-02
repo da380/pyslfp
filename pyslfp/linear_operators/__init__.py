@@ -19,6 +19,7 @@ from .physics import (
 from .spatial import (
     ocean_average_operator,
     ice_projection_operator,
+    ice_sheet_projection_operator,
     ocean_projection_operator,
     land_projection_operator,
     ice_average_operator,
@@ -83,6 +84,7 @@ __all__ = [
     # .spatial
     "ocean_average_operator",
     "ice_projection_operator",
+    "ice_sheet_projection_operator",
     "ocean_projection_operator",
     "land_projection_operator",
     "ice_average_operator",

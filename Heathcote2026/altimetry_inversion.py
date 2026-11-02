@@ -310,11 +310,11 @@ def main():
     )
 
     ocean_mask_mm = mm_scale * state.ocean_projection(value=0.0)
-    ice_mask_mm = mm_scale * state.ice_projection(value=0.0)
+    ice_mask_mm = mm_scale * state.ice_sheet_projection(value=0.0)
 
     # Unitless masks for plotting
     ocean_mask = state.ocean_projection(value=0.0)
-    ice_mask = state.ice_projection(value=0.0)
+    ice_mask = state.ice_sheet_projection(value=0.0)
 
     model_prior, noise_measure, calib = utils.build_measures(
         state,

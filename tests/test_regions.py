@@ -57,6 +57,8 @@ def mock_gdf():
             "SUBREGION1": ["GrlA", "GrlB"],  # Mouginot
             "HYBAS_ID": ["101", "102"],  # HydroBASINS
             "NAME": ["SeaA", "SeaB"],  # IHO Seas
+            "o1region": ["01", "02"],  # GTN-G
+            "full_name": ["GlacA", "GlacB"],  # GTN-G
             "geometry": [p1, p2],
         },
         crs="EPSG:4326",
@@ -70,12 +72,28 @@ def mock_gdf():
 # ==================================================================== #
 
 
-def test_glacier_projection_basic(region_engine):
-    """Test the static glacier projection mask (North America bounds)."""
-    glacier_proj = region_engine.glacier_projection(value=0)
-    assert isinstance(glacier_proj, SHGrid)
-    assert np.all((glacier_proj.data == 0) | (glacier_proj.data == 1))
-    assert np.sum(glacier_proj.data) > 0
+def test_gtng_regions(region_engine):
+    """The GTN-G glacier regions load, list in numerical order, project and
+    are found by the universal router."""
+    names = region_engine.list_gtng_regions()
+    assert len(names) == 20
+    assert names[0] == "Alaska" and names[4] == "Greenland Periphery"
+    alaska = region_engine.gtng_projection("Alaska", value=0)
+    assert isinstance(alaska, SHGrid)
+    assert np.all((alaska.data == 0) | (alaska.data == 1))
+    assert np.sum(alaska.data) > 0
+    np.testing.assert_array_equal(
+        region_engine.get_projection("Alaska", value=0).data, alaska.data
+    )
+    assert "GTN-G (Glacier Regions)" in region_engine.list_all_regions()
+
+
+def test_rgi7_glaciers_table(region_engine):
+    """The glacier table holds positions, areas and regions."""
+    table = region_engine.rgi7_glaciers
+    assert {"latitude", "longitude", "area", "o1region"} <= set(table.data_vars)
+    assert table.sizes["glacier"] > 0
+    assert np.all(table["area"].values > 0)
 
 
 def test_caspian_sea_projection(region_engine):
@@ -470,6 +488,7 @@ def test_list_all_regions(mock_read_file, mock_ensure, region_engine, mock_gdf):
     assert "GrlA" in all_regions["Mouginot (Greenland)"]
     assert "101" in all_regions["HydroBASINS (Level 3)"]
     assert "Mocked Ocean Basin" in all_regions["Natural Earth (Oceans)"]
+    assert "GlacA" in all_regions["GTN-G (Glacier Regions)"]
 
 
 @pytest.mark.slow
@@ -506,5 +525,12 @@ def test_universal_plot_routing(mock_plot_iho, mock_plot_ar6, region_engine):
         region_engine.plot_boundaries(None, ["FakeRegion"])
 
     # Test warning for Caspian Sea (has no vector boundaries)
-    with pytest.warns(UserWarning, match="has no vector boundaries to plot"):
+    with pytest.warns(UserWarning, match="has no boundaries to plot"):
         region_engine.plot_boundaries(None, ["Caspian Sea"])
+
+    # GTN-G glacier regions route to their own plotter
+    with patch.object(MockRegionHost, "plot_gtng_boundaries") as mock_plot_gtng:
+        region_engine.plot_boundaries(None, ["Svalbard and Jan Mayen"])
+    mock_plot_gtng.assert_called_once_with(
+        None, region_names=["Svalbard and Jan Mayen"]
+    )

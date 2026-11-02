@@ -22,7 +22,7 @@ from pyslfp.linear_operators.loads import (
 )
 from pyslfp.linear_operators.physics import lebesgue_load_space, sobolev_load_space
 from pyslfp.linear_operators.spatial import (
-    ice_projection_operator,
+    ice_sheet_projection_operator,
     ocean_average_operator,
 )
 from pyslfp.models import (
@@ -33,6 +33,7 @@ from pyslfp.models import (
     ModelSetup,
     dynamic_topography,
     firn,
+    glaciers,
     ice_sheets,
     land_water_storage,
     ocean_density,
@@ -41,7 +42,8 @@ from pyslfp.models import (
 
 @pytest.fixture(scope="module")
 def state():
-    return EarthState.for_testing(16)
+    """A real state: the supports follow the Earth's geography."""
+    return EarthState.from_defaults(lmax=16)
 
 
 @pytest.fixture(scope="module")
@@ -80,6 +82,7 @@ def budget(state, load_space, field_space):
         state,
         [
             ice_sheets(state, load_space, name="ice", **on_fields),
+            glaciers(state, load_space, name="glaciers", **on_fields),
             firn(state, load_space, density=density, name="firn", **on_fields),
             land_water_storage(state, load_space, name="water", **on_fields),
             dynamic_topography(state, load_space, name="eta", **on_fields),
@@ -241,7 +244,7 @@ def test_three_component_space_reproduces_the_hand_built_operators(
     its weighting carries the support. Their sea surface height takes eta
     unmasked, as a set-up does."""
     joint = three.space
-    ice = state.ice_projection(value=0.0)
+    ice = state.ice_sheet_projection(value=0.0)
     ice_to_load = ice_thickness_change_to_load_operator(state, field_space, load_space)
     dyn_to_load = sea_level_change_to_load_operator(state, field_space, load_space)
     rho_to_load = ocean_density_change_to_load_operator(state, field_space, load_space)
@@ -249,7 +252,7 @@ def test_three_component_space_reproduces_the_hand_built_operators(
 
     scripts_row = RowLinearOperator(
         [
-            ice_to_load @ ice_projection_operator(state, field_space),
+            ice_to_load @ ice_sheet_projection_operator(state, field_space),
             dyn_to_load,
             rho_to_load,
         ]
@@ -336,7 +339,10 @@ def test_a_global_prior_conditions_exactly_on_the_mass_constraint(budget):
 
 def test_component_gmsl_sums_to_the_total(budget):
     x = _random(budget, 6)
-    parts = sum(budget.barystatic_gmsl(name)(x)[0] for name in ("ice", "firn", "water"))
+    parts = sum(
+        budget.barystatic_gmsl(name)(x)[0]
+        for name in ("ice", "glaciers", "firn", "water")
+    )
     np.testing.assert_allclose(budget.barystatic_gmsl()(x)[0], parts, rtol=1e-12)
 
 

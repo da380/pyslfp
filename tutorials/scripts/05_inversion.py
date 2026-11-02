@@ -20,7 +20,7 @@ import pyslfp as sl
 from pyslfp.linear_operators import (
     FingerPrintOperator,
     TideGaugeObservationModel,
-    ice_projection_operator,
+    ice_sheet_projection_operator,
     ocean_average_operator,
     read_gloss_tide_gauge_data,
 )
@@ -60,7 +60,9 @@ def build(lmax):
         PRIOR_ORDER,
         PRIOR_SCALE_KM * 1.0e3 / params.length_scale,
         pointwise_std=PRIOR_STD_M / params.length_scale,
-    ).affine_map(ice_projection_operator(state, ice_space, exclude_ice_shelves=True))
+    ).affine_map(
+        ice_sheet_projection_operator(state, ice_space, exclude_ice_shelves=True)
+    )
     noise = inf.GaussianMeasure.from_standard_deviation(
         inf.EuclideanSpace(len(points)), NOISE_STD_MM * 1.0e-3 / params.length_scale
     )

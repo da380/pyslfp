@@ -7,7 +7,7 @@ mass conversions—decoupled from the physical Sea Level Equation.
 """
 
 from __future__ import annotations
-from typing import Union, List, Optional
+from typing import List, Optional, Sequence, Union
 
 from pyshtools import SHGrid
 from pygeoinf import LinearOperator, CholeskySolver, Traits
@@ -48,10 +48,28 @@ def ice_projection_operator(
     *,
     exclude_ice_shelves: bool = False,
 ) -> LinearOperator:
-    """Returns a LinearOperator that projects a field onto the ice sheets."""
+    """Returns a LinearOperator that projects a field onto the state's ice
+    (`EarthState.ice_projection`)."""
     check_load_space(space)
     projection_field = state.ice_projection(
         value=0.0, exclude_ice_shelves=exclude_ice_shelves
+    )
+    return space.multiplication_operator(projection_field)
+
+
+def ice_sheet_projection_operator(
+    state: EarthState,
+    space: Union[Lebesgue, Sobolev],
+    /,
+    *,
+    sheets: Optional[Union[str, Sequence[str]]] = None,
+    exclude_ice_shelves: bool = False,
+) -> LinearOperator:
+    """Returns a LinearOperator that projects a field onto the ice sheets
+    (`EarthState.ice_sheet_projection`)."""
+    check_load_space(space)
+    projection_field = state.ice_sheet_projection(
+        value=0.0, sheets=sheets, exclude_ice_shelves=exclude_ice_shelves
     )
     return space.multiplication_operator(projection_field)
 
@@ -96,7 +114,8 @@ def ice_average_operator(
     *,
     exclude_ice_shelves: bool = False,
 ) -> LinearOperator:
-    """Returns a LinearOperator that computes the spatial average over ice sheets."""
+    """Returns a LinearOperator that computes the spatial average over the
+    state's ice (`EarthState.ice_projection`)."""
     check_load_space(space)
     projection_field = state.ice_projection(
         value=0.0, exclude_ice_shelves=exclude_ice_shelves

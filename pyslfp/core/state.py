@@ -5,7 +5,7 @@ geographic projections and standard loads built on them."""
 from __future__ import annotations
 from functools import cached_property
 
-from typing import Any, Optional
+from typing import Any, List, Optional, Sequence, Union
 
 import numpy as np
 from pyshtools import SHGrid
@@ -16,6 +16,27 @@ from .model import EarthModel
 from ..regions import Regions
 from ..ice import AnalyticalIceModel, BaseIceSeaLevelModel, IceNG
 from ..plot import plot_coastline
+
+# The ice sheets `EarthState.ice_sheet_projection` defines by rule.
+ICE_SHEETS = ("antarctic", "greenland")
+
+# The GTN-G first-order glacier region of Greenland, ice sheet included.
+_GTNG_GREENLAND = 5
+
+
+def _nearest_rows(
+    lats: np.ndarray, weights: np.ndarray, latitude: np.ndarray
+) -> np.ndarray:
+    """The rows, among those of positive quadrature weight, whose latitudes
+    are nearest the given ones; `lats` are the rows' latitudes, descending."""
+    valid = np.flatnonzero(weights > 0)
+    ascending = -lats[valid]
+    upper = np.clip(np.searchsorted(ascending, -latitude), 1, len(valid) - 1)
+    lower = upper - 1
+    nearer_lower = np.abs(ascending[lower] + latitude) <= np.abs(
+        ascending[upper] + latitude
+    )
+    return valid[np.where(nearer_lower, lower, upper)]
 
 
 class EarthState(Regions):
@@ -303,26 +324,184 @@ class EarthState(Regions):
         *,
         value: float = np.nan,
         exclude_ice_shelves: bool = False,
-        exclude_glaciers: bool = True,
     ) -> SHGrid:
         """
-        Returns a grid that is 1 over ice sheets and `value` elsewhere.
+        Returns a grid that is 1 wherever the state has ice and `value`
+        elsewhere: the ice sheets and any other ice the ice model holds. The ice
+        sheets alone are `ice_sheet_projection`.
 
         Args:
-            value (float): The value to assign outside the ice sheet. Defaults to NaN.
-            exclude_ice_shelves (bool): If True, exclude ice shelves.
-            exclude_glaciers (bool): If True, exclude mountain glaciers.
+            value (float): The value to assign outside the ice. Defaults to NaN.
+            exclude_ice_shelves (bool): If True, exclude floating ice.
         """
         if exclude_ice_shelves:
             mask = (self.ice_thickness.data > 0) & (self.ocean_function.data == 0)
         else:
             mask = self.ice_thickness.data > 0
-
-        if exclude_glaciers:
-            glacier_mask = self.glacier_projection(value=0).data == 1
-            mask = mask & ~glacier_mask
-
         return SHGrid.from_array(np.where(mask, 1, value), grid=self.grid)
+
+    def ice_sheet_projection(
+        self,
+        /,
+        *,
+        value: float = np.nan,
+        sheets: Optional[Union[str, Sequence[str]]] = None,
+        exclude_ice_shelves: bool = False,
+    ) -> SHGrid:
+        """
+        Returns a grid that is 1 over the ice sheets and `value` elsewhere.
+
+        The ice sheets are the state's ice selected by rule: the Antarctic ice
+        sheet is all ice south of 60S, the Greenland ice sheet all ice within the
+        GTN-G first-order glacier region of Greenland (region 5), shelves and
+        margins included in both. Drainage-basin outlines would not do, since
+        they leave out the shelves and the margin cells whose centres fall
+        outside them, and on the grid Greenland's ice joins that of Arctic
+        Canada, so connectivity cannot separate the two. Peripheral glaciers
+        that the ice model holds as part of the sheets count as ice sheet; ice
+        elsewhere, such as Arctic Canada's and Alaska's in present-day models,
+        belongs to neither sheet. The rule applies at any degree and epoch, and
+        selects only these two sheets.
+
+        Args:
+            value (float): The value to assign outside the ice sheets.
+                Defaults to NaN.
+            sheets: "antarctic", "greenland" or a sequence of them; both if
+                None.
+            exclude_ice_shelves (bool): If True, exclude floating ice.
+
+        Raises:
+            ValueError: If a sheet is not one of the two.
+        """
+        names = (
+            ICE_SHEETS
+            if sheets is None
+            else ((sheets,) if isinstance(sheets, str) else tuple(sheets))
+        )
+        unknown = set(names) - set(ICE_SHEETS)
+        if unknown:
+            raise ValueError(
+                f"Unknown ice sheets {sorted(unknown)}; the ice sheets are "
+                f"{ICE_SHEETS}."
+            )
+        ice = (
+            self.ice_projection(value=0.0, exclude_ice_shelves=exclude_ice_shelves).data
+            > 0
+        )
+        lats, _ = np.meshgrid(self.lats(), self.lons(), indexing="ij")
+        mask = np.zeros_like(ice)
+        if "antarctic" in names:
+            mask |= ice & (lats < -60.0)
+        if "greenland" in names:
+            greenland = self.gtng_regions[_GTNG_GREENLAND].name
+            mask |= ice & (self.gtng_projection(greenland, value=0.0).data > 0)
+        return SHGrid.from_array(np.where(mask, 1, value), grid=self.grid)
+
+    def glacier_area_density(
+        self, /, *, regions: Optional[Sequence[Union[int, str]]] = None
+    ) -> SHGrid:
+        """
+        The area of the glaciers of the Randolph Glacier Inventory 7.0 per unit
+        area, non-dimensional.
+
+        Glaciers are far smaller than the grid's resolution (the median is
+        0.17 km^2, against a half-wavelength of 78 km at degree 256), and sea
+        level is wanted well away from them, so each is taken as a point mass:
+        its area is placed at the grid node nearest its centroid, divided by
+        the node's quadrature weight. `model.integrate` then returns the total
+        area exactly, and the field's coefficients are those of point masses at
+        the nodes. The density is therefore not a covered fraction, and exceeds
+        one where much glacier area meets at a node. Glaciers at nodes of the
+        ice sheets are left out: there the ice model holds the ice, peripheral
+        glaciers included, as part of the sheets (`ice_sheet_projection`).
+
+        Args:
+            regions: GTN-G first-order regions to keep, by number or name
+                (`list_gtng_regions`); all if None.
+
+        Raises:
+            ValueError: If a region is not a GTN-G first-order region.
+        """
+        table = self.rgi7_glaciers
+        keep = np.isin(table["o1region"].values, self._gtng_numbers(regions))
+        latitude = table["latitude"].values[keep]
+        longitude = table["longitude"].values[keep]
+        length_scale = self.model.parameters.length_scale
+        area = table["area"].values[keep] / length_scale**2
+
+        weights = self.model.integration_weights
+        n_rows = len(weights)
+        n_lon = len(self.lons()) - (1 if self.extend else 0)
+        rows = _nearest_rows(self.lats()[:n_rows], weights, latitude)
+        columns = np.rint(np.mod(longitude, 360.0) * n_lon / 360.0).astype(int) % n_lon
+        summed = np.zeros((n_rows, n_lon))
+        np.add.at(summed, (rows, columns), area)
+
+        data = np.zeros_like(self.ice_thickness.data)
+        data[:n_rows, :n_lon] = np.divide(
+            summed,
+            weights[:, None],
+            out=np.zeros_like(summed),
+            where=weights[:, None] > 0,
+        )
+        if self.extend:
+            data[:, -1] = data[:, 0]
+        data[self.ice_sheet_projection(value=0.0).data > 0] = 0.0
+        return SHGrid.from_array(data, grid=self.grid)
+
+    def glacier_projection(self, /, *, value: float = np.nan) -> SHGrid:
+        """
+        Returns a grid that is 1 at the nodes holding glaciers outside the ice
+        sheets (`glacier_area_density`) and `value` elsewhere.
+
+        Args:
+            value (float): The value to assign elsewhere. Defaults to NaN.
+        """
+        mask = self.glacier_area_density().data > 0
+        return SHGrid.from_array(np.where(mask, 1, value), grid=self.grid)
+
+    def get_projection(
+        self, regions: Union[str, List[str]], /, *, value: float = np.nan
+    ) -> SHGrid:
+        """
+        As `Regions.get_projection`, with one region that depends on the state:
+        "Glaciers", the nodes holding glaciers outside the ice sheets
+        (`glacier_projection`).
+        """
+        names = [regions] if isinstance(regions, str) else list(regions)
+        others = [name for name in names if name != "Glaciers"]
+        mask = np.zeros(self.ice_thickness.data.shape, dtype=bool)
+        if len(others) < len(names):
+            mask |= self.glacier_projection(value=0.0).data > 0
+        if others:
+            mask |= super().get_projection(others, value=0.0).data > 0
+        return SHGrid.from_array(np.where(mask, 1.0, value), grid=self.grid)
+
+    def list_all_regions(self) -> dict[str, List[str]]:
+        """As `Regions.list_all_regions`, with the regions that depend on the
+        state."""
+        regions = super().list_all_regions()
+        regions["State-dependent"] = ["Glaciers"]
+        return regions
+
+    def _gtng_numbers(self, regions: Optional[Sequence[Union[int, str]]]) -> list:
+        """The numbers of the given GTN-G first-order regions; all if None."""
+        known = list(self.gtng_regions.numbers)
+        if regions is None:
+            return known
+        if isinstance(regions, (str, int)):
+            regions = [regions]
+        numbers = []
+        for region in regions:
+            number = (
+                region
+                if isinstance(region, (int, np.integer))
+                else self.gtng_regions.map_keys(region)
+            )
+            if number not in known:
+                raise ValueError(f"'{region}' is not a GTN-G first-order region.")
+            numbers.append(int(number))
+        return numbers
 
     def land_projection(
         self, /, *, value: float = np.nan, exclude_ice: bool = False

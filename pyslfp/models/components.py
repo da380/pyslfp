@@ -28,7 +28,9 @@ allows:
   region with a Lipschitz boundary is bounded on H^s for -1/2 < s < 1/2 and
   on no H^s with s >= 1/2. Every load carries the ocean function or a
   support's indicator, so it lies in H^s only for s < 1/2, and the load
-  space should have an order in [0, 1/2). The sea level equation gains
+  space should have an order in [0, 1/2). A glacier's load carries the
+  indicator of its outline in the same way; glaciers are far smaller than
+  the grid's resolution, so the grid holds each as a point mass. The sea level equation gains
   one order, so a load space of order above 0 puts the response above
   order 1, where evaluation at points is bounded.
 - **Pointwise observables leave the support to their points.** The sea
@@ -54,8 +56,7 @@ change (`barystatic_gmsl_operator`). An ocean-internal component
 rearranges the ocean's mass without changing it, and is what the ocean
 mass-conservation constraint couples.
 
-The factories below build the components in use; glaciers will join them
-once the library has a glacier inventory. Every component's space, and
+The factories below build the components in use. Every component's space, and
 every observable space, must share the load space's grid, so that a
 field, its load and its contributions are fields on the same grid; their
 Sobolev orders differ. The load operators are written on the Lebesgue
@@ -81,7 +82,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from types import MappingProxyType
-from typing import Mapping, Optional, Union
+from typing import Mapping, Optional, Sequence, Union
 
 from pyshtools import SHGrid
 
@@ -189,9 +190,9 @@ def ice_sheets(
     """
     An ice thickness change over the ice sheets.
 
-    The support is the ice the state attributes to the ice sheets,
-    `EarthState.ice_projection`, shelves included, so the component follows
-    the library's definition of the ice sheets. On it the load is
+    The support is the ice sheets as the library defines them,
+    `EarthState.ice_sheet_projection`: the Antarctic and Greenland ice,
+    shelves and margins included. On it the load is
     rho_i (1 - C) delta I, the grounded part only: floating ice displaces
     its own weight of water and loads nothing. The thickness change
     contributes directly, unmasked, to the ice surface height, which ice
@@ -209,7 +210,7 @@ def ice_sheets(
         name: The component's name.
     """
     space = _component_space(space, load_space)
-    ice = state.ice_projection(value=0.0)
+    ice = state.ice_sheet_projection(value=0.0)
     rho_i = state.model.parameters.ice_density
     return LoadComponent(
         name=name,
@@ -238,7 +239,9 @@ def land_water_storage(
 
     The support is the land that carries no ice; the ice-covered land
     belongs to the ice components. The load is rho_w w on the support, the
-    mask entering as part of the multiplier.
+    mask entering as part of the multiplier. Glaciers on ice-free land lie
+    on the support too: the glaciers component loads their ice, this one
+    the water stored around them.
 
     Args:
         state: The Earth state supplying the masks.
@@ -293,7 +296,7 @@ def firn(
         name: The component's name.
     """
     space = _component_space(space, load_space)
-    ice = state.ice_projection(value=0.0)
+    ice = state.ice_sheet_projection(value=0.0)
     return LoadComponent(
         name=name,
         space=space,
@@ -305,6 +308,54 @@ def firn(
         observables={
             ICE_SURFACE_HEIGHT: _inclusion(space, observable_space, load_space)
         },
+    )
+
+
+def glaciers(
+    state: EarthState,
+    load_space: Space,
+    /,
+    *,
+    space: Optional[Space] = None,
+    regions: Optional[Sequence[Union[int, str]]] = None,
+    name: str = "glaciers",
+) -> LoadComponent:
+    """
+    A thickness change of the glaciers of the Randolph Glacier Inventory 7.0.
+
+    The field h is a regional thickness change, which each glacier takes at
+    its own position. Glaciers are far smaller than the grid's resolution,
+    and sea level is wanted well away from them, so each is a point mass at
+    its grid node (`EarthState.glacier_area_density`), and the load is
+    rho_i a h, with a the glacier area density. The whole glacier area
+    loads, with no factor (1 - C): the glaciers are grounded, and a node the
+    ocean function counts as ocean, often a small island or a coast the grid
+    does not resolve, says nothing about them. Glaciers at the nodes of the
+    ice sheets belong to the ice sheets. The support is the nodes holding
+    glaciers. There is no direct observable: contributions to one pointwise
+    observable share a support, so glacier altimetry would need an
+    observable of its own.
+
+    Args:
+        state: The Earth state supplying the glaciers and the ice sheets.
+        load_space: The space of the loads.
+        space: The component's space, on the load space's grid. The load
+            space if omitted.
+        regions: GTN-G first-order regions to keep, by number or name; all
+            if None. One component per region gives regional budgets.
+        name: The component's name.
+    """
+    space = _component_space(space, load_space)
+    density = state.glacier_area_density(regions=regions)
+    rho_i = state.model.parameters.ice_density
+    support = state.model.zero_grid()
+    support.data[:] = (density.data > 0).astype(float)
+    return LoadComponent(
+        name=name,
+        space=space,
+        to_load=_multiplication_into(space, load_space, rho_i * density),
+        support=_mask(space, support),
+        role=Role.MASS_SOURCE,
     )
 
 

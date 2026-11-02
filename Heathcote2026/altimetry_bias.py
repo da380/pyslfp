@@ -309,7 +309,7 @@ def main():
 
         ocean_mask_raw = state.ocean_projection(value=0.0)
         ocean_mask_mm = scale_mm * ocean_mask_raw
-        ice_mask = scale_mm * state.ice_projection(value=0.0)
+        ice_mask = scale_mm * state.ice_sheet_projection(value=0.0)
 
         # Physical density units for the raw density map (nondimensional
         # density x density_scale = kg/m^3; x1000 -> g/m^3).

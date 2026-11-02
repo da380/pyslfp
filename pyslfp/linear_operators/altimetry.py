@@ -8,7 +8,7 @@ physical parameter spaces to discrete SSH observations.
 """
 
 from __future__ import annotations
-from typing import List, Tuple, Union, Optional
+from typing import List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
@@ -92,26 +92,25 @@ def ice_altimetry_points(
     /,
     *,
     spacing: float = 2.0,
+    sheets: Optional[Union[str, Sequence[str]]] = None,
     exclude_ice_shelves: bool = False,
-    exclude_glaciers: bool = True,
 ) -> List[Tuple[float, float]]:
     """A regular grid of observation points over the ice sheets.
 
     Args:
-        state: The Earth state whose ice mask filters the points.
+        state: The Earth state whose ice sheets filter the points
+            (`EarthState.ice_sheet_projection`).
         spacing: The grid spacing in degrees.
+        sheets: "antarctic", "greenland" or a sequence of them; both if None.
         exclude_ice_shelves: Whether floating shelves are excluded.
-        exclude_glaciers: Whether mountain glaciers are excluded.
     """
     lats = np.arange(-90.0, 90.0 + 1e-9, spacing)
     lons = np.arange(0.0, 360.0, spacing)
     lat_mesh, lon_mesh = np.meshgrid(lats, lons, indexing="ij")
     candidate_points = np.column_stack((lat_mesh.ravel(), lon_mesh.ravel()))
 
-    mask = state.ice_projection(
-        value=0,
-        exclude_ice_shelves=exclude_ice_shelves,
-        exclude_glaciers=exclude_glaciers,
+    mask = state.ice_sheet_projection(
+        value=0, sheets=sheets, exclude_ice_shelves=exclude_ice_shelves
     )
     return _filter_independent_points(candidate_points, mask)
 

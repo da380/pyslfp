@@ -39,6 +39,12 @@ from .response import (
     SurfaceDisplacementSpace,
 )
 from .history import FieldHistory, FieldHistorySpace
+from .spaces import (
+    lebesgue_load_space,
+    lebesgue_response_space,
+    sobolev_load_space,
+    sobolev_response_space,
+)
 
 __all__ = [
     "EarthModel",
@@ -52,6 +58,10 @@ __all__ = [
     "SurfaceDisplacementSpace",
     "FieldHistory",
     "FieldHistorySpace",
+    "lebesgue_load_space",
+    "lebesgue_response_space",
+    "sobolev_load_space",
+    "sobolev_response_space",
     "EQUATORIAL_RADIUS",
     "POLAR_RADIUS",
     "MEAN_RADIUS",

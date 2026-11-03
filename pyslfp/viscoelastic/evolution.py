@@ -42,11 +42,11 @@ from planetmodel import units
 
 from ..core import EarthModel
 from ..core.response import RELATIVE_SEA_LEVEL_CHANGE, GRDResponse, GRDSpace
+from ..core.spaces import lebesgue_response_space
 from ..ice import BaseIceModel, BaseIceSeaLevelModel
 from ..love_numbers import fluid_tidal_number
 from ..core import AndersonMixer, SeaLevelEquation
 from ..core import EarthState
-from ..linear_operators.physics import lebesgue_response_space
 from .operator import ViscoelasticOperator, ViscoelasticState
 from .rheology import Rheology
 
@@ -197,8 +197,9 @@ class IceKernels:
     interval.  In this parameterisation the dual of the initial
     thickness vanishes identically under frozen shorelines (a uniform
     thickness shift loads nothing), which the calculation satisfies by
-    construction.  Any remaining inversion-side smoothing -- Sobolev
-    duals in the manner of pygeoinf -- acts on these views."""
+    construction.  The Sobolev kernel, the derivative's Riesz
+    representer in a space of ice histories, is the adjoint of
+    `IceHistoryOperator`, built from the per-node duals."""
 
     dates: np.ndarray
     load_duals: list[SHGrid] = field(repr=False)

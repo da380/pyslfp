@@ -280,7 +280,14 @@ continuous adjoints' representers as the run resolves its rheology.
    and V in the discrete and continuous adjoints.
 4. The Sobolev kernels: `FieldHistorySpace` in core, then the ice history
    operator whose adjoint gives the kernels.
-5. The docs: the viscoelastic adjoint problem in theory.rst, release_4.md
+5. The layout: `linear_operators` dissolved by role. The space builders and
+   the centrifugal potential operator go to `core` (the builders have moved),
+   `FingerPrintOperator` to `elastic` beside its solver, the observation
+   operators and models to a new `observations` subpackage (GNSS joins it in
+   package 6), the load-building operators to `models`, and the spatial
+   operators to `core` beside the regions; the deprecated wrappers in
+   `utils.py` are removed.
+6. The docs: the viscoelastic adjoint problem in theory.rst, release_4.md
    and this file.
 
 ## Work packages

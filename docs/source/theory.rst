@@ -504,6 +504,27 @@ with finite jumps at the observation times only, and pairs with thickness
 histories continuous in time. ``IceKernels.at_dates`` maps the kernels onto an
 ice model's own dates by the transpose of its linear interpolation.
 
+The Sobolev kernel is the derivative's Riesz representer in a space of ice
+histories, ``FieldHistorySpace``: the product of a Sobolev space
+:math:`H^s(T)` on the run's interval of time and one :math:`H^r(S^2)` on the
+sphere, with the inner product :math:`(A_t^s\otimes A_x^r\,u, v)`, where
+:math:`A_t = 1 - L_t^2\,\partial_t^2`. Both factors are diagonal in their
+eigenbases, so the history's components :math:`c_{kj}` lie on the products
+:math:`\phi_k(t)Y_j(\mathbf{x})` with the metric :math:`\mu_k\nu_j`. The forward
+map reads a history at the date nodes, so its derivative has the components
+:math:`\sum_n \phi_k(t_n)\,d_{n,j}`, with :math:`d_n` the discrete per-node
+duals, and the representer divides them by the metric. For :math:`s > 1/2`
+evaluation at a time is bounded on :math:`H^s(T)`, so each delta of
+:math:`K_I` becomes the Green's function of :math:`A_t^s`, continuous in time:
+the representer converges as time modes are added, where an L2 representer
+grows without bound, and as the date grid is refined. The quelled view is a
+one-sided form of the same idea, the Green's function of :math:`\partial_t`
+with a terminal condition. The time space's mesh is padded at both ends, so
+that no end condition distorts the kernel near the present.
+``IceHistoryOperator`` is the frozen-shoreline map from a history to the
+responses at the observation dates as a ``pygeoinf`` operator, and its adjoint
+applied to the duals of a measurement is this kernel.
+
 Initial sea level and viscosity
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

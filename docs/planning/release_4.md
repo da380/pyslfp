@@ -81,17 +81,25 @@ tangential traction `tangential_load`; `solve_nonlinear_response` returns the
 new state and a `GRDResponse`; and `adjoint_generalised_solve` takes
 `horizontal_dual`. Fields on the sphere through time: `FieldHistorySpace`
 (`pyslfp.core.history`), the product of a pygeoinf interval space and a
-sphere space with the product metric, and its vectors, `FieldHistory`.
+sphere space with the product metric, and its vectors, `FieldHistory`. The
+load and response space builders (`lebesgue_load_space`,
+`sobolev_load_space`, `lebesgue_response_space`, `sobolev_response_space`) in
+`pyslfp.core`. `IceHistoryOperator` (`pyslfp.viscoelastic`): the
+frozen-shoreline map from an ice thickness history to the responses at
+observation dates, whose adjoint gives the Sobolev kernels.
 
 ## Planned work still to land
 
 - The viscoelastic side of the response: snapshots holding a `GRDResponse`,
   the horizontal memory field, the adjoints; GNSS observation models with the
   frame of the data ([response_plan.md](response_plan.md), packages 5 and 6).
-- The deprecations: the wrappers in `linear_operators/utils.py`
-  (`l2_products_operator`, `spatial_multiplication_operator`) and the
-  altimetry observation models the models plan replaces, removed or kept as
-  deprecated aliases, to be decided.
+- The layout: `linear_operators` dissolved by role, its operators beside the
+  physics they wrap (`core`, `elastic`, `viscoelastic`), the observations in a
+  new `observations` subpackage and the load-building operators in `models`
+  ([response_plan.md](response_plan.md), package 5, step 5). The wrappers in
+  `linear_operators/utils.py` (`l2_products_operator`,
+  `spatial_multiplication_operator`) go with it; whether the altimetry
+  observation models the models plan replaces go too is to be decided.
 - The rest of the scope set with the port: the viscoelastic adjoints wrapped
   as pygeoinf operators, planetmodel 1.4's plots, the priors layer, and
   time-dependent model spaces, which wait on a tensor product of spaces in

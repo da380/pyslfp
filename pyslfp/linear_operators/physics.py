@@ -19,7 +19,6 @@ from pygeoinf import (
     EuclideanSpace,
     GaussianMeasure,
 )
-from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
 from pyslfp.core import EarthModelParameters, EarthModel
 from pyslfp.elastic import LinearSeaLevelEquation
@@ -28,6 +27,12 @@ from pyslfp.core.response import (
     ANGULAR_VELOCITY_CHANGE,
     GRDResponse,
     GRDSpace,
+)
+from pyslfp.core.spaces import (
+    lebesgue_load_space,
+    lebesgue_response_space,
+    sobolev_load_space,
+    sobolev_response_space,
 )
 
 from pyslfp.linear_operators.utils import underlying_space
@@ -42,11 +47,11 @@ class FingerPrintOperator(LinearOperator[SHGrid, GRDResponse]):
     The response holds the sea level change, the displacement -- its
     horizontal part on request -- the gravitational potential change and,
     with rotational feedback, the angular velocity change. The adjoint is one
-    adjoint solve whatever the response holds: a dual s on the coefficients of
-    the horizontal potential V pairs with the total load through d = l s, the
-    tangential Love numbers, and the total load is the direct load plus
-    rho_w C xi, so it enters as a further sea level dual rho_w C d, a direct
-    term d, and through the centrifugal potential an angular velocity dual.
+    forward solve whatever the response holds, by reciprocity: a sea level
+    dual acts as a direct load, a dual on the vertical displacement as a
+    normal traction, a potential dual as a potential load, a dual on the
+    horizontal displacement as a tangential traction, and an angular
+    velocity dual as an angular momentum.
     """
 
     def __init__(
@@ -403,99 +408,6 @@ class FingerPrintOperator(LinearOperator[SHGrid, GRDResponse]):
             verbose=self._verbose,
         )
         return adjoint_sea_level
-
-
-# ==================================================================== #
-#                       Space Generators                               #
-# ==================================================================== #
-
-
-def lebesgue_load_space(earth_model: EarthModel, /) -> Lebesgue:
-    """
-    Defines the L2 mathematical space for square-integrable surface loads.
-
-    Args:
-        earth_model: The EarthModel relative to which the space is defined
-
-    Returns:
-        Lebesgue: The mathematical space for surface loads.
-    """
-    return Lebesgue(
-        earth_model.lmax,
-        radius=earth_model.parameters.mean_sea_floor_radius,
-        grid=earth_model.grid,
-        sampling=earth_model.sampling,
-        extend=earth_model.extend,
-    )
-
-
-def lebesgue_response_space(
-    earth_model: EarthModel, /, *, horizontal: bool = False, rotation: bool = True
-) -> GRDSpace:
-    """
-    The L2 response space: a `GRDSpace` over the Lebesgue field space.
-
-    Args:
-        earth_model: The EarthModel relative to which the space is defined.
-        horizontal: Whether the displacement holds its horizontal part.
-        rotation: Whether the angular velocity change is held.
-    """
-    return GRDSpace(
-        lebesgue_load_space(earth_model), horizontal=horizontal, rotation=rotation
-    )
-
-
-def sobolev_load_space(
-    earth_model: EarthModel, order: float, scale: float, /
-) -> Sobolev:
-    """
-    Defines a Sobolev space for surface mass loads with smoothness constraints.
-
-    Args:
-        earth_model: The EarthModel relative to which the space is defined.
-        order (float): The Sobolev order (smoothness constraint).
-        scale (float): The characteristic length scale.
-
-    Returns:
-        Sobolev: The regularized mathematical space for surface loads.
-    """
-    return Sobolev(
-        earth_model.lmax,
-        order,
-        scale,
-        radius=earth_model.parameters.mean_sea_floor_radius,
-        grid=earth_model.grid,
-        sampling=earth_model.sampling,
-        extend=earth_model.extend,
-    )
-
-
-def sobolev_response_space(
-    earth_model: EarthModel,
-    order: float,
-    scale: float,
-    /,
-    *,
-    horizontal: bool = False,
-    rotation: bool = True,
-) -> GRDSpace:
-    """
-    A Sobolev response space: a `GRDSpace` over the Sobolev field space of
-    the given order and scale. The sea level equation gains one order, so the
-    response's order is at most the load's plus one.
-
-    Args:
-        earth_model: The EarthModel relative to which the space is defined.
-        order (float): The Sobolev order of the response fields.
-        scale (float): The characteristic length scale.
-        horizontal: Whether the displacement holds its horizontal part.
-        rotation: Whether the angular velocity change is held.
-    """
-    return GRDSpace(
-        sobolev_load_space(earth_model, order, scale),
-        horizontal=horizontal,
-        rotation=rotation,
-    )
 
 
 # ================================================================ #

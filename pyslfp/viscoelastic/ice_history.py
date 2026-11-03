@@ -33,7 +33,7 @@ from typing import Optional
 import numpy as np
 from pyshtools import SHGrid
 
-from pygeoinf import DirectSum, LinearOperator
+from pygeoinf import DirectSum, LinearOperator, TensorProduct
 
 from ..core.history import FieldHistorySpace
 from ..core.response import GRDResponse, GRDSpace
@@ -131,8 +131,9 @@ class IceHistoryOperator(LinearOperator[np.ndarray, list[GRDResponse]]):
                 "dates must be decreasing (kiloyears before present, the past "
                 "first), with at least two entries"
             )
-        if not isinstance(domain, FieldHistorySpace):
-            raise ValueError("the domain must be a FieldHistorySpace")
+        if not isinstance(domain, TensorProduct) or len(domain.factors) != 2:
+            raise ValueError("the history space must be a FieldHistorySpace")
+        domain = FieldHistorySpace.from_product(domain)
         model = evolution.model
         field_space = domain.field_space
         model.check_field(field_space.zero())

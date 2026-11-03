@@ -32,6 +32,7 @@ from pyshtools import SHGrid
 
 from pygeoinf import (
     AffineOperator,
+    TensorProduct,
     DirectSum,
     HilbertSpace,
     Linearization,
@@ -133,8 +134,12 @@ class SeaLevelEvolutionOperator(Operator):
                 "dates must be decreasing (kiloyears before present, the past "
                 "first), with at least two entries"
             )
-        if not isinstance(history_space, FieldHistorySpace):
+        if (
+            not isinstance(history_space, TensorProduct)
+            or len(history_space.factors) != 2
+        ):
             raise ValueError("the history space must be a FieldHistorySpace")
+        history_space = FieldHistorySpace.from_product(history_space)
         if not isinstance(viscosity_space, LogViscositySpace):
             raise ValueError("the viscosity space must be a LogViscositySpace")
         model = evolution.model

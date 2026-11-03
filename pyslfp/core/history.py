@@ -31,7 +31,122 @@ from pyshtools import SHGrid
 
 from pygeoinf import CoordinateSpace, LinearFunctional, LinearOperator, TensorProduct
 
-__all__ = ["FieldHistorySpace"]
+__all__ = [
+    "FieldHistorySpace",
+    "at_time",
+    "time_average",
+    "difference_quotient",
+    "sample_at_times",
+]
+
+
+# ================================================================ #
+#                        Sampling in time                          #
+# ================================================================ #
+
+
+def _time_factor(space: TensorProduct) -> CoordinateSpace:
+    """The time factor of a product, its first, which must be an interval
+    space with a basis at points."""
+    if not isinstance(space, TensorProduct) or not hasattr(
+        space.factors[0], "basis_matrix"
+    ):
+        raise ValueError("the space must be a tensor product with a time factor first")
+    return space.factors[0]
+
+
+def _window_components(time_space, lower: float, upper: float) -> np.ndarray:
+    """The integrals of the time basis over a window, by Gauss quadrature on
+    each piece between the mesh's nodes inside it, exact for the polynomials
+    the eigenfunctions are on the elements."""
+    lower, upper = float(lower), float(upper)
+    if not upper > lower:
+        raise ValueError("the window must have positive length")
+    start, end = time_space.bounds
+    if lower < start or upper > end:
+        raise ValueError("the window must lie inside the time interval")
+    nodes = np.asarray(time_space.nodes, dtype=float)
+    inside = nodes[(nodes > lower) & (nodes < upper)]
+    breaks = np.concatenate(([lower], np.unique(inside), [upper]))
+    points, weights = np.polynomial.legendre.leggauss(4)
+    out = np.zeros(time_space.dim)
+    for a, b in zip(breaks[:-1], breaks[1:]):
+        half = 0.5 * (b - a)
+        positions = a + half * (points + 1.0)
+        out += (half * weights) @ time_space.basis_matrix(positions)
+    return out
+
+
+def at_time(space: TensorProduct, time: float, /) -> LinearOperator:
+    """
+    The value of a history at a time: the contraction of a product whose
+    first factor is the time space with the Dirac functional there, onto the
+    product of the remaining factors, bounded for a time order above one
+    half.
+
+    Raises:
+        ValueError: If the time lies outside the interval.
+    """
+    time_space = _time_factor(space)
+    return space.contraction(
+        LinearFunctional.from_derivative_components(
+            time_space, time_space.basis_matrix([float(time)])[0]
+        )
+    )
+
+
+def time_average(space: TensorProduct, lower: float, upper: float, /) -> LinearOperator:
+    """
+    The mean of a history over a window of time, the contraction with the
+    functional (1 / (upper - lower)) int_lower^upper dt, bounded on a time
+    space of any order: what an observation averaged over an interval, an
+    epoch of a satellite solution say, sees.
+
+    Raises:
+        ValueError: If the window is empty or lies outside the interval.
+    """
+    time_space = _time_factor(space)
+    components = _window_components(time_space, lower, upper) / (
+        float(upper) - float(lower)
+    )
+    return space.contraction(
+        LinearFunctional.from_derivative_components(time_space, components)
+    )
+
+
+def difference_quotient(
+    space: TensorProduct, lower: float, upper: float, /
+) -> LinearOperator:
+    """
+    The change of a history over a window per unit time, the contraction
+    with (delta_upper - delta_lower) / (upper - lower): the rate an
+    observation over a span measures, a velocity or a trend, which needs no
+    more of the time space than evaluation does.
+
+    Raises:
+        ValueError: If the window is empty or an end lies outside the interval.
+    """
+    time_space = _time_factor(space)
+    lower, upper = float(lower), float(upper)
+    if not upper > lower:
+        raise ValueError("the window must have positive length")
+    rows = time_space.basis_matrix([lower, upper])
+    return space.contraction(
+        LinearFunctional.from_derivative_components(
+            time_space, (rows[1] - rows[0]) / (upper - lower)
+        )
+    )
+
+
+def sample_at_times(space: TensorProduct, times: Sequence[float], /) -> LinearOperator:
+    """
+    A history's values at several times, one `at_time` per time stacked
+    into a `DirectSum` of the remaining factors' product, in order: a series
+    of epochs.
+    """
+    from pygeoinf import ColumnLinearOperator
+
+    return ColumnLinearOperator([at_time(space, float(t)) for t in times])
 
 
 class FieldHistorySpace(TensorProduct):
@@ -58,6 +173,21 @@ class FieldHistorySpace(TensorProduct):
             TypeError: If either space provides no coordinates.
         """
         super().__init__([time_space, field_space])
+
+    @classmethod
+    def from_product(cls, space: TensorProduct, /) -> FieldHistorySpace:
+        """The history space equal to a tensor product of a time space and a
+        field space, as a lift or a contraction on a larger product leaves
+        it; a `FieldHistorySpace` is returned as it is.
+
+        Raises:
+            ValueError: If the product has other than two factors.
+        """
+        if isinstance(space, FieldHistorySpace):
+            return space
+        if not isinstance(space, TensorProduct) or len(space.factors) != 2:
+            raise ValueError("a history space is a tensor product of two factors")
+        return cls(*space.factors)
 
     # -- identity ----------------------------------------------------------
 
@@ -118,10 +248,7 @@ class FieldHistorySpace(TensorProduct):
         Raises:
             ValueError: If the time lies outside the interval.
         """
-        dirac = LinearFunctional.from_derivative_components(
-            self.time_space, self.basis_matrix([time])[0]
-        )
-        return self.contraction(dirac)
+        return at_time(self, time)
 
     def at(self, history: np.ndarray, time: float, /) -> SHGrid:
         """The history's field at a time of the interval."""

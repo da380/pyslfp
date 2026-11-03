@@ -770,6 +770,18 @@ interval.
   up, its horizontal part :math:`\nabla_1 V` included, in the frame of the
   data (below).
 
+A set-up describes one epoch. ``HistorySetup`` is the same vocabulary
+through time: the tensor product of a time space and the set-up's space, on
+which every operator of the set-up acts at each time by a lift, at one
+application per time mode, and a history is sampled by a contraction with a
+functional on the time factor: its value at a time, bounded for a time
+order above one half; its mean over a window; or its change over a span per
+unit time, which is what a velocity or a trend observed over years is, and
+needs no more of the time space than evaluation does. The response to a
+fingerprint operator at every epoch is such a lift, the elastic physics
+through time, and the ice history of a set-up is the argument of the
+viscoelastic operators.
+
 Evaluation at a point is bounded only on fields of Sobolev order above one on
 the sphere, so the observables of tide gauges, altimetry at points and GNSS
 must take values in such a space. The displacement's norm weights the

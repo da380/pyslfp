@@ -232,7 +232,7 @@ costs and the details.
 | `love_numbers/` | `LoveNumbers` and the radial spectral-element solver that computes them from any `planetmodel` model. |
 | `observations/` | Tide gauges, satellite altimetry, GRACE and GNSS: the observation models, each an observable from the model space with its sampling at stations, points or coefficients and its noise; the networks' data; and the frame of GNSS solutions, as Helmert parameters or frame-invariant data. |
 | `ice/` | The ice model interfaces, `IceNG` for the ICE-5G, ICE-6G and ICE-7G histories, `AnalyticalIceModel` for testing, and export to `planetmodel` surface histories. |
-| `models/` | Model spaces for inversions: named load components (ice sheets, glaciers, land water, firn, sterodynamic sea level, ocean density) and `ModelSetup`, which assembles them with their loads, observables and constraints, and the operators from the components' fields to their loads. |
+| `models/` | Model spaces for inversions: named load components (ice sheets, glaciers, land water, firn, sterodynamic sea level, ocean density), `ModelSetup`, which assembles them with their loads, observables and constraints, `HistorySetup`, the same through time on a tensor product with a time space, and the operators from the components' fields to their loads. |
 | `plotting/` | Plotting of `pyshtools.SHGrid` fields on Cartopy projections. |
 | `data/` | Location and retrieval of the external datasets. |
 

@@ -30,6 +30,7 @@ from .loads import (
     sea_level_change_to_load_operator,
     steric_sea_level_operator,
 )
+from .history import HistorySetup
 from .setup import OCEAN_MASS, ModelSetup, RegionalDecomposition
 from .setups import ice_and_firn, ice_and_ocean, ice_ocean_and_density, sea_level_budget
 
@@ -52,6 +53,7 @@ __all__ = [
     "ocean_density",
     "barystatic_gmsl_operator",
     "ModelSetup",
+    "HistorySetup",
     "OCEAN_MASS",
     "RegionalDecomposition",
     "ice_and_ocean",

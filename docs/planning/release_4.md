@@ -176,9 +176,8 @@ sharp rule holds the ocean functions. The package exposes `__version__`.
 
 ## Planned work still to land
 
-- The rest of the scope set with the port: planetmodel 1.5's plots, the
-  priors layer, and time-dependent model spaces for the set-ups' components,
-  on `FieldHistorySpace`.
+- The rest of the scope set with the port: planetmodel 1.5's plots and the
+  priors layer.
 - Typed generics (`DiagonalMetricSpace[GRDResponse]`,
   `LinearOperator[SHGrid, GRDResponse]`) in code written or touched for the
   release.

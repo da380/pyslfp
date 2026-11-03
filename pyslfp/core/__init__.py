@@ -42,7 +42,13 @@ from .response import (
     SurfaceDisplacement,
     SurfaceDisplacementSpace,
 )
-from .history import FieldHistorySpace
+from .history import (
+    FieldHistorySpace,
+    at_time,
+    difference_quotient,
+    sample_at_times,
+    time_average,
+)
 from .spaces import (
     check_load_space,
     check_response_space,
@@ -80,6 +86,10 @@ __all__ = [
     "SurfaceDisplacement",
     "SurfaceDisplacementSpace",
     "FieldHistorySpace",
+    "at_time",
+    "time_average",
+    "difference_quotient",
+    "sample_at_times",
     "lebesgue_load_space",
     "lebesgue_response_space",
     "sobolev_load_space",

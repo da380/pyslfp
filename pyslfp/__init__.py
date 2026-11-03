@@ -63,7 +63,7 @@ from . import viscoelastic
 try:
     __version__ = _version("pyslfp")
 except PackageNotFoundError:  # a source tree that is not installed
-    __version__ = "0.0.0"
+    __version__ = "4.0.0"
 
 __all__ = [
     "__version__",

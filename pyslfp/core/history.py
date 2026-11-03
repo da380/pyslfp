@@ -77,8 +77,9 @@ class FieldHistorySpace(DiagonalMetricSpace[FieldHistory]):
 
     The components are the K x N array of a history read row by row; the
     metric of component (k, j) is mu_k nu_j, mu the time space's and nu the
-    field space's. A rank-one history a(t) f(x) therefore has the norm
-    |a| |f|, and the inner product of two is the product of theirs.
+    field space's. A rank-one history a(t) f(x) therefore has as its norm
+    the product of the norms of a and f, and the inner product of two is the
+    product of theirs.
     """
 
     def __init__(self, time_space: HilbertSpace, field_space: HilbertSpace, /) -> None:

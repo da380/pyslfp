@@ -51,8 +51,8 @@ without touching the assembler.
    submodule is called `models` (matching pygeoinf's `model_space`,
    disambiguated in docstrings from `EarthModel` and the ice models);
    no deep inheritance even though the spaces nest physically; no
-   design for viscous or time-dependent physics (time dependence
-   arrives as linked single-epoch models via filtering);
+   design here for viscous or time-dependent physics, whose spaces
+   build on `FieldHistorySpace` (`pyslfp.core.history`);
    `AltimetryObservationModel` and `JointAltimetryObservationModel`
    are removed in 4.0, a set-up's `geocentric_sea_level` replacing
    them.
@@ -278,7 +278,7 @@ pairing, and puts their loads in a space of order below 1/2.
 - Observation models: they consume a set-up's spaces and components,
   they are not part of one.
 - Time dependence; the set-ups describe single-epoch (rate) spaces.
-  Revisit once pygeoinf has a tensor product of spaces.
+  Time-dependent components build on `FieldHistorySpace`.
 - Priors: a separate layer that takes a set-up, built later.
 
 ## Risks

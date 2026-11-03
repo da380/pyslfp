@@ -117,16 +117,17 @@ observation dates, whose adjoint gives the Sobolev kernels.
 
 ## Planned work still to land
 
-- The viscoelastic side of the response: snapshots holding a `GRDResponse`,
-  the horizontal memory field, the adjoints; GNSS observation models with the
-  frame of the data ([response_plan.md](response_plan.md), packages 5 and 6).
-- The observation models reshaped with package 6: each takes its observable
-  as an operator from the model space (a set-up's, or a viscoelastic
-  operator's) and adds the sampling, the stations' data and the noise.
-- The rest of the scope set with the port: the viscoelastic adjoints wrapped
-  as pygeoinf operators, planetmodel 1.4's plots, the priors layer, and
-  time-dependent model spaces, which wait on a tensor product of spaces in
-  pygeoinf.
+- GNSS observation models with the frame of the data, and the observation
+  models reshaped with them: each takes its observable as an operator from
+  the model space (a set-up's, or a viscoelastic operator's) and adds the
+  sampling, the stations' data and the noise
+  ([response_plan.md](response_plan.md), package 6).
+- The rest of the scope set with the port: the viscoelastic operators beyond
+  `IceHistoryOperator` (the migrating-shoreline map, which is nonlinear, and
+  the viscosity kernels), planetmodel 1.4's plots, the priors layer, and
+  time-dependent model spaces for the set-ups' components, on
+  `FieldHistorySpace`, which moves onto pygeoinf's tensor products of
+  coordinate spaces when they land.
 - Typed generics (`DiagonalMetricSpace[GRDResponse]`,
   `LinearOperator[SHGrid, GRDResponse]`) in code written or touched for the
   release.

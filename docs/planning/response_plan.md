@@ -62,8 +62,8 @@ takes (`horizontal_dual` of `adjoint_generalised_solve`). Its reciprocal
 statement is a forward solve with a tangential traction, answered through the
 numbers (h^v, l^v, k^v); the fingerprint operator's adjoint takes that form
 (`tangential_load`), as it takes a displacement dual through the traction
-channel zeta^u. The viscoelastic adjoint needs the memory field's horizontal
-part as well.
+channel zeta^u. The viscoelastic adjoints carry the memory field's
+horizontal part as well (package 5).
 
 On grids and at points, grad_1 V comes from ducc0: `synthesis_general` with
 spin 1 and E-mode coefficients sqrt(l(l + 1)) a_lm gives (d/dtheta,
@@ -270,35 +270,33 @@ continuous adjoints' representers as the run resolves its rheology.
   instantaneous kernels of the two methods agree to the solver tolerance,
   both being the elastic adjoint.
 
-### Steps
+### Where it lives
 
-1. The solver: `solve_response` with the generalised channels,
-   `horizontal_response`, `tangential_load`, `solve_nonlinear_response` and
-   `horizontal_dual`; the fingerprint adjoint on `tangential_load`.
-2. The snapshots and the horizontal memory field: the runs, the code that
-   reads snapshots, tutorials 06, 07 and 09, and the tests.
-3. The adjoints: `GRDResponse` measurements, the renamed `Measurement` fields,
-   and V in the discrete and continuous adjoints.
-4. The Sobolev kernels: `FieldHistorySpace` in core, then the ice history
-   operator whose adjoint gives the kernels.
-5. The layout: `linear_operators` dissolved by role. The space builders and
-   the centrifugal potential operator go to `core` (the builders have moved),
-   `FingerPrintOperator` to `elastic` beside its solver, the observation
-   operators and models to a new `observations` subpackage (GNSS joins it in
-   package 6), the load-building operators to `models`, and the spatial
-   operators to `core` beside the regions; the deprecated wrappers in
-   `utils.py` are removed.
-6. The docs: the viscoelastic adjoint problem in theory.rst, release_4.md
-   and this file.
+- The solver: `solve_response` with every generalised channel, the ready
+  `horizontal_response`, the tangential traction `tangential_load`,
+  `solve_nonlinear_response`, and `horizontal_dual` in
+  `adjoint_generalised_solve` (`pyslfp.core.sea_level`); the fingerprint
+  adjoint takes the tangential traction (`pyslfp.elastic.operator`).
+- The snapshots, the horizontal memory field, the `GRDResponse` measurements
+  and V in both adjoints (`pyslfp.viscoelastic.evolution`).
+- `FieldHistorySpace` (`pyslfp.core.history`) and `IceHistoryOperator`
+  (`pyslfp.viscoelastic.ice_history`).
+- The layout that came with it: `linear_operators` dissolved into `core`,
+  `elastic`, `observations` and `models`, with the altimetry observation
+  models removed for `ModelSetup.geocentric_sea_level`.
+- Tests: `tests/test_horizontal_displacement.py`, `tests/test_history.py`,
+  `tests/viscoelastic/test_evolution.py` and
+  `tests/viscoelastic/test_ice_history.py`.
 
 ## Work packages
 
-Packages 1 to 4 are built: the solver's coefficient engine with V
+Packages 1 to 5 are built: the solver's coefficient engine with V
 (`SeaLevelEquation._solve_generalised`, and `solve_response` returning a
 `GRDResponse`), `pyslfp.core.response`, the fingerprint operator onto a
-`GRDSpace` with the horizontal part on request, and its consumers (sea surface
-height, GRACE, tide gauges, the altimetry models), which reach the fields by
-name through `GRDSpace.field_operator`.
+`GRDSpace` with the horizontal part on request, its consumers (sea surface
+height, GRACE, tide gauges, altimetry), which reach the fields by name through
+`GRDSpace.field_operator`, and the viscoelastic side set out above. Package 6
+remains.
 
 1. **The solver.** Horizontal displacement as a coefficient output of the
    elastic sea level solvers (linear and non-linear), with a test against
@@ -312,7 +310,8 @@ name through `GRDSpace.field_operator`.
    gauges, altimetry, the models' observables. The index-based response tuple
    goes.
 5. **The viscoelastic side:** snapshots hold a `GRDResponse`; the horizontal
-   memory field and the adjoints. The design is set out above.
+   memory field and the adjoints; the Sobolev kernels. Built, as set out
+   above.
 6. **GNSS observation models**, with the frame of the data: frame (Helmert)
    parameters as nuisances, or frame-invariant data. The observation models
    are reshaped together here, tide gauges, altimetry and GRACE with GNSS:

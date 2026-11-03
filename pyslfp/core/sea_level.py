@@ -813,6 +813,12 @@ class SeaLevelEquation:
         displacement when the space holds it, and the angular velocity
         change when it holds that.
 
+        The generalised forcings (`displacement_load`,
+        `gravitational_potential_load`, `tangential_load`,
+        `displacement_response`, `gravitational_potential_response`,
+        `inertia_moment_change`, `angular_momentum_change`) and the
+        `ocean_function` override are as for `solve_generalised_equation`.
+
         Args:
             state (EarthState): The unperturbed background Earth state.
             direct_load (Optional[SHGrid]): The surface mass load; None for
@@ -820,10 +826,6 @@ class SeaLevelEquation:
             space (GRDSpace): The response space, over this model's grid and
                 radius; it holds the angular velocity change exactly when
                 there is rotational feedback.
-            displacement_load, gravitational_potential_load, tangential_load,
-                displacement_response, gravitational_potential_response,
-                inertia_moment_change, angular_momentum_change,
-                ocean_function: As for `solve_generalised_equation`.
             horizontal_response (Optional[SHCoeffs]): A ready horizontal
                 displacement potential V, a viscoelastic step's memory
                 field, joined to V with no Love number applied.
@@ -1204,7 +1206,8 @@ class SeaLevelEquation:
         The sea level change is band-limited here too: the synthesis of the
         last iteration's coefficients plus the uniform shift of the mass
         budget, which joins degree 0. The displacement, potential and V
-        are those of the last iteration's load.
+        are those of the last iteration's load. The forcings and options
+        not listed below are those of `solve_nonlinear_equation`.
 
         Args:
             initial_state (EarthState): The unperturbed background state.
@@ -1212,7 +1215,6 @@ class SeaLevelEquation:
             horizontal_response (Optional[SHCoeffs]): A ready horizontal
                 displacement potential V, joined to V with no Love number
                 applied.
-            The other arguments are those of `solve_nonlinear_equation`.
 
         Raises:
             ValueError: If the space does not match the model or the feedback.

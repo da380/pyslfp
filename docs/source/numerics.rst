@@ -193,6 +193,23 @@ Kernels have the regularity of the measurements that drive them. A measurement
 patch with a sharp edge rings through every relaxation mode at a finite
 truncation, so patches should be tapered in degree, as the tutorials do.
 
+The horizontal displacement adds little to either direction. Forward, each step
+reads the memory field's V at the surface, one value per coefficient, and the
+sea level solve gains one product per coefficient, since V feeds nothing back.
+In reverse, a horizontal dual adds one surface term per degree to the radial
+solve, and in the continuous adjoint one more unit response per degree, the
+tangential traction's, computed once with the others.
+
+The Sobolev kernel, the adjoint of ``IceHistoryOperator``, costs one discrete
+reversed sweep and the product of its per-node duals with the time
+eigenfunctions at the dates, which is negligible beside the sweep. On the
+homogeneous test body of the test suite it converges at second order as the
+date grid is refined, changing by :math:`5\times10^{-3}`,
+:math:`5\times10^{-4}` and :math:`1\times10^{-4}` of its size from 5 to 33
+dates, and at time order one it settles as time modes are added, the change
+halving with each doubling of the modes, where the per-node dual at an
+observation date doubles with each halving of the spacing.
+
 
 Calibrating the initial sea level
 ---------------------------------

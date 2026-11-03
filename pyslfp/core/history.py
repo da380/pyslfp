@@ -59,6 +59,22 @@ class FieldHistorySpace(TensorProduct):
         """
         super().__init__([time_space, field_space])
 
+    # -- identity ----------------------------------------------------------
+
+    def __eq__(self, other: object) -> bool:
+        """Equal to any tensor product of the same factors, which is what this
+        is: a lift or a contraction on the product builds a plain one, and
+        has to land here."""
+        if self is other:
+            return True
+        if not isinstance(other, TensorProduct):
+            return NotImplemented
+        return self._key() == other._key()
+
+    # Defining __eq__ discards the inherited hash; the product's is the right one.
+    def __hash__(self) -> int:
+        return hash((TensorProduct, self._key()))
+
     # -- structure ---------------------------------------------------------
 
     @property

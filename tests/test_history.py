@@ -154,3 +154,18 @@ def test_a_factor_without_coordinates_is_refused(state):
 
     with pytest.raises(TypeError):
         FieldHistorySpace(_Opaque(), _field_space(state, "lebesgue"))
+
+
+def test_the_space_is_the_tensor_product_of_its_factors(state):
+    """A lift or a contraction on a product of the same factors lands on a
+    plain tensor product, which must be this space."""
+    from pygeoinf import DirectSum, TensorProduct
+
+    time_space = _time_space("sobolev")
+    field_space = _field_space(state, "lebesgue")
+    space = FieldHistorySpace(time_space, field_space)
+    plain = TensorProduct([time_space, field_space])
+    assert space == plain and plain == space and hash(space) == hash(plain)
+    joint = DirectSum([field_space, _field_space(state, "sobolev")], labels=["a", "b"])
+    product = TensorProduct([time_space, joint])
+    assert product.lift(joint.projection("a")).codomain == space

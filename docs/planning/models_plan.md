@@ -272,13 +272,70 @@ pairing, and puts their loads in a space of order below 1/2.
   use the physical definitions of the ice sheets, the glaciers and the
   ocean.
 
+## Histories (WP4)
+
+A set-up describes one epoch. A history set-up is the same vocabulary
+through time: the set-up's joint space tensored with a time space, so that
+every component becomes a history and every derived operator acts at each
+time. pygeoinf's tensor products of coordinate spaces make this a thin layer:
+the product metric is the natural one, a lift applies an operator on the
+field factor at every time at one application per time mode, and a
+contraction with a functional on the time factor samples a history.
+
+**The space.** `HistorySetup(setup, time_space)` has
+`space = TensorProduct([time_space, setup.space])`, whose vectors are
+(K, N) arrays, K the time modes and N the set-up's dimension; the time
+coordinate is whatever the caller's time space uses, years or kiloyears
+before present, and the components' labels are the set-up's. A component's
+history is reached by `history(name)`, the lift of the set-up's projection,
+onto `FieldHistorySpace(time_space, component.space)`, which equals the lifted
+codomain.
+
+**Derived operators are lifts.** The load operator maps a history of the
+set-up to the load history, `FieldHistorySpace(time_space, load_space)`; the
+observables, the support and the response to a fingerprint operator likewise,
+the last the elastic physics at every epoch, costing one fingerprint solve
+per time mode. The scalar diagnostics, the barystatic and steric GMSL and
+their split, and the constraints, map into the time space itself, functions
+of time in its basis, through the isometry from `TensorProduct([time_space,
+EuclideanSpace(k)])`; the ocean mass constraint keeps its surjectivity, since
+a lift's traits are its factors'.
+
+**Sampling in time** is a contraction with a functional on the time factor,
+on any product whose first factor is the time space, in `pyslfp.core.history`:
+`at_time(space, t)`, bounded for a time order above one half; `time_average(space,
+t0, t1)`, the mean over a window by the time space's quadrature, bounded on
+any order; and `difference_quotient(space, t0, t1)`, the change over a window
+per unit time, which is what a rate observed over a span is, GNSS velocities
+and altimetry trends included, and avoids the pointwise derivative that would
+need an order above three halves. Each returns an operator onto the product
+of the remaining factors, the set-up's space or a response space, which the
+observation models then sample; a series of epochs is a column of these.
+
+**The viscoelastic coupling** is composition, not a method of the set-up: the
+ice history of a set-up is `history("ice_sheets")`, whose codomain is the
+history space `SeaLevelEvolutionOperator` and `IceHistoryOperator` take, so
+`evolution_operator.fixing(...) @ history_setup.history("ice_sheets")` is the
+viscoelastic response of the set-up's ice. A set-up stays passive.
+
+**Priors through time** are the priors layer's: a Gaussian on the product
+with a separable covariance, `GaussianMeasure.from_tensor_product` of a
+time measure and the set-up's prior, and non-separable ones as their own
+measures on the same vectors.
+
+Tests: the product space's axioms; a lifted operator at a time equals the
+set-up's operator applied to the history at that time; the GMSL history of a
+rank-one history is the profile times the field's GMSL; the lifted constraint
+holds for a history in its kernel; the window average and the difference
+quotient against quadrature of the evaluation; a tide gauge series on the
+lifted response against the fingerprint at each epoch; the composition with
+`IceHistoryOperator` passing the adjoint check.
+
 ## Non-goals
 
 - Priors, calibration chains, solver and conditioning choices.
 - Observation models: they consume a set-up's spaces and components,
   they are not part of one.
-- Time dependence; the set-ups describe single-epoch (rate) spaces.
-  Time-dependent components build on `FieldHistorySpace`.
 - Priors: a separate layer that takes a set-up, built later.
 
 ## Risks

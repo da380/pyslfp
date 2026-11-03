@@ -56,12 +56,10 @@ drivers (`adjoint_ice_history`, `continuous_adjoint_ice_history`,
 it. Under migrating shorelines the derivatives are complete when the
 flotation condition is smoothed (`EarthState.flotation_width`); under the
 sharp rule they hold the trajectory's ocean functions and omit the
-shorelines' terms, whose size `tools/shoreline_hessian.py` measures. What
-remains is the 3D viscosity kernels about a radial model, the time integral
-of the pointwise contraction of the adjoint internal variables with the
-forward strain, which needs the forward and adjoint fields at every radius
-multiplied across degrees; they are kernels only, no forward map leaving the
-radial models.
+shorelines' terms, whose size `tools/shoreline_hessian.py` measures. Kernels
+with respect to laterally varying viscosity are out of scope: they need the
+generalised spherical harmonics of the strain tensor, which belong to the
+three-dimensional codes.
 
 ## Glacial-cycle spin-up
 

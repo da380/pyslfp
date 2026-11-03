@@ -33,10 +33,10 @@
    second-order adjoint problem (Yu et al. 2025) backwards, by either method.
    pygeoinf then builds exact Hessian-vector products for any objective on
    the operator, and its Laplace approximations and Newton methods use them.
-7. **3D viscosity kernels are kernels only.** The derivative with respect to
-   laterally varying viscosity about a radial model exists, but no forward map
-   leaves the radial models, so it is a result computed from the adjoint, not
-   an operator's domain.
+7. **No lateral viscosity.** Kernels with respect to laterally varying
+   viscosity need the generalised spherical harmonics of the strain tensor
+   and belong to the three-dimensional codes; the library's viscosity is a
+   function of radius.
 
 ## The map
 
@@ -323,11 +323,9 @@ when no second derivative is supplied.
 6. **The docs**: numerics.rst (the costs, and the agreement of the two
    methods under refinement), release_4.md and the roadmap.
 
-Later, and separately: the shoreline terms of the second derivative under
-migrating shorelines, above; and the 3D viscosity kernels about a radial model, the
-time integral of the pointwise contraction of the adjoint internal variables
-with d - m, which needs the forward and adjoint fields at every radius,
-multiplied across degrees.
+Kernels with respect to laterally varying viscosity are out of scope: they
+need the generalised spherical harmonics of the strain tensor, which belong
+to the three-dimensional codes.
 
 ## Smoothed flotation: the complete Hessian under migrating shorelines
 

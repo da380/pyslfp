@@ -57,7 +57,15 @@ it. Two things remain. Under migrating shorelines the second derivative is
 that of the map with the ocean functions held, which omits the line
 distributions on the shorelines of Yu et al. (2025, eqs 112, 116 and 117);
 evaluating them needs the shoreline located on the grid, with the normal
-derivatives of the sea level and the thickness across it. And the 3D
+derivatives of the sea level and the thickness across it.
+`tools/shoreline_hessian.py` measures their size: nothing between flips of
+flotation cells, and across flips the whole Hessian in the sea level and the
+ice history, a quarter to a third of a misfit's Gauss-Newton term for 100 m
+thickness changes at a ten per cent residual. The grid's own version would
+treat the ocean function as a step smoothed over the flotation margin of
+one cell, whose derivative is supported on the cells near flotation; that
+makes the forward map differentiable and its Hessian complete, at the price
+of a smoothed shoreline in the forward run. And the 3D
 viscosity kernels about a radial model, the time integral of the pointwise
 contraction of the adjoint internal variables with the forward strain, which
 needs the forward and adjoint fields at every radius multiplied across

@@ -237,6 +237,27 @@ for directions smooth in time. Directions rough in time, random on the time
 modes say, are pre-asymptotic at these spacings, as the time quadrature of
 the continuous adjoint's density then is.
 
+Under migrating shorelines the second derivative holds the trajectory's ocean
+functions (:doc:`theory`), and ``tools/shoreline_hessian.py`` measures what
+that omits on a marine cap, a 12 km cap on a 3 km ocean melting over ten
+kiloyears at degree 16. Between flips of flotation cells the held-C Hessian
+is the whole Hessian, to :math:`10^{-7}` against second differences of an
+objective, in every argument. Across flips the omitted term is the entire
+Hessian in the initial sea level and the ice history, where the held-C map
+is affine, and on the grid it is the sum of the jumps the gradient makes at
+each flip. Its size scales with the shoreline motion the perturbation
+induces: for a rise of the initial sea level of 100 m the quadratic term of
+the objective is about four per cent of its linear term, for a thickness
+change of 100 m at every date about four per cent, and for a change of
+viscosity of ten per cent, which flips no cell, nothing. Against the
+Gauss-Newton term of a misfit whose residual is ten per cent of the response,
+the omitted term is three to five per cent for the sea level rise and a
+quarter to a third for the thickness change, both at 50 to 100 m. So a Newton
+iteration converging through small steps, and a Laplace approximation at a
+small residual, lose little; a step that moves the shorelines by a cell or
+more, or a large residual, see a Hessian short of its shoreline part by that
+much.
+
 
 Calibrating the initial sea level
 ---------------------------------

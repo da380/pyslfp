@@ -56,7 +56,7 @@ _METHODS = ("discrete", "continuous")
 _SHORELINES = ("frozen", "migrating")
 
 
-class SeaLevelEvolutionOperator(Operator):
+class SeaLevelEvolutionOperator(Operator[tuple, tuple]):
     """
     The evolution as an operator: from DirectSum([history space, sea level
     space, log-viscosity space]), labelled `ice_history`,
@@ -306,14 +306,14 @@ class SeaLevelEvolutionOperator(Operator):
     def _responses(self, snapshots: Sequence[SeaLevelSnapshot]) -> tuple:
         return tuple(snapshots[node].response for node in self._observation_nodes)
 
-    def _value(self, x) -> tuple:
+    def _value(self, x: tuple) -> tuple:
         _, snapshots = self._run(x)
         return self._responses(snapshots)
 
-    def _derivative(self, x) -> LinearOperator:
+    def _derivative(self, x) -> LinearOperator[tuple, tuple]:
         return self._linearize(x).derivative
 
-    def _linearize(self, x) -> Linearization:
+    def _linearize(self, x: tuple) -> Linearization[tuple, tuple]:
         evolution, snapshots = self._run(x)
         return Linearization(
             x, self._responses(snapshots), self._derivative_about(evolution, snapshots)
@@ -321,7 +321,7 @@ class SeaLevelEvolutionOperator(Operator):
 
     def _derivative_about(
         self, evolution: SeaLevelEvolution, snapshots: Sequence[SeaLevelSnapshot]
-    ) -> LinearOperator:
+    ) -> LinearOperator[tuple, tuple]:
         """The derivative at the point a recorded run was made at: the
         tangent-linear run forwards, the adjoint sweep backwards, both
         holding the run's ocean functions."""
@@ -407,7 +407,7 @@ class SeaLevelEvolutionOperator(Operator):
         )
         return tangent, nodal, ditau
 
-    def _second_derivative(self, x, v) -> LinearOperator:
+    def _second_derivative(self, x, v) -> LinearOperator[tuple, tuple]:
         """F''(x)[v, .]: forwards the second-order tangent-linear run with
         v's and u's tangent-linear runs, backwards the second-order adjoint
         sweep along v, both about the recorded run at x. The log

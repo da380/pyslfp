@@ -9,6 +9,8 @@ mass loads: the load rows of the components that the models assemble.
 from __future__ import annotations
 from typing import Union
 
+import numpy as np
+
 from pyshtools import SHGrid
 from pygeoinf import (
     LinearOperator,
@@ -30,7 +32,7 @@ def ice_thickness_change_to_load_operator(
     state: EarthState,
     ice_space: Union[Lebesgue, Sobolev],
     load_space: Union[Lebesgue, Sobolev],
-) -> LinearOperator:
+) -> LinearOperator[SHGrid, SHGrid]:
     """Maps an ice thickness change to its surface mass load,
     rho_ice (1 - C) delta I: grounded ice only.
 
@@ -60,7 +62,7 @@ def sea_level_change_to_load_operator(
     state: EarthState,
     sea_level_space: Union[Lebesgue, Sobolev],
     load_space: Union[Lebesgue, Sobolev],
-) -> LinearOperator:
+) -> LinearOperator[SHGrid, SHGrid]:
     """Maps a sea level change (or a sterodynamic sea level change) to its
     surface mass load, rho_w C delta xi: ocean only.
 
@@ -90,7 +92,7 @@ def ocean_density_change_to_load_operator(
     state: EarthState,
     density_space: Union[Lebesgue, Sobolev],
     load_space: Union[Lebesgue, Sobolev],
-) -> LinearOperator:
+) -> LinearOperator[SHGrid, SHGrid]:
     """Maps an ocean density change to its surface mass load,
     C SL delta rho: the water column's depth times the change.
 
@@ -125,7 +127,7 @@ def steric_sea_level_operator(
     state: EarthState,
     density_space: Union[Lebesgue, Sobolev],
     sea_level_space: Union[Lebesgue, Sobolev],
-) -> LinearOperator:
+) -> LinearOperator[SHGrid, SHGrid]:
     """Maps a vertically averaged ocean density change to the steric
     sea level change it produces,
 
@@ -153,7 +155,7 @@ def ocean_mass_conservation_operator(
     state: EarthState,
     sea_level_space: Union[Lebesgue, Sobolev],
     density_space: Union[Lebesgue, Sobolev],
-) -> LinearOperator:
+) -> LinearOperator[tuple, np.ndarray]:
     """The ocean mass change of an (eta, delta rho) pair, as a linear
     operator whose kernel is the mass-conservation constraint
 

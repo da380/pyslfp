@@ -83,6 +83,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from types import MappingProxyType
 from typing import Mapping, Optional, Sequence, Union
+import numpy as np
 
 from pyshtools import SHGrid
 
@@ -142,10 +143,12 @@ class LoadComponent:
 
     name: str
     space: Space
-    to_load: Optional[LinearOperator]
-    support: LinearOperator
+    to_load: Optional[LinearOperator[SHGrid, SHGrid]]
+    support: LinearOperator[SHGrid, SHGrid]
     role: Role
-    observables: Mapping[str, LinearOperator] = field(default_factory=dict)
+    observables: Mapping[str, LinearOperator[SHGrid, SHGrid]] = field(
+        default_factory=dict
+    )
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name:
@@ -458,7 +461,7 @@ def ocean_density(
 
 def barystatic_gmsl_operator(
     state: EarthState, component: LoadComponent, /
-) -> LinearOperator:
+) -> LinearOperator[SHGrid, np.ndarray]:
     """
     The barystatic global mean sea level change a mass source implies.
 
@@ -514,7 +517,7 @@ def _component_space(space: Optional[Space], load_space: Space) -> Space:
 
 def _inclusion(
     space: Space, observable_space: Optional[Space], load_space: Space
-) -> LinearOperator:
+) -> LinearOperator[SHGrid, SHGrid]:
     """The field itself, read from its space into an observable space on
     the load space's grid; the identity on its own space if none is given."""
     if observable_space is None or observable_space == space:
@@ -528,7 +531,7 @@ def _inclusion(
     return space.order_inclusion_operator(observable_space)
 
 
-def _mask(space: Space, indicator: SHGrid) -> LinearOperator:
+def _mask(space: Space, indicator: SHGrid) -> LinearOperator[SHGrid, SHGrid]:
     """Multiplication by a 0/1 indicator, which is idempotent on any space."""
     mask = space.multiplication_operator(indicator)
     return mask.with_traits(mask.traits | Traits.IDEMPOTENT)
@@ -536,7 +539,7 @@ def _mask(space: Space, indicator: SHGrid) -> LinearOperator:
 
 def _multiplication_into(
     space: Space, load_space: Space, multiplier: SHGrid
-) -> LinearOperator:
+) -> LinearOperator[SHGrid, SHGrid]:
     """u -> multiplier * u from a component's space into the load space,
     written on the Lebesgue spaces and lifted to the given ones."""
 

@@ -10,7 +10,7 @@ change from a model space with any direct terms included.
 """
 
 from __future__ import annotations
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import Any, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
@@ -24,6 +24,7 @@ from pygeoinf import (
 )
 
 from pyslfp.core import EarthState
+from pyslfp.core.response import GRDResponse
 from pyslfp.core.observables import geocentric_sea_level_operator
 from pyslfp.elastic.operator import FingerPrintOperator
 from pyslfp.observations.base import Noise, ObservationModel
@@ -120,7 +121,7 @@ def altimetry_point_operator(
     *,
     remove_rotational_contribution: bool = True,
     matrix_free: bool = False,
-) -> LinearOperator:
+) -> LinearOperator[GRDResponse, np.ndarray]:
     """
     Returns an operator mapping the SLE response space directly to geocentric sea level values
     at discrete altimetry observation points.
@@ -138,7 +139,9 @@ def altimetry_point_operator(
     return point_eval_op @ ssh_op
 
 
-def altimetry_averaging_operator(points: List[Tuple[float, float]]) -> LinearOperator:
+def altimetry_averaging_operator(
+    points: List[Tuple[float, float]],
+) -> LinearOperator[np.ndarray, np.ndarray]:
     """
     Creates a LinearOperator that maps a vector of altimetry observations
     to a Global Mean Sea Level (GMSL) estimate using a latitude-weighted average.
@@ -173,7 +176,7 @@ class AltimetryObservationModel(ObservationModel):
 
     def __init__(
         self,
-        observable: LinearOperator,
+        observable: LinearOperator[Any, SHGrid],
         points: List[Tuple[float, float]],
         /,
         *,
@@ -225,7 +228,7 @@ class AltimetryObservationModel(ObservationModel):
         """The observation points, (latitude, longitude) in degrees."""
         return list(self._points)
 
-    def averaging_operator(self) -> LinearOperator:
+    def averaging_operator(self) -> LinearOperator[np.ndarray, np.ndarray]:
         """The latitude-weighted mean of the data, an estimate of the global
         mean sea level change, into EuclideanSpace(1)."""
         return altimetry_averaging_operator(self._points)

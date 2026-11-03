@@ -9,7 +9,9 @@ change from a model space with any direct terms included.
 
 from __future__ import annotations
 import csv
-from typing import Callable, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
+import numpy as np
+from pyshtools import SHGrid
 
 
 from pygeoinf import (
@@ -17,7 +19,7 @@ from pygeoinf import (
 )
 
 from pyslfp.data.downloader import ensure_data
-from pyslfp.core.response import RELATIVE_SEA_LEVEL_CHANGE, GRDSpace
+from pyslfp.core.response import RELATIVE_SEA_LEVEL_CHANGE, GRDResponse, GRDSpace
 from pyslfp.core.spaces import check_load_space, check_response_space
 from pyslfp.elastic.operator import FingerPrintOperator
 from pyslfp.observations.base import Noise, ObservationModel
@@ -76,7 +78,7 @@ def read_gloss_tide_gauge_data(
 
 def tide_gauge_operator(
     response_space: GRDSpace, points: List[Tuple[float, float]], /
-) -> LinearOperator:
+) -> LinearOperator[GRDResponse, np.ndarray]:
     """
     Maps the response to the sea level change at discrete locations: tide
     gauges measure the relative sea level change.
@@ -112,7 +114,7 @@ class TideGaugeObservationModel(ObservationModel):
 
     def __init__(
         self,
-        observable: LinearOperator,
+        observable: LinearOperator[Any, SHGrid],
         points: List[Tuple[float, float]],
         /,
         *,
@@ -162,7 +164,7 @@ class TideGaugeObservationModel(ObservationModel):
     @classmethod
     def from_gloss_network(
         cls,
-        observable: LinearOperator,
+        observable: LinearOperator[Any, SHGrid],
         /,
         *,
         filter_func: Optional[Callable[[str, float, float], bool]] = None,

@@ -25,6 +25,7 @@ observed; `lift` builds it from the map on the field space.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 from pyshtools import SHGrid
@@ -77,7 +78,7 @@ def _window_components(time_space, lower: float, upper: float) -> np.ndarray:
     return out
 
 
-def at_time(space: TensorProduct, time: float, /) -> LinearOperator:
+def at_time(space: TensorProduct, time: float, /) -> LinearOperator[np.ndarray, Any]:
     """
     The value of a history at a time: the contraction of a product whose
     first factor is the time space with the Dirac functional there, onto the
@@ -95,7 +96,9 @@ def at_time(space: TensorProduct, time: float, /) -> LinearOperator:
     )
 
 
-def time_average(space: TensorProduct, lower: float, upper: float, /) -> LinearOperator:
+def time_average(
+    space: TensorProduct, lower: float, upper: float, /
+) -> LinearOperator[np.ndarray, Any]:
     """
     The mean of a history over a window of time, the contraction with the
     functional (1 / (upper - lower)) int_lower^upper dt, bounded on a time
@@ -116,7 +119,7 @@ def time_average(space: TensorProduct, lower: float, upper: float, /) -> LinearO
 
 def difference_quotient(
     space: TensorProduct, lower: float, upper: float, /
-) -> LinearOperator:
+) -> LinearOperator[np.ndarray, Any]:
     """
     The change of a history over a window per unit time, the contraction
     with (delta_upper - delta_lower) / (upper - lower): the rate an
@@ -138,7 +141,9 @@ def difference_quotient(
     )
 
 
-def sample_at_times(space: TensorProduct, times: Sequence[float], /) -> LinearOperator:
+def sample_at_times(
+    space: TensorProduct, times: Sequence[float], /
+) -> LinearOperator[np.ndarray, tuple]:
     """
     A history's values at several times, one `at_time` per time stacked
     into a `DirectSum` of the remaining factors' product, in order: a series

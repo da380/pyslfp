@@ -14,9 +14,10 @@ GRACE Level-2 products publish; see ``stokes_coefficient_operator``.
 """
 
 from __future__ import annotations
-from typing import Tuple, Union
+from typing import Any, Tuple, Union
 
 import numpy as np
+from pyshtools import SHGrid
 
 from pygeoinf import (
     LinearOperator,
@@ -31,7 +32,7 @@ from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 from planetmodel import units
 
 from pyslfp.core import EarthModel
-from pyslfp.core.response import POTENTIAL_CHANGE, GRDSpace
+from pyslfp.core.response import GRDResponse, POTENTIAL_CHANGE, GRDSpace
 from pyslfp.core.spaces import check_load_space, check_response_space
 from pyslfp.elastic.operator import FingerPrintOperator
 from pyslfp.observations.base import Noise, ObservationModel
@@ -59,7 +60,7 @@ from pyslfp.observations.base import Noise, ObservationModel
 
 def _unit_sphere_coefficient_operator(
     space: Union[Lebesgue, Sobolev], max_degree: int, min_degree: int, /
-) -> LinearOperator:
+) -> LinearOperator[SHGrid, np.ndarray]:
     """Maps a field to its coefficients in the convention above."""
     return (1.0 / space.radius) * space.coefficient_operator(
         lmax=max_degree, lmin=min_degree
@@ -68,7 +69,7 @@ def _unit_sphere_coefficient_operator(
 
 def _unit_sphere_synthesis_operator(
     space: Union[Lebesgue, Sobolev], max_degree: int, min_degree: int, /
-) -> LinearOperator:
+) -> LinearOperator[np.ndarray, SHGrid]:
     """Maps coefficients in the convention above to the field they define."""
     return space.radius * space.from_coefficient_operator(
         lmax=max_degree, lmin=min_degree
@@ -158,7 +159,7 @@ def _check_convention(convention: str, /) -> None:
 
 def _coefficient_reader(
     space: HilbertSpace, max_degree: int, min_degree: int, /
-) -> LinearOperator:
+) -> LinearOperator[Any, np.ndarray]:
     """
     The coefficients of degrees `min_degree` to `max_degree`, in this
     module's convention, read from a space whose components are the radius
@@ -185,7 +186,7 @@ def grace_observation_operator(
     /,
     *,
     min_obs_degree: int = 2,
-) -> LinearOperator:
+) -> LinearOperator[GRDResponse, np.ndarray]:
     """
     Maps the response to the coefficients of its gravitational potential
     change, read from the response's components with no transform.
@@ -220,7 +221,7 @@ class GraceObservationModel(ObservationModel):
 
     def __init__(
         self,
-        observable: LinearOperator,
+        observable: LinearOperator[Any, Any],
         model: EarthModel,
         max_obs_degree: int,
         /,
@@ -447,7 +448,7 @@ class WMBMethod:
 
     def potential_coefficient_to_load_operator(
         self, load_space: Union[Lebesgue, Sobolev]
-    ) -> LinearOperator:
+    ) -> LinearOperator[np.ndarray, SHGrid]:
         """
         Maps a vector of observed gravitational potential coefficients to an
         approximation of the causative continuous surface mass load.
@@ -463,7 +464,7 @@ class WMBMethod:
 
     def load_to_potential_coefficient_operator(
         self, load_space: Union[Lebesgue, Sobolev]
-    ) -> LinearOperator:
+    ) -> LinearOperator[SHGrid, np.ndarray]:
         """
         Maps a load to the corresponding potential coefficients based on the WMB theory.
         """

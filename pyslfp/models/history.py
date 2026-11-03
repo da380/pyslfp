@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from types import MappingProxyType
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 
@@ -105,7 +105,9 @@ class HistorySetup:
 
     # -- lifting -----------------------------------------------------------
 
-    def lift(self, operator: LinearOperator, /) -> LinearOperator:
+    def lift(
+        self, operator: LinearOperator[tuple, Any], /
+    ) -> LinearOperator[np.ndarray, np.ndarray]:
         """
         An operator on the set-up's space, applied at every time: the tensor
         product of the identity on the time space with it, onto the product
@@ -116,7 +118,9 @@ class HistorySetup:
             raise ValueError("the operator must act on the set-up's space")
         return self._space.lift(operator)
 
-    def through_time(self, functional: LinearOperator, /) -> LinearOperator:
+    def through_time(
+        self, functional: LinearOperator[tuple, np.ndarray], /
+    ) -> LinearOperator[np.ndarray, np.ndarray]:
         """
         A scalar diagnostic of the set-up, an operator into EuclideanSpace(1),
         applied at every time, as a function of time in the time space: its
@@ -148,13 +152,13 @@ class HistorySetup:
             composed.traits | (lifted.traits & Traits.SURJECTIVE)
         )
 
-    def history(self, name: str, /) -> LinearOperator:
+    def history(self, name: str, /) -> LinearOperator[np.ndarray, np.ndarray]:
         """The history of one component, from the space onto the
         `FieldHistorySpace` over the component's space: the lift of the
         set-up's projection."""
         return self.lift(self._setup.space.projection(name))
 
-    def at(self, time: float, /) -> LinearOperator:
+    def at(self, time: float, /) -> LinearOperator[np.ndarray, tuple]:
         """The set-up's vector at a time of the interval, from the space onto
         the set-up's space."""
         return at_time(self._space, time)
@@ -167,47 +171,51 @@ class HistorySetup:
         return FieldHistorySpace(self._time_space, self._setup.load_space)
 
     @property
-    def load_operator(self) -> LinearOperator:
+    def load_operator(self) -> LinearOperator[np.ndarray, np.ndarray]:
         """From the space to the load history."""
         return self.lift(self._setup.load_operator)
 
     @property
-    def support(self) -> LinearOperator:
+    def support(self) -> LinearOperator[np.ndarray, np.ndarray]:
         """The set-up's support at every time."""
         return self.lift(self._setup.support)
 
     @property
-    def observables(self) -> Mapping[str, LinearOperator]:
+    def observables(self) -> Mapping[str, LinearOperator[np.ndarray, np.ndarray]]:
         """The set-up's direct observables, each a history of its field."""
         return self._observables
 
     @property
-    def constraints(self) -> Mapping[str, LinearOperator]:
+    def constraints(self) -> Mapping[str, LinearOperator[np.ndarray, np.ndarray]]:
         """The set-up's constraints at every time, each into the time space;
         the surjectivity of a constraint survives the lift."""
         return self._constraints
 
-    def barystatic_gmsl(self, name: Optional[str] = None, /) -> LinearOperator:
+    def barystatic_gmsl(
+        self, name: Optional[str] = None, /
+    ) -> LinearOperator[np.ndarray, np.ndarray]:
         """The barystatic GMSL of a mass source, or of all of them, as a
         function of time."""
         return self.through_time(self._setup.barystatic_gmsl(name))
 
     @property
-    def steric_gmsl(self) -> Optional[LinearOperator]:
+    def steric_gmsl(self) -> Optional[LinearOperator[np.ndarray, np.ndarray]]:
         """The steric GMSL as a function of time, or None without a density
         component."""
         steric = self._setup.steric_gmsl
         return None if steric is None else self.through_time(steric)
 
     @property
-    def gmsl_split(self) -> Optional[LinearOperator]:
+    def gmsl_split(self) -> Optional[LinearOperator[np.ndarray, np.ndarray]]:
         """The barystatic and steric GMSL at every time, the set-up's split
         lifted onto TensorProduct([time space, EuclideanSpace(2)]), a pair of
         functions of time held as a (K, 2) array; None without both."""
         split = self._setup.gmsl_split
         return None if split is None else self.lift(split)
 
-    def response(self, fingerprint: FingerPrintOperator, /) -> LinearOperator:
+    def response(
+        self, fingerprint: FingerPrintOperator, /
+    ) -> LinearOperator[np.ndarray, np.ndarray]:
         """The response to the set-up's load at every time: the elastic
         physics at each epoch, one fingerprint solve per time mode, onto the
         product of the time space and the response space."""
@@ -215,7 +223,7 @@ class HistorySetup:
 
     def relative_sea_level_change(
         self, fingerprint: FingerPrintOperator, /
-    ) -> LinearOperator:
+    ) -> LinearOperator[np.ndarray, np.ndarray]:
         """The relative sea level change at every time, direct terms
         included, onto the history of the fingerprint's field space."""
         return self.lift(self._setup.relative_sea_level_change(fingerprint))
@@ -226,7 +234,7 @@ class HistorySetup:
         /,
         *,
         remove_rotational_contribution: bool = True,
-    ) -> LinearOperator:
+    ) -> LinearOperator[np.ndarray, np.ndarray]:
         """The geocentric sea level change at every time, as for the
         set-up's."""
         return self.lift(
@@ -236,7 +244,9 @@ class HistorySetup:
             )
         )
 
-    def gmsl(self, fingerprint: FingerPrintOperator, /) -> LinearOperator:
+    def gmsl(
+        self, fingerprint: FingerPrintOperator, /
+    ) -> LinearOperator[np.ndarray, np.ndarray]:
         """The global mean sea level change through the sea level equation,
         as a function of time."""
         return self.through_time(self._setup.gmsl(fingerprint))
@@ -245,7 +255,7 @@ class HistorySetup:
         return f"HistorySetup({self._setup!r}, {self._time_space!r})"
 
 
-def operator_dim(operator: LinearOperator) -> Optional[int]:
+def operator_dim(operator: LinearOperator[Any, Any]) -> Optional[int]:
     """The dimension of an operator's Euclidean codomain, or None."""
     codomain = operator.codomain
     return codomain.dim if isinstance(codomain, EuclideanSpace) else None

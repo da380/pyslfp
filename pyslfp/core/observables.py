@@ -19,6 +19,7 @@ from pygeoinf import EuclideanSpace, LinearOperator
 from .model import EarthModel
 from .response import (
     ANGULAR_VELOCITY_CHANGE,
+    GRDResponse,
     DISPLACEMENT,
     RELATIVE_SEA_LEVEL_CHANGE,
     GRDSpace,
@@ -36,7 +37,7 @@ __all__ = ["centrifugal_potential_operator", "geocentric_sea_level_operator"]
 
 def centrifugal_potential_operator(
     model: EarthModel, /, *, sobolev_parameters=None
-) -> LinearOperator:
+) -> LinearOperator[np.ndarray, SHGrid]:
     """
     Returns the LinearOperator the maps an angular velocity perturbation
     [omega_x, omega_y, omega_z] to the corresponding centrifugal potential
@@ -95,7 +96,7 @@ def geocentric_sea_level_operator(
     /,
     *,
     remove_rotational_contribution: bool = True,
-) -> LinearOperator:
+) -> LinearOperator[GRDResponse, SHGrid]:
     """
     Returns an operator mapping the response to the geocentric sea level change,
     a field of the response's field space.

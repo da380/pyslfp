@@ -176,8 +176,10 @@ sharp rule holds the ocean functions. The package exposes `__version__`.
 
 ## Planned work still to land
 
+The operators of the release's modules carry typed generics
+(`LinearOperator[SHGrid, GRDResponse]`, `Operator[tuple, tuple]`), with
+`Any` where a space is the caller's.
+
 - The rest of the scope set with the port: planetmodel 1.5's plots and the
   priors layer.
-- Typed generics (`DiagonalMetricSpace[GRDResponse]`,
-  `LinearOperator[SHGrid, GRDResponse]`) in code written or touched for the
-  release.
+

@@ -43,7 +43,19 @@ from __future__ import annotations
 from functools import reduce
 from operator import add
 from types import MappingProxyType
-from typing import Iterable, List, Mapping, NamedTuple, Optional, Sequence, Tuple, Union
+from typing import (
+    Any,
+    Iterable,
+    List,
+    Mapping,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
+
+import numpy as np
 
 from pygeoinf import (
     BlockDiagonalLinearOperator,
@@ -59,7 +71,7 @@ from pyshtools import SHGrid
 
 from pyslfp.core import EarthState
 from pyslfp.core.observables import geocentric_sea_level_operator
-from pyslfp.core.response import RELATIVE_SEA_LEVEL_CHANGE, GRDSpace
+from pyslfp.core.response import GRDResponse, RELATIVE_SEA_LEVEL_CHANGE, GRDSpace
 from pyslfp.elastic import FingerPrintOperator
 from pyslfp.core import (
     ocean_average_operator,
@@ -246,12 +258,12 @@ class ModelSetup:
     # ---------------------------------------------------------#
 
     @property
-    def load_operator(self) -> LinearOperator:
+    def load_operator(self) -> LinearOperator[tuple, SHGrid]:
         """The total load, the sum of the components' loads."""
         return self._load_operator
 
     @property
-    def support(self) -> LinearOperator:
+    def support(self) -> LinearOperator[tuple, tuple]:
         """The components' supports, block by block: multiplication by each
         support's indicator. The operators of the set-up account for the
         supports already; this is for display and diagnostics, such as
@@ -259,13 +271,13 @@ class ModelSetup:
         return self._support
 
     @property
-    def observables(self) -> Mapping[str, LinearOperator]:
+    def observables(self) -> Mapping[str, LinearOperator[tuple, SHGrid]]:
         """The direct operator of each observable, into the observable's
         space, summing the components' contributions. Read-only."""
         return self._observables
 
     @property
-    def constraints(self) -> Mapping[str, LinearOperator]:
+    def constraints(self) -> Mapping[str, LinearOperator[tuple, np.ndarray]]:
         """
         The constraints the components' roles imply, each into a Euclidean
         space and claiming surjectivity, as exact conditioning needs. Read-only.
@@ -282,7 +294,9 @@ class ModelSetup:
     #                 Global mean sea level                    #
     # ---------------------------------------------------------#
 
-    def barystatic_gmsl(self, name: Optional[str] = None, /) -> LinearOperator:
+    def barystatic_gmsl(
+        self, name: Optional[str] = None, /
+    ) -> LinearOperator[tuple, np.ndarray]:
         """
         The barystatic global mean sea level change, into EuclideanSpace(1).
 
@@ -303,7 +317,7 @@ class ModelSetup:
         return self._barystatic[name]
 
     @property
-    def steric_gmsl(self) -> Optional[LinearOperator]:
+    def steric_gmsl(self) -> Optional[LinearOperator[tuple, np.ndarray]]:
         """The steric global mean sea level change, the ocean average of the
         steric sea level, into EuclideanSpace(1); None without a steric
         contribution. The steric sea level carries the ocean function, so its
@@ -313,7 +327,7 @@ class ModelSetup:
         return self._steric
 
     @property
-    def gmsl_split(self) -> Optional[LinearOperator]:
+    def gmsl_split(self) -> Optional[LinearOperator[tuple, np.ndarray]]:
         """The barystatic and steric global mean sea level changes together,
         into EuclideanSpace(2) in that order; None unless the set-up has
         both."""
@@ -323,7 +337,9 @@ class ModelSetup:
     #            Through the sea level equation                #
     # ---------------------------------------------------------#
 
-    def response(self, fingerprint: FingerPrintOperator, /) -> LinearOperator:
+    def response(
+        self, fingerprint: FingerPrintOperator, /
+    ) -> LinearOperator[tuple, GRDResponse]:
         """
         The response to the set-up's load, into the fingerprint operator's
         response space: the observable of the members with no direct terms,
@@ -341,7 +357,7 @@ class ModelSetup:
 
     def relative_sea_level_change(
         self, fingerprint: FingerPrintOperator, /
-    ) -> LinearOperator:
+    ) -> LinearOperator[tuple, SHGrid]:
         """
         The relative sea level change, into the fingerprint operator's field
         space: the sea level equation's response to the total load, plus the
@@ -371,7 +387,7 @@ class ModelSetup:
         /,
         *,
         remove_rotational_contribution: bool = True,
-    ) -> LinearOperator:
+    ) -> LinearOperator[tuple, SHGrid]:
         """
         The geocentric sea level change, into the fingerprint operator's field
         space, the observable of altimetry: the response's geocentric sea level
@@ -403,8 +419,8 @@ class ModelSetup:
         return self._with_geocentric_contributions(change, response)
 
     def _with_geocentric_contributions(
-        self, change: LinearOperator, response: GRDSpace
-    ) -> LinearOperator:
+        self, change: LinearOperator[tuple, SHGrid], response: GRDSpace
+    ) -> LinearOperator[tuple, SHGrid]:
         """A sea level operator with the components' direct contributions to
         the geocentric sea level added, which must lie in the response's
         field space."""
@@ -418,7 +434,9 @@ class ModelSetup:
             )
         return change + direct
 
-    def gmsl(self, fingerprint: FingerPrintOperator, /) -> LinearOperator:
+    def gmsl(
+        self, fingerprint: FingerPrintOperator, /
+    ) -> LinearOperator[tuple, np.ndarray]:
         """
         The global mean sea level change, the ocean average of
         `relative_sea_level_change`, into EuclideanSpace(1). Mass conservation makes it
@@ -457,7 +475,7 @@ class ModelSetup:
         codomain = on_fields.codomain
         sea_level = response.field_operator(RELATIVE_SEA_LEVEL_CHANGE) @ fingerprint
 
-        def of_role(role: Role) -> LinearOperator:
+        def of_role(role: Role) -> LinearOperator[tuple, SHGrid]:
             return self._row(
                 {
                     c.name: c.to_load
@@ -482,7 +500,7 @@ class ModelSetup:
     #                     Private helpers                      #
     # ---------------------------------------------------------#
 
-    def _ocean_mean(self, space: Space) -> LinearOperator:
+    def _ocean_mean(self, space: Space) -> LinearOperator[SHGrid, np.ndarray]:
         """A field's integral over the sphere over the ocean area, into
         EuclideanSpace(1): the ocean average of a field the ocean function
         already confines to the ocean, such as an ocean-internal load or the
@@ -502,7 +520,9 @@ class ModelSetup:
             )
         return fingerprint.codomain
 
-    def _averaging(self, space: Space, regions: Regions) -> LinearOperator:
+    def _averaging(
+        self, space: Space, regions: Regions
+    ) -> LinearOperator[SHGrid, np.ndarray]:
         """Regional averages on a space, from names or masks."""
         if (
             isinstance(regions, (list, tuple))
@@ -512,7 +532,7 @@ class ModelSetup:
             return averaging_operator(self._state, space, list(regions))
         return region_average_operator(self._state, space, regions)
 
-    def _observable(self, name: str) -> LinearOperator:
+    def _observable(self, name: str) -> LinearOperator[tuple, SHGrid]:
         """The row of the components' contributions to an observable, which
         must share its space."""
         blocks = {
@@ -529,8 +549,8 @@ class ModelSetup:
         return self._row(blocks, codomains.pop())
 
     def _row(
-        self, blocks: Mapping[str, LinearOperator], codomain: Space
-    ) -> LinearOperator:
+        self, blocks: Mapping[str, LinearOperator[Any, Any]], codomain: Space
+    ) -> LinearOperator[tuple, Any]:
         """A row over the joint space, the given block for each named
         component and zero for the rest."""
         row = RowLinearOperator(

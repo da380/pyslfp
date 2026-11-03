@@ -12,7 +12,7 @@ elastic set-up and a viscoelastic run alike.
 from __future__ import annotations
 
 import copy
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 import numpy as np
 
@@ -61,8 +61,8 @@ class ObservationModel:
 
     def __init__(
         self,
-        observable: LinearOperator,
-        sampling: LinearOperator,
+        observable: LinearOperator[Any, Any],
+        sampling: LinearOperator[Any, np.ndarray],
         /,
         *,
         noise: Noise = None,
@@ -92,17 +92,17 @@ class ObservationModel:
         return noise_measure(self.data_space, noise)
 
     @property
-    def observable(self) -> LinearOperator:
+    def observable(self) -> LinearOperator[Any, Any]:
         """The observable, from the model space into its own space."""
         return self._observable
 
     @property
-    def sampling_operator(self) -> LinearOperator:
+    def sampling_operator(self) -> LinearOperator[Any, np.ndarray]:
         """The measurement, from the observable's space into the data space."""
         return self._sampling
 
     @property
-    def forward_operator(self) -> LinearOperator:
+    def forward_operator(self) -> LinearOperator[Any, np.ndarray]:
         """From the model space to the data space."""
         return self._forward
 

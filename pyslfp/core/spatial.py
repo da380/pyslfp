@@ -10,6 +10,7 @@ alike.
 
 from __future__ import annotations
 from typing import List, Optional, Sequence, Union
+import numpy as np
 
 from pyshtools import SHGrid
 from pygeoinf import LinearOperator, CholeskySolver, Traits
@@ -32,7 +33,7 @@ def ocean_projection_operator(
     /,
     *,
     exclude_ice_shelves: bool = False,
-) -> LinearOperator:
+) -> LinearOperator[SHGrid, SHGrid]:
     """Returns a LinearOperator that projects a field onto the oceans."""
     check_load_space(space)
     projection_field = state.ocean_projection(
@@ -47,7 +48,7 @@ def ice_projection_operator(
     /,
     *,
     exclude_ice_shelves: bool = False,
-) -> LinearOperator:
+) -> LinearOperator[SHGrid, SHGrid]:
     """Returns a LinearOperator that projects a field onto the state's ice
     (`EarthState.ice_projection`)."""
     check_load_space(space)
@@ -64,7 +65,7 @@ def ice_sheet_projection_operator(
     *,
     sheets: Optional[Union[str, Sequence[str]]] = None,
     exclude_ice_shelves: bool = False,
-) -> LinearOperator:
+) -> LinearOperator[SHGrid, SHGrid]:
     """Returns a LinearOperator that projects a field onto the ice sheets
     (`EarthState.ice_sheet_projection`)."""
     check_load_space(space)
@@ -80,7 +81,7 @@ def land_projection_operator(
     /,
     *,
     exclude_ice: bool = True,
-) -> LinearOperator:
+) -> LinearOperator[SHGrid, SHGrid]:
     """Returns a LinearOperator that projects a field onto background land."""
     check_load_space(space)
     projection_field = state.land_projection(value=0.0, exclude_ice=exclude_ice)
@@ -98,7 +99,7 @@ def ocean_average_operator(
     /,
     *,
     exclude_ice_shelves: bool = False,
-) -> LinearOperator:
+) -> LinearOperator[SHGrid, np.ndarray]:
     """Returns a LinearOperator that computes the spatial average over the oceans."""
     check_load_space(space)
     projection_field = state.ocean_projection(
@@ -113,7 +114,7 @@ def ice_average_operator(
     /,
     *,
     exclude_ice_shelves: bool = False,
-) -> LinearOperator:
+) -> LinearOperator[SHGrid, np.ndarray]:
     """Returns a LinearOperator that computes the spatial average over the
     state's ice (`EarthState.ice_projection`)."""
     check_load_space(space)
@@ -129,7 +130,7 @@ def land_average_operator(
     /,
     *,
     exclude_ice: bool = True,
-) -> LinearOperator:
+) -> LinearOperator[SHGrid, np.ndarray]:
     """Returns a LinearOperator that computes the spatial average over land."""
     check_load_space(space)
     projection_field = state.land_projection(value=0.0, exclude_ice=exclude_ice)
@@ -143,7 +144,7 @@ def land_average_operator(
 
 def remove_ocean_average_operator(
     state: EarthState, space: Union[Lebesgue, Sobolev]
-) -> LinearOperator:
+) -> LinearOperator[SHGrid, SHGrid]:
     """
     Returns a LinearOperator that adjusts a scalar surface function such that
     its integral over the oceans is strictly zero.
@@ -182,7 +183,7 @@ def ice_sheet_averaging_operator(
     /,
     *,
     groupings: Optional[Union[str, List[List[str]]]] = None,
-) -> LinearOperator:
+) -> LinearOperator[SHGrid, np.ndarray]:
     """Maps a Global Field -> [N x 1] Averages for specified basin groupings."""
     check_load_space(space)
 
@@ -196,7 +197,7 @@ def ice_sheet_basis_operator(
     /,
     *,
     groupings: Optional[Union[str, List[List[str]]]] = None,
-) -> LinearOperator:
+) -> LinearOperator[np.ndarray, SHGrid]:
     """
     Maps [N x 1] coefficients -> Global Field.
     Acts as a strict right-inverse to the averaging operator.
@@ -244,7 +245,7 @@ def region_average_operator(
     state: EarthState,
     space: Union[Lebesgue, Sobolev],
     regions: Union[str, List[str], List[List[str]]],
-) -> LinearOperator:
+) -> LinearOperator[SHGrid, np.ndarray]:
     """
     Maps a global field to a Euclidean vector of regional spatial averages.
 
@@ -263,7 +264,7 @@ def region_projection_operator(
     state: EarthState,
     space: Union[Lebesgue, Sobolev],
     regions: Union[str, List[str]],
-) -> LinearOperator:
+) -> LinearOperator[SHGrid, SHGrid]:
     """
     Projects a global field onto a single (potentially composite) region.
     Maps Space -> Space.
@@ -286,7 +287,7 @@ def averaging_operator(
     load_space: Union[Lebesgue, Sobolev],
     weighting_functions: List[SHGrid],
     /,
-) -> LinearOperator:
+) -> LinearOperator[SHGrid, np.ndarray]:
     """
     Creates an operator that computes the true spatial average over given regions.
 

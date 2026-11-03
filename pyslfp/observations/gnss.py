@@ -27,7 +27,7 @@ or not at all, the data then being in the centre-of-mass frame.
 
 from __future__ import annotations
 
-from typing import List, Optional, Sequence, Tuple
+from typing import Any, List, Optional, Sequence, Tuple
 
 import numpy as np
 import scipy.linalg
@@ -40,7 +40,11 @@ from pygeoinf import (
     RowLinearOperator,
 )
 
-from pyslfp.core.response import DISPLACEMENT, SurfaceDisplacementSpace
+from pyslfp.core.response import (
+    DISPLACEMENT,
+    SurfaceDisplacement,
+    SurfaceDisplacementSpace,
+)
 from pyslfp.core.spaces import check_load_space
 from pyslfp.elastic.operator import FingerPrintOperator
 from pyslfp.observations.base import Noise, ObservationModel, noise_measure
@@ -72,7 +76,7 @@ _FRAMES = (None, "nuisance", "invariant")
 # ================================================================ #
 
 
-class HelmertTransformation(MatrixLinearOperator):
+class HelmertTransformation(MatrixLinearOperator[np.ndarray, np.ndarray]):
     """
     The Helmert transformation at stations, from its parameters,
     EuclideanSpace(k), to the station data, in the order of the displacement's
@@ -147,7 +151,7 @@ class HelmertTransformation(MatrixLinearOperator):
         """The components at each station, in order."""
         return self._directions
 
-    def frame_reduction(self) -> LinearOperator:
+    def frame_reduction(self) -> LinearOperator[np.ndarray, np.ndarray]:
         """
         Z^T, from the station data to the combinations the transformation
         cannot change: Z is an orthonormal basis of the complement of the
@@ -289,7 +293,7 @@ class GnssObservationModel(ObservationModel):
 
     def __init__(
         self,
-        observable: LinearOperator,
+        observable: LinearOperator[Any, SurfaceDisplacement],
         points: Sequence[Tuple[float, float]],
         /,
         *,
@@ -439,7 +443,7 @@ class GnssObservationModel(ObservationModel):
         return self._helmert
 
     @property
-    def frame_reduction(self) -> Optional[LinearOperator]:
+    def frame_reduction(self) -> Optional[LinearOperator[np.ndarray, np.ndarray]]:
         """In the invariant frame, Z^T, from the station data to the data;
         otherwise None."""
         return self._reduction

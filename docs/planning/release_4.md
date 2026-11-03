@@ -62,6 +62,32 @@ the documentation, each entry giving the old form and the new.
 - **Module paths.** `pyslfp.plot` is `pyslfp.plotting`, `pyslfp.regions` is
   `pyslfp.core.regions`, `pyslfp.parallel` is `pyslfp.core.parallel`; the
   top-level names (`pyslfp.plot`, `pyslfp.set_num_threads`, ...) are unchanged.
+- **`pyslfp.linear_operators` is gone**, its operators beside the physics they
+  serve. Old: `from pyslfp.linear_operators import X`. New:
+  - `pyslfp.core`: the space builders (`lebesgue_load_space`,
+    `sobolev_load_space`, `lebesgue_response_space`,
+    `sobolev_response_space`), `underlying_space`, `check_load_space`,
+    `check_response_space`, `centrifugal_potential_operator`,
+    `geocentric_sea_level_operator`, and the projections and averages
+    (`ocean_projection_operator`, `ocean_average_operator`,
+    `ice_projection_operator`, `ice_sheet_projection_operator`,
+    `region_average_operator`, `averaging_operator`, ...);
+  - `pyslfp.elastic`: `FingerPrintOperator`;
+  - `pyslfp.observations`: the tide gauge, altimetry and GRACE operators and
+    models (`TideGaugeObservationModel`, `GraceObservationModel`, `WMBMethod`,
+    `altimetry_point_operator`, `ocean_altimetry_points`, ...);
+  - `pyslfp.models`: the load operators (`ice_thickness_change_to_load_operator`,
+    `sea_level_change_to_load_operator`, `steric_sea_level_operator`, ...).
+- **Removed:** `AltimetryObservationModel` and
+  `JointAltimetryObservationModel`, whose model spaces the set-ups now
+  hold, and `joint_ice_ocean_to_load_operator` with them. Old:
+  `AltimetryObservationModel(fingerprint, points).forward_operator`. New:
+  `fingerprint.field_space.point_evaluation_operator(points) @
+  setup.geocentric_sea_level(fingerprint)` for a set-up `setup` on the
+  fingerprint operator's load space. The deprecated wrappers
+  `l2_products_operator` and `spatial_multiplication_operator` are removed;
+  use the pygeoinf space methods of the same names
+  (`space.l2_products_operator`, `space.multiplication_operator`).
 - **GRACE noise.** `WMBMethod.load_measure_to_observation_measure` takes a
   coefficient's variance as the spectral variance over the metric, which v1
   did not; results built on it change.
@@ -84,7 +110,8 @@ new state and a `GRDResponse`; and `adjoint_generalised_solve` takes
 sphere space with the product metric, and its vectors, `FieldHistory`. The
 load and response space builders (`lebesgue_load_space`,
 `sobolev_load_space`, `lebesgue_response_space`, `sobolev_response_space`) in
-`pyslfp.core`. `IceHistoryOperator` (`pyslfp.viscoelastic`): the
+`pyslfp.core`. `ModelSetup.geocentric_sea_level`, the observable of
+altimetry. `IceHistoryOperator` (`pyslfp.viscoelastic`): the
 frozen-shoreline map from an ice thickness history to the responses at
 observation dates, whose adjoint gives the Sobolev kernels.
 
@@ -93,13 +120,9 @@ observation dates, whose adjoint gives the Sobolev kernels.
 - The viscoelastic side of the response: snapshots holding a `GRDResponse`,
   the horizontal memory field, the adjoints; GNSS observation models with the
   frame of the data ([response_plan.md](response_plan.md), packages 5 and 6).
-- The layout: `linear_operators` dissolved by role, its operators beside the
-  physics they wrap (`core`, `elastic`, `viscoelastic`), the observations in a
-  new `observations` subpackage and the load-building operators in `models`
-  ([response_plan.md](response_plan.md), package 5, step 5). The wrappers in
-  `linear_operators/utils.py` (`l2_products_operator`,
-  `spatial_multiplication_operator`) go with it; whether the altimetry
-  observation models the models plan replaces go too is to be decided.
+- The observation models reshaped with package 6: each takes its observable
+  as an operator from the model space (a set-up's, or a viscoelastic
+  operator's) and adds the sampling, the stations' data and the noise.
 - The rest of the scope set with the port: the viscoelastic adjoints wrapped
   as pygeoinf operators, planetmodel 1.4's plots, the priors layer, and
   time-dependent model spaces, which wait on a tensor product of spaces in

@@ -8,10 +8,8 @@ import pygeoinf as inf
 from pygeoinf.testing import check_operator
 
 from pyslfp.core import EarthState
-from pyslfp.linear_operators.physics import (
-    FingerPrintOperator,
-    centrifugal_potential_operator,
-)
+from pyslfp.elastic import FingerPrintOperator
+from pyslfp.core import centrifugal_potential_operator
 
 CHECK_RTOL = 1e-6
 CHECK_ATOL = 1e-6

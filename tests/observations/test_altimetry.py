@@ -8,15 +8,13 @@ import pygeoinf as inf
 from pygeoinf.testing import check_operator
 
 from pyslfp.core import EarthState
-from pyslfp.linear_operators.physics import FingerPrintOperator
-from pyslfp.linear_operators.altimetry import (
+from pyslfp.elastic import FingerPrintOperator
+from pyslfp.observations import (
     ocean_altimetry_points,
     ice_altimetry_points,
-    geocentric_sea_level_operator,
     altimetry_point_operator,
-    AltimetryObservationModel,
-    JointAltimetryObservationModel,
 )
+from pyslfp.core import geocentric_sea_level_operator
 
 
 # ==================================================================== #
@@ -132,58 +130,6 @@ def test_altimetry_point_operator(fingerprint_operator, sample_points, remove_ro
     )
 
     domain_measure = fingerprint_operator.response_measure_for_testing()
-
-    check_operator(
-        A,
-        rng=np.random.default_rng(0),
-        measure=domain_measure,
-        codomain_measure=inf.GaussianMeasure.from_standard_deviation(A.codomain, 1.0),
-        trials=2,
-        rtol=1e-4,
-        atol=1e-4,
-    )
-
-
-# ==================================================================== #
-#                  3. Observation Models                               #
-# ==================================================================== #
-
-
-def test_altimetry_observation_model_adjoint(fingerprint_operator, sample_points):
-    """
-    Rigorously tests the full Ice -> Load -> SLE -> geocentric sea level -> Points adjoint chain.
-    """
-    model = AltimetryObservationModel(
-        fingerprint_operator, sample_points, remove_rotational_contribution=True
-    )
-    A = model.forward_operator
-
-    # Domain is the Ice Parameter space (defaults to the load space of the fingerprint)
-    domain_measure = fingerprint_operator.load_measure_for_testing()
-
-    check_operator(
-        A,
-        rng=np.random.default_rng(0),
-        measure=domain_measure,
-        codomain_measure=inf.GaussianMeasure.from_standard_deviation(A.codomain, 1.0),
-        trials=2,
-        rtol=1e-4,
-        atol=1e-4,
-    )
-
-
-def test_joint_altimetry_observation_model_adjoint(fingerprint_operator, sample_points):
-    """
-    Rigorously tests the Joint [Ice, Ocean] -> Load -> SLE -> geocentric sea level -> Points chain.
-    """
-    model = JointAltimetryObservationModel(
-        fingerprint_operator, sample_points, remove_rotational_contribution=True
-    )
-    A = model.forward_operator
-
-    # The domain is a direct sum [Ice, Ocean], so we build a composite measure
-    sub_measure = fingerprint_operator.load_measure_for_testing()
-    domain_measure = inf.GaussianMeasure.from_product([sub_measure, sub_measure])
 
     check_operator(
         A,

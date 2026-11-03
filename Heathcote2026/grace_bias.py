@@ -42,7 +42,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import pygeoinf as inf
-from pyslfp.linear_operators import WMBMethod
+from pyslfp.observations import WMBMethod
 
 import common
 from figures import error_density, field_map

@@ -7,8 +7,8 @@ import numpy as np
 
 import pygeoinf as inf
 from pygeoinf.testing import check_operator
-from pyslfp.linear_operators.physics import FingerPrintOperator
-from pyslfp.linear_operators.tide_gauges import (
+from pyslfp.elastic import FingerPrintOperator
+from pyslfp.observations import (
     read_gloss_tide_gauge_data,
     tide_gauge_operator,
     TideGaugeObservationModel,

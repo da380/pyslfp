@@ -14,16 +14,17 @@ from pygeoinf import (
 from pygeoinf.testing import check_operator, check_traits
 
 from pyslfp.core import EarthState
-from pyslfp.linear_operators.loads import (
+from pyslfp.models import (
     ice_thickness_change_to_load_operator,
     ocean_density_change_to_load_operator,
     sea_level_change_to_load_operator,
     steric_sea_level_operator,
 )
-from pyslfp.linear_operators.physics import lebesgue_load_space, sobolev_load_space
-from pyslfp.linear_operators.spatial import (
-    ice_sheet_projection_operator,
+from pyslfp.core import (
+    lebesgue_load_space,
+    sobolev_load_space,
 )
+from pyslfp.core import ice_sheet_projection_operator
 from pyslfp.models import (
     ICE_SURFACE_HEIGHT,
     OCEAN_MASS,

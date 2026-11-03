@@ -1,9 +1,9 @@
 """
-Physical operator wrappers for the pyslfp library.
+The elastic fingerprint as a pygeoinf operator.
 
-This module bridges the core SeaLevelEquation solver with the pygeoinf
-functional-analysis library: the solver's forward and adjoint solves
-become LinearOperators on the appropriate Hilbert spaces, the form an
+`FingerPrintOperator` maps a surface load to the response of the linear
+elastic sea level equation, a `GRDResponse`, on Lebesgue or Sobolev spaces:
+the solver's forward and adjoint solves as a LinearOperator, the form an
 inversion consumes.
 """
 
@@ -16,12 +16,11 @@ from pyshtools import SHGrid
 from pygeoinf import (
     HilbertSpace,
     LinearOperator,
-    EuclideanSpace,
     GaussianMeasure,
 )
 
 from pyslfp.core import EarthModelParameters, EarthModel
-from pyslfp.elastic import LinearSeaLevelEquation
+from .fingerprint import LinearSeaLevelEquation
 from pyslfp.core import EarthState
 from pyslfp.core.response import (
     ANGULAR_VELOCITY_CHANGE,
@@ -35,7 +34,8 @@ from pyslfp.core.spaces import (
     sobolev_response_space,
 )
 
-from pyslfp.linear_operators.utils import underlying_space
+from pyslfp.core.observables import centrifugal_potential_operator
+from pyslfp.core.spaces import underlying_space
 
 
 class FingerPrintOperator(LinearOperator[SHGrid, GRDResponse]):
@@ -413,58 +413,3 @@ class FingerPrintOperator(LinearOperator[SHGrid, GRDResponse]):
 # ================================================================ #
 #                 Solid Earth Response Operators                   #
 # ================================================================ #
-
-
-def centrifugal_potential_operator(
-    model: EarthModel, /, *, sobolev_parameters=None
-) -> LinearOperator:
-    """
-    Returns the LinearOperator the maps an angular velocity perturbation
-    [omega_x, omega_y, omega_z] to the corresponding centrifugal potential
-    perturbation.
-
-    The transverse components give the degree-2, order-1 potential and the
-    axial component the degree-2, order-0 potential together with its
-    degree-0 part, a constant on the surface.
-    """
-
-    domain = EuclideanSpace(3)
-
-    sobolev_field = sobolev_parameters is not None
-
-    if sobolev_field:
-        order, scale = sobolev_parameters
-        codomain = sobolev_load_space(model, order, scale)
-    else:
-        codomain = lebesgue_load_space(model)
-
-    r = model.parameters.rotation_factor
-    r_axial = model.parameters.axial_rotation_factor
-    r_uniform = model.parameters.uniform_rotation_factor
-    b = model.parameters.mean_sea_floor_radius
-
-    def mapping(w: np.ndarray) -> SHGrid:
-        cpc_lm = model.zero_coefficients()
-        cpc_lm.coeffs[:, 2, 1] = r * w[:2]
-        cpc_lm.coeffs[0, 2, 0] = r_axial * w[2]
-        cpc_lm.coeffs[0, 0, 0] = r_uniform * w[2]
-        return model.expand_coefficient(cpc_lm)
-
-    def adjoint_mapping(cpc: SHGrid) -> np.ndarray:
-        cpc_lm = model.expand_field(cpc, lmax_calc=2)
-        w = np.empty(3)
-        w[:2] = r * b * b * cpc_lm.coeffs[:, 2, 1]
-        w[2] = (
-            b
-            * b
-            * (r_axial * cpc_lm.coeffs[0, 2, 0] + r_uniform * cpc_lm.coeffs[0, 0, 0])
-        )
-        return w
-
-    l2_codomain = underlying_space(codomain)
-
-    l2_operator = LinearOperator.from_callables(
-        domain, l2_codomain, mapping, adjoint=adjoint_mapping
-    )
-
-    return LinearOperator.from_formal_adjoint(domain, codomain, l2_operator)

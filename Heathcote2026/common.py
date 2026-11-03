@@ -37,17 +37,17 @@ import numpy as np
 
 import pygeoinf as inf
 from pyslfp import EarthState, set_num_threads
-from pyslfp.linear_operators import (
-    FingerPrintOperator,
+from pyslfp.elastic import FingerPrintOperator
+from pyslfp.observations import (
     WMBMethod,
-    geocentric_sea_level_operator,
     grace_observation_operator,
     ocean_altimetry_points,
 )
-from pyslfp.linear_operators.loads import sea_level_change_to_load_operator
-from pyslfp.linear_operators.physics import sobolev_load_space
-from pyslfp.linear_operators.spatial import ocean_average_operator
-from pyslfp.linear_operators.utils import averaging_operator
+from pyslfp.core import geocentric_sea_level_operator
+from pyslfp.models import sea_level_change_to_load_operator
+from pyslfp.core import sobolev_load_space
+from pyslfp.core import ocean_average_operator
+from pyslfp.core import averaging_operator
 from pyslfp.models import (
     GEOCENTRIC_SEA_LEVEL,
     OCEAN_MASS,

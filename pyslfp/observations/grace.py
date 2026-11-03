@@ -31,8 +31,8 @@ from planetmodel import units
 
 from pyslfp.core import EarthModel
 from pyslfp.core.response import POTENTIAL_CHANGE
-from pyslfp.linear_operators.utils import check_response_space, check_load_space
-from pyslfp.linear_operators.physics import FingerPrintOperator
+from pyslfp.core.spaces import check_load_space, check_response_space
+from pyslfp.elastic.operator import FingerPrintOperator
 
 
 # ================================================================ #

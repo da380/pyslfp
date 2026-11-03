@@ -3,20 +3,21 @@ Test suite for mass load conversions and composite domain operators.
 """
 
 import pytest
-import pygeoinf as inf
 from pygeoinf.testing import check_operator
 
 import numpy as np
 
 from pyslfp.core import EarthState
-from pyslfp.linear_operators.physics import lebesgue_load_space, sobolev_load_space
-from pyslfp.linear_operators.loads import (
+from pyslfp.core import (
+    lebesgue_load_space,
+    sobolev_load_space,
+)
+from pyslfp.models import (
     ice_thickness_change_to_load_operator,
     sea_level_change_to_load_operator,
     ocean_density_change_to_load_operator,
     steric_sea_level_operator,
     ocean_mass_conservation_operator,
-    joint_ice_ocean_to_load_operator,
 )
 
 # ==================================================================== #
@@ -163,42 +164,3 @@ def test_barystatic_weighting_and_mean_depth(testing_state):
 # ==================================================================== #
 #                  3. Composite Joint Load Operators                   #
 # ==================================================================== #
-
-
-@pytest.mark.parametrize("sobolev", [False, True])
-def test_joint_ice_ocean_to_load_operator(testing_state, sobolev):
-    """
-    Tests the adjoint identity for the RowLinearOperator combining ice
-    and ocean loads. This ensures the adjoint correctly splits the gradient
-    back into the individual direct sum subspaces.
-    """
-    model = testing_state.model
-    b = model.parameters.mean_sea_floor_radius
-
-    if sobolev:
-        ice_space = sobolev_load_space(model, 1.0, 0.1 * b)
-        ocean_space = sobolev_load_space(model, 1.0, 0.1 * b)
-        load_space = sobolev_load_space(model, 1.0, 0.1 * b)
-    else:
-        ice_space = lebesgue_load_space(model)
-        ocean_space = lebesgue_load_space(model)
-        load_space = lebesgue_load_space(model)
-
-    A = joint_ice_ocean_to_load_operator(
-        testing_state, ice_space, ocean_space, load_space
-    )
-
-    # The domain is a HilbertSpaceDirectSum, so we must build a direct sum measure
-    ice_measure = ice_space.heat_measure(0.5 * b)
-    ocean_measure = ocean_space.heat_measure(0.5 * b)
-    domain_measure = inf.GaussianMeasure.from_product([ice_measure, ocean_measure])
-
-    check_operator(
-        A,
-        rng=np.random.default_rng(0),
-        measure=domain_measure,
-        codomain_measure=load_space.heat_measure(0.5 * b),
-        trials=2,
-        rtol=1e-4,
-        atol=1e-4,
-    )

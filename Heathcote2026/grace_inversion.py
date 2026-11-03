@@ -71,7 +71,7 @@ import numpy as np
 
 import pygeoinf as inf
 import pyslfp as sl
-from pyslfp.linear_operators import WMBMethod
+from pyslfp.observations import WMBMethod
 
 import common
 import figures

@@ -206,8 +206,9 @@ The space is built in pyslfp, in core beside `GRDSpace`, as
 interval space and a pygeoinf sphere space, whose vectors, `FieldHistory`,
 hold the components as a K x N array. A generic tensor product is possible
 only when both factors expose their coordinates, as these do, and the
-product metric is the natural one here; whether the construction moves to
-pygeoinf is for later. A time-local forward map, such as an elastic
+product metric is the natural one here. pygeoinf is to provide tensor
+products of coordinate spaces; `FieldHistorySpace` then rests on them, a
+change inside the class that leaves its interface as it is. A time-local forward map, such as an elastic
 fingerprint at each epoch of a GRACE series, commutes with the time basis:
 K solves give the whole history whatever the number of epochs.
 
@@ -313,7 +314,11 @@ name through `GRDSpace.field_operator`.
 5. **The viscoelastic side:** snapshots hold a `GRDResponse`; the horizontal
    memory field and the adjoints. The design is set out above.
 6. **GNSS observation models**, with the frame of the data: frame (Helmert)
-   parameters as nuisances, or frame-invariant data.
+   parameters as nuisances, or frame-invariant data. The observation models
+   are reshaped together here, tide gauges, altimetry and GRACE with GNSS:
+   each takes its observable as an operator from the model space, a set-up's
+   or a viscoelastic operator's, and adds the sampling, the stations' data and
+   the noise, never physics.
 
 WP3 of the models submodule follows packages 1 to 4, so that the new scripts
 are built on the named response.

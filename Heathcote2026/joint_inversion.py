@@ -67,7 +67,7 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import pygeoinf as inf
-from pyslfp.linear_operators import altimetry_averaging_operator
+from pyslfp.observations import altimetry_averaging_operator
 
 import common
 import figures

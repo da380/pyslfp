@@ -12,7 +12,10 @@ from pygeoinf.interval import Sobolev as TimeSobolev
 from pygeoinf.testing import check_coordinates, check_operator, check_space
 
 from pyslfp.core import EarthState, FieldHistory, FieldHistorySpace
-from pyslfp.linear_operators.physics import lebesgue_load_space, sobolev_load_space
+from pyslfp.core import (
+    lebesgue_load_space,
+    sobolev_load_space,
+)
 
 LMAX = 8
 START, END = 0.0, 26.0

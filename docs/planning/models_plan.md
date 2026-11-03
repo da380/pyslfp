@@ -3,7 +3,7 @@
 Status: design agreed, revised against pygeoinf 2 (see "Against
 pygeoinf 2" below), and to ship in 4.0.0 with the pygeoinf 2 port. The
 steric and mass-conservation pieces it builds on are in
-pyslfp/linear_operators/loads.py.
+pyslfp/models/loads.py.
 
 ## Goal
 
@@ -54,8 +54,8 @@ without touching the assembler.
    design for viscous or time-dependent physics (time dependence
    arrives as linked single-epoch models via filtering);
    `AltimetryObservationModel` and `JointAltimetryObservationModel`
-   become deprecated aliases for a release when their replacements
-   land.
+   are removed in 4.0, a set-up's `geocentric_sea_level` replacing
+   them.
 6. **Direct observable contributions belong to the set-up.** The
    physics that made the August reorganisation necessary is that
    altimetry is model-dependent: sea surface height carries eta's

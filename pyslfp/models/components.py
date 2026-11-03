@@ -90,8 +90,11 @@ from pygeoinf import LinearOperator, Traits
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
 from pyslfp.core import EarthState
-from pyslfp.linear_operators.utils import check_load_space, underlying_space
-from pyslfp.linear_operators.loads import (
+from pyslfp.core import (
+    check_load_space,
+    underlying_space,
+)
+from pyslfp.models.loads import (
     ocean_density_change_to_load_operator,
     sea_level_change_to_load_operator,
     steric_sea_level_operator,

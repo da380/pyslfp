@@ -8,8 +8,11 @@ import numpy as np
 import pygeoinf as inf
 from pygeoinf.testing import check_operator
 from pyslfp.core import EarthState
-from pyslfp.linear_operators.physics import lebesgue_load_space, sobolev_load_space
-from pyslfp.linear_operators.spatial import (
+from pyslfp.core import (
+    lebesgue_load_space,
+    sobolev_load_space,
+)
+from pyslfp.core import (
     ocean_projection_operator,
     ice_projection_operator,
     ice_sheet_projection_operator,

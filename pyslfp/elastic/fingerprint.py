@@ -3,8 +3,8 @@
 An elastic earth responds instantaneously, so a fingerprint is one
 equilibrium solve of the sea level equation: this module wraps the
 engine of `pyslfp.core` with a fixed background state, which is all
-the elastic problem adds to it.  The operator layer for inference,
-built on these solves, is `pyslfp.linear_operators`.
+the elastic problem adds to it.  `FingerPrintOperator`, in
+`operator`, is these solves and their adjoint as a pygeoinf operator.
 """
 
 from __future__ import annotations

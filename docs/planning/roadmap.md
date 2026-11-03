@@ -17,7 +17,7 @@ the response classes and horizontal displacement (see below).
 It also completes the harvest of physics from the Heathcote2026 scripts: the
 barystatic and steric GMSL split and the regional decomposition after Gregory
 et al. (2019) are to land as diagnostics of a set-up. The steric and
-mass-conservation operators are already in `linear_operators/loads.py`. The
+mass-conservation operators are in `models/loads.py`. The
 scripts are then replaced by new, simplified ones built on set-ups, tested
 against a local record of the current scripts kept outside the repository;
 the current scripts leave the repository once the new ones reproduce them.
@@ -51,11 +51,12 @@ arc-minutes by `tools/build_landlocked.py` and shipped as
 The viscoelastic kernel drivers (`adjoint_ice_history`,
 `continuous_adjoint_ice_history`, `IceKernels`, `Measurement`,
 `ForwardTrajectory`, the decay-time functionals) are a computational layer. The
-inversion-facing surface is to be pygeoinf 2 `Operator` and `LinearOperator`
-objects wrapping them, as `linear_operators` wraps the elastic adjoint. Until
-then the drivers should be kept working and documented, but not grown into a
-public API that the wrappers would replace. The port of `linear_operators`
-itself is planned in `pygeoinf_v2_port.md`.
+inversion-facing surface is pygeoinf 2 `Operator` and `LinearOperator` objects
+wrapping them, as `FingerPrintOperator` wraps the elastic adjoint.
+`IceHistoryOperator` is the frozen-shoreline map from an ice history; the
+migrating-shoreline map, which is nonlinear, and the viscosity kernels remain
+to be wrapped. Until then the drivers should be kept working and documented,
+but not grown into a public API that the wrappers would replace.
 
 ## Glacial-cycle spin-up
 

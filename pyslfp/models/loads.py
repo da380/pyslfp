@@ -3,8 +3,7 @@ Mass load conversions and composite domain operators for the pyslfp library.
 
 This module provides pygeoinf LinearOperators that convert physical fields
 (like ice thickness or the sterodynamic sea level change) into equivalent surface
-mass loads. It also includes factories for combining disjoint parameter spaces
-into unified loads for joint inversions.
+mass loads: the load rows of the components that the models assemble.
 """
 
 from __future__ import annotations
@@ -18,8 +17,8 @@ from pygeoinf import (
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
 from pyslfp.core import EarthState
-from pyslfp.linear_operators.spatial import ocean_average_operator
-from pyslfp.linear_operators.utils import underlying_space, check_load_space
+from pyslfp.core.spaces import check_load_space, underlying_space
+from pyslfp.core.spatial import ocean_average_operator
 
 
 # ================================================================ #
@@ -184,34 +183,3 @@ def ocean_mass_conservation_operator(
             ),
         ]
     )
-
-
-# ================================================================ #
-#                 Composite Joint Load Operators                   #
-# ================================================================ #
-
-
-def joint_ice_ocean_to_load_operator(
-    state: EarthState,
-    ice_space: Union[Lebesgue, Sobolev],
-    ocean_space: Union[Lebesgue, Sobolev],
-    load_space: Union[Lebesgue, Sobolev],
-) -> LinearOperator:
-    """
-    Constructs an operator that maps a joint parameter space of
-    [Ice Thickness Change, Ocean Topography] into a single combined Direct Load.
-
-    Args:
-        state: The EarthState providing geometry and physical parameters.
-        ice_space: The Hilbert space defining the ice thickness prior.
-        ocean_space: The Hilbert space defining the sterodynamic sea level prior.
-        load_space: The target Hilbert space for the SLE Fingerprint solver.
-
-    Returns:
-        A LinearOperator mapping from a DirectSum([ice, ocean])
-        to the combined load_space.
-    """
-    ice_to_load = ice_thickness_change_to_load_operator(state, ice_space, load_space)
-    ocean_to_load = sea_level_change_to_load_operator(state, ocean_space, load_space)
-
-    return RowLinearOperator([ice_to_load, ocean_to_load])

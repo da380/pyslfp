@@ -10,13 +10,13 @@ from pygeoinf.testing import check_operator
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
 from pyslfp.core import EarthState
-from pyslfp.linear_operators.utils import (
+from pyslfp.core import (
     underlying_space,
     check_load_space,
     check_response_space,
     averaging_operator,
 )
-from pyslfp.linear_operators.physics import (
+from pyslfp.core import (
     lebesgue_load_space,
     sobolev_load_space,
     lebesgue_response_space,

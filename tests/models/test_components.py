@@ -7,8 +7,11 @@ import pytest
 from pygeoinf.testing import check_operator, check_traits
 
 from pyslfp.core import EarthState
-from pyslfp.linear_operators.physics import lebesgue_load_space, sobolev_load_space
-from pyslfp.linear_operators.loads import steric_sea_level_operator
+from pyslfp.core import (
+    lebesgue_load_space,
+    sobolev_load_space,
+)
+from pyslfp.models import steric_sea_level_operator
 from pyslfp.models import (
     ICE_SURFACE_HEIGHT,
     GEOCENTRIC_SEA_LEVEL,

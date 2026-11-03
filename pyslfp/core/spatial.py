@@ -1,9 +1,11 @@
 """
-Spatial observation and masking operators for the pyslfp library.
+Spatial projection and averaging operators over a background state.
 
-This module provides standalone pygeoinf LinearOperators for spatial
-manipulations—such as masking oceans, regional basin averaging, and
-mass conversions—decoupled from the physical Sea Level Equation.
+These are pygeoinf LinearOperators on the load spaces: projections onto the
+ocean, the ice, the ice sheets, the land and named regions, and averages over
+them, built from the state's ocean function and ice. They involve no sea
+level equation, and serve the physics, the observations and the models
+alike.
 """
 
 from __future__ import annotations
@@ -13,12 +15,10 @@ from pyshtools import SHGrid
 from pygeoinf import LinearOperator, CholeskySolver, Traits
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
-from pyslfp.core import EarthState
-from pyslfp.linear_operators.utils import (
-    underlying_space,
-    averaging_operator,
-    check_load_space,
-)
+from pygeoinf.symmetric_space.sphere import Sphere
+
+from .spaces import check_load_space, underlying_space
+from .state import EarthState
 
 
 # ================================================================ #
@@ -279,3 +279,39 @@ def region_projection_operator(
     mask = state.get_projection(regions, value=0.0)
 
     return space.multiplication_operator(mask)
+
+
+def averaging_operator(
+    state: EarthState,
+    load_space: Union[Lebesgue, Sobolev],
+    weighting_functions: List[SHGrid],
+    /,
+) -> LinearOperator:
+    """
+    Creates an operator that computes the true spatial average over given regions.
+
+    The action on function `u` returns a vector `d` where `d_i` is the
+    integral of `u * w_i` divided by the integral (area) of `w_i`. For a
+    weighting function of unit integral this coincides with the plain L2
+    product, ``load_space.l2_products_operator([w_i])``; the normalisation
+    only matters for weights with non-unit integral.
+
+    Args:
+        state: The EarthState object used for integration (area calculation).
+        load_space: The input domain space.
+        weighting_functions: SHGrid masks representing the regions to average over.
+
+    Returns:
+        LinearOperator: Mapping from load_space to EuclideanSpace(N_weights).
+    """
+    if not isinstance(load_space, Sphere):
+        raise TypeError("load_space must be a Lebesgue or Sobolev space.")
+
+    # Pre-calculate the physical areas for normalization using the EarthState
+    areas = [state.model.integrate(w_i) for w_i in weighting_functions]
+
+    # Normalize the weighting functions so the inner product acts as an average
+    normalized_weights = [w_i / area for w_i, area in zip(weighting_functions, areas)]
+
+    # Delegate to the pygeoinf-native construction
+    return load_space.l2_products_operator(normalized_weights)

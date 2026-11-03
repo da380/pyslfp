@@ -9,9 +9,9 @@ from pygeoinf import EuclideanSpace, GaussianMeasure
 from pygeoinf.testing import check_operator
 
 from pyslfp.core import EarthState
-from pyslfp.linear_operators import FingerPrintOperator
-from pyslfp.linear_operators.physics import sobolev_load_space
-from pyslfp.linear_operators.utils import averaging_operator
+from pyslfp.elastic import FingerPrintOperator
+from pyslfp.core import sobolev_load_space
+from pyslfp.core import averaging_operator
 from pyslfp.models import (
     ICE_SURFACE_HEIGHT,
     OCEAN_MASS,
@@ -190,3 +190,39 @@ def test_the_ready_made_set_ups(state, scale, fingerprint):
     firn_setup = ice_and_firn(state, load_space, firn_density=density)
     assert firn_setup.names == ("ice_sheets", "firn")
     assert set(firn_setup.observables) == {ICE_SURFACE_HEIGHT}
+
+
+def test_the_geocentric_sea_level(budget, fingerprint, state):
+    """The geocentric sea level, the observable of altimetry, is the relative
+    sea level change plus the vertical displacement of the response to the
+    set-up's load, the direct contributions entering both alike; with the
+    rotational contribution it passes the adjoint check."""
+    x = _sample(budget, 4)
+    field_space = fingerprint.field_space
+    difference = field_space.subtract(
+        budget.geocentric_sea_level(fingerprint, remove_rotational_contribution=False)(
+            x
+        ),
+        budget.relative_sea_level_change(fingerprint)(x),
+    )
+    displacement = (
+        fingerprint.codomain.field_operator("displacement")
+        @ fingerprint
+        @ budget.load_operator
+    )(x)
+    scale = np.max(np.abs(displacement.data))
+    np.testing.assert_allclose(
+        difference.data, displacement.data, rtol=0.0, atol=1e-10 * scale
+    )
+    b = state.model.parameters.mean_sea_floor_radius
+    measure = GaussianMeasure.from_product(
+        [c.space.heat_measure(0.3 * b) for c in budget.components], domain=budget.space
+    )
+    check_operator(
+        budget.geocentric_sea_level(fingerprint),
+        rng=np.random.default_rng(5),
+        measure=measure,
+        codomain_measure=field_space.heat_measure(0.3 * b),
+        trials=2,
+        rtol=1e-7,
+    )

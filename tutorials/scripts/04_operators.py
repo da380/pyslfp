@@ -2,9 +2,10 @@
 # # 4. Operators, composition and sensitivity kernels
 #
 # The sea level equation is linear in the load, so the fingerprint is a
-# linear operator from loads to responses. `pyslfp.linear_operators`
-# expresses it as one, on Hilbert spaces from `pygeoinf`, together with
-# the projections, averages and observation models that compose with it.
+# linear operator from loads to responses. `FingerPrintOperator`, in
+# `pyslfp.elastic`, expresses it as one, on Hilbert spaces from `pygeoinf`;
+# the projections and averages of `pyslfp.core` and the observation models
+# of `pyslfp.observations` compose with it.
 # Composition gives derived quantities in a line, and the adjoint of any
 # composition is its sensitivity kernel: the field that says how much
 # each unit of mass, wherever it is placed, contributes to the quantity.
@@ -17,16 +18,16 @@ from cartopy import crs as ccrs
 from pygeoinf.testing import check_operator
 
 import pyslfp as sl
-from pyslfp.linear_operators import (
-    FingerPrintOperator,
-    TideGaugeObservationModel,
+from pyslfp.elastic import FingerPrintOperator
+from pyslfp.observations import TideGaugeObservationModel
+from pyslfp.core import (
     averaging_operator,
     ice_sheet_basis_operator,
-    ice_thickness_change_to_load_operator,
     lebesgue_load_space,
     ocean_average_operator,
     remove_ocean_average_operator,
 )
+from pyslfp.models import ice_thickness_change_to_load_operator
 
 LMAX = 128
 

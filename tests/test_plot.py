@@ -14,7 +14,7 @@ import cartopy.crs as ccrs
 from matplotlib.contour import QuadContourSet
 
 from pyshtools import SHCoeffs
-from pyslfp.linear_operators import FingerPrintOperator
+from pyslfp.elastic import FingerPrintOperator
 from pyslfp.plotting import plot, create_map_figure, plot_coastline, plot_displacement
 
 

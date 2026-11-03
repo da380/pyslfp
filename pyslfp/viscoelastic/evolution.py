@@ -42,6 +42,7 @@ from planetmodel import units
 
 from ..core import EarthModel
 from ..core.response import RELATIVE_SEA_LEVEL_CHANGE, GRDResponse, GRDSpace
+from ..core.observables import centrifugal_potential_operator
 from ..core.spaces import lebesgue_response_space
 from ..ice import BaseIceModel, BaseIceSeaLevelModel
 from ..love_numbers import fluid_tidal_number
@@ -1721,19 +1722,9 @@ class SeaLevelEvolution:
 
         elastic_sle = self._sle_elastic()
 
-        def psi_star(potential_dual: SHGrid) -> np.ndarray:
-            """The adjoint of the centrifugal potential operator: a
-            potential dual to angular velocity space (the formula of
-            `pyslfp.linear_operators.centrifugal_potential_operator`)."""
-            coeffs = model.expand_field(potential_dual).coeffs
-            return r2 * np.array(
-                [
-                    parameters.rotation_factor * coeffs[0, 2, 1],
-                    parameters.rotation_factor * coeffs[1, 2, 1],
-                    parameters.axial_rotation_factor * coeffs[0, 2, 0]
-                    + parameters.uniform_rotation_factor * coeffs[0, 0, 0],
-                ]
-            )
+        # the adjoint of the centrifugal potential operator: a potential
+        # dual to angular velocity space
+        psi_star = centrifugal_potential_operator(model).adjoint
 
         def jump(m: _Duals, node: int):
             """The instantaneous adjoint fingerprint of a measurement,

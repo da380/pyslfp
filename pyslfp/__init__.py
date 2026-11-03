@@ -2,11 +2,13 @@
 pyslfp: A physical engine for sea-level fingerprinting and glacial isostatic adjustment.
 
 One sea-level engine, two drivers: `core` holds the Earth model, the
-background state and the sea level equation solvers; `elastic` wraps
-them as instantaneous fingerprints and `viscoelastic` as forward GIA in
-time.  `love_numbers` solves the radial problem that serves both,
-`linear_operators` is the inference layer over the elastic side, and
-`models` builds model spaces for inversions from named load components.
+background state, the sea level equation solvers, the spaces of loads,
+responses and histories, and the operators both drivers share; `elastic`
+wraps the solvers as instantaneous fingerprints and `viscoelastic` as
+forward GIA in time, each with its pygeoinf operators.  `love_numbers`
+solves the radial problem that serves both, `observations` samples the
+response as tide gauges, altimetry and GRACE do, and `models` builds model
+spaces for inversions from named load components.
 """
 
 # ---------------------------------------------------------------------------
@@ -40,13 +42,13 @@ from .core.parallel import set_num_threads, physical_core_count
 # ---------------------------------------------------------------------------
 # 5. Expose Sub-packages for Namespaced Access
 # ---------------------------------------------------------------------------
-# Allows users to do: `pyslfp.linear_operators.ocean_average_operator(...)`
+# Allows users to do: `pyslfp.core.ocean_average_operator(...)`
 from . import core
 from . import elastic
 from . import ice
-from . import linear_operators
 from . import love_numbers
 from . import models
+from . import observations
 from . import plotting
 from . import viscoelastic
 
@@ -76,9 +78,9 @@ __all__ = [
     "core",
     "elastic",
     "ice",
-    "linear_operators",
     "love_numbers",
     "models",
+    "observations",
     "plotting",
     "viscoelastic",
 ]

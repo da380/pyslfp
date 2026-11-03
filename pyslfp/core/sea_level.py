@@ -897,8 +897,8 @@ class SeaLevelEquation:
         solvers' tolerance; a viscoelastic adjoint step chains it with the
         transposed radial updates.  The load channels zeta^u, zeta^phi,
         zeta^v and the angular momentum input are not carried (the time
-        stepping does not use them); the elastic fingerprint adjoint in
-        `pyslfp.linear_operators` covers them.
+        stepping does not use them); the adjoint of
+        `pyslfp.elastic.FingerPrintOperator` covers them.
 
         Args:
             state (EarthState): The background state, as in the forward.

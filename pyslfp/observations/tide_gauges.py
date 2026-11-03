@@ -17,8 +17,8 @@ from pygeoinf import (
 
 from pyslfp.data.downloader import ensure_data
 from pyslfp.core.response import RELATIVE_SEA_LEVEL_CHANGE, GRDSpace
-from pyslfp.linear_operators.utils import check_response_space
-from pyslfp.linear_operators.physics import FingerPrintOperator
+from pyslfp.core.spaces import check_response_space
+from pyslfp.elastic.operator import FingerPrintOperator
 
 
 # ================================================================ #

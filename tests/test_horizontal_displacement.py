@@ -12,8 +12,9 @@ from pyshtools import SHCoeffs, SHGrid
 from pyslfp.core import EarthState, SeaLevelEquation
 from pyslfp.core.response import DISPLACEMENT, POTENTIAL_CHANGE
 from pyslfp.core.response import RELATIVE_SEA_LEVEL_CHANGE
-from pyslfp.linear_operators import FingerPrintOperator, centrifugal_potential_operator
-from pyslfp.linear_operators.physics import (
+from pyslfp.elastic import FingerPrintOperator
+from pyslfp.core import centrifugal_potential_operator
+from pyslfp.core import (
     lebesgue_load_space,
     lebesgue_response_space,
 )

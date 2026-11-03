@@ -17,12 +17,14 @@ import pygeoinf as inf
 from cartopy import crs as ccrs
 
 import pyslfp as sl
-from pyslfp.linear_operators import (
-    FingerPrintOperator,
+from pyslfp.elastic import FingerPrintOperator
+from pyslfp.observations import (
     TideGaugeObservationModel,
+    read_gloss_tide_gauge_data,
+)
+from pyslfp.core import (
     ice_sheet_projection_operator,
     ocean_average_operator,
-    read_gloss_tide_gauge_data,
 )
 
 LMAX = 128  # the model inverted

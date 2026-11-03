@@ -58,13 +58,14 @@ from pygeoinf import (
 from pyshtools import SHGrid
 
 from pyslfp.core import EarthState
-from pyslfp.core.response import RELATIVE_SEA_LEVEL_CHANGE
-from pyslfp.linear_operators.physics import FingerPrintOperator
-from pyslfp.linear_operators.spatial import (
+from pyslfp.core.observables import geocentric_sea_level_operator
+from pyslfp.core.response import RELATIVE_SEA_LEVEL_CHANGE, GRDSpace
+from pyslfp.elastic import FingerPrintOperator
+from pyslfp.core import (
     ocean_average_operator,
     region_average_operator,
 )
-from pyslfp.linear_operators.utils import averaging_operator
+from pyslfp.core import averaging_operator
 from pyslfp.models.components import (
     GEOCENTRIC_SEA_LEVEL,
     STERIC_SEA_LEVEL,
@@ -346,15 +347,60 @@ class ModelSetup:
             @ fingerprint
             @ (self._load_operator)
         )
-        if GEOCENTRIC_SEA_LEVEL in self._observables:
-            direct = self._observables[GEOCENTRIC_SEA_LEVEL]
-            if direct.codomain != response.field_space:
-                raise ValueError(
-                    "the geocentric sea level contributions must lie in the "
-                    "fingerprint operator's field space"
-                )
-            change = change + direct
-        return change
+        return self._with_geocentric_contributions(change, response)
+
+    def geocentric_sea_level(
+        self,
+        fingerprint: FingerPrintOperator,
+        /,
+        *,
+        remove_rotational_contribution: bool = True,
+    ) -> LinearOperator:
+        """
+        The geocentric sea level change, into the fingerprint operator's field
+        space, the observable of altimetry: the response's geocentric sea level
+        (`pyslfp.core.geocentric_sea_level_operator`, the relative sea level
+        change plus the vertical displacement) for the total load, plus the
+        direct contributions to the geocentric sea level, as in
+        `relative_sea_level_change`. Point evaluation of it gives altimetry
+        data.
+
+        Args:
+            fingerprint: The fingerprint operator, on the set-up's load space.
+            remove_rotational_contribution: Whether the centrifugal
+                potential's height is added, as for
+                `geocentric_sea_level_operator`.
+
+        Raises:
+            ValueError: If the spaces do not match.
+        """
+        response = self._response_space(fingerprint)
+        change = (
+            geocentric_sea_level_operator(
+                self._state,
+                response,
+                remove_rotational_contribution=remove_rotational_contribution,
+            )
+            @ fingerprint
+            @ self._load_operator
+        )
+        return self._with_geocentric_contributions(change, response)
+
+    def _with_geocentric_contributions(
+        self, change: LinearOperator, response: GRDSpace
+    ) -> LinearOperator:
+        """A sea level operator with the components' direct contributions to
+        the geocentric sea level added, which must lie in the response's
+        field space."""
+        if GEOCENTRIC_SEA_LEVEL not in self._observables:
+            return change
+        direct = self._observables[GEOCENTRIC_SEA_LEVEL]
+        if direct.codomain != response.field_space:
+            raise ValueError(
+                "the geocentric sea level contributions must lie in the "
+                "fingerprint operator's field space"
+            )
+        return change + direct
 
     def gmsl(self, fingerprint: FingerPrintOperator, /) -> LinearOperator:
         """

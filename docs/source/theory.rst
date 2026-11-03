@@ -42,9 +42,11 @@ The library is one sea level engine with two drivers.
   viscoelastic evolution is an equilibrium solve of the same engine, with
   per-step effective Love numbers and a memory field from the internal
   variables. It also computes sensitivity kernels by adjoint methods.
-* ``pyslfp.linear_operators`` exposes the elastic physics as linear operators
-  between Hilbert spaces, with their adjoints, for inverse problems built on
-  ``pygeoinf``.
+* Each driver exposes its physics as linear operators between Hilbert spaces,
+  with their adjoints, for inverse problems built on ``pygeoinf``:
+  ``FingerPrintOperator`` in ``pyslfp.elastic`` and ``IceHistoryOperator`` in
+  ``pyslfp.viscoelastic``. ``pyslfp.observations`` samples the response as
+  tide gauges, altimetry and GRACE do.
 
 The two drivers are named for the physical approximation they make, not for an
 application: GIA is a use of the viscoelastic driver. They are not symmetric,
@@ -421,9 +423,9 @@ Elastic kernels
 
 The adjoint of the fingerprint operator is a generalised sea level equation,
 as above, so a sensitivity kernel costs one solve.
-``pyslfp.linear_operators`` wraps the forward and adjoint solves as
-``pygeoinf`` linear operators, where they compose with observation operators
-for tide gauges, altimetry and GRACE.
+``FingerPrintOperator`` wraps the forward and adjoint solves as a ``pygeoinf``
+linear operator, where it composes with the observation operators for tide
+gauges, altimetry and GRACE in ``pyslfp.observations``.
 
 The viscoelastic adjoint problem
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

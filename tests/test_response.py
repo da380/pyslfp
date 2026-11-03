@@ -9,7 +9,10 @@ from pygeoinf import EuclideanSpace, GaussianMeasure
 from pygeoinf.testing import check_coordinates, check_operator, check_space
 
 from pyslfp.core import EarthState, SeaLevelEquation
-from pyslfp.linear_operators.physics import lebesgue_load_space, sobolev_load_space
+from pyslfp.core import (
+    lebesgue_load_space,
+    sobolev_load_space,
+)
 from pyslfp.core.response import (
     ANGULAR_VELOCITY_CHANGE,
     DISPLACEMENT,

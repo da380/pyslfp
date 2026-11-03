@@ -28,7 +28,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import pyslfp as sl
-from pyslfp.linear_operators import lebesgue_response_space
+from pyslfp.core import lebesgue_response_space
 from pyslfp.viscoelastic import (
     SeaLevelEvolution,
     ViscoelasticOperator,

@@ -9,8 +9,8 @@ from pygeoinf.testing import check_operator
 
 from pyslfp.core.response import POTENTIAL_CHANGE
 from pyslfp.core import EarthState
-from pyslfp.linear_operators.physics import (
-    FingerPrintOperator,
+from pyslfp.elastic import FingerPrintOperator
+from pyslfp.core import (
     lebesgue_load_space,
     sobolev_load_space,
 )
@@ -18,8 +18,8 @@ import pyshtools as sh
 from planetmodel import units
 from pygeoinf.symmetric_space.sphere import Lebesgue
 
-from pyslfp.linear_operators.spatial import ice_projection_operator
-from pyslfp.linear_operators.grace import (
+from pyslfp.core import ice_projection_operator
+from pyslfp.observations import (
     grace_observation_operator,
     stokes_coefficient_operator,
     GraceObservationModel,

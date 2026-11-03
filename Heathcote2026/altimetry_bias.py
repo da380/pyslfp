@@ -49,7 +49,7 @@ import matplotlib.pyplot as plt
 
 import pygeoinf as inf
 import pyslfp as sl
-from pyslfp.linear_operators import altimetry_averaging_operator
+from pyslfp.observations import altimetry_averaging_operator
 
 import common
 from common import ETA, ICE, RHO

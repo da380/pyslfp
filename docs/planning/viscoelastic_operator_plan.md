@@ -157,12 +157,11 @@ argument in the adjoint.
 
 A linearisation at (I, S_0, chi) is one forward run that records the ocean
 functions and the internal states, at every node or at a checkpoint stride.
-The tangent-linear runs need d and m at every node only for q_k, and run
-forwards, so they recompute the gaps from the checkpoints by forward steps,
-exactly, without the backward amplification that the adjoint's
-reconstruction spends digits on. The continuous adjoint's viscosity kernel
-now needs the trajectory at every node; it gains the checkpointed
-reconstruction that the discrete adjoint has.
+The tangent-linear runs need d and m at every node only for the
+relaxation-time drive, and run forwards, so they refill the gaps from the
+checkpoints by forward steps, exactly, without the backward amplification
+that the adjoints' reconstruction spends digits on. Both adjoints already
+reconstruct between checkpoints.
 
 ## The operator
 
@@ -312,8 +311,8 @@ when no second derivative is supplied.
 2. **The log-viscosity space**, every branch: the per-layer interval spaces,
    nodal evaluation and its transpose, and the rheology from chi.
 3. **The tangent-linear runs**, discrete and continuous, in the computational
-   layer beside the adjoints in `SeaLevelEvolution`; the checkpointed
-   trajectory for the continuous adjoint's viscosity kernel.
+   layer beside the adjoints in `SeaLevelEvolution`
+   (`tangent_linear_ice_history`).
 4. **The operator**: value, `linearize`, `method`, `shorelines` and
    `fixing`; `IceHistoryOperator` as its frozen, fixed case.
 5. **Second derivatives**: the second-order tangent-linear and adjoint

@@ -983,6 +983,17 @@ class ViscoelasticStep:
     def _system(self, l: int) -> DegreeSystem:
         return self.operator._effective_system(self.scheme, self.dt, l)
 
+    def add_memory(self, extra: dict[int, np.ndarray]) -> None:
+        """Adds a known term to the step's memory state, degree by
+        degree, shaped as the state's internal variables: the drive a
+        tangent-linear step takes from the forward trajectory, which
+        enters the step as the start-of-step strain does, through the
+        memory force and the update alike."""
+        for l, value in extra.items():
+            self._mem[l] = self._mem[l] + value
+        self._bmem.clear()
+        self._memory_solutions = None
+
     def _memory_force(self, l: int) -> np.ndarray:
         if l not in self._bmem:
             self._bmem[l] = self.operator._deg(l).memory_force(self._mem[l])

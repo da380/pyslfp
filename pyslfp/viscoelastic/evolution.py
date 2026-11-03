@@ -438,6 +438,46 @@ class _TrajectoryCursor:
         return self._state
 
 
+class _ForwardCursor:
+    """Serves the forward internal states to a forward sweep, in order:
+    stored states where the recording kept them, exact forward steps
+    under the recorded loads between, which amplify nothing."""
+
+    def __init__(self, evolution, trajectory, dates, scheme) -> None:
+        self._evolution = evolution
+        self._trajectory = trajectory
+        kyr = KYR / evolution.model.parameters.scales.factor(units.TIME)
+        self._dt = (dates[:-1] - dates[1:]) * kyr * evolution._to_mat_time
+        self._scheme = scheme
+        self._node = 0
+        self._state = trajectory.states[0]
+
+    def state(self, node: int) -> ViscoelasticState:
+        """The forward state at a date node, reconstructing as needed."""
+        if node < self._node:
+            raise ValueError("the trajectory cursor moves forwards")
+        while self._node < node:
+            target = self._node + 1
+            stored = self._trajectory.states[target]
+            if stored is not None:
+                self._state = stored
+            else:
+                evolution = self._evolution
+                self._state, _ = evolution.operator.step(
+                    self._state,
+                    float(self._dt[self._node]),
+                    scheme=self._scheme,
+                    load=evolution._columns(
+                        self._trajectory.loads[target], evolution._to_mat_density
+                    ),
+                    tide=evolution._columns(
+                        self._trajectory.tides[target], evolution._to_mat_potential
+                    ),
+                )
+            self._node = target
+        return self._state
+
+
 def _normalise_measurement(
     measurement: dict[float, SHGrid | Measurement | GRDResponse],
     dates: np.ndarray,
@@ -1253,6 +1293,263 @@ class SeaLevelEvolution:
                 )
             )
         return snapshots, vstate
+
+    # -- the tangent-linear run ------------------------------------------------
+
+    def tangent_linear_ice_history(
+        self,
+        dates: Sequence[float],
+        snapshots: Sequence[SeaLevelSnapshot],
+        *,
+        ice_thickness: Optional[Sequence[SHGrid]] = None,
+        initial_sea_level: Optional[SHGrid] = None,
+        itau: Optional[Sequence[np.ndarray]] = None,
+        method: str = "discrete",
+        space: Optional[GRDSpace] = None,
+        rotational_feedbacks: bool = True,
+        rtol: float = 1e-9,
+    ) -> tuple[list[SeaLevelSnapshot], ViscoelasticState]:
+        """The tangent-linear run: the derivative of a run's responses
+        along a perturbation of the ice history, the initial sea level
+        and the inverse relaxation times, about the forward run whose
+        `snapshots` are given.
+
+        With the ocean functions of the forward run held, the forward
+        problem is linear in its loads, so the derivative is the forward
+        problem once more: the shorelines prescribed from the trajectory,
+        the direct load the perturbation's,
+
+            rho_i (1 - C_n) delta I_n - rho_i (1 - C_0) delta I_0
+            + rho_w (C_n - C_0) delta S_0,
+
+        and, for a perturbation of the relaxation times, the drive of each
+        branch shifted by a known term from the trajectory.  Holding the
+        ocean functions is exact in the continuum, the singular terms of
+        shoreline motion cancelling (Yu et al. 2025); on the grid the
+        map is piecewise affine in the ice history and the initial sea
+        level, and this is its derivative on each piece.  Under frozen
+        shorelines the initial sea level contributes nothing.
+
+        `method` chooses how the relaxation-time perturbation enters:
+        "discrete" differentiates the scheme's weights, the forward mode
+        of the time-stepped map, whose adjoint is `adjoint_ice_history`;
+        "continuous" discretises the continuous tangent-linear problem,
+        the drive q_k = (d - m_k) delta itau_k / itau_k entering each
+        step like the strain, whose adjoint is
+        `continuous_adjoint_ice_history`.  The two coincide in the ice
+        history and the initial sea level, and differ in the relaxation
+        times by the order of the scheme.
+
+        Args:
+            dates: The forward run's dates, kiloyears before present,
+                decreasing.
+            snapshots: The forward run's snapshots, one per date: their
+                ocean functions are the trajectory's under migrating
+                shorelines, and with `itau` the run must have recorded
+                its internal states (`record`), every node or on a
+                checkpoint stride, the gaps being refilled by forward
+                steps.
+            ice_thickness: The thickness perturbation at each date, one
+                grid per node, in the Earth model's units; None for no
+                perturbation.
+            initial_sea_level: The perturbation of the initial sea level,
+                a grid; None for none.
+            itau: The perturbation of each branch's inverse relaxation
+                times, nodal (nspec, ngll) arrays over the material's
+                mesh in its units, as `IceKernels.itau` is laid out;
+                None for none.
+            method: "discrete" or "continuous".
+            space, rotational_feedbacks, rtol: As for `run_ice_history`,
+                and as the forward run was made.
+
+        Returns:
+            The perturbed responses at every date, as snapshots carrying
+            their dates and the trajectory's ocean functions, and the
+            final tangent-linear internal state.
+        """
+        if method not in ("discrete", "continuous"):
+            raise ValueError(
+                f"method must be 'discrete' or 'continuous', got {method!r}"
+            )
+        dates = np.asarray(dates, dtype=float)
+        if dates.ndim != 1 or dates.size < 2 or np.any(np.diff(dates) >= 0.0):
+            raise ValueError(
+                "dates must be decreasing (kiloyears before present, the "
+                "past first), with at least two entries"
+            )
+        snapshots = list(snapshots)
+        if len(snapshots) != dates.size:
+            raise ValueError("the snapshots must give one entry per date node")
+        op = self.operator
+        model = self.model
+        parameters = model.parameters
+        if rotational_feedbacks is True:
+            self._assert_transverse_stable()
+        space = self._space(space, rotational_feedbacks)
+        kyr = KYR / parameters.scales.factor(units.TIME)
+        rho_i = parameters.ice_density
+        rho_w = parameters.water_density
+        C0 = self.state.ocean_function.data
+        migrating = snapshots[0].ocean_function is not None
+        if migrating and any(snap.ocean_function is None for snap in snapshots):
+            raise ValueError(
+                "every snapshot of a migrating run carries its ocean function"
+            )
+
+        def C_at(node: int) -> np.ndarray:
+            return snapshots[node].ocean_function.data if migrating else C0
+
+        def C_grid(node: int) -> Optional[SHGrid]:
+            return snapshots[node].ocean_function if migrating else None
+
+        if ice_thickness is not None:
+            ice_thickness = list(ice_thickness)
+            if len(ice_thickness) != dates.size:
+                raise ValueError("ice_thickness must give one grid per date node")
+            for grid in ice_thickness:
+                model.check_field(grid)
+            delta_ice = [grid.data for grid in ice_thickness]
+        else:
+            delta_ice = [np.zeros_like(C0) for _ in range(dates.size)]
+        delta_sea = None
+        if initial_sea_level is not None:
+            model.check_field(initial_sea_level)
+            delta_sea = initial_sea_level.data
+
+        def direct_load(node: int) -> SHGrid:
+            load = (
+                rho_i * (1.0 - C_at(node)) * delta_ice[node]
+                - rho_i * (1.0 - C0) * delta_ice[0]
+            )
+            if delta_sea is not None and migrating:
+                load = load + rho_w * (C_at(node) - C0) * delta_sea
+            return SHGrid.from_array(load, grid=model.grid, copy=False)
+
+        K = op.rheology.num_branches
+        cursor = None
+        if itau is not None:
+            ditau = [np.asarray(a, dtype=float) for a in itau]
+            shape = op.material.mesh.r.shape
+            if len(ditau) != K or any(a.shape != shape for a in ditau):
+                raise ValueError(
+                    f"itau must give {K} nodal arrays of shape {shape}, one per branch"
+                )
+            trajectory = self._as_trajectory(snapshots, dates)
+            cursor = _ForwardCursor(self, trajectory, dates, self.scheme)
+        implicit = self.scheme == "backward_euler"
+
+        def drive(node: int, dt: float) -> dict[int, np.ndarray]:
+            """The memory increment of the step onto `node` from the
+            relaxation-time perturbation: the forward mode of the
+            scheme's weights, or the continuous drive q_k discretised
+            by the scheme."""
+            fwd_prev = cursor.state(node - 1)
+            fwd_n = cursor.state(node)
+            if method == "discrete":
+                dweights = op.scheme_weight_derivatives(self.scheme, dt)
+            else:
+                weights = op.scheme_weights(self.scheme, dt)
+            out = {}
+            for l in op.degrees:
+                deg = op.degree(l)
+                m_prev = fwd_prev.m[l]
+                d0 = fwd_prev.cached_strain[l]
+                d1 = fwd_n.cached_strain[l]
+                extra = np.zeros_like(m_prev)
+                for k in range(K):
+                    dh = (dt * ditau[k][deg.e0 :])[None, :, :, None]
+                    if method == "discrete":
+                        if implicit:
+                            dw = dweights[k][0][deg.e0 :][None, :, :, None]
+                            extra[k] = dw * dh * (m_prev[k] - d1)
+                        else:
+                            de, dalpha, dbeta = (
+                                w[deg.e0 :][None, :, :, None] for w in dweights[k]
+                            )
+                            extra[k] = dh * (de * m_prev[k] + dalpha * d0 + dbeta * d1)
+                    else:
+                        itau_k = deg.itau[k][None, :, :, None]
+                        ratio = np.where(
+                            itau_k > 0.0,
+                            dh / (dt * np.where(itau_k > 0.0, itau_k, 1.0)),
+                            0.0,
+                        )
+                        q0 = (d0 - m_prev[k]) * ratio
+                        q1 = (d1 - fwd_n.m[l][k]) * ratio
+                        if implicit:
+                            w = weights[k][0][deg.e0 :][None, :, :, None]
+                            extra[k] = (1.0 - w) * q1
+                        else:
+                            alpha = weights[k][1][deg.e0 :][None, :, :, None]
+                            beta = weights[k][2][deg.e0 :][None, :, :, None]
+                            extra[k] = alpha * q0 + beta * q1
+                out[l] = extra
+            return out
+
+        vstate = op.zero_state(ncols=lambda l: 2 * (l + 1))
+        op.prime_strain(vstate)
+        sigma = np.zeros((2, model.lmax + 1, model.lmax + 1))
+        psi = np.zeros_like(sigma)
+        date0 = float(dates[0])
+        # the direct load vanishes at the first date, so the start, the
+        # instantaneous response to it, is zero
+        out = [
+            SeaLevelSnapshot(0.0, space.zero(), date=date0, ocean_function=C_grid(0))
+        ]
+        for node, (a, b) in enumerate(zip(dates[:-1], dates[1:]), start=1):
+            dt = (a - b) * kyr * self._to_mat_time
+            step = op.start_step(
+                vstate,
+                dt,
+                scheme=self.scheme,
+                load=self._columns(sigma, self._to_mat_density),
+                tide=self._columns(psi, self._to_mat_potential),
+            )
+            if cursor is not None:
+                step.add_memory(drive(node, dt))
+            sle = self._sle_for(dt)
+            memory_u = self._coeffs(step.memory_surface("U"), self._to_nd_length)
+            memory_phi = self._coeffs(step.memory_surface("phi"), self._to_nd_potential)
+            moment = step.inertia_moment()[0] * self._to_nd_moment
+            load_grid = direct_load(node)
+            response = sle.solve_response(
+                self.state,
+                load_grid,
+                space,
+                displacement_response=memory_u,
+                gravitational_potential_response=memory_phi,
+                horizontal_response=self._memory_horizontal(step, space),
+                inertia_moment_change=moment,
+                ocean_function=C_grid(node),
+                rotational_feedbacks=rotational_feedbacks,
+                rtol=rtol,
+            )
+            xi = response.field(RELATIVE_SEA_LEVEL_CHANGE).data
+            sigma = model.expand_field(
+                SHGrid.from_array(
+                    load_grid.data + rho_w * C_at(node) * xi,
+                    grid=model.grid,
+                    copy=False,
+                )
+            ).coeffs
+            psi = (
+                self._centrifugal(response.angular_velocity_change)
+                if rotational_feedbacks
+                else np.zeros_like(sigma)
+            )
+            vstate, _ = step.finish(
+                load=self._columns(sigma, self._to_mat_density),
+                tide=self._columns(psi, self._to_mat_potential),
+            )
+            out.append(
+                SeaLevelSnapshot(
+                    float(vstate.t / self._to_mat_time),
+                    response,
+                    date=float(b),
+                    ocean_function=C_grid(node),
+                )
+            )
+        return out, vstate
 
     # -- the initial sea level ------------------------------------------------
 

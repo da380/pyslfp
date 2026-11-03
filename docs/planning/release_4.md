@@ -146,6 +146,12 @@ branch of a rheology as a function of radius, a pygeoinf layered radial
 space per branch with one Sobolev space per relaxing layer, with its values
 at the mesh's nodes, their transpose, the rheology a vector names and the
 functional the inverse-relaxation-time kernels define on it.
+`SeaLevelEvolution.tangent_linear_ice_history`: the derivative of a run's
+responses along perturbations of the ice history, the initial sea level and
+the inverse relaxation times, about a recorded forward run, frozen or
+migrating, by the forward mode of the time-stepped map (`method="discrete"`,
+the transpose of `adjoint_ice_history`) or by the continuous tangent-linear
+problem (`method="continuous"`).
 
 ## Planned work still to land
 

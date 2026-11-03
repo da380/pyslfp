@@ -10,9 +10,12 @@ Hessian-vector product with central differences of the gradient and second
 differences of an objective across ranges of the perturbation that flip
 cells, counting the flips, and then the omitted part against the
 Gauss-Newton term of a misfit with a residual of ten per cent of the
-response. Run with the surface degree as the argument (16 by default):
+response. Run with the surface degree as the first argument (16 by default)
+and, as the second, a flotation width in metres, under which the smoothed
+rule's Hessian carries the shorelines' terms:
 
     python tools/shoreline_hessian.py 16
+    python tools/shoreline_hessian.py 16 500
 """
 
 import sys
@@ -29,6 +32,7 @@ from pyslfp.viscoelastic.ice_history import _NodalIceModel
 warnings.simplefilter("ignore")
 
 LMAX = int(sys.argv[1]) if len(sys.argv) > 1 else 16
+WIDTH_M = float(sys.argv[2]) if len(sys.argv) > 2 else None
 SCALES = units.Scales.geophysical(6.371e6)
 TAU = 6.0e6
 model = LayeredIsotropicElastic(
@@ -62,6 +66,7 @@ class Cap(BaseIceModel):
 
 
 ice_model = Cap(length_scale=metre)
+WIDTH = None if WIDTH_M is None else WIDTH_M / metre
 dates = np.linspace(10.0, 0.0, 6)
 base_ice = [
     ice_model.get_ice_thickness(
@@ -113,7 +118,7 @@ def run(eps, u):
             [(base_rheology.mu[0], base_rheology.itau[0] + eps * u["itau"][0])],
         )
     )
-    state = EarthState(ice[0], sea, earth, land=None)
+    state = EarthState(ice[0], sea, earth, land=None, flotation_width=WIDTH)
     evolution = SeaLevelEvolution(ViscoelasticOperator(rheology, LMAX), state)
     snapshots, _ = evolution.run_ice_history(
         dates,
@@ -140,7 +145,7 @@ def gradient(evolution, snapshots, u):
     kernels = evolution.adjoint_ice_history(
         dates,
         {0.0: g},
-        ocean_functions=[s.ocean_function for s in snapshots],
+        ocean_functions=[s.effective_ocean_function for s in snapshots],
         internal_states=snapshots,
         rtol=1e-11,
     )
@@ -193,8 +198,11 @@ for label, u in directions.items():
         {0.0: g},
         tangent,
         itau=u["itau"],
-        ocean_functions=[s.ocean_function for s in snapshots],
+        ocean_functions=[s.effective_ocean_function for s in snapshots],
         internal_states=snapshots,
+        flotation_curvatures=[s.flotation_curvature for s in snapshots],
+        ice_thickness=u["ice"],
+        initial_sea_level=u["sea_level"],
         rtol=1e-11,
     )
     Huu = pairing(derivatives, u)
@@ -249,8 +257,11 @@ for label in (
         {0.0: g},
         tangent,
         itau=u["itau"],
-        ocean_functions=[s.ocean_function for s in snapshots],
+        ocean_functions=[s.effective_ocean_function for s in snapshots],
         internal_states=snapshots,
+        flotation_curvatures=[s.flotation_curvature for s in snapshots],
+        ice_thickness=u["ice"],
+        initial_sea_level=u["sea_level"],
         rtol=1e-11,
     )
     held = pairing(derivatives, u)

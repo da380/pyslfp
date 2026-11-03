@@ -237,27 +237,34 @@ for directions smooth in time. Directions rough in time, random on the time
 modes say, are pre-asymptotic at these spacings, as the time quadrature of
 the continuous adjoint's density then is.
 
-Under migrating shorelines the second derivative holds the trajectory's ocean
-functions (:doc:`theory`), and ``tools/shoreline_hessian.py`` measures what
-that omits on a marine cap, a 12 km cap on a 3 km ocean melting over ten
-kiloyears at degree 16. Between flips of flotation cells the held-C Hessian
-is the whole Hessian, to :math:`10^{-7}` against second differences of an
-objective, in every argument. Across flips the omitted term is the entire
-Hessian in the initial sea level and the ice history, where the held-C map
-is affine, and on the grid it is the sum of the jumps the gradient makes at
-each flip. Its size scales with the shoreline motion the perturbation
-induces: for a rise of the initial sea level of 100 m the quadratic term of
-the objective is about four per cent of its linear term, for a thickness
-change of 100 m at every date about four per cent, and for a change of
-viscosity of ten per cent, which flips no cell, nothing. Against the
+Under migrating shorelines with the sharp flotation rule the second
+derivative holds the trajectory's ocean functions (:doc:`theory`), and
+``tools/shoreline_hessian.py`` measures what that omits on a marine cap, a
+12 km cap on a 3 km ocean melting over ten kiloyears at degree 16. Between
+flips of flotation cells the held-C Hessian is the whole Hessian, to
+:math:`10^{-7}` against second differences of an objective, in every
+argument. Across flips the omitted term is the entire Hessian in the initial
+sea level and the ice history, where the held-C map is affine, and on the
+grid it is the sum of the jumps the gradient makes at each flip. Its size
+scales with the shoreline motion the perturbation induces: against the
 Gauss-Newton term of a misfit whose residual is ten per cent of the response,
-the omitted term is three to five per cent for the sea level rise and a
-quarter to a third for the thickness change, both at 50 to 100 m. So a Newton
-iteration converging through small steps, and a Laplace approximation at a
-small residual, lose little; a step that moves the shorelines by a cell or
-more, or a large residual, see a Hessian short of its shoreline part by that
-much.
+it is three to five per cent for a rise of the initial sea level of 100 m
+and a quarter to a third for a thickness change of 100 m at every date, both
+at 50 to 100 m, and nothing for a change of viscosity of ten per cent, which
+flips no cell.
 
+With the flotation condition smoothed over 500 m (``flotation_width``) the
+same tool shows the Hessian complete: second differences of the objective
+match it to :math:`10^{-4}` of the linear term at small perturbations in
+every direction, with the cells within the width partly ocean, and the part
+of the Gauss-Newton term the sharp rule omitted falls to :math:`3\times10^{-4}`
+for the sea level rise and to one per cent for the thickness change at 50 m,
+the residue being the third derivative over a perturbation a tenth of the
+width. The width is a modelling choice: a point within it of flotation is a
+fraction of ocean, the forward run differs from the sharp one by those cells,
+and tends to it as the width shrinks. The derivatives cost nothing more than
+under the sharp rule, since the solver takes the ocean function as a weight;
+only the second derivative carries one more field per node.
 
 Calibrating the initial sea level
 ---------------------------------

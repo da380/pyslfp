@@ -14,6 +14,9 @@ spaces for inversions from named load components.
 # ---------------------------------------------------------------------------
 # 1. The shared core: configuration, state and the sea level engine
 # ---------------------------------------------------------------------------
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _version
+
 from .core import EarthModel, EarthModelParameters, EarthState, SeaLevelEquation
 from .love_numbers import LoveNumbers
 
@@ -55,7 +58,13 @@ from . import viscoelastic
 # ---------------------------------------------------------------------------
 # 6. Define the Top-Level API (__all__)
 # ---------------------------------------------------------------------------
+try:
+    __version__ = _version("pyslfp")
+except PackageNotFoundError:  # a source tree that is not installed
+    __version__ = "0.0.0"
+
 __all__ = [
+    "__version__",
     # Core & State
     "EarthModelParameters",
     "LoveNumbers",

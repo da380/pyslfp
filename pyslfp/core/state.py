@@ -39,6 +39,69 @@ def _nearest_rows(
     return valid[np.where(nearer_lower, lower, upper)]
 
 
+def smoothstep(x: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The C^2 smoothstep on [-1, 1], zero below and one above, and its first
+    two derivatives: with t = (x + 1) / 2 on the interval, sigma = 6 t^5 -
+    15 t^4 + 10 t^3, whose first and second derivatives vanish at both ends,
+    so that a function built on it is twice continuously differentiable."""
+    x = np.asarray(x, dtype=float)
+    t = np.clip((x + 1.0) / 2.0, 0.0, 1.0)
+    inside = (x > -1.0) & (x < 1.0)
+    sigma = t * t * t * (10.0 + t * (-15.0 + 6.0 * t))
+    # the derivatives in x, dt / dx being one half
+    first = np.where(inside, 15.0 * t * t * (1.0 - t) ** 2, 0.0)
+    second = np.where(inside, 15.0 * t * (1.0 - t) * (1.0 - 2.0 * t), 0.0)
+    return sigma, first, second
+
+
+def flotation_fields(
+    sea_level: np.ndarray,
+    ice_thickness: np.ndarray,
+    water_density: float,
+    ice_density: float,
+    /,
+    *,
+    width: Optional[float] = None,
+    land_mask: Optional[np.ndarray] = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    The ocean function of the flotation condition and the two fields its
+    derivatives need.
+
+    With the flotation argument x = (S - (rho_i / rho_w) I) / w, the ocean
+    function is sigma(x), the smoothstep over [-1, 1], so that a point more
+    than w from floating its ice is land or ocean exactly, and the rest are
+    partly ocean. The second field is Lambda = x sigma'(x): the variation of
+    the ocean function enters every load multiplied by the flotation margin
+    rho_w S - rho_i I = rho_w w x, and Lambda is that product per unit of
+    sea level, so that C + Lambda is the ocean function the derivatives of
+    the loads see. The third is the derivative of C + Lambda per unit of
+    sea level, (2 sigma' + x sigma'') / w, which the second derivative of
+    the loads carries.
+    Under the sharp rule, `width` None, the ocean function is the indicator
+    of a positive margin and the other two fields are zero. A land mask sets
+    all three to zero where it is True.
+
+    Returns:
+        (ocean function, Lambda, Lambda' / w), arrays of the grids' shape.
+    """
+    margin = water_density * sea_level - ice_density * ice_thickness
+    if width is None:
+        ocean = np.where(margin > 0.0, 1.0, 0.0)
+        weight = np.zeros_like(ocean)
+        curvature = np.zeros_like(ocean)
+    else:
+        x = margin / (water_density * float(width))
+        ocean, first, second = smoothstep(x)
+        weight = x * first
+        curvature = (2.0 * first + x * second) / float(width)
+    if land_mask is not None:
+        ocean = np.where(land_mask, 0.0, ocean)
+        weight = np.where(land_mask, 0.0, weight)
+        curvature = np.where(land_mask, 0.0, curvature)
+    return ocean, weight, curvature
+
+
 class EarthState(Regions):
     """
     A pure data container representing a snapshot of the Earth's surface state.
@@ -57,6 +120,7 @@ class EarthState(Regions):
         *,
         land: Optional[SHGrid] = None,
         ocean_function: Optional[SHGrid] = None,
+        flotation_width: Optional[float] = None,
     ) -> None:
         """
         Initialises an EarthState container.
@@ -81,9 +145,19 @@ class EarthState(Regions):
                 independently of the sea level; see
                 `SeaLevelEvolution.calibrate_initial_sea_level`. None (the
                 default) derives the ocean function from flotation.
+            flotation_width (Optional[float]): A height, in the model's
+                units, over which the flotation condition is smoothed: a
+                point whose sea level is within this height of floating its
+                ice is partly ocean, by the smoothstep of
+                `flotation_fields`, so that the ocean function depends
+                differentiably on the sea level and the ice thickness. None
+                (the default) is the sharp rule. The non-linear solver and
+                the viscoelastic evolution carry it into the states they
+                create.
 
         Raises:
-            ValueError: If the input grids do not match in lmax, grid type, or extension.
+            ValueError: If the input grids do not match in lmax, grid type, or
+                extension, or the flotation width is not positive.
         """
         super().__init__()
 
@@ -105,6 +179,11 @@ class EarthState(Regions):
             if not np.all((ocean_function.data == 0.0) | (ocean_function.data == 1.0)):
                 raise ValueError("a prescribed ocean function must be ones and zeros")
         self._prescribed_ocean_function = ocean_function
+        if flotation_width is not None and not flotation_width > 0.0:
+            raise ValueError("the flotation width must be positive")
+        self._flotation_width = (
+            None if flotation_width is None else float(flotation_width)
+        )
 
     @staticmethod
     def from_defaults(*, lmax: int = 256) -> EarthState:
@@ -241,27 +320,61 @@ class EarthState(Regions):
     #                 Lazy Evaluated Masks                     #
     # ---------------------------------------------------------#
 
+    @property
+    def flotation_width(self) -> Optional[float]:
+        """The height over which the flotation condition is smoothed, or
+        None for the sharp rule."""
+        return self._flotation_width
+
+    def _flotation(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        parameters = self.model.parameters
+        return flotation_fields(
+            self.sea_level.data,
+            self.ice_thickness.data,
+            parameters.water_density,
+            parameters.ice_density,
+            width=self._flotation_width,
+            land_mask=None if self._land is None else self._land.data > 0.0,
+        )
+
     @cached_property
     def ocean_function(self) -> SHGrid:
         """
-        Returns the ocean function (1 over oceans, 0 elsewhere).
-        Computed lazily using the state's internal flotation conditions,
-        unless the state was given a prescribed one.
+        Returns the ocean function: one over the oceans and zero elsewhere
+        under the sharp flotation rule, and between the two within the
+        flotation width of a smoothed one. Computed lazily from the state's
+        flotation condition, unless the state was given a prescribed one.
         """
         if self._prescribed_ocean_function is not None:
             return self._prescribed_ocean_function.copy()
-        ocean_data = np.where(
-            self.model.parameters.water_density * self.sea_level.data
-            - self.model.parameters.ice_density * self.ice_thickness.data
-            > 0,
-            1.0,
-            0.0,
-        )
+        return SHGrid.from_array(self._flotation()[0], grid=self.grid)
 
-        if self._land is not None:
-            ocean_data = np.where(self._land.data > 0.0, 0.0, ocean_data)
+    @cached_property
+    def effective_ocean_function(self) -> SHGrid:
+        """
+        The ocean function that the derivatives of the loads see, C + Lambda,
+        where Lambda = x sigma'(x) is the flotation margin times the
+        derivative of the smoothed rule: the variation of the ocean function
+        enters every load multiplied by the margin, and this is that product
+        per unit of sea level. Under the sharp rule, or with a prescribed
+        ocean function, it is the ocean function itself.
+        """
+        if self._prescribed_ocean_function is not None or self._flotation_width is None:
+            return self.ocean_function
+        ocean, weight, _ = self._flotation()
+        return SHGrid.from_array(ocean + weight, grid=self.grid)
 
-        return SHGrid.from_array(ocean_data, grid=self.grid)
+    @cached_property
+    def flotation_curvature(self) -> SHGrid:
+        """
+        The derivative of the effective ocean function C + Lambda per unit
+        of sea level, (2 sigma' + x sigma'') / w, which the second derivative
+        of the loads carries: zero under the sharp rule or with a prescribed
+        ocean function.
+        """
+        if self._prescribed_ocean_function is not None or self._flotation_width is None:
+            return SHGrid.from_array(np.zeros_like(self.sea_level.data), grid=self.grid)
+        return SHGrid.from_array(self._flotation()[2], grid=self.grid)
 
     @cached_property
     def one_minus_ocean_function(self) -> SHGrid:

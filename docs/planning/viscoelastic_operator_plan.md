@@ -329,6 +329,101 @@ time integral of the pointwise contraction of the adjoint internal variables
 with d - m, which needs the forward and adjoint fields at every radius,
 multiplied across degrees.
 
+## Smoothed flotation: the complete Hessian under migrating shorelines
+
+The second derivative above holds the trajectory's ocean functions, and
+`tools/shoreline_hessian.py` shows what that omits: between flips of
+flotation cells nothing, across flips the whole Hessian in the initial sea
+level and the ice history, a quarter to a third of a misfit's Gauss-Newton
+term for 100 m thickness changes at a ten per cent residual. On the grid the
+omitted terms are the jumps of the gradient at each flip, and the continuum
+line distributions are their limit; neither is a quantity a smooth Hessian
+can represent. The grid's own remedy is to make the ocean function
+differentiable: a step smoothed over a flotation margin of a chosen height.
+
+### The rule
+
+With S the sea level, I the ice thickness and the land mask as now, the
+flotation argument is the height
+
+    x = (S - (rho_i / rho_w) I) / w,
+
+positive over the oceans, with w the smoothing height, and the ocean
+function is C = sigma(x) off the land mask, where sigma is the C^2
+smoothstep sigma(x) = 6 x^5 - 15 x^4 + 10 x^3 on [0, 1] shifted to [-1, 1],
+zero below and one above: compact support, so that a cell more than w from
+flotation is land or ocean exactly as now, and continuous second derivative,
+so that the Hessian is continuous. w is a length, in the model's units, an
+option of `EarthState` (`flotation_width`, None for the sharp rule, the
+default), which the nonlinear solver's and the migrating run's states
+inherit as they inherit the land mask. Frozen shorelines are untouched; a
+migrating run with w > 0 differs from the sharp one by the cells within w of
+flotation being partly ocean, and tends to it as w -> 0.
+
+### What the derivatives gain
+
+Every load term is of the form rho_w C S or rho_i (1 - C) I, so each
+variation of C enters multiplied by the flotation margin
+Phi = rho_w S - rho_i I = rho_w w x. With delta C = sigma'(x) delta x and
+delta x = (delta xi + delta S_0 - (rho_i / rho_w) delta I) / w,
+
+    Phi delta C = rho_w Lambda (delta xi + delta S_0 - (rho_i / rho_w) delta I),
+    Lambda = x sigma'(x),
+
+a dimensionless field supported on the strip, which vanishes identically for
+the sharp rule: this is the cancellation Yu et al. use, now a bounded term
+rather than a vanishing one. Collecting terms, the tangent-linear load is
+
+    delta zeta = rho_w C^ delta xi
+               + rho_i (1 - C^_n) delta I_n - rho_i (1 - C^_0) delta I_0
+               + rho_w (C^_n - C^_0) delta S_0,          C^ = C + Lambda,
+
+the present form with the ocean function replaced by the effective one
+C^ = C + Lambda, strip included, in the feedback and in every grounding
+factor. The generalised solver and its adjoint already take the ocean
+function as a weight field, in the load, the area and the mass shift, so the
+first-order tangent-linear run and both adjoints change only in which field
+they are handed and in the grounding factors of the kernels, C^_n for C_n.
+The gradient of `final_sea_level_misfit` follows.
+
+The second derivative gains one new term, from the second variation of C
+and the product of the margin's and the ocean function's first variations:
+
+    delta_uv zeta  ∋  rho_w K(x) (delta_u y)(delta_v y),
+    K = (2 sigma' + x sigma'') / w = d(C + Lambda) / dS,
+    y = xi + S_0 - (rho_i / rho_w) I,
+
+a direct load in the second-order tangent-linear problem at every node,
+built from the two tangent-linear runs' sea levels and the directions, and
+in the second-order adjoint sweep the corresponding sources: a sea level
+dual rho_w K delta_v y lambda_n at every node, and the same field times
+-rho_i and rho_w into the thickness and initial sea level blocks of the
+result, beside the derivative of the grounding factors. K is supported on
+the strip and continuous, since sigma is C^2; `EarthState.flotation_curvature`
+holds it.
+
+### Tests
+
+- The sharp limit: a migrating run with w -> 0 tends to the sharp run, and
+  with no cell within w of flotation at any date equals it exactly.
+- Mass conservation of a run with fractional ocean cells.
+- The Taylor test and the adjoint check along directions that cross
+  flotation, which the C-held derivative fails and the smoothed one passes;
+  central differences of the gradient across the strip against the Hessian,
+  symmetric to rounding, with `tools/shoreline_hessian.py` rerun with w > 0
+  showing the measured term recovered.
+- The frozen case unchanged: every existing test passes as it stands.
+
+### Steps
+
+1. The rule in `EarthState`, the solver's and the run's states inheriting
+   it, and the fields a state exposes, `effective_ocean_function` and
+   `flotation_curvature`; snapshots record them.
+2. C^ in the tangent-linear run, both first-order adjoints and the misfit
+   gradient.
+3. The K terms in the second-order runs and sweeps, both methods.
+4. The docs: theory.rst, numerics.rst (the tool rerun), release_4.md.
+
 ## Open questions
 
 Settled: the class is `SeaLevelEvolutionOperator`, after the driver it

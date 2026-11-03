@@ -1477,6 +1477,41 @@ Yu et al.'s approximate kernels, their eqs (118)--(120), drop the
 second-order variables altogether and keep the first term of
 \eqref{eq:hessian}, the Gauss--Newton Hessian.
 
+\paragraph{The smoothed flotation rule.} The grid's own form of the omitted
+terms comes from making the ocean function differentiable. With the
+flotation argument $x = (S - \rho_i I/\rho_w)/w$ for a chosen height $w$,
+let $C = \sigma(x)$ off the land mask, $\sigma$ the quintic smoothstep on
+$[-1,1]$, zero below and one above, so that a point more than $w$ from
+floating its ice is land or ocean exactly and the rest are partly ocean.
+Every load is of the form $\rho_w C S$ or $\rho_i(1-C)I$, so a variation of
+$C$ enters multiplied by the margin $\Phi = \rho_w S - \rho_i I = \rho_w w x$,
+and with $\delta C = \sigma'(x)\,\delta x$,
+\begin{equation}
+\Phi\,\delta C = \rho_w\Lambda\,\delta y,\qquad
+\Lambda = x\sigma'(x),\qquad y = \xi + S_0 - \rho_i I/\rho_w,
+\end{equation}
+a bounded field on the strip which vanishes identically under the sharp
+rule: the cancellation of Section~\ref{sec:tangent} made into a term.
+Collecting, the tangent-linear load is \eqref{eq:tangentload} with the
+ocean function replaced by the effective one $\hat C = C + \Lambda$ in the
+feedback $\rho_w\hat C\,\delta\xi$ and in every grounding factor, and the
+adjoints follow, since the solver and its transpose take the ocean function
+as a weight. The second variation adds, from $\Phi\,\delta_{uv}C +
+2\,\delta_u\Phi\,\delta_v C$,
+\begin{equation}
+\delta_{uv}\zeta \ni \rho_w K\,\delta_u y\,\delta_v y,\qquad
+K = \frac{d\hat C}{dS} = \frac{2\sigma' + x\sigma''}{w},
+\end{equation}
+a direct load of the second-order tangent-linear problem at every time,
+less its value at $t_0$, and in the second-order adjoint a sea level dual
+$\rho_w K\,\delta_v y\,\lambda$ at every time together with the same field,
+times $-\rho_i$ and $\rho_w$, in the thickness and initial sea level
+components of the result. $K$ is continuous because $\sigma$ is twice
+continuously differentiable, so the Hessian is continuous; it is supported
+on the strip; and with it \eqref{eq:secondtangent} and
+\eqref{eq:secondadjoint} are complete, the forward run having shorelines
+smoothed over $w$, which tend to the sharp ones as $w \to 0$.
+
 The discrete second derivative is the forward mode of
 Section~\ref{sec:discadj} differentiated once more, with the second
 derivatives of the scheme weights in $h$, and its adjoint the reverse mode

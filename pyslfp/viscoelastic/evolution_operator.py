@@ -43,7 +43,7 @@ from ..core import EarthState
 from ..core.history import FieldHistorySpace
 from ..core.response import GRDResponse, GRDSpace
 from ..core.spaces import check_load_space, lebesgue_response_space
-from .evolution import SeaLevelEvolution, SeaLevelSnapshot
+from .evolution import SeaLevelEvolution, SeaLevelSnapshot, _effective_ocean_functions
 from .ice_history import IceHistoryOperator, _NodalIceModel
 from .operator import ViscoelasticOperator
 from .viscosity import LogViscositySpace
@@ -243,6 +243,7 @@ class SeaLevelEvolutionOperator(Operator):
             sea_level,
             self._evolution.model,
             land=background.land,
+            flotation_width=background.flotation_width,
             ocean_function=(
                 background.ocean_function if self._shorelines == "frozen" else None
             ),
@@ -317,7 +318,7 @@ class SeaLevelEvolutionOperator(Operator):
         viscosity_space = self.viscosity_space
         rheology = evolution.operator.rheology
         ocean_functions = (
-            [snap.ocean_function for snap in snapshots]
+            _effective_ocean_functions(snapshots)
             if self._shorelines == "migrating"
             else None
         )
@@ -403,11 +404,17 @@ class SeaLevelEvolutionOperator(Operator):
         evolution, snapshots = self._run(x)
         rheology = evolution.operator.rheology
         tangent_v, nodal_v, ditau_v = self._tangent(evolution, snapshots, v, rheology)
+        ice_v = self.thickness_at_dates(v[0])
+        curvatures = (
+            [snap.flotation_curvature for snap in snapshots]
+            if self._shorelines == "migrating"
+            else None
+        )
         history_space = self.history_space
         sea_level_space = self.sea_level_space
         viscosity_space = self.viscosity_space
         ocean_functions = (
-            [snap.ocean_function for snap in snapshots]
+            _effective_ocean_functions(snapshots)
             if self._shorelines == "migrating"
             else None
         )
@@ -426,6 +433,10 @@ class SeaLevelEvolutionOperator(Operator):
                 itau_uv=[
                     itau * a * b for itau, a, b in zip(rheology.itau, nodal_u, nodal_v)
                 ],
+                ice_u=self.thickness_at_dates(u[0]),
+                ice_v=ice_v,
+                sea_level_u=u[1],
+                sea_level_v=v[1],
                 method=self._method,
                 space=self._response_space,
                 rotational_feedbacks=self._rotational_feedbacks,
@@ -441,6 +452,9 @@ class SeaLevelEvolutionOperator(Operator):
                 itau=ditau_v,
                 ocean_functions=ocean_functions,
                 internal_states=snapshots,
+                flotation_curvatures=curvatures,
+                ice_thickness=ice_v,
+                initial_sea_level=v[1],
                 rotational_feedbacks=self._rotational_feedbacks,
                 rtol=self._rtol,
                 method=self._method,

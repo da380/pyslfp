@@ -53,23 +53,15 @@ derivative by the discrete and the continuous methods, as set out in
 [viscoelastic_operator_plan.md](viscoelastic_operator_plan.md); the kernel
 drivers (`adjoint_ice_history`, `continuous_adjoint_ice_history`,
 `IceKernels`, the decay-time functionals) are the computational layer under
-it. Two things remain. Under migrating shorelines the second derivative is
-that of the map with the ocean functions held, which omits the line
-distributions on the shorelines of Yu et al. (2025, eqs 112, 116 and 117);
-evaluating them needs the shoreline located on the grid, with the normal
-derivatives of the sea level and the thickness across it.
-`tools/shoreline_hessian.py` measures their size: nothing between flips of
-flotation cells, and across flips the whole Hessian in the sea level and the
-ice history, a quarter to a third of a misfit's Gauss-Newton term for 100 m
-thickness changes at a ten per cent residual. The grid's own version would
-treat the ocean function as a step smoothed over the flotation margin of
-one cell, whose derivative is supported on the cells near flotation; that
-makes the forward map differentiable and its Hessian complete, at the price
-of a smoothed shoreline in the forward run. And the 3D
-viscosity kernels about a radial model, the time integral of the pointwise
-contraction of the adjoint internal variables with the forward strain, which
-needs the forward and adjoint fields at every radius multiplied across
-degrees; they are kernels only, no forward map leaving the radial models.
+it. Under migrating shorelines the derivatives are complete when the
+flotation condition is smoothed (`EarthState.flotation_width`); under the
+sharp rule they hold the trajectory's ocean functions and omit the
+shorelines' terms, whose size `tools/shoreline_hessian.py` measures. What
+remains is the 3D viscosity kernels about a radial model, the time integral
+of the pointwise contraction of the adjoint internal variables with the
+forward strain, which needs the forward and adjoint fields at every radius
+multiplied across degrees; they are kernels only, no forward map leaving the
+radial models.
 
 ## Glacial-cycle spin-up
 

@@ -163,10 +163,16 @@ by `SeaLevelEvolution.second_order_tangent_linear_ice_history` forwards and
 equations of Yu et al. 2025, with the shoreline terms omitted), gives pygeoinf
 exact Hessians; `KernelDerivatives` holds the derivative of the kernels along
 a direction, and the scheme weights gain their second derivatives.
+`EarthState.flotation_width`: the flotation condition smoothed over a
+height, under which the ocean function is differentiable, with
+`effective_ocean_function` and `flotation_curvature` the fields the first and
+second derivatives of the loads see; the derivatives and the Hessian of a
+migrating run are then complete, the shorelines' terms included, where the
+sharp rule holds the ocean functions. The package exposes `__version__`.
 
 ## Planned work still to land
 
-- The rest of the scope set with the port: planetmodel 1.4's plots, the
+- The rest of the scope set with the port: planetmodel 1.5's plots, the
   priors layer, and time-dependent model spaces for the set-ups' components,
   on `FieldHistorySpace`.
 - Typed generics (`DiagonalMetricSpace[GRDResponse]`,

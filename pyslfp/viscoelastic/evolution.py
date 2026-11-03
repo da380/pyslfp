@@ -309,6 +309,13 @@ class SeaLevelSnapshot:
     #: the shorelines are frozen at the background state's): the C(t)
     #: record an adjoint calculation reads back.
     ocean_function: SHGrid | None = field(default=None, repr=False)
+    #: The ocean function the derivatives of the loads see at this time,
+    #: C + Lambda (`EarthState.effective_ocean_function`), and its derivative
+    #: per unit of sea level (`EarthState.flotation_curvature`), which the
+    #: second derivative of the loads carries; the ocean function itself
+    #: under the sharp flotation rule, and zero, which None stands for.
+    effective_ocean_function: SHGrid | None = field(default=None, repr=False)
+    flotation_curvature: SHGrid | None = field(default=None, repr=False)
     #: The radial internal state at this time, recorded on request
     #: (`record`): the forward trajectory a viscosity-kernel adjoint
     #: pairs its duals with.  Under a checkpointing stride only the
@@ -364,6 +371,18 @@ class InitialSeaLevelCalibration:
     converged: bool
     method: str
     shorelines: str
+
+
+def _effective_ocean_function(snapshot: SeaLevelSnapshot) -> Optional[SHGrid]:
+    """The ocean function the derivatives see at a snapshot: the effective
+    one when recorded, else the ocean function itself."""
+    if snapshot.effective_ocean_function is not None:
+        return snapshot.effective_ocean_function
+    return snapshot.ocean_function
+
+
+def _effective_ocean_functions(snapshots: Sequence[SeaLevelSnapshot]) -> list[SHGrid]:
+    return [_effective_ocean_function(snap) for snap in snapshots]
 
 
 def _record_stride(record: bool | int) -> int:
@@ -1249,6 +1268,8 @@ class SeaLevelEvolution:
                 space.zero(),
                 date=date0,
                 ocean_function=self.state.ocean_function,
+                effective_ocean_function=self.state.effective_ocean_function,
+                flotation_curvature=self.state.flotation_curvature,
                 internal_state=vstate if stride else None,
                 load_coefficients=sigma if stride else None,
                 tide_coefficients=psi if stride else None,
@@ -1303,6 +1324,8 @@ class SeaLevelEvolution:
                     response,
                     date=float(b),
                     ocean_function=final_state.ocean_function,
+                    effective_ocean_function=final_state.effective_ocean_function,
+                    flotation_curvature=final_state.flotation_curvature,
                     internal_state=vstate if keep else None,
                     load_coefficients=sigma if stride else None,
                     tide_coefficients=psi if stride else None,
@@ -1465,13 +1488,13 @@ class SeaLevelEvolution:
         space = self._space(space, rotational_feedbacks)
         kyr = KYR / parameters.scales.factor(units.TIME)
         rho_w = parameters.water_density
-        C0 = self.state.ocean_function.data
+        C0 = self.state.effective_ocean_function.data
 
         def C_at(node: int) -> np.ndarray:
-            return snapshots[node].ocean_function.data if migrating else C0
+            return _effective_ocean_function(snapshots[node]).data if migrating else C0
 
         def C_grid(node: int) -> Optional[SHGrid]:
-            return snapshots[node].ocean_function if migrating else None
+            return _effective_ocean_function(snapshots[node]) if migrating else None
 
         vstate = op.zero_state(ncols=lambda l: 2 * (l + 1))
         op.prime_strain(vstate)
@@ -1631,7 +1654,7 @@ class SeaLevelEvolution:
         parameters = model.parameters
         rho_i = parameters.ice_density
         rho_w = parameters.water_density
-        C0 = self.state.ocean_function.data
+        C0 = self.state.effective_ocean_function.data
         if ice_thickness is not None:
             ice_thickness = list(ice_thickness)
             if len(ice_thickness) != dates.size:
@@ -1647,7 +1670,7 @@ class SeaLevelEvolution:
             delta_sea = initial_sea_level.data
 
         def C_at(node: int) -> np.ndarray:
-            return snapshots[node].ocean_function.data if migrating else C0
+            return _effective_ocean_function(snapshots[node]).data if migrating else C0
 
         def direct_load(node: int) -> Optional[SHGrid]:
             if delta_ice is None and delta_sea is None:
@@ -1685,6 +1708,64 @@ class SeaLevelEvolution:
             record=record,
         )
 
+    def _flotation_variations(
+        self,
+        snapshots: Sequence[SeaLevelSnapshot],
+        tangent: Sequence[SeaLevelSnapshot],
+        ice: Optional[Sequence[SHGrid]],
+        sea_level: Optional[SHGrid],
+    ) -> Optional[list[np.ndarray]]:
+        """Under a smoothed flotation rule, rho_w K_n delta y_n at every
+        node for a direction, with K the snapshots' flotation curvature and
+        delta y = delta xi + delta S_0 - (rho_i / rho_w) delta I; None under
+        the sharp rule, where K vanishes."""
+        curvatures = [snap.flotation_curvature for snap in snapshots]
+        if not any(k is not None and np.any(k.data != 0.0) for k in curvatures):
+            return None
+        parameters = self.model.parameters
+        rho_w = parameters.water_density
+        ratio = parameters.ice_density / rho_w
+        out = []
+        for node, (snap, k) in enumerate(zip(tangent, curvatures)):
+            y = snap.response.field(RELATIVE_SEA_LEVEL_CHANGE).data.copy()
+            if sea_level is not None:
+                y += sea_level.data
+            if ice is not None:
+                y -= ratio * ice[node].data
+            out.append(np.zeros_like(y) if k is None else rho_w * k.data * y)
+        return out
+
+    def _flotation_second_order_load(
+        self, snapshots, tangent_u, tangent_v, ice_u, ice_v, sea_level_u, sea_level_v
+    ) -> Callable[[int], Optional[SHGrid]]:
+        """The direct load of the second-order run from the shorelines'
+        second variation, rho_w K (delta_u y)(delta_v y) less its value at
+        the first date, or no load under the sharp rule."""
+        a = self._flotation_variations(snapshots, tangent_v, ice_v, sea_level_v)
+        if a is None:
+            return lambda node: None
+        parameters = self.model.parameters
+        rho_w = parameters.water_density
+        ratio = parameters.ice_density / rho_w
+        model = self.model
+
+        def y_u(node: int) -> np.ndarray:
+            y = tangent_u[node].response.field(RELATIVE_SEA_LEVEL_CHANGE).data.copy()
+            if sea_level_u is not None:
+                y += sea_level_u.data
+            if ice_u is not None:
+                y -= ratio * ice_u[node].data
+            return y
+
+        base = a[0] * y_u(0)
+
+        def direct_load(node: int) -> Optional[SHGrid]:
+            return SHGrid.from_array(
+                a[node] * y_u(node) - base, grid=model.grid, copy=False
+            )
+
+        return direct_load
+
     def second_order_tangent_linear_ice_history(
         self,
         dates: Sequence[float],
@@ -1695,6 +1776,10 @@ class SeaLevelEvolution:
         itau_u: Optional[Sequence[np.ndarray]] = None,
         itau_v: Optional[Sequence[np.ndarray]] = None,
         itau_uv: Optional[Sequence[np.ndarray]] = None,
+        ice_u: Optional[Sequence[SHGrid]] = None,
+        ice_v: Optional[Sequence[SHGrid]] = None,
+        sea_level_u: Optional[SHGrid] = None,
+        sea_level_v: Optional[SHGrid] = None,
         method: str = "discrete",
         space: Optional[GRDSpace] = None,
         rotational_feedbacks: bool = True,
@@ -1730,6 +1815,14 @@ class SeaLevelEvolution:
                 along u and v, for a parameterisation that is not linear
                 in them, such as itau delta_u chi delta_v chi for the log
                 viscosity; None for a linear one.
+            ice_u, ice_v, sea_level_u, sea_level_v: The two directions'
+                perturbations of the ice history, one grid per node, and of
+                the initial sea level, which under a smoothed flotation rule
+                enter the second derivative through the shorelines: the
+                load gains rho_w K (delta_u y)(delta_v y), with K the
+                snapshots' `flotation_curvature` and y = xi + S_0 -
+                (rho_i / rho_w) I, less the same at the first date. None
+                for none; under the sharp rule they do not enter.
             method, space, rotational_feedbacks, rtol, record: As for
                 `tangent_linear_ice_history`.
 
@@ -1783,11 +1876,14 @@ class SeaLevelEvolution:
                         total[l] = value if l not in total else total[l] + value
                 return total
 
+        direct_load = self._flotation_second_order_load(
+            snapshots, tangent_u, tangent_v, ice_u, ice_v, sea_level_u, sea_level_v
+        )
         return self._tangent_run(
             dates,
             snapshots,
             migrating,
-            lambda node: None,
+            direct_load,
             drive,
             space=space,
             rotational_feedbacks=rotational_feedbacks,
@@ -1891,7 +1987,7 @@ class SeaLevelEvolution:
                 kernels = self.adjoint_ice_history(
                     dates,
                     {float(dates[-1]): SHGrid.from_array(g, grid=model.grid)},
-                    ocean_functions=[snap.ocean_function for snap in snapshots],
+                    ocean_functions=_effective_ocean_functions(snapshots),
                     rotational_feedbacks=rotational_feedbacks,
                     rtol=rtol,
                 )
@@ -2040,6 +2136,7 @@ class SeaLevelEvolution:
                 SHGrid.from_array(guess, grid=model.grid),
                 model,
                 land=self.state.land,
+                flotation_width=self.state.flotation_width,
                 ocean_function=prescribed,
             )
             misfit = self._with_state(start).final_sea_level_misfit(
@@ -2059,6 +2156,7 @@ class SeaLevelEvolution:
                 SHGrid.from_array(calibrated, grid=model.grid),
                 model,
                 land=self.state.land,
+                flotation_width=self.state.flotation_width,
                 ocean_function=start.ocean_function,
             )
             update = float(np.max(np.abs(support * residual)))
@@ -2089,6 +2187,7 @@ class SeaLevelEvolution:
                 SHGrid.from_array(guess, grid=model.grid),
                 model,
                 land=self.state.land,
+                flotation_width=self.state.flotation_width,
             )
             misfit = self._with_state(state).final_sea_level_misfit(
                 dates,
@@ -2181,6 +2280,9 @@ class SeaLevelEvolution:
         itau: Optional[Sequence[np.ndarray]] = None,
         ocean_functions: Optional[Sequence[SHGrid]] = None,
         internal_states: Sequence[ViscoelasticState],
+        flotation_curvatures: Optional[Sequence[SHGrid]] = None,
+        ice_thickness: Optional[Sequence[SHGrid]] = None,
+        initial_sea_level: Optional[SHGrid] = None,
         rotational_feedbacks: bool = True,
         rtol: float = 1e-9,
         method: str = "discrete",
@@ -2209,9 +2311,17 @@ class SeaLevelEvolution:
             itau: v's perturbation of the inverse relaxation times, nodal
                 arrays per branch as for `tangent_linear_ice_history`;
                 None for none.
-            ocean_functions: The trajectory's, under migrating shorelines.
+            ocean_functions: The trajectory's effective ocean functions,
+                under migrating shorelines.
             internal_states: The recorded forward trajectory, as for
                 `adjoint_ice_history`; required here.
+            flotation_curvatures: Under a smoothed flotation rule, the
+                trajectory's `flotation_curvature` at every node, with
+                `ice_thickness` and `initial_sea_level` v's perturbations
+                of those arguments: the shorelines' second variation then
+                enters as a sea level dual rho_w K delta_v y lambda_n at
+                every node and as terms of the thickness and initial sea
+                level blocks. None under the sharp rule.
             rotational_feedbacks, rtol: As for `adjoint_ice_history`.
             method: "discrete" or "continuous".
 
@@ -2232,6 +2342,9 @@ class SeaLevelEvolution:
                 itau=itau,
                 ocean_functions=ocean_functions,
                 internal_states=internal_states,
+                flotation_curvatures=flotation_curvatures,
+                ice_thickness=ice_thickness,
+                initial_sea_level=initial_sea_level,
                 rotational_feedbacks=rotational_feedbacks,
                 rtol=rtol,
             )
@@ -2250,7 +2363,7 @@ class SeaLevelEvolution:
         kyr = KYR / parameters.scales.factor(units.TIME)
         scheme = self.scheme
         implicit = scheme == "backward_euler"
-        C = self.state.ocean_function.data
+        C = self.state.effective_ocean_function.data
         if ocean_functions is not None:
             if len(ocean_functions) != dates.size:
                 raise ValueError("ocean_functions must give one grid per date node")
@@ -2276,6 +2389,19 @@ class SeaLevelEvolution:
             self._check_itau(itau)
             if itau is not None
             else [np.zeros(op.material.mesh.r.shape) for _ in range(K)]
+        )
+        a_flotation = (
+            None
+            if flotation_curvatures is None
+            else self._flotation_variations(
+                [
+                    SeaLevelSnapshot(0.0, None, flotation_curvature=k)
+                    for k in flotation_curvatures
+                ],
+                tangent,
+                ice_thickness,
+                initial_sea_level,
+            )
         )
 
         mdual, ddual, dmdual, dddual = {}, {}, {}, {}
@@ -2448,6 +2574,8 @@ class SeaLevelEvolution:
             dg_xi, dg_omega, _ = sle_dual_inputs(
                 dsigma_dual, dpsi_dual, n, measured=False
             )
+            if a_flotation is not None:
+                dg_xi = dg_xi + a_flotation[n] * load_duals[n]
             df_dual, dsu_dual, dsphi_dual, dj_dual = sle.adjoint_generalised_solve(
                 self.state,
                 sea_level_dual=SHGrid.from_array(dg_xi, grid=model.grid, copy=False),
@@ -2562,6 +2690,10 @@ class SeaLevelEvolution:
 
         raw, baseline, thickness, initial_sea_level = views(load_duals)
         _, _, dthickness, dinitial_sea_level = views(dload_duals)
+        if a_flotation is not None:
+            dthickness, dinitial_sea_level = self._flotation_blocks(
+                a_flotation, load_duals, dthickness, dinitial_sea_level
+            )
         instantaneous = {}
         lumps = {}
         for node, m in duals.items():
@@ -2610,6 +2742,26 @@ class SeaLevelEvolution:
         )
         return kernels, derivatives
 
+    def _flotation_blocks(self, a, node_duals, dthickness, dinitial_sea_level):
+        """The shorelines' second variation in the thickness and initial sea
+        level blocks of the Hessian's action: the field rho_w K delta_v y
+        paired with the node duals, times -rho_i / rho_w for the thickness
+        at its node, and summed for the initial sea level, less the first
+        date's for both."""
+        parameters = self.model.parameters
+        ratio = parameters.ice_density / parameters.water_density
+        total = sum(node_duals)
+        dthickness = list(dthickness)
+        for n in range(len(node_duals)):
+            dthickness[n] = dthickness[n] - ratio * a[n] * node_duals[n]
+        dthickness[0] = dthickness[0] + ratio * a[0] * total
+        dinitial_sea_level = (
+            dinitial_sea_level
+            + sum(a[n] * node_duals[n] for n in range(len(node_duals)))
+            - a[0] * total
+        )
+        return dthickness, dinitial_sea_level
+
     def _second_order_continuous_sweep(
         self,
         dates,
@@ -2619,6 +2771,9 @@ class SeaLevelEvolution:
         itau,
         ocean_functions,
         internal_states,
+        flotation_curvatures=None,
+        ice_thickness=None,
+        initial_sea_level=None,
         rotational_feedbacks,
         rtol,
     ) -> tuple[IceKernels, KernelDerivatives]:
@@ -2644,7 +2799,7 @@ class SeaLevelEvolution:
         if rotational_feedbacks is True:
             self._assert_transverse_stable()
         kyr = KYR / parameters.scales.factor(units.TIME)
-        C = self.state.ocean_function.data
+        C = self.state.effective_ocean_function.data
         water_density = parameters.water_density
         g_surface = parameters.gravitational_acceleration
         r2 = parameters.mean_sea_floor_radius**2
@@ -2672,6 +2827,19 @@ class SeaLevelEvolution:
             self._check_itau(itau)
             if itau is not None
             else [np.zeros(op.material.mesh.r.shape) for _ in range(K)]
+        )
+        a_flotation = (
+            None
+            if flotation_curvatures is None
+            else self._flotation_variations(
+                [
+                    SeaLevelSnapshot(0.0, None, flotation_curvature=k)
+                    for k in flotation_curvatures
+                ],
+                tangent,
+                ice_thickness,
+                initial_sea_level,
+            )
         )
         elastic_sle = self._sle_elastic()
         psi_star = centrifugal_potential_operator(model).adjoint
@@ -2844,8 +3012,18 @@ class SeaLevelEvolution:
         ddensity_late = [np.zeros_like(C) for _ in range(dates.size)]
         ddensity_early = [None] * dates.size
 
+        dlump_load: dict[int, np.ndarray] = {}
+
         def observe(node: int) -> None:
+            """At a reversed node, the measurement's jump for both states
+            and, under a smoothed flotation rule, the derivative state's
+            jump from the shorelines' second variation, a sea level dual
+            rho_w K delta_v y times the node's dual, which stands for a
+            source distributed in time under the date quadrature."""
             nonlocal sigma_c, psi_c, dsigma_c, dpsi_c
+            late = density_late[node]
+            early = late
+            jumped = False
             if node in duals:
                 xi_a, lam, psi_a, channels = jump(duals[node], node)
                 lump_load[node] = xi_a.data
@@ -2856,9 +3034,27 @@ class SeaLevelEvolution:
                 apply_jump(vstate, strains, op.rheology.itau)
                 apply_jump(dstate, strains, ditau)
                 early, sigma_c, psi_c = smooth_equilibrium(vstate, node)
-                dearly, dsigma_c, dpsi_c = smooth_equilibrium(dstate, node)
                 if node > 0:
                     density_early[node] = early
+                jumped = True
+            if a_flotation is not None and np.any(a_flotation[node] != 0.0):
+                node_dual = per_ka * (
+                    w_early[node] * early + w_late[node] * late
+                ) + lump_load.get(node, 0.0)
+                xi_a, lam, psi_a, channels = jump(
+                    _Duals(
+                        relative_sea_level_change=SHGrid.from_array(
+                            a_flotation[node] * node_dual, grid=model.grid
+                        )
+                    ),
+                    node,
+                )
+                dlump_load[node] = dlump_load.get(node, 0.0) + xi_a.data
+                apply_jump(dstate, jump_strains(lam, psi_a, channels), op.rheology.itau)
+                jumped = True
+            if jumped:
+                dearly, dsigma_c, dpsi_c = smooth_equilibrium(dstate, node)
+                if node > 0:
                     ddensity_early[node] = dearly
 
         observe(N)
@@ -2973,8 +3169,12 @@ class SeaLevelEvolution:
             assemble(density_late, density_early, lump_load)
         )
         _, _, _, _, dthickness, dinitial_sea_level = assemble(
-            ddensity_late, ddensity_early, {}
+            ddensity_late, ddensity_early, dlump_load
         )
+        if a_flotation is not None:
+            dthickness, dinitial_sea_level = self._flotation_blocks(
+                a_flotation, load_duals, dthickness, dinitial_sea_level
+            )
         rate = []
         tail = np.zeros_like(C)
         for n in range(dates.size - 1, 0, -1):
@@ -3073,7 +3273,7 @@ class SeaLevelEvolution:
         if rotational_feedbacks is True:
             self._assert_transverse_stable()
         kyr = KYR / parameters.scales.factor(units.TIME)
-        C = self.state.ocean_function.data
+        C = self.state.effective_ocean_function.data
         water_density = parameters.water_density
         g_surface = parameters.gravitational_acceleration
         r2 = parameters.mean_sea_floor_radius**2
@@ -3465,7 +3665,7 @@ class SeaLevelEvolution:
         kyr = KYR / parameters.scales.factor(units.TIME)
         scheme = self.scheme
         implicit = scheme == "backward_euler"
-        C = self.state.ocean_function.data
+        C = self.state.effective_ocean_function.data
         if ocean_functions is not None:
             if len(ocean_functions) != dates.size:
                 raise ValueError("ocean_functions must give one grid per date node")

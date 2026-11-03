@@ -584,6 +584,28 @@ derivative of the map with the ocean functions held, exact under frozen
 shorelines. Their approximate kernels, which drop the second-order variables,
 are the Gauss-Newton Hessian.
 
+The remedy on the grid is to make the ocean function differentiable. With
+``flotation_width`` set on an ``EarthState``, the flotation condition is
+smoothed over that height: with :math:`x = (S - \rho_i I/\rho_w)/w` the
+ocean function is :math:`\sigma(x)`, the quintic smoothstep over
+:math:`[-1, 1]`, so that a point more than :math:`w` from floating its ice is
+land or ocean exactly and the rest are partly ocean. Every load carries the
+variation of :math:`C` multiplied by the flotation margin
+:math:`\rho_w S - \rho_i I = \rho_w w x`, and the product is
+:math:`\rho_w\Lambda\,\delta y` with :math:`\Lambda = x\sigma'(x)` and
+:math:`y = \xi + S_0 - \rho_i I/\rho_w`: the derivatives see the effective
+ocean function :math:`\hat C = C + \Lambda` in the feedback and in every
+grounding factor, which is the cancellation of the sharp rule turned into a
+bounded term on the strip, and the second derivative gains the load
+:math:`\rho_w K\,\delta_u y\,\delta_v y` with
+:math:`K = d\hat C/dS = (2\sigma' + x\sigma'')/w`, continuous since
+:math:`\sigma` is twice continuously differentiable. The generalised solver
+takes the ocean function as a weight, so nothing changes in it; the
+tangent-linear run, both adjoints and both second-order sweeps take
+:math:`\hat C` and :math:`K` from the trajectory, and the Hessian is then
+complete, at the price of shorelines smoothed over :math:`w` in the forward
+run, which tends to the sharp one as :math:`w \to 0`.
+
 ``SeaLevelEvolutionOperator`` is the evolution as a ``pygeoinf`` operator on
 the ice history, the initial sea level and the log viscosity of every branch,
 each an element of a Hilbert space of functions: a ``FieldHistorySpace``, a

@@ -46,7 +46,7 @@ from pyshtools import SHCoeffs, SHGrid
 
 from .anderson import AndersonMixer
 from .model import EarthModel
-from .state import EarthState
+from .state import flotation_fields, EarthState
 from .response import GRDResponse, GRDSpace
 
 
@@ -1443,11 +1443,14 @@ class SeaLevelEquation:
             new_slc_data = slc_local + eustatic_shift
             new_bathy = raw_bathy + eustatic_shift
 
-            new_ocean_func = np.where(
-                water_density * new_bathy - ice_density * new_ice > 0, 1.0, 0.0
+            new_ocean_func, _, _ = flotation_fields(
+                new_bathy,
+                new_ice,
+                water_density,
+                ice_density,
+                width=initial_state.flotation_width,
+                land_mask=land_mask,
             )
-            if land_mask is not None:
-                new_ocean_func = np.where(land_mask, 0.0, new_ocean_func)
 
             max_slc = np.max(np.abs(slc_data))
             if max_slc > 0:
@@ -1504,7 +1507,13 @@ class SeaLevelEquation:
         final_ice = SHGrid.from_array(new_ice, grid=grid)
 
         # The final state holds the same regions as land as the initial one.
-        final_state = EarthState(final_ice, final_sea_level, model, land=land)
+        final_state = EarthState(
+            final_ice,
+            final_sea_level,
+            model,
+            land=land,
+            flotation_width=initial_state.flotation_width,
+        )
 
         return final_state, _Solution(
             relative_sea_level_change=slc_data,

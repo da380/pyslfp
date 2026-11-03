@@ -350,8 +350,10 @@ class EarthModel:
         self._normalization: str = "ortho"
         self._csphase: int = 1
 
-        # Precompute the quadrature weights used for surface integration
+        # Precompute the quadrature weights used for surface integration, and
+        # the shape of the grid an array handed to `integrate` must have
         self._integration_weights = self._compute_integration_weights()
+        self._grid_shape: tuple[int, ...] = self.zero_grid().data.shape
 
     @staticmethod
     def from_defaults(*, lmax: int = 256) -> EarthModel:
@@ -534,7 +536,7 @@ class EarthModel:
         grid = "DH2" if self._sampling == 2 else self.grid
         return f.expand(grid=grid, extend=self.extend)
 
-    def integrate(self, f: SHGrid) -> float:
+    def integrate(self, f: Union[SHGrid, np.ndarray]) -> float:
         """
         Integrate a function over the surface of the sphere.
 
@@ -544,20 +546,27 @@ class EarthModel:
         identical to reading off the degree-zero coefficient.
 
         Args:
-            f: The function to integrate, represented as an SHGrid object.
+            f: The function to integrate: an SHGrid, checked against the
+                model's grid, or an array of its values laid out as the
+                model's grid, as the solvers hold fields, checked for its
+                shape alone.
 
         Returns:
             The integral of the function over the surface.
-        """
-        self.check_field(f)
-        return self._integrate_data(f.data)
 
-    def _integrate_data(self, data: np.ndarray) -> float:
+        Raises:
+            ValueError: If the field does not match the model's grid.
         """
-        Integrates raw grid values laid out as for this model's grid.
-
-        Internal fast path used by the solvers; no compatibility checks.
-        """
+        if isinstance(f, SHGrid):
+            self.check_field(f)
+            data = f.data
+        else:
+            data = np.asarray(f)
+            if data.shape != self._grid_shape:
+                raise ValueError(
+                    f"the array's shape {data.shape} is not the model's grid "
+                    f"shape {self._grid_shape}"
+                )
         if self._extend:
             rows = data[:-1, :-1] if self._grid == "DH" else data[:, :-1]
         else:

@@ -199,8 +199,7 @@ class SeaLevelEquation:
     def _ocean_average(self, state: EarthState, f: SHGrid) -> float:
         """Computes the spatial average of a field over the oceans."""
         return (
-            self._model._integrate_data(state.ocean_function.data * f.data)
-            / state.ocean_area
+            self._model.integrate(state.ocean_function.data * f.data) / state.ocean_area
         )
 
     def _expand(self, data: np.ndarray) -> np.ndarray:
@@ -633,9 +632,7 @@ class SeaLevelEquation:
 
         if direct_load is not None:
             direct_data = direct_load.data
-            mean_slc = -model._integrate_data(direct_data) / (
-                water_density * ocean_area
-            )
+            mean_slc = -model.integrate(direct_data) / (water_density * ocean_area)
         else:
             direct_data = np.zeros_like(ocean_function)
             mean_slc = 0.0
@@ -677,7 +674,7 @@ class SeaLevelEquation:
                 # uniform, and so absorbed by mass conservation below
                 slc_lm[0, 0, 0] -= (self._hc + (self._kc + 1.0) / g) * centrifugal_0
             slc = self._synthesise(slc_lm)
-            shift = mean_slc - model._integrate_data(ocean_function * slc) / ocean_area
+            shift = mean_slc - model.integrate(ocean_function * slc) / ocean_area
             slc += shift
             # the uniform shift is the degree-0 term, Y_00 = 1/sqrt(4 pi)
             slc_lm[0, 0, 0] += shift * np.sqrt(4.0 * np.pi)
@@ -997,7 +994,7 @@ class SeaLevelEquation:
             xi_dual = g_xi + water_density * ocean_function * (
                 self._synthesise(lam) / r2
             )
-            mean_dual = model._integrate_data(xi_dual)
+            mean_dual = model.integrate(xi_dual)
             xg_dual = xi_dual - ocean_function * (mean_dual / ocean_area)
             z_dual = r2 * self._expand(xg_dual)
             new = r_out.copy()
@@ -1355,12 +1352,12 @@ class SeaLevelEquation:
 
         if sediment_thickness_change is not None:
             sediment_load = sediment_density * sediment_thickness_change.data
-            sediment_mass_change = model._integrate_data(sediment_load)
+            sediment_mass_change = model.integrate(sediment_load)
         else:
             sediment_load = None
             sediment_mass_change = 0.0
 
-        initial_water_mass = water_density * model._integrate_data(
+        initial_water_mass = water_density * model.integrate(
             initial_ocean_func * initial_bathy
         )
 
@@ -1426,14 +1423,14 @@ class SeaLevelEquation:
             if dynamic_sea_level_change is not None:
                 raw_bathy += dynamic_sea_level_change.data
 
-            total_ice_mass_change = model._integrate_data(grounded_ice_change)
+            total_ice_mass_change = model.integrate(grounded_ice_change)
             target_water_mass = (
                 initial_water_mass - total_ice_mass_change - sediment_mass_change
             )
-            current_raw_water_mass = water_density * model._integrate_data(
+            current_raw_water_mass = water_density * model.integrate(
                 current_ocean_func * raw_bathy
             )
-            current_ocean_density_area = water_density * model._integrate_data(
+            current_ocean_density_area = water_density * model.integrate(
                 current_ocean_func
             )
 

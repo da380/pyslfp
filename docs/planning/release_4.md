@@ -129,19 +129,21 @@ load and response space builders (`lebesgue_load_space`,
 `pyslfp.core`. `ModelSetup.geocentric_sea_level`, the observable of
 altimetry, and `ModelSetup.response`, the response to the set-up's load.
 `ObservationModel`, the shape the observation models share, with their
-noise. `grace_observation_operator` and `GraceObservationModel` read the
-potential change's coefficients from the response's components, with no
-transform. `IceHistoryOperator` (`pyslfp.viscoelastic`): the
+noise, and `noise_measure`, which turns standard deviations into a measure.
+`GnssObservationModel` (`pyslfp.observations`): the displacement, or its
+rate, at stations in east, north and up, with the frame of the data taken as
+Helmert nuisance parameters joined to the model space (`frame="nuisance"`,
+with `joint_prior`), by reducing the data to the combinations the frame
+cannot change (`frame="invariant"`), or not at all; `HelmertTransformation`,
+the design at the stations, any of the translation, rotation and scale, with
+`frame_reduction`. `grace_observation_operator` and `GraceObservationModel`
+read the potential change's coefficients from the response's components, with
+no transform. `IceHistoryOperator` (`pyslfp.viscoelastic`): the
 frozen-shoreline map from an ice thickness history to the responses at
 observation dates, whose adjoint gives the Sobolev kernels.
 
 ## Planned work still to land
 
-- GNSS observation models with the frame of the data, and the observation
-  models reshaped with them: each takes its observable as an operator from
-  the model space (a set-up's, or a viscoelastic operator's) and adds the
-  sampling, the stations' data and the noise
-  ([response_plan.md](response_plan.md), package 6).
 - The rest of the scope set with the port: the viscoelastic operators beyond
   `IceHistoryOperator` (the migrating-shoreline map, which is nonlinear, and
   the viscosity kernels), planetmodel 1.4's plots, the priors layer, and

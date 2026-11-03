@@ -18,8 +18,11 @@ from pyslfp.core import (
     lebesgue_load_space,
     lebesgue_response_space,
     sobolev_load_space,
+    sobolev_response_space,
 )
+from pyslfp.core.response import DISPLACEMENT
 from pyslfp.ice import AnalyticalIceModel
+from pyslfp.observations import GnssObservationModel
 from pyslfp.viscoelastic import (
     IceHistoryOperator,
     Rheology,
@@ -144,3 +147,29 @@ def test_what_is_refused(setting):
     )
     with pytest.raises(ValueError):
         IceHistoryOperator(evolution, dates, other, [0.0])
+
+
+def test_a_gnss_rate_observable(setting):
+    """GNSS velocities in the nuisance frame, the displacement rate over the
+    last five kiloyears of the ice history operator, pass the adjoint check
+    on the direct sum of the history space and the frame's rates."""
+    material, earth, _, _, _ = setting
+    b = earth.parameters.mean_sea_floor_radius
+    space = sobolev_response_space(earth, 2.0, 0.3 * b, horizontal=True)
+    operator = IceHistoryOperator(
+        _evolution(material, earth),
+        np.linspace(10.0, 0.0, 5),
+        _domain(earth, "sobolev", field_kind="sobolev"),
+        [5.0, 0.0],
+        space=space,
+        rtol=1e-12,
+    )
+    displacement = space.projection(DISPLACEMENT)
+    past, present = (displacement @ operator.codomain.projection(i) for i in (0, 1))
+    rate = (1.0 / 5.0) * (present - past) @ operator
+    points = [(45.0, -60.0), (-33.8, 151.2), (51.5, 0.0), (10.0, 80.0)]
+    model = GnssObservationModel(rate, points, frame="nuisance", noise=1.0)
+    assert model.model_space.subspaces[0] == operator.domain
+    check_operator(
+        model.forward_operator, rng=np.random.default_rng(0), trials=2, rtol=1e-8
+    )

@@ -41,6 +41,7 @@ from pyshtools import SHCoeffs, SHGrid
 from planetmodel import units
 
 from ..core import EarthModel
+from ..core.model import SECONDS_PER_KILOYEAR
 from ..core.response import RELATIVE_SEA_LEVEL_CHANGE, GRDResponse, GRDSpace
 from ..core.observables import centrifugal_potential_operator
 from ..core.spaces import lebesgue_response_space
@@ -64,7 +65,7 @@ __all__ = [
 ]
 
 #: Seconds per kiloyear (Julian years), for the date conversions.
-KYR = 1.0e3 * 365.25 * 86400.0
+KYR = SECONDS_PER_KILOYEAR
 
 POTENTIAL = units.LENGTH**2 * units.TIME**-2
 SURFACE_DENSITY = units.DENSITY * units.LENGTH

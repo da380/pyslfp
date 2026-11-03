@@ -235,7 +235,8 @@ time factor, and their `basis_matrix` the eigenfunctions at given times.
 The ice history operator, in `pyslfp.viscoelastic`:
 
 - Domain: a `FieldHistorySpace` of ice thickness, its time coordinate the
-  date in kiloyears before present, over an interval holding the run's dates.
+  model's non-dimensional time from the run's first date
+  (`EarthModel.times_from_dates`), over an interval holding the run's dates.
 - Codomain: a pygeoinf `DirectSum` of one `GRDSpace` per observation date,
   the dates on the run's grid.
 - Forward: the history read at the run's dates, through an ice model that

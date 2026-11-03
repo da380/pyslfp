@@ -92,11 +92,13 @@ class SeaLevelEvolutionOperator(Operator):
                 scheme, the operator's material and, under frozen
                 shorelines, the ocean function of its background state; the
                 state's `land` is kept.
-            dates: The run's dates, in kiloyears before present, decreasing,
-                inside the history's interval of time.
+            dates: The run's dates, in kiloyears before present, decreasing;
+                their times from the first, in the model's unit, must lie
+                inside the history's interval.
             history_space: The space of ice thickness histories, its time
-                coordinate the date and its field space over the model's
-                sphere.
+                coordinate the model's time from the run's first date
+                (`EarthModel.times_from_dates`) and its field space over the
+                model's sphere.
             sea_level_space: A pygeoinf sphere space over the model's sphere,
                 for the initial sea level.
             viscosity_space: The log-viscosity space, on the evolution's
@@ -176,7 +178,8 @@ class SeaLevelEvolutionOperator(Operator):
         self._method = method
         self._rotational_feedbacks = rotational_feedbacks
         self._rtol = rtol
-        self._basis = history_space.basis_matrix(dates)
+        self._times = model.times_from_dates(dates, dates[0])
+        self._basis = history_space.basis_matrix(self._times)
         self._cache: Optional[tuple] = None
         domain = DirectSum(
             [history_space, sea_level_space, viscosity_space], labels=ARGUMENTS
@@ -194,6 +197,11 @@ class SeaLevelEvolutionOperator(Operator):
     def dates(self) -> np.ndarray:
         """The run's dates, in kiloyears before present."""
         return self._dates.copy()
+
+    @property
+    def times(self) -> np.ndarray:
+        """The run's dates as the history's times, from zero at the first."""
+        return self._times.copy()
 
     @property
     def observation_dates(self) -> list[float]:

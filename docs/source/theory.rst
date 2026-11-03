@@ -508,8 +508,8 @@ ice model's own dates by the transpose of its linear interpolation.
 
 The Sobolev kernel is the derivative's Riesz representer in a space of ice
 histories, ``FieldHistorySpace``: the product of a Sobolev space
-:math:`H^s(T)` on the run's interval of time and one :math:`H^r(S^2)` on the
-sphere, with the inner product :math:`(A_t^s\otimes A_x^r\,u, v)`, where
+:math:`H^s(T)` on the run's interval of time, in the model's non-dimensional
+time from the run's first date, and one :math:`H^r(S^2)` on the sphere, with the inner product :math:`(A_t^s\otimes A_x^r\,u, v)`, where
 :math:`A_t = 1 - L_t^2\,\partial_t^2`. Both factors are diagonal in their
 eigenbases, so the history's components :math:`c_{kj}` lie on the products
 :math:`\phi_k(t)Y_j(\mathbf{x})` with the metric :math:`\mu_k\nu_j`. The forward

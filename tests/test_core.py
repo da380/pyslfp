@@ -391,3 +391,18 @@ def test_with_degree_preserves_extend():
     refined = model.with_degree(32)
     assert refined.lmax == 32
     assert refined.extend is False
+
+
+def test_times_from_dates_and_back():
+    """Dates in kiloyears before present and the model's times from a run's
+    first date, through the kiloyear in the model's unit of time."""
+    from pyslfp.core import EarthState
+    from pyslfp.core.model import SECONDS_PER_KILOYEAR
+
+    model = EarthState.for_testing(4).model
+    kiloyear = model.parameters.kiloyear
+    assert kiloyear == SECONDS_PER_KILOYEAR / model.parameters.time_scale
+    dates = np.array([10.0, 6.0, 0.0])
+    times = model.times_from_dates(dates, 10.0)
+    np.testing.assert_allclose(times, [0.0, 4.0 * kiloyear, 10.0 * kiloyear])
+    np.testing.assert_allclose(model.dates_from_times(times, 10.0), dates)

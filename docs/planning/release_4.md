@@ -128,6 +128,10 @@ load and response space builders (`lebesgue_load_space`,
 `sobolev_load_space`, `lebesgue_response_space`, `sobolev_response_space`) in
 `pyslfp.core`. `ModelSetup.geocentric_sea_level`, the observable of
 altimetry, and `ModelSetup.response`, the response to the set-up's load.
+`EarthModel.times_from_dates` and `dates_from_times`, with
+`EarthModelParameters.kiloyear`: the model's non-dimensional time from a
+date in kiloyears before present and back, the time coordinate of the
+history spaces being the model's, like every other coordinate.
 `ObservationModel`, the shape the observation models share, with their
 noise, and `noise_measure`, which turns standard deviations into a measure.
 `GnssObservationModel` (`pyslfp.observations`): the displacement, or its

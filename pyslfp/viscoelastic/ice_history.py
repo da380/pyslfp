@@ -80,7 +80,9 @@ class IceHistoryOperator(LinearOperator[np.ndarray, list[GRDResponse]]):
     `FieldHistorySpace` into a `DirectSum` of one response space per
     observation date.
 
-    The history's time coordinate is the date in kiloyears before present.
+    The history's time coordinate is the model's non-dimensional time,
+    increasing from zero at the run's first date, as for
+    `SeaLevelEvolution.run`; `EarthModel.times_from_dates` converts dates.
     The direct load at each date is the grounded thickness change since the
     first, over the background state's ocean function, so a history constant
     in time loads nothing. The adjoint is the discrete adjoint's thickness
@@ -105,10 +107,12 @@ class IceHistoryOperator(LinearOperator[np.ndarray, list[GRDResponse]]):
             evolution: The evolution, whose background state gives the
                 frozen ocean function; its state when the operator is
                 applied is the one used.
-            dates: The run's dates, in kiloyears before present, decreasing,
-                inside the history's interval of time.
-            domain: The history space, its time coordinate the date and its
-                field space over the evolution's model sphere.
+            dates: The run's dates, in kiloyears before present, decreasing;
+                their times from the first, in the model's unit, must lie
+                inside the history's interval.
+            domain: The history space, its time coordinate the model's time
+                from the run's first date and its field space over the
+                evolution's model sphere.
             observation_dates: The dates of the responses, on the run's
                 dates.
             space: The response space at each observation date, as for
@@ -164,7 +168,8 @@ class IceHistoryOperator(LinearOperator[np.ndarray, list[GRDResponse]]):
         self._rtol = rtol
         # the time eigenfunctions at the run's dates, refusing a date outside
         # the history's interval
-        self._basis = domain.basis_matrix(dates)
+        self._times = model.times_from_dates(dates, dates[0])
+        self._basis = domain.basis_matrix(self._times)
         codomain = DirectSum([space] * len(observation_dates))
         super().__init__(domain, codomain)
 
@@ -179,6 +184,11 @@ class IceHistoryOperator(LinearOperator[np.ndarray, list[GRDResponse]]):
     def dates(self) -> np.ndarray:
         """The run's dates, in kiloyears before present."""
         return self._dates.copy()
+
+    @property
+    def times(self) -> np.ndarray:
+        """The run's dates as the history's times, from zero at the first."""
+        return self._times.copy()
 
     @property
     def observation_dates(self) -> list[float]:

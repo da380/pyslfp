@@ -17,6 +17,9 @@ from planetmodel.units import Scales
 
 from ..love_numbers.table import LoveNumbers
 
+#: Seconds per kiloyear of Julian years, the unit of the dates of ice histories.
+SECONDS_PER_KILOYEAR = 1.0e3 * 365.25 * 86400.0
+
 # =====================================================================
 # Default Earth Model Physical Parameters (PREM and standard values)
 # =====================================================================
@@ -97,6 +100,13 @@ class EarthModelParameters:
 
     # The scales, and the non-dimensional values, set in __post_init__
     scales: Scales = field(init=False)
+
+    @property
+    def kiloyear(self) -> float:
+        """One kiloyear in the model's unit of time: the factor that turns a
+        span of dates, in kiloyears before present, into a span of the
+        non-dimensional time the solvers and the history spaces use."""
+        return SECONDS_PER_KILOYEAR / self.time_scale
 
     equatorial_radius: float = field(init=False)
     polar_radius: float = field(init=False)
@@ -535,6 +545,22 @@ class EarthModel:
         self.check_coefficient(f)
         grid = "DH2" if self._sampling == 2 else self.grid
         return f.expand(grid=grid, extend=self.extend)
+
+    def times_from_dates(self, dates, origin: float, /) -> np.ndarray:
+        """
+        The model's non-dimensional times of dates in kiloyears before
+        present, increasing from zero at `origin`, the date at which a run
+        starts: the time coordinate of the history spaces and of
+        `SeaLevelEvolution.run`.
+        """
+        dates = np.asarray(dates, dtype=float)
+        return (float(origin) - dates) * self.parameters.kiloyear
+
+    def dates_from_times(self, times, origin: float, /) -> np.ndarray:
+        """The dates, in kiloyears before present, of the model's times
+        measured from `origin`: the inverse of `times_from_dates`."""
+        times = np.asarray(times, dtype=float)
+        return float(origin) - times / self.parameters.kiloyear
 
     def integrate(self, f: Union[SHGrid, np.ndarray]) -> float:
         """

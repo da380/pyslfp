@@ -285,8 +285,10 @@ contraction with a functional on the time factor samples a history.
 **The space.** `HistorySetup(setup, time_space)` has
 `space = TensorProduct([time_space, setup.space])`, whose vectors are
 (K, N) arrays, K the time modes and N the set-up's dimension; the time
-coordinate is whatever the caller's time space uses, years or kiloyears
-before present, and the components' labels are the set-up's. A component's
+coordinate is the model's non-dimensional time, as everywhere in the
+library, with `EarthModel.times_from_dates` and `dates_from_times` the
+conveniences for dates in kiloyears before present, and the components'
+labels are the set-up's. A component's
 history is reached by `history(name)`, the lift of the set-up's projection,
 onto `FieldHistorySpace(time_space, component.space)`, which equals the lifted
 codomain.

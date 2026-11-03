@@ -32,15 +32,18 @@ from pyslfp.viscoelastic import (
 
 from .body import LMAX, TAU
 
-START, END = 0.0, 10.0
+START, END = 0.0, 10.0  # the run's span, in kiloyears
 LENGTH = 2.0  # the time length scale, in kiloyears
 
 
 def _domain(earth, time_kind, modes=16, field_kind="lebesgue"):
+    # the history's time is the model's, from zero at the run's first date
+    kiloyear = earth.parameters.kiloyear
+    bounds = dict(lower=START * kiloyear, upper=END * kiloyear)
     if time_kind == "lebesgue":
-        time_space = TimeLebesgue(modes, lower=START, upper=END, length_scale=LENGTH)
+        time_space = TimeLebesgue(modes, length_scale=LENGTH * kiloyear, **bounds)
     else:
-        time_space = TimeSobolev(modes, 1.0, LENGTH, lower=START, upper=END)
+        time_space = TimeSobolev(modes, 1.0, LENGTH * kiloyear, **bounds)
     if field_kind == "lebesgue":
         field_space = lebesgue_load_space(earth)
     else:

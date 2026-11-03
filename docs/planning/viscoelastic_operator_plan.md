@@ -43,7 +43,8 @@
 Domain: DirectSum([X_I, X_S, X_chi]).
 
 - X_I: a `FieldHistorySpace` of ice thickness over an interval holding the
-  run's dates, as for `IceHistoryOperator`.
+  run's dates, in the model's non-dimensional time from the first date, as
+  for `IceHistoryOperator`.
 - X_S: a sphere space (Lebesgue or Sobolev) for the initial sea level S_0.
 - X_chi: the log-viscosity space below, one summand per relaxing branch.
 

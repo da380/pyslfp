@@ -49,8 +49,11 @@ def _marine(earth):
 
 
 def _spaces(earth, rheology, modes=16):
+    # the history's time is the model's, from zero at the run's first date
+    kiloyear = earth.parameters.kiloyear
     history = FieldHistorySpace(
-        TimeSobolev(modes, 1.0, 2.0, lower=0.0, upper=10.0), lebesgue_load_space(earth)
+        TimeSobolev(modes, 1.0, 2.0 * kiloyear, lower=0.0, upper=10.0 * kiloyear),
+        lebesgue_load_space(earth),
     )
     return history, lebesgue_load_space(earth), LogViscositySpace(rheology, 8)
 
@@ -69,7 +72,8 @@ def _history_of(space, dates, ice_model, earth):
             for d in dates
         ]
     )
-    return np.linalg.lstsq(space.basis_matrix(dates), values, rcond=None)[0]
+    times = earth.times_from_dates(dates, dates[0])
+    return np.linalg.lstsq(space.basis_matrix(times), values, rcond=None)[0]
 
 
 def _point(operator, ice_model, state, earth):

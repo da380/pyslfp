@@ -235,6 +235,33 @@ reduces the misfit from about 150 m to about a centimetre in five runs, and the
 gradient method to a few centimetres in seven.
 
 
+Observations
+------------
+
+An observation model adds little to the solve behind its observable. The
+displacement at stations, horizontal part included, is synthesised from the
+coefficients by ``ducc0``'s general synthesis at arbitrary points, spin 0 for
+:math:`U` and spin 1 for :math:`\nabla_1 V`, and its adjoint is the adjoint
+synthesis, exact to the synthesis tolerance of :math:`10^{-13}`. At degree 256
+on one thread either direction takes about 13 ms for anything from a hundred
+to ten thousand stations, the cost lying in the harmonic part rather than the
+points, against 220 ms for a sea level solve; at degree 128 it is about 3 ms.
+GRACE's coefficients are a selection of the response's components, with no
+transform at all.
+
+The frame-invariant reduction :math:`Z^{\mathsf T}` is held as the
+:math:`k` Householder reflectors of the QR factorisation of the Helmert
+design, :math:`k` vectors of the length of the data, and each application is
+one pass over the data per parameter. A dense :math:`Z` would be quadratic in
+the data: for ten thousand stations, three components each, about 7 GB, where
+the reflectors take under 2 MB and reduce the data in under a tenth of a
+millisecond. The design's columns are scaled to unit length before the
+factorisation, since the range does not depend on their scales and the
+translation's differ from the rotation's and the scale's by the radius, and a
+design whose columns are dependent at the stations is refused, as is a network
+with no more data than parameters.
+
+
 Threads and processes
 ---------------------
 
@@ -281,6 +308,11 @@ than to stored outputs:
 * dot-product tests of every adjoint, gradient identities for the kernels at
   machine precision, and central finite differences converging at second order
   about migrating-shoreline trajectories;
+* the GNSS frame: the Helmert design against the transformation computed in
+  three dimensions, the translation and scale against their fields sampled at
+  the stations, and the frame-invariant posterior against the nuisance
+  posterior, which approaches it as one over the variance of the frame's
+  prior;
 * covariance gates: the same physical problem run under deliberately different
   non-dimensional schemes, compared after conversion to SI, which catches any
   factor dropped because the default scheme makes it one.

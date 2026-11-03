@@ -13,8 +13,9 @@
    u = U r_hat + grad_1 V, a spheroidal field: loads have no toroidal part, so
    there is no rigid rotation, and degree 1 is in the centre-of-mass frame.
    V has no degree 0. It offers the vertical part, the horizontal part as
-   east and north components on a grid or at points, a projection onto a line
-   of sight, and later frame changes.
+   east and north components on a grid or at points; a projection onto a
+   line of sight is for later, and the frame of GNSS data belongs to the
+   observation model.
 3. **Optional members.** The horizontal part, which costs an adjoint channel,
    and omega, present only with rotational feedback. xi, U and phi are always
    present.
@@ -335,26 +336,41 @@ frame differs from it by a Helmert transformation: a translation T, a small
 rotation R and a scale s, or their rates for velocities. At a station x = b r
 the transformation adds
 
-    delta u = T + s b r + b R x r,
+    delta u = T + s x + R x x,
 
 in east, north and up: the translation is a degree-1 spheroidal field with
-V = U, the scale a degree-0 vertical field, and the rotation a rigid toroidal
-motion, which no response holds. `HelmertTransformation(points, radius,
-parameters=("translation", "rotation", "scale"))` is the design operator from
-EuclideanSpace(k) to the data, in the order of the point evaluation.
+V = U, the scale a degree-0 vertical field, and the rotation a rigid
+toroidal motion, which no response holds.
+`HelmertTransformation(points, radius, parameters=("translation", "rotation",
+"scale"), directions=("east", "north", "up"))` is the design matrix, a
+`MatrixLinearOperator` from EuclideanSpace(k) to the station data in the
+order of the displacement's point evaluation, with `parameter_names`; the
+translation is a length, the rotation in radians and the scale a ratio, in
+Earth-fixed axes. `frame_reduction()` gives Z^T, held as the k Householder
+reflectors of the design's QR factorisation, so that no dense Z is formed; a
+design whose columns are dependent at the stations, or a network with no more
+data than parameters, is refused.
 
-The model takes the frame in one of two ways:
+`GnssObservationModel(observable, points, names=, directions=, frame=,
+parameters=, noise=)` takes a displacement observable, into a
+`SurfaceDisplacementSpace` with point values and with the horizontal part if
+east or north is observed, and the frame in one of three ways:
 
+- `frame=None`: the data are in the centre-of-mass frame.
 - `frame="nuisance"`: the Helmert parameters join the model space, and the
-  forward operator acts on DirectSum([model space, EuclideanSpace(k)]) as
-  F u + A h; a prior on h states how well the frame is known.
-- `frame="invariant"`: the data are reduced to the combinations the frame
-  cannot change, Z^T d with Z an orthonormal basis of the complement of A's
-  range, so that the data space has dimension 3N - k, the forward operator is
-  Z^T F, and the noise Z^T C Z. This is the nuisance form with no prior
-  information on h, without a singular covariance.
+  forward operator, a `RowLinearOperator`, acts on DirectSum([model space,
+  EuclideanSpace(k)]) as F u + A h; `joint_prior(prior, frame)` joins a prior
+  on h, a measure or standard deviations, stating how well the frame is
+  known.
+- `frame="invariant"`: the data are reduced to Z^T d, the data space has
+  dimension 3N - k, the forward operator is Z^T F, and the noise Z^T C Z.
+  This is the nuisance form with no prior information on h, without a
+  singular covariance; station data enter as `frame_reduction(d)`.
 
-None leaves the data in the centre-of-mass frame.
+The noise is given for the station data in every frame. `from_fingerprint`
+takes the displacement of a fingerprint operator's response; a viscoelastic
+rate is the difference of two dates of `IceHistoryOperator`'s codomain over
+their interval.
 
 ### Tests
 
@@ -363,34 +379,27 @@ None leaves the data in the centre-of-mass frame.
   GRACE from `FingerPrintOperator`, altimetry from a set-up).
 - GRACE's coefficients read from the components equal those through the
   field space, and the Stokes conversion is unchanged.
-- The Helmert design: a uniform translation is the degree-1 field with V = U
-  sampled at the stations, a scale the degree-0 vertical field, and a rotation
-  the rigid motion b R x r in east and north, which a response's horizontal
-  part, being spheroidal, is orthogonal to on the sphere though not at a
-  finite set of stations; Z^T A = 0, and Z^T Z = I.
-- GNSS with `frame="invariant"`: adding any Helmert motion to the data leaves
-  Z^T d unchanged; with `frame="nuisance"` the adjoint check on the direct sum.
+- The Helmert design equals T + s x + R x x computed in three dimensions; a
+  uniform translation equals the degree-1 field with V = U sampled at the
+  stations, and a scale the degree-0 vertical field; Z^T A = 0 and
+  Z^T Z = I, and dependent designs are refused.
+- GNSS in each frame passes the adjoint check; with `frame="invariant"`,
+  adding any Helmert motion to the data leaves Z^T d unchanged and the noise
+  is Z^T C Z; the nuisance frame's posterior mean tends to the invariant
+  frame's as one over the variance of the frame prior.
 - A viscoelastic GNSS observable, the displacement rate between two dates of
-  `IceHistoryOperator`, gives a model that passes the adjoint check.
-
-### Steps
-
-1. The reshape: tide gauges, altimetry (a model again, now taking its
-   observable) and GRACE, with `ModelSetup.response`, the noise and the
-   direct coefficient read; tutorials 04 and 05 and the Heathcote scripts
-   follow.
-2. GNSS: `HelmertTransformation` and `GnssObservationModel`, with both frames.
-3. The docs: theory.rst, numerics.rst, release_4.md and this file.
+  `IceHistoryOperator`, gives a model in the nuisance frame that passes the
+  adjoint check.
 
 ## Work packages
 
-Packages 1 to 5 are built: the solver's coefficient engine with V
+Packages 1 to 6 are built: the solver's coefficient engine with V
 (`SeaLevelEquation._solve_generalised`, and `solve_response` returning a
 `GRDResponse`), `pyslfp.core.response`, the fingerprint operator onto a
 `GRDSpace` with the horizontal part on request, its consumers (sea surface
 height, GRACE, tide gauges, altimetry), which reach the fields by name through
-`GRDSpace.field_operator`, and the viscoelastic side set out above. Package 6
-remains.
+`GRDSpace.field_operator`, the viscoelastic side, and the observation models
+with GNSS, all as set out above.
 
 1. **The solver.** Horizontal displacement as a coefficient output of the
    elastic sea level solvers (linear and non-linear), with a test against

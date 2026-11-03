@@ -25,9 +25,10 @@ Around these it provides:
 - Sensitivity kernels by adjoint methods: for elastic fingerprints, and for a
   viscoelastic evolution with respect to the ice history, the initial sea
   level and the mantle viscosity.
-- The elastic physics as linear operators between Hilbert spaces, with
-  observation models for tide gauges, satellite altimetry and GRACE, for
-  Bayesian inversions built on [`pygeoinf`](https://github.com/da380/pygeoinf).
+- The fingerprint and the viscoelastic response to an ice history as linear
+  operators between Hilbert spaces, with observation models for tide gauges,
+  satellite altimetry, GRACE and GNSS, for Bayesian inversions built on
+  [`pygeoinf`](https://github.com/da380/pygeoinf).
 - Ice histories (ICE-5G, ICE-6G and ICE-7G), regional masks, and plotting on
   map projections.
 
@@ -229,7 +230,7 @@ costs and the details.
 | `elastic/` | `LinearSeaLevelEquation`, the fingerprint driver, and `FingerPrintOperator`, the fingerprint and its adjoint as a `pygeoinf` operator. |
 | `viscoelastic/` | `Rheology`, `ViscoelasticOperator` (the radial time stepping), `SeaLevelEvolution` (the coupled evolution and its adjoints), the kernel and measurement types, decay-time functionals and `calibrate_initial_sea_level`, and `IceHistoryOperator`, the map from an ice history to the responses as a `pygeoinf` operator, whose adjoint gives the Sobolev kernels. |
 | `love_numbers/` | `LoveNumbers` and the radial spectral-element solver that computes them from any `planetmodel` model. |
-| `observations/` | Tide gauges, satellite altimetry and GRACE: their observables sampled at stations, points or Stokes coefficients, their networks' data, and their observation models. |
+| `observations/` | Tide gauges, satellite altimetry, GRACE and GNSS: the observation models, each an observable from the model space with its sampling at stations, points or coefficients and its noise; the networks' data; and the frame of GNSS solutions, as Helmert parameters or frame-invariant data. |
 | `ice/` | The ice model interfaces, `IceNG` for the ICE-5G, ICE-6G and ICE-7G histories, `AnalyticalIceModel` for testing, and export to `planetmodel` surface histories. |
 | `models/` | Model spaces for inversions: named load components (ice sheets, glaciers, land water, firn, sterodynamic sea level, ocean density) and `ModelSetup`, which assembles them with their loads, observables and constraints, and the operators from the components' fields to their loads. |
 | `plotting/` | Plotting of `pyshtools.SHGrid` fields on Cartopy projections. |

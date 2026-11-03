@@ -16,10 +16,11 @@ rotational feedbacks, for two descriptions of the solid Earth:
 Around these it provides Love numbers for any spherically layered model that
 planetmodel_ describes; sensitivity kernels by adjoint methods, for
 fingerprints and for a viscoelastic evolution with respect to the ice history,
-the initial sea level and the mantle viscosity; the elastic physics as linear
-operators between Hilbert spaces, with observation models for tide gauges,
-satellite altimetry and GRACE, for Bayesian inversions built on pygeoinf_; and
-ice histories, regional masks and plotting.
+the initial sea level and the mantle viscosity; the fingerprint and the
+viscoelastic response to an ice history as linear operators between Hilbert
+spaces, with observation models for tide gauges, satellite altimetry, GRACE
+and GNSS, for Bayesian inversions built on pygeoinf_; and ice histories,
+regional masks and plotting.
 
 :doc:`theory` summarises the physics and methods, :doc:`numerics` their
 discretisation and cost, and :doc:`units` the non-dimensionalisation. The

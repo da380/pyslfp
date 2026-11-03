@@ -46,7 +46,7 @@ The library is one sea level engine with two drivers.
   with their adjoints, for inverse problems built on ``pygeoinf``:
   ``FingerPrintOperator`` in ``pyslfp.elastic`` and ``IceHistoryOperator`` in
   ``pyslfp.viscoelastic``. ``pyslfp.observations`` samples the response as
-  tide gauges, altimetry and GRACE do.
+  tide gauges, altimetry, GRACE and GNSS do.
 
 The two drivers are named for the physical approximation they make, not for an
 application: GIA is a use of the viscoelastic driver. They are not symmetric,
@@ -424,8 +424,8 @@ Elastic kernels
 The adjoint of the fingerprint operator is a generalised sea level equation,
 as above, so a sensitivity kernel costs one solve.
 ``FingerPrintOperator`` wraps the forward and adjoint solves as a ``pygeoinf``
-linear operator, where it composes with the observation operators for tide
-gauges, altimetry and GRACE in ``pyslfp.observations``.
+linear operator, where it composes with the observation models of
+``pyslfp.observations`` (below).
 
 The viscoelastic adjoint problem
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -657,6 +657,117 @@ genuine blend of prior and data, :math:`K = P(P + R)^{-1}` when
 :math:`\mathcal{H}' = I`; the weights of the misfit are the simplest instance,
 the inverse of a diagonal noise covariance without a prior. The full Bayesian
 estimate is a natural application of ``pygeoinf``.
+
+
+Observations
+------------
+
+Observables and sampling
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+An observation model in ``pyslfp.observations`` keeps the physics apart from
+the measurement. Its observable :math:`O` is a linear operator from the model
+space into the space of the quantity observed (a field, a surface
+displacement, the coefficients of the potential change), its sampling
+:math:`S` takes that quantity to the data, and the data are
+
+.. math::
+
+   d = S\,O\,u + e,
+
+with the noise :math:`e` a Gaussian measure on the data space, or independent
+noise of given standard deviations. Whatever builds the observable holds the
+physics, the direct terms of a model set-up included, so one observation model
+serves a fingerprint operator, a set-up and ``IceHistoryOperator`` alike; a
+rate is the difference of the responses at two observation dates over their
+interval.
+
+* Tide gauges observe the relative sea level change :math:`\xi` at the
+  stations.
+* Satellite altimetry observes the geocentric sea level change
+  :math:`\xi + U`, the height of the sea surface measured from the centre of
+  mass. By default the height of the centrifugal potential perturbation,
+  :math:`\psi/g`, is removed from it (``remove_rotational_contribution``).
+* GRACE observes the coefficients of the potential change between two
+  degrees, read directly from the response's components, so that no synthesis
+  and analysis lie between the solver and the data. Level-2 products give the
+  Stokes coefficients of the potential, positive near mass, at their reference
+  radius :math:`a` and gravitational parameter :math:`GM`:
+  :math:`\Delta C_{\ell m} = -(a/GM)(b/a)^{\ell+1}\phi_{\ell m}/\sqrt{4\pi}`,
+  and :math:`\Delta S_{\ell m}` likewise.
+* GNSS observes the surface displacement at the stations in east, north and
+  up, its horizontal part :math:`\nabla_1 V` included, in the frame of the
+  data (below).
+
+Evaluation at a point is bounded only on fields of Sobolev order above one on
+the sphere, so the observables of tide gauges, altimetry at points and GNSS
+must take values in such a space. The displacement's norm weights the
+coefficients of :math:`V` by :math:`\ell(\ell+1)`, so :math:`\nabla_1 V` has
+the regularity of :math:`U` and one order serves both. A finite set of
+coefficients is bounded on any of the spaces.
+
+The frame of GNSS data
+^^^^^^^^^^^^^^^^^^^^^^
+
+A response's displacement is in the frame of the centre of mass. A GNSS
+solution realises its own frame, which differs from it by a Helmert
+transformation: a translation :math:`\mathbf{T}`, a small rotation
+:math:`\mathbf{R}` and a change of scale :math:`s`, or their rates for
+velocities. At a station :math:`\mathbf{x} = b\,\hat{\mathbf{r}}` it adds
+
+.. math::
+
+   \delta\mathbf{u} = \mathbf{T} + s\,\mathbf{x} + \mathbf{R}\times\mathbf{x},
+
+whose east, north and up components are
+
+.. math::
+
+   \delta u_e = \mathbf{T}\cdot\hat{\mathbf{e}} + b\,\mathbf{R}\cdot\hat{\mathbf{n}},
+   \qquad
+   \delta u_n = \mathbf{T}\cdot\hat{\mathbf{n}} - b\,\mathbf{R}\cdot\hat{\mathbf{e}},
+   \qquad
+   \delta u_r = \mathbf{T}\cdot\hat{\mathbf{r}} + b\,s.
+
+As a field on the sphere the translation is
+:math:`(\mathbf{T}\cdot\hat{\mathbf{r}})\,\hat{\mathbf{r}} +
+\nabla_1(\mathbf{T}\cdot\hat{\mathbf{r}})`, of degree 1 with :math:`V = U`: a
+change of origin changes the degree-1 displacement by equal amounts in
+:math:`U` and :math:`V`, and only their difference is independent of it. The
+scale is a degree-0 vertical field. The rotation is a rigid toroidal motion,
+which no response holds, the response of a spherically symmetric Earth to a
+surface load being spheroidal. ``HelmertTransformation`` is the design matrix
+:math:`A` from the :math:`k` chosen parameters to the station data, with the
+translation a length, the rotation in radians and the scale a ratio, in
+Earth-fixed axes.
+
+``GnssObservationModel`` takes the frame in one of three ways.
+
+* Without a frame, the data are taken to be in the centre-of-mass frame.
+* As nuisance parameters, :math:`h` joins the model space,
+  :math:`d = F u + A h + e` on the direct sum, and a prior on :math:`h`,
+  independent of that on :math:`u`, states how well the frame is known.
+* Frame-invariant, the data are reduced to :math:`Z^{\mathsf T} d`, with
+  :math:`Z` an orthonormal basis of the orthogonal complement of the range of
+  :math:`A`. Since :math:`Z^{\mathsf T}A = 0`, the reduced data
+  :math:`Z^{\mathsf T}F u + Z^{\mathsf T}e` do not depend on the frame, and
+  their noise has the covariance :math:`Z^{\mathsf T}CZ`, of full rank
+  :math:`3N - k` for :math:`N` stations.
+
+The invariant form is the nuisance form with no prior information on the
+frame. Integrating the nuisance likelihood over :math:`h` under a flat prior
+leaves the quadratic form of
+
+.. math::
+
+   C^{-1} - C^{-1}A\,(A^{\mathsf T}C^{-1}A)^{-1}A^{\mathsf T}C^{-1}
+   = Z\,(Z^{\mathsf T}CZ)^{-1}Z^{\mathsf T}
+
+in :math:`d - F u`, which is the likelihood of :math:`Z^{\mathsf T}d`. A flat
+prior is the singular limit of the nuisance form; the invariant form reaches
+it with a covariance of full rank and :math:`k` fewer data. The nuisance form
+is the one to use when the frame is partly known, or its parameters are
+wanted.
 
 
 References

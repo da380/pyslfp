@@ -1109,6 +1109,7 @@ run resolves its rheology, so their disagreement is a diagnostic of the forward
 resolution.
 
 \subsection{The discrete adjoint of a step}
+\label{sec:discadj}
 
 Per degree, let $\mathsf{K}$ be the symmetric effective system of the step,
 $\mathsf{D}$ the map from a degree solution to the nodal strain scalars,
@@ -1165,6 +1166,7 @@ construction applies about the trajectory, with the recorded $C_{n}$ in place
 of $C_{0}$.
 
 \subsection{The continuous adjoint}
+\label{sec:contadj}
 
 Between observation times the adjoint state evolves by the forward equations
 without load, in reversed time, so it is stepped by the forward machinery. At
@@ -1225,6 +1227,7 @@ change; an objective on the absolute sea level $S_{0}+\xi$ adds the sum of its
 own sea level duals.
 
 \subsection{Relaxation times and viscosity}
+\label{sec:visckernel}
 
 With the forward trajectory recorded, the adjoints also return
 $\partial J/\partial\tau_{k}^{-1}(r)$ for each branch, the one-dimensional reduction
@@ -1250,6 +1253,237 @@ system positive definite. Backward Euler inverts explicitly,
 $\mathbf{m}^{n} = (1+h)\mathbf{m}^{n+1} - h\,\mathbf{d}^{n+1}$. Running dissipation
 backwards amplifies rounding by $e^{h}$ per branch and step, so the sum of $h$
 across a gap is the number of digits spent.
+
+\subsection{The tangent-linear problem}
+\label{sec:tangent}
+
+The kernels above are the components of the derivative of the map from the
+model parameters to the responses. The operator form of the evolution needs
+the derivative's forward action as well, the tangent-linear problem, and the
+structure of both is clearest when the forward problem is written as one
+linear system. Per degree, with $\mathsf{K}_{U}$ the system assembled with the
+unrelaxed moduli, $\mathsf{D}$ the strain map, $\mathsf{W}_{k}$ the weights of
+branch $k$ and $\Lambda_{k}$ the diagonal of its nodal inverse relaxation
+times $\tau_{k}^{-1}$, the forward problem of Section~\ref{sec:visco},
+continuous in time, is
+\begin{equation}
+\mathsf{K}_{U}\mathbf{x} = \sum_{k}\mathsf{D}^{\mathsf T}\mathsf{W}_{k}\mathbf{m}_{k}
+ + \mathbf{f}_{\sigma}\sigma + \mathbf{f}_{\psi}\psi,\qquad
+\dot{\mathbf{m}}_{k} = \Lambda_{k}\,(\mathsf{D}\mathbf{x}-\mathbf{m}_{k}),\qquad
+\mathbf{m}_{k}(t_{0}) = 0,
+\label{eq:forwardlinear}
+\end{equation}
+with $\mathbf{f}_{\sigma}$ and $\mathbf{f}_{\psi}$ the unit right-hand sides of
+a load and a tide, closed at each time by the sea level equation of
+Section~\ref{sec:sle} with the ocean function $C(t)$ and the rotational
+balance of Section~\ref{sec:rotation}, which return the load $\sigma$ and the
+centrifugal coefficients $\psi$ from the surface values of $\mathbf{x}$ and the
+direct load
+\begin{equation}
+\zeta_{d} = \rho_{i}(1-C)\,I - \rho_{i}(1-C_{0})\,I_{0} + \rho_{w}(C-C_{0})\,S_{0},
+\label{eq:directload}
+\end{equation}
+the ocean's own response $\rho_{w}C\xi$ being part of the closure. For a given
+history $C(t)$ and given $\Lambda$ every relation is linear, so the whole, over
+the interval, is one linear system
+\begin{equation}
+\mathcal{M}(\Lambda)\,y = \mathcal{B}\,\zeta_{d},\qquad y = (\mathbf{x},\mathbf{m},\sigma,\psi),
+\label{eq:system}
+\end{equation}
+in which $\Lambda$ enters the internal-variable rows alone, and linearly, while
+$I$ and $S_{0}$ enter the right-hand side alone, through \eqref{eq:directload}.
+The responses are linear in $y$.
+
+The viscosity is parameterised by $\chi_{k} = \log(\eta_{k}/\eta_{0})$ for each
+branch, $\eta_{0}$ the unit of viscosity, so that with $\mu_{k}$ fixed
+$\delta\tau_{k}^{-1} = -\tau_{k}^{-1}\delta\chi_{k}$. Perturbing the parameters
+about a trajectory, with the ocean functions of that trajectory held, gives the
+tangent-linear problem
+\begin{equation}
+\mathcal{M}\,\delta y = \mathcal{B}\,\delta\zeta_{d} - \mathcal{M}'[\delta\Lambda]\,y,
+\label{eq:tangent}
+\end{equation}
+where $\mathcal{M}'[\delta\Lambda]$, the derivative of the system in the
+relaxation times, acts in the internal-variable rows only. Written out it is
+the forward problem \eqref{eq:forwardlinear} once more,
+\begin{gather}
+\mathsf{K}_{U}\,\delta\mathbf{x} = \sum_{k}\mathsf{D}^{\mathsf T}\mathsf{W}_{k}\,\delta\mathbf{m}_{k}
+ + \mathbf{f}_{\sigma}\delta\sigma + \mathbf{f}_{\psi}\delta\psi,\notag\\
+\delta\dot{\mathbf{m}}_{k} = \Lambda_{k}\,(\mathsf{D}\,\delta\mathbf{x} + \mathbf{q}_{k} - \delta\mathbf{m}_{k}),\qquad
+\mathbf{q}_{k} = -(\mathsf{D}\mathbf{x}-\mathbf{m}_{k})\,\delta\chi_{k},
+\label{eq:tangentvisco}
+\end{gather}
+closed by the same sea level equation with the ocean functions prescribed from
+the trajectory, and driven by the direct load
+\begin{equation}
+\delta\zeta_{d} = \rho_{i}(1-C)\,\delta I - \rho_{i}(1-C_{0})\,\delta I_{0}
+ + \rho_{w}(C-C_{0})\,\delta S_{0}.
+\label{eq:tangentload}
+\end{equation}
+Three things change, then: the shorelines are prescribed, the direct load is
+the perturbation's, and the drive of each branch is shifted by $\mathbf{q}_{k}$,
+a known function of time built from the trajectory. The forward stepper
+integrates it, as it integrates the continuous adjoint; in the exponential
+trapezoid $\mathbf{q}_{k}$ enters with the strain, linear in time over a step,
+so that $\alpha_{k}\mathbf{q}_{k}^{n}+\beta_{k}\mathbf{q}_{k}^{n+1}$ joins the
+known part $\tilde{\mathbf{m}}_{k}$ of the update and the elimination of
+$\delta\mathbf{d}^{n+1}$ is unchanged.
+
+Holding the ocean functions is exact, not an approximation of the derivative:
+the variation of the ocean function with sea level is a line distribution on
+the shoreline, and it multiplies $\rho_{w}S-\rho_{i}I$, which vanishes there, so
+the singular terms cancel \citep[eqs 51--53 and 62--63]{YuEtAl2025}. The term
+$\rho_{w}(C-C_{0})\,\delta S_{0}$ of \eqref{eq:tangentload} is all that the
+initial sea level contributes, and under frozen shorelines it vanishes with
+the map's dependence on $S_{0}$. On the grid the ocean function flips cell by
+cell, and the map is piecewise affine in $I$ and $S_{0}$, the tangent-linear
+problem being its derivative on each piece.
+
+The adjoint of the tangent-linear operator is the continuous adjoint problem
+of Section~\ref{sec:contadj}. For an objective $J = \langle g, y\rangle$,
+\eqref{eq:tangent} gives
+\begin{equation}
+\delta J = \langle\lambda, \mathcal{B}\,\delta\zeta_{d}\rangle
+ - \langle\lambda, \mathcal{M}'[\delta\Lambda]\,y\rangle,\qquad
+\mathcal{M}^{\mathsf T}\lambda = g,
+\label{eq:duality}
+\end{equation}
+and $\mathcal{M}^{\mathsf T}\lambda = g$, the transpose of
+\eqref{eq:forwardlinear} with the time derivative reversed by integration by
+parts, is that adjoint problem. Its load dual $\mathcal{B}^{\mathsf T}\lambda$
+paired with \eqref{eq:tangentload} gives the ice and initial sea level
+kernels, eqs (64) and (65) of \citet{YuEtAl2025}, and the second pairing,
+$\sum_{k}\int(\mathsf{W}_{k}\lambda_{k})\cdot(\mathsf{D}\mathbf{x}-\mathbf{m}_{k})\,
+\delta\tau_{k}^{-1}\,\dd t$ with $\lambda_{k}$ the multiplier of the $k$th
+internal-variable equation, is the kernel for the relaxation times of
+Section~\ref{sec:visckernel}, their eq.~(61). The two continuous problems are
+therefore each other's adjoint before either is discretised. The kernel in
+$\chi_{k}$ is $-\tau_{k}^{-1}$ times that in $\tau_{k}^{-1}$, which is
+$\eta_{k}\,\partial J/\partial\eta_{k}$.
+
+The discrete tangent-linear problem is the forward mode of the time-stepped
+map, the counterpart of the reverse mode of Section~\ref{sec:discadj}. In the
+notation there, with a subscript $h$ for the derivative of a scheme weight in
+$h = \Delta t\,\tau^{-1}$ and $\delta h = -h\,\delta\chi$,
+\begin{gather*}
+\delta\tilde{\mathbf{m}} = \mathsf{E}\,\delta\mathbf{m}^{n} + \mathsf{A}\,\delta\mathbf{d}^{n}
+ + (\mathsf{E}_{h}\mathbf{m}^{n} + \mathsf{A}_{h}\mathbf{d}^{n})\,\delta h,\\
+\delta\mathbf{x}_{m} = \mathsf{K}^{-1}\big(\mathsf{D}^{\mathsf T}\mathsf{W}\,\delta\tilde{\mathbf{m}}
+ - \delta\mathsf{K}\,\mathbf{x}\big),\qquad
+\delta\mathsf{K} = \sum_{k}\varphi_{1,k}'\,\delta h_{k}\,\mathsf{D}^{\mathsf T}\mathsf{W}_{k}\mathsf{D},\\
+(\delta\sigma,\delta\psi) = \mathcal{L}\big(\delta\zeta_{d,n+1}, \mathsf{P}\,\delta\mathbf{x}_{m}, \mathbf{q}\cdot\delta\mathbf{x}_{m}\big),\\
+\delta\mathbf{x} = \delta\mathbf{x}_{m} + \mathbf{x}_{\sigma}\delta\sigma^{\mathsf T} + \mathbf{x}_{\psi}\delta\psi^{\mathsf T},\qquad
+\delta\mathbf{d}^{n+1} = \mathsf{D}\,\delta\mathbf{x},\qquad
+\delta\mathbf{m}^{n+1} = \delta\tilde{\mathbf{m}} + \mathsf{B}\,\delta\mathbf{d}^{n+1} + \mathsf{B}_{h}\mathbf{d}^{n+1}\,\delta h,
+\end{gather*}
+$\delta\mathsf{K}$ being the derivative of the effective system through
+$\mu_{\mathrm{eff}}$, the branch bilinear form weighted by $\varphi_{1}'$. With
+$\delta h = 0$ this is the forward step driven by the tangent-linear load,
+which is also what the scheme makes of \eqref{eq:tangentvisco} with
+$\mathbf{q}_{k}=0$: in $I$ and $S_{0}$ the two methods coincide. In $\chi$ they
+differ, one differentiating the weights where the other discretises
+$\mathbf{q}_{k}$, by the order of the scheme, as the two adjoints do. The
+tangent-linear problems need $\mathbf{x}$ and $\mathbf{m}$ at every node, for
+$\mathbf{q}_{k}$ or for the weight terms; from a checkpointed trajectory the
+gaps are refilled by forward steps, which are exact, without the backward
+amplification of Section~\ref{sec:visckernel}.
+
+\subsection{Second derivatives}
+\label{sec:second}
+
+\citet{YuEtAl2025} derive the second-order adjoint equations of the GIA
+problem. In the form \eqref{eq:system} they follow from differentiating
+\eqref{eq:tangent} once more. Let $u$ and $v$ be two perturbations of the
+parameters, $\delta_{u}y$ and $\delta_{v}y$ their tangent-linear solutions. The
+system is linear in $\Lambda$, but $\Lambda$ is not linear in $\chi$:
+$\delta_{uv}\Lambda = \Lambda\,\delta_{u}\chi\,\delta_{v}\chi$. So
+\begin{equation}
+\mathcal{M}\,\delta_{uv}y = -\mathcal{M}'[\delta_{u}\Lambda]\,\delta_{v}y
+ - \mathcal{M}'[\delta_{v}\Lambda]\,\delta_{u}y
+ - \mathcal{M}'[\delta_{uv}\Lambda]\,y,
+\label{eq:secondtangent}
+\end{equation}
+the second-order tangent-linear problem: the forward problem with no direct
+load, the shorelines prescribed, and the drive of branch $k$ shifted by
+\begin{equation}
+\mathbf{q}^{uv}_{k} = -(\mathsf{D}\,\delta_{v}\mathbf{x}-\delta_{v}\mathbf{m}_{k})\,\delta_{u}\chi_{k}
+ - (\mathsf{D}\,\delta_{u}\mathbf{x}-\delta_{u}\mathbf{m}_{k})\,\delta_{v}\chi_{k}
+ + (\mathsf{D}\mathbf{x}-\mathbf{m}_{k})\,\delta_{u}\chi_{k}\,\delta_{v}\chi_{k}.
+\label{eq:qsecond}
+\end{equation}
+It vanishes unless $u$ or $v$ perturbs the viscosity: with the shorelines held
+the map is affine in $I$ and $S_{0}$, and under frozen shorelines with the
+viscosity fixed it is linear.
+
+For an objective $J = \Phi(F(p))$, with $F$ the map from the parameters $p$ to
+the responses, the Hessian acts on $v$ as
+\begin{equation}
+H v = F'^{*}\,\Phi''\,F' v + \big(F''[v,\cdot]\big)^{*}\,\Phi',
+\label{eq:hessian}
+\end{equation}
+the first term needing the tangent-linear and adjoint problems alone. The
+second is what the second-order adjoint computes. With $g = \Phi'(F(p))$ and
+$\lambda$ its first-order adjoint, pairing \eqref{eq:secondtangent} with $g$
+and turning the middle term through \eqref{eq:tangent} for $u$,
+\begin{equation}
+\begin{aligned}
+\langle g, \delta_{uv}y\rangle
+ ={}& -\langle\mu, \mathcal{B}\,\delta_{u}\zeta_{d}\rangle
+ + \langle\mu, \mathcal{M}'[\delta_{u}\Lambda]\,y\rangle
+ - \langle\lambda, \mathcal{M}'[\delta_{u}\Lambda]\,\delta_{v}y\rangle
+ - \langle\lambda, \mathcal{M}'[\delta_{uv}\Lambda]\,y\rangle,\\
+\mathcal{M}^{\mathsf T}\mu ={}& \mathcal{M}'[\delta_{v}\Lambda]^{\mathsf T}\lambda.
+\end{aligned}
+\label{eq:secondadjoint}
+\end{equation}
+The second-order adjoint variable $\mu$ solves the adjoint problem with no
+measurement, forced instead by the first-order adjoint and $v$'s viscosity
+perturbation: $\mathcal{M}'[\delta_{v}\Lambda]\,y$ depends on $\mathbf{x}$ and
+on $\mathbf{m}$, so its transpose applied to $\lambda$ forces the equilibrium
+rows, like a memory force built from
+$\Lambda_{k}\,\delta_{v}\chi_{k}\,\lambda_{k}$, and the internal-variable
+rows, by the same quantity with the opposite sign. Reading off the components
+of $\langle g,\delta_{uv}y\rangle$ as a functional of $u$: in $I$ and $S_{0}$
+it is the load dual $-\mathcal{B}^{\mathsf T}\mu$ of the second-order adjoint,
+paired as in \eqref{eq:tangentload}; in $\chi_{k}$ it is three terms, the
+second-order adjoint paired with $\mathsf{D}\mathbf{x}-\mathbf{m}_{k}$, the
+first-order adjoint paired with the tangent-linear
+$\mathsf{D}\,\delta_{v}\mathbf{x}-\delta_{v}\mathbf{m}_{k}$, and the
+first-order adjoint paired with
+$(\mathsf{D}\mathbf{x}-\mathbf{m}_{k})\,\delta_{v}\chi_{k}$, each with the
+branch weights and the factor $-\tau_{k}^{-1}$ of the log parameterisation.
+These are the three terms of eq.~(115) of \citet{YuEtAl2025}, and the load
+duals those of their eqs (116) and (117), without the terms discussed next.
+A Hessian-vector product therefore costs four runs: the forward run and the
+first-order adjoint, which the gradient already needs, the tangent-linear run
+for $v$ and the second-order adjoint sweep.
+
+\paragraph{What holding the shorelines omits.} The cancellation that makes
+the tangent-linear problem exact fails at second order. The coefficient
+$\rho_{w}S-\rho_{i}I$ of the ocean function's variation is itself perturbed
+by $u$ and $v$, and its perturbation does not vanish on the shoreline, so the
+second-order adjoint load and the Hessian kernels of \citet[eqs 112, 116 and
+117]{YuEtAl2025} carry line distributions on the shorelines at every time, and
+one on the initial shoreline from the dependence of $C_{0}$ on $S_{0}$ and
+$I_{0}$: a load perturbation moves the shoreline, and the moved shoreline
+changes the ocean load. Equations \eqref{eq:secondtangent} and
+\eqref{eq:secondadjoint} are Yu et al.'s with those terms dropped, the second
+derivative of the map with the ocean functions held, which on the grid is
+the second derivative of each affine piece. Evaluating the omitted terms
+needs the shoreline located, with the normal derivatives of $S$ and $I$
+across it and line integrals along it, which \citet{YuEtAl2025} leave to
+future work; so does the library. Under frozen shorelines nothing is omitted.
+Yu et al.'s approximate kernels, their eqs (118)--(120), drop the
+second-order variables altogether and keep the first term of
+\eqref{eq:hessian}, the Gauss--Newton Hessian.
+
+The discrete second derivative is the forward mode of
+Section~\ref{sec:discadj} differentiated once more, with the second
+derivatives of the scheme weights in $h$, and its adjoint the reverse mode
+of that; the continuous one discretises \eqref{eq:secondtangent} and
+\eqref{eq:secondadjoint} by the forward stepper, as at first order. The
+discrete pair are exact transposes, so the Hessian they give is symmetric to
+rounding; the continuous pair are symmetric to the order of the scheme.
 
 \subsection{Decay times}
 

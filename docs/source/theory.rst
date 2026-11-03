@@ -546,6 +546,44 @@ continuous one integrates the adjoint internal variables against the forward
 scalars. ``IceKernels.viscosity`` maps them to viscosity through
 :math:`\partial\tau^{-1}/\partial\eta = -\tau^{-2}/\mu`.
 
+The tangent-linear problem and second derivatives
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For a given history of ocean functions :math:`C(t)` and given relaxation
+times, the forward problem is one linear system over the run's interval,
+:math:`\mathcal{M}(\Lambda)\,y = \mathcal{B}\,\zeta_d`, in which the inverse
+relaxation times :math:`\Lambda` enter the internal-variable equations alone
+and the ice history and the initial sea level enter the direct load alone,
+:math:`\zeta_d = \rho_i(1-C)I - \rho_i(1-C_0)I_0 + \rho_w(C-C_0)S_0`. With the
+viscosity parameterised as :math:`\chi_k = \log(\eta_k/\eta_0)` per branch, the
+tangent-linear problem, the derivative's forward action, is the forward
+problem once more: the shorelines prescribed from the trajectory, the direct
+load replaced by the perturbation's, and the drive of each branch shifted by
+:math:`\mathbf{q}_k = -(\mathbf{d}-\mathbf{m}_k)\,\delta\chi_k`, a known function
+of time. Holding the ocean functions is exact: their variation is a line
+distribution on the shoreline multiplying :math:`\rho_w S - \rho_i I`, which
+vanishes there (Yu et al. 2025). The adjoint of the tangent-linear operator is
+the continuous adjoint problem, so the two are each other's adjoint before
+either is discretised. The discrete tangent-linear problem is the forward mode
+of the time-stepped map; in the ice history and the initial sea level it
+coincides with the continuous one, and in the viscosity the two differ by the
+order of the scheme, as the adjoints do.
+
+Differentiating once more gives the second derivative of the map with the
+ocean functions held. It vanishes unless a direction perturbs the viscosity,
+since the map is then affine in the ice history and the initial sea level,
+and its adjoint is the second-order adjoint problem of Yu et al. (2025): the
+adjoint problem forced not by a measurement but by the first-order adjoint and
+the viscosity perturbation. A Hessian-vector product of any objective on the
+map costs four runs: the forward run, the first-order adjoint, a tangent-linear
+run and the second-order adjoint sweep. Under migrating shorelines the
+cancellation that makes the first derivative exact fails at second order, and
+Yu et al.'s second-order load and Hessian kernels carry line distributions on
+the shorelines, which the library omits: what it computes is the second
+derivative of the map with the ocean functions held, exact under frozen
+shorelines. Their approximate kernels, which drop the second-order variables,
+are the Gauss-Newton Hessian.
+
 Decay times
 ^^^^^^^^^^^
 

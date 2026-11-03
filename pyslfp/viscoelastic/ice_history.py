@@ -33,7 +33,7 @@ from pyshtools import SHGrid
 
 from pygeoinf import DirectSum, LinearOperator
 
-from ..core.history import FieldHistory, FieldHistorySpace
+from ..core.history import FieldHistorySpace
 from ..core.response import GRDResponse, GRDSpace
 from ..core.spaces import lebesgue_response_space
 from ..ice import BaseIceModel
@@ -71,7 +71,7 @@ class _NodalIceModel(BaseIceModel):
         return SHGrid.from_array(values, grid=template.grid)
 
 
-class IceHistoryOperator(LinearOperator[FieldHistory, list[GRDResponse]]):
+class IceHistoryOperator(LinearOperator[np.ndarray, list[GRDResponse]]):
     """
     The map from an ice thickness history to the responses at observation
     dates, under frozen shorelines: a pygeoinf `LinearOperator` from a
@@ -188,15 +188,15 @@ class IceHistoryOperator(LinearOperator[FieldHistory, list[GRDResponse]]):
         """The response space at each observation date."""
         return self._response_space
 
-    def thickness_at_dates(self, history: FieldHistory, /) -> list[SHGrid]:
+    def thickness_at_dates(self, history: np.ndarray, /) -> list[SHGrid]:
         """The history's thickness at the run's dates."""
         field_space = self.domain.field_space
-        values = self._basis @ history.components
+        values = self._basis @ history
         return [field_space.from_components(row) for row in values]
 
     # -- the maps ----------------------------------------------------------
 
-    def _value(self, history: FieldHistory) -> list[GRDResponse]:
+    def _value(self, history: np.ndarray) -> list[GRDResponse]:
         ice_model = _NodalIceModel(
             self._dates,
             self.thickness_at_dates(history),
@@ -212,7 +212,7 @@ class IceHistoryOperator(LinearOperator[FieldHistory, list[GRDResponse]]):
         # the snapshots come in the order of the run's dates
         return [snapshots[node].response for node in self._observation_nodes]
 
-    def _adjoint_value(self, duals: list[GRDResponse]) -> FieldHistory:
+    def _adjoint_value(self, duals: list[GRDResponse]) -> np.ndarray:
         measurement = dict(zip(self._observation_dates, duals))
         kernels = self._evolution.adjoint_ice_history(
             self._dates,
@@ -224,6 +224,4 @@ class IceHistoryOperator(LinearOperator[FieldHistory, list[GRDResponse]]):
         field_space = domain.field_space
         thickness = np.stack([field_space.to_components(d) for d in kernels.thickness])
         derivative = self._basis.T @ thickness
-        return FieldHistory(
-            domain, derivative / domain.metric_values.reshape(domain.shape)
-        )
+        return domain.from_components(domain.solve_gram(derivative.reshape(-1)))

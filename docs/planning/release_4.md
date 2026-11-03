@@ -122,8 +122,8 @@ the ready responses (with `horizontal_response`, a ready V) and the
 tangential traction `tangential_load`; `solve_nonlinear_response` returns the
 new state and a `GRDResponse`; and `adjoint_generalised_solve` takes
 `horizontal_dual`. Fields on the sphere through time: `FieldHistorySpace`
-(`pyslfp.core.history`), the product of a pygeoinf interval space and a
-sphere space with the product metric, and its vectors, `FieldHistory`. The
+(`pyslfp.core.history`), the pygeoinf tensor product of an interval space
+and a sphere space, whose vectors are (K, N) arrays of components. The
 load and response space builders (`lebesgue_load_space`,
 `sobolev_load_space`, `lebesgue_response_space`, `sobolev_response_space`) in
 `pyslfp.core`. `ModelSetup.geocentric_sea_level`, the observable of

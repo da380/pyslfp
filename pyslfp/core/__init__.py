@@ -9,7 +9,7 @@ but the table it is handed.
 
 `response` holds the response to a load, the displacement included, as one
 spectral object (`GRDResponse`, `SurfaceDisplacement`) with its Hilbert space,
-and `history` a field through time (`FieldHistory`) with its space. `spaces`
+and `history` the space of fields through time (`FieldHistorySpace`). `spaces`
 builds the load and response spaces over a model's sphere, `observables`
 reads physical quantities off a response (the centrifugal potential, the
 geocentric sea level), and `spatial` projects and averages fields over the
@@ -42,7 +42,7 @@ from .response import (
     SurfaceDisplacement,
     SurfaceDisplacementSpace,
 )
-from .history import FieldHistory, FieldHistorySpace
+from .history import FieldHistorySpace
 from .spaces import (
     check_load_space,
     check_response_space,
@@ -79,7 +79,6 @@ __all__ = [
     "GRDSpace",
     "SurfaceDisplacement",
     "SurfaceDisplacementSpace",
-    "FieldHistory",
     "FieldHistorySpace",
     "lebesgue_load_space",
     "lebesgue_response_space",

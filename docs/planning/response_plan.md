@@ -202,14 +202,13 @@ considered, so a smooth time basis serves. The time space's mesh is padded at
 both ends, so that no end condition marks the history inside its interval,
 the present included.
 
-The space is built in pyslfp, in core beside `GRDSpace`, as
-`FieldHistorySpace`: a `DiagonalMetricSpace` over the product of a pygeoinf
-interval space and a pygeoinf sphere space, whose vectors, `FieldHistory`,
-hold the components as a K x N array. A generic tensor product is possible
-only when both factors expose their coordinates, as these do, and the
-product metric is the natural one here. pygeoinf is to provide tensor
-products of coordinate spaces; `FieldHistorySpace` then rests on them, a
-change inside the class that leaves its interface as it is. A time-local forward map, such as an elastic
+The space is `FieldHistorySpace`, in core beside `GRDSpace`: pygeoinf's
+`TensorProduct` of an interval space and a sphere space, whose vectors are
+K x N arrays of components. A generic tensor product is possible only when
+both factors expose their coordinates, as these do, and the product metric
+is the natural one here; pygeoinf 2.2.0 provides it, with the contraction
+that evaluates a history at a time, the lift of a map on the field space to
+one acting at each time, and Gaussian measures with separable covariances. A time-local forward map, such as an elastic
 fingerprint at each epoch of a GRACE series, commutes with the time basis:
 K solves give the whole history whatever the number of epochs.
 

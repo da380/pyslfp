@@ -28,7 +28,12 @@
    discrete one, as the adjoints are. The operator takes `method="discrete"`
    or `method="continuous"`, which selects the tangent-linear problem and the
    adjoint together.
-6. **3D viscosity kernels are kernels only.** The derivative with respect to
+6. **Second derivatives.** The operator supplies its second derivative,
+   F''(x)[v, .], with the second-order tangent-linear problem forwards and the
+   second-order adjoint problem (Yu et al. 2025) backwards, by either method.
+   pygeoinf then builds exact Hessian-vector products for any objective on
+   the operator, and its Laplace approximations and Newton methods use them.
+7. **3D viscosity kernels are kernels only.** The derivative with respect to
    laterally varying viscosity about a radial model exists, but no forward map
    leaves the radial models, so it is a result computed from the adjoint, not
    an operator's domain.
@@ -62,10 +67,14 @@ Under frozen shorelines C_0 is an input of the operator, not a function of the
 arguments, so the shorelines cannot flip as S_0 changes. The value is then
 linear in I, independent of S_0, and nonlinear in chi.
 
-Under migrating shorelines the map is piecewise smooth: it is differentiable
-wherever no cell changes from land to ocean or back, and its derivative there
-holds the forward trajectory's ocean functions C(t) fixed. This is the
-derivative the adjoint already computes.
+Under migrating shorelines the derivative holds the forward trajectory's
+ocean functions C(t) fixed, which is the derivative the adjoint already
+computes. In the continuum this is exact: the variation of the ocean function
+is a line distribution on the shoreline, and it multiplies rho_w S - rho_i I,
+which vanishes there (Yu et al. 2025, eqs 51-53 and 62-63), so the singular
+terms cancel. On the grid the map is piecewise affine in I and S_0, the
+pieces separated by cells flipping between land and ocean, and the C-held
+derivative is its derivative on each piece.
 
 ## The log-viscosity space
 
@@ -186,6 +195,71 @@ that pygeoinf's linear machinery applies; this is `IceHistoryOperator`, which
 becomes this special case. It is new in 4.0 and unreleased, so it changes
 without a deprecation.
 
+## Second derivatives
+
+pygeoinf builds the exact Hessian of an objective from the forward operator's
+`second_derivative(x, v)`, which is F''(x)[v, .] as a `LinearOperator`. Its
+MAP objectives, Laplace approximations, `NewtonCG` and `TrustRegionNewton` use
+it when the operator supplies it, and fall back to Gauss-Newton otherwise. For
+J = Phi(F(x)),
+
+    H v = F'* Phi'' F' v + (F''(x)[v, .])* Phi'(F(x)),
+
+and the second term is what a second-order adjoint computes: given a
+direction v and the dual g = Phi'(F(x)), the adjoint of u -> F''(x)[v, u]. The
+first term needs only the first-order problems. So the operator's second
+derivative has:
+
+- forward: the second-order tangent-linear problem, the forward problem once
+  more, with the trajectory's shorelines held, no direct load, and each
+  branch's drive shifted by
+
+      q2_k = -(d_u - m_u) dchi_v,k - (d_v - m_v) dchi_u,k
+             + (d - m_k) dchi_u,k dchi_v,k,
+
+  from d^2 itau = itau dchi dchi, with (d_u, m_u) and (d_v, m_v) the
+  tangent-linear states of u and v;
+- adjoint: the second-order adjoint problem, stepped backwards in the same
+  sweep as the first-order adjoint of g, with sources from the tangent-linear
+  state of v, which is reconstructed from checkpoints like the forward state.
+
+What is built is the second derivative of the C-held map. With the
+trajectory's shorelines held, the map is affine in the ice history and the
+initial sea level, so F''(x)[v, u] vanishes unless v or u moves the
+viscosity: the second-order terms are the viscosity block and its coupling
+to the ice history and the initial sea level, the trade-off between ice and
+viscosity that a joint inversion meets. Under frozen shorelines this is the
+whole second derivative. Under migrating shorelines it is not: the
+cancellation that makes the C-held first derivative exact fails at second
+order, because the coefficient rho_w S - rho_i I of the ocean function's
+variation is itself perturbed, and its perturbation does not vanish on the
+shoreline. Yu et al.'s second-order adjoint load (eq. 112) and Hessian
+kernels for I and S_0 (eqs 116-117) therefore carry line distributions on
+the shorelines at every time, and one on the initial shoreline: a load
+perturbation moves the shoreline, and the moved shoreline changes the ocean
+load. These terms are omitted. Evaluating them needs the shoreline located on
+the grid, with the normal derivatives of S and I and line integrals along it,
+which Yu et al. leave to future work. The theory note derives the C-held
+second-order problems from Yu et al.'s equations and records the omitted
+terms; the docs state the omission beside the operator. An inversion for the
+ice history and the initial sea level alone under frozen shorelines gains
+nothing over Gauss-Newton, and the frozen operator with the viscosity fixed
+is linear and has no second derivative.
+
+Both methods apply here too: the discrete second-order adjoint is the reverse
+mode of the discrete tangent-linear step, and needs the second derivatives of
+the scheme weights in h; the continuous one discretises the second-order
+adjoint equations with the shoreline terms dropped, so that, as at first
+order, the two methods differ by the time discretisation alone. A
+Hessian-vector product costs four runs in all (Yu et al. 2025, Section 4):
+the forward run and the first-order adjoint, which the linearisation and the
+gradient already hold, a tangent-linear run for v, and the second-order
+adjoint sweep. pygeoinf's Hessian uses only the adjoint of F''(x)[v, .]; its
+forward action, which costs two tangent-linear runs and a second-order one,
+serves the checks. Yu et al.'s approximate kernels (eqs 118-120), which drop
+the second-order variables, are the Gauss-Newton Hessian that pygeoinf builds
+when no second derivative is supplied.
+
 ## Costs
 
 - The value at a new chi rebuilds the `ViscoelasticOperator`: the radial
@@ -195,6 +269,8 @@ without a deprecation.
   level solve per date with the recorded ocean function, plus the forward
   recomputation between checkpoints when chi varies.
 - An adjoint sweep costs about a forward run, as now.
+- A Hessian-vector product costs two runs beyond the linearisation and the
+  gradient (above).
 - Under frozen shorelines with chi fixed nothing needs recording, and the map
   is applied directly.
 
@@ -217,6 +293,15 @@ without a deprecation.
   radial modes are added, as the ice kernel does as time modes are.
 - A rheology with two branches (a Burgers mantle), so that every branch is
   exercised from the start.
+- Second derivatives: the Taylor test on the gradient of a misfit,
+  ||grad J(x + e u) - grad J(x) - e H u|| = O(e^2), for directions in each
+  block; the symmetry of the Hessian, <w, H u> = <H w, u>, to rounding for
+  the discrete method and to the scheme's order for the continuous one;
+  `check_operator` on F''(x)[v, .] and the symmetry F''(x)[v, u] =
+  F''(x)[u, v]; and the vanishing of F'' in the block of the ice history and
+  the initial sea level. The Taylor tests about a migrating-shoreline
+  trajectory use perturbations that move no shoreline, since the omitted
+  terms are exactly those of shoreline motion.
 
 ## Steps
 
@@ -231,10 +316,15 @@ without a deprecation.
    trajectory for the continuous adjoint's viscosity kernel.
 4. **The operator**: value, `linearize`, `method`, `shorelines` and
    `fixing`; `IceHistoryOperator` as its frozen, fixed case.
-5. **The docs**: numerics.rst (the costs, and the agreement of the two
+5. **Second derivatives**: the second-order tangent-linear and adjoint
+   problems, derived in the theory note against Yu et al. (2025) and then
+   implemented by both methods, with the second derivatives of the scheme
+   weights; `second_derivative` on the operator.
+6. **The docs**: numerics.rst (the costs, and the agreement of the two
    methods under refinement), release_4.md and the roadmap.
 
-Later, and separately: the 3D viscosity kernels about a radial model, the
+Later, and separately: the shoreline terms of the second derivative under
+migrating shorelines, above; and the 3D viscosity kernels about a radial model, the
 time integral of the pointwise contraction of the adjoint internal variables
 with d - m, which needs the forward and adjoint fields at every radius,
 multiplied across degrees.

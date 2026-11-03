@@ -2,7 +2,8 @@
 Tests for fields on the sphere through time: the space's axioms and its
 product metric, the field at a time, and evaluation at a time, bounded above
 order one half in time and free of an end condition at the ends of the
-interval.
+interval. The space is a pygeoinf tensor product; what is tested here is
+what the library adds to it.
 """
 
 import numpy as np
@@ -11,7 +12,7 @@ from pygeoinf.interval import Lebesgue as TimeLebesgue
 from pygeoinf.interval import Sobolev as TimeSobolev
 from pygeoinf.testing import check_coordinates, check_operator, check_space
 
-from pyslfp.core import EarthState, FieldHistory, FieldHistorySpace
+from pyslfp.core import EarthState, FieldHistorySpace
 from pyslfp.core import (
     lebesgue_load_space,
     sobolev_load_space,
@@ -70,8 +71,8 @@ def test_the_metric_is_the_product(state):
     space = FieldHistorySpace(time_space, field_space)
     a, b = _random(time_space, 1), _random(time_space, 2)
     f, g = _random(field_space, 3), _random(field_space, 4)
-    u = space.from_rank_one(a, f)
-    v = space.from_rank_one(b, g)
+    u = space.rank_one(a, f)
+    v = space.rank_one(b, g)
     expected = time_space.inner_product(a, b) * field_space.inner_product(f, g)
     np.testing.assert_allclose(space.inner_product(u, v), expected, rtol=1e-12)
 
@@ -84,13 +85,13 @@ def test_the_field_at_a_time(state):
     space = FieldHistorySpace(time_space, field_space)
     a = time_space.from_components(np.random.default_rng(5).standard_normal(16))
     f = _random(field_space, 6)
-    u = space.from_rank_one(a, f)
+    u = space.rank_one(a, f)
     for node in time_space.interior_nodes[[0, 7, -1]]:
         value = a[np.argmin(np.abs(time_space.nodes - node))]
         np.testing.assert_allclose(
-            u.at(float(node)).data, value * f.data, rtol=1e-10, atol=1e-14
+            space.at(u, float(node)).data, value * f.data, rtol=1e-10, atol=1e-14
         )
-    assert isinstance(u, FieldHistory)
+    assert u.shape == space.shape
 
 
 @pytest.mark.parametrize("time_kind", ["lebesgue", "sobolev"])
@@ -147,9 +148,9 @@ def test_the_padding_keeps_the_ends_free(state):
     assert ratio > 1.8
 
 
-def test_a_space_without_a_diagonal_metric_is_refused(state):
-    class _Dense:
-        has_diagonal_metric = False
+def test_a_factor_without_coordinates_is_refused(state):
+    class _Opaque:
+        pass
 
-    with pytest.raises(ValueError):
-        FieldHistorySpace(_Dense(), _field_space(state, "lebesgue"))
+    with pytest.raises(TypeError):
+        FieldHistorySpace(_Opaque(), _field_space(state, "lebesgue"))

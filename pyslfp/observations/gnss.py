@@ -279,8 +279,8 @@ class GnssObservationModel(ObservationModel):
       frame is known.
     - "invariant": the data are reduced to Z^T d, the combinations the frame
       cannot change (`HelmertTransformation.frame_reduction`), so that the
-      data space has dimension 3N - k, with N stations, the forward operator
-      is Z^T F and the noise Z^T C Z. This is the nuisance form with no prior
+      data space has dimension N d - k, with N stations and d directions,
+      the forward operator is Z^T F and the noise Z^T C Z. This is the nuisance form with no prior
       information on the frame, without a singular covariance. Station data
       enter as `frame_reduction(d)`.
 

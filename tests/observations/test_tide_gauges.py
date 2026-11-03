@@ -134,7 +134,9 @@ def test_tide_gauge_observation_model_structure(fingerprint_operator, sample_poi
     composite forward operator (Mapping: Load Space -> Euclidean Data Space).
     """
     names = ["A", "B", "C"]
-    model = TideGaugeObservationModel(fingerprint_operator, sample_points, names=names)
+    model = TideGaugeObservationModel.from_fingerprint(
+        fingerprint_operator, sample_points, names=names
+    )
 
     assert model.names == names
     assert model.points == sample_points
@@ -151,7 +153,9 @@ def test_tide_gauge_forward_operator_adjoint(fingerprint_operator, sample_points
     Rigorously tests the adjoint of the fully assembled forward operator
     (PointEval @ Fingerprint).
     """
-    model = TideGaugeObservationModel(fingerprint_operator, sample_points)
+    model = TideGaugeObservationModel.from_fingerprint(
+        fingerprint_operator, sample_points
+    )
     A = model.forward_operator
 
     domain_measure = fingerprint_operator.load_measure_for_testing()
@@ -165,3 +169,25 @@ def test_tide_gauge_forward_operator_adjoint(fingerprint_operator, sample_points
         rtol=1e-4,
         atol=1e-4,
     )
+
+
+def test_the_model_is_its_sampling_of_its_observable(
+    fingerprint_operator, sample_points
+):
+    """The forward operator is the stations' sampling of the observable, the
+    response's relative sea level change, as `tide_gauge_operator` reads it."""
+    model = TideGaugeObservationModel.from_fingerprint(
+        fingerprint_operator, sample_points
+    )
+    load = fingerprint_operator.load_measure_for_testing().sample(
+        rng=np.random.default_rng(1)
+    )
+    expected = tide_gauge_operator(fingerprint_operator.codomain, sample_points)(
+        fingerprint_operator(load)
+    )
+    np.testing.assert_allclose(model.forward_operator(load), expected, rtol=1e-12)
+    np.testing.assert_allclose(
+        model.sampling_operator(model.observable(load)), expected, rtol=1e-12
+    )
+    assert model.model_space == fingerprint_operator.domain
+    assert model.data_space == inf.EuclideanSpace(len(sample_points))

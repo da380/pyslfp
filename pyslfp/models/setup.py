@@ -323,6 +323,22 @@ class ModelSetup:
     #            Through the sea level equation                #
     # ---------------------------------------------------------#
 
+    def response(self, fingerprint: FingerPrintOperator, /) -> LinearOperator:
+        """
+        The response to the set-up's load, into the fingerprint operator's
+        response space: the observable of the members with no direct terms,
+        the displacement and the potential change, which a response space's
+        `projection` reads off.
+
+        Args:
+            fingerprint: The fingerprint operator, on the set-up's load space.
+
+        Raises:
+            ValueError: If the spaces do not match.
+        """
+        self._response_space(fingerprint)
+        return fingerprint @ self._load_operator
+
     def relative_sea_level_change(
         self, fingerprint: FingerPrintOperator, /
     ) -> LinearOperator:

@@ -1,12 +1,12 @@
 """
-Observation models and spectral estimators for GRACE gravimetry.
+GRACE gravimetry: the gravitational potential change as coefficients.
 
-This module provides two distinct ways to link surface mass loads to
-gravitational potential changes:
-
-1. GraceObservationModel: The exact, iterative elastic Sea Level Equation.
-2. WMBMethod: The fast, purely spectral approximation (Wahr, Molenaar, & Bryan, 1998),
-   highly effective for building data-space preconditioners.
+`GraceObservationModel` reads the coefficients of an observable, the
+potential change from a model space, between two degrees; for a response's
+potential member they are read from its components, with no transform.
+`WMBMethod` is the fast spectral approximation of Wahr, Molenaar and Bryan
+(1998), which maps loads to coefficients through the load Love numbers alone
+and serves the data-space preconditioners.
 
 Both report the potential change either in pyslfp's own coefficient
 convention, the default, or as the dimensionless Stokes coefficients that
@@ -20,19 +20,21 @@ import numpy as np
 
 from pygeoinf import (
     LinearOperator,
-    DirectSum,
     EuclideanSpace,
     GaussianMeasure,
     DiagonalLinearOperator,
+    HilbertSpace,
 )
+from pygeoinf.algebra.spaces import ComponentView
 from pygeoinf.symmetric_space.sphere import Lebesgue, Sobolev
 
 from planetmodel import units
 
 from pyslfp.core import EarthModel
-from pyslfp.core.response import POTENTIAL_CHANGE
+from pyslfp.core.response import POTENTIAL_CHANGE, GRDSpace
 from pyslfp.core.spaces import check_load_space, check_response_space
 from pyslfp.elastic.operator import FingerPrintOperator
+from pyslfp.observations.base import Noise, ObservationModel
 
 
 # ================================================================ #
@@ -154,16 +156,39 @@ def _check_convention(convention: str, /) -> None:
 # ================================================================ #
 
 
+def _coefficient_reader(
+    space: HilbertSpace, max_degree: int, min_degree: int, /
+) -> LinearOperator:
+    """
+    The coefficients of degrees `min_degree` to `max_degree`, in this
+    module's convention, read from a space whose components are the radius
+    times them: the response's potential member, the components of a sphere
+    space, read with no transform, or a sphere space itself, whose vectors
+    are analysed first. Both order the components as the convention does.
+    """
+    sphere = space.space if isinstance(space, ComponentView) else space
+    if not isinstance(sphere, (Lebesgue, Sobolev)):
+        raise ValueError("the observable must lie in a sphere space or its components")
+    if not 0 <= min_degree <= max_degree <= sphere.lmax:
+        raise ValueError(
+            f"the degrees {min_degree} to {max_degree} are not within the "
+            f"space's 0 to {sphere.lmax}"
+        )
+    degrees = sphere.degrees
+    indices = np.flatnonzero((degrees >= min_degree) & (degrees <= max_degree))
+    return (1.0 / sphere.radius) * space.coordinate_selection(indices)
+
+
 def grace_observation_operator(
-    response_space: DirectSum,
+    response_space: GRDSpace,
     max_obs_degree: int,
     /,
     *,
     min_obs_degree: int = 2,
 ) -> LinearOperator:
     """
-    Maps the physical response fields to a vector of spherical harmonic
-    coefficients of the gravitational potential change.
+    Maps the response to the coefficients of its gravitational potential
+    change, read from the response's components with no transform.
 
     The coefficients are those of the potential change on the sphere of the
     response space, orthonormal on the unit sphere and in pyslfp's units;
@@ -179,21 +204,24 @@ def grace_observation_operator(
         EuclideanSpace.
     """
     check_response_space(response_space, point_values=False)
-    spatial_to_coeffs = _unit_sphere_coefficient_operator(
-        response_space.field_space, max_obs_degree, min_obs_degree
+    potential = response_space.projection(POTENTIAL_CHANGE)
+    return (
+        _coefficient_reader(potential.codomain, max_obs_degree, min_obs_degree)
+        @ potential
     )
-    return spatial_to_coeffs @ response_space.field_operator(POTENTIAL_CHANGE)
 
 
-class GraceObservationModel:
+class GraceObservationModel(ObservationModel):
     """
-    An observation model linking surface mass loads to GRACE spherical
-    harmonic coefficients via the full, exact elastic Sea Level Equation.
+    GRACE: the gravitational potential change, read as its coefficients
+    between two degrees, in pyslfp's convention or as the Stokes coefficients
+    of GRACE Level-2 products.
     """
 
     def __init__(
         self,
-        fingerprint_operator: FingerPrintOperator,
+        observable: LinearOperator,
+        model: EarthModel,
         max_obs_degree: int,
         /,
         *,
@@ -201,12 +229,18 @@ class GraceObservationModel:
         convention: str = "orthonormal",
         gravitational_parameter: float = GRACE_GRAVITATIONAL_PARAMETER,
         reference_radius: float = GRACE_REFERENCE_RADIUS,
+        noise: Noise = None,
     ):
         """
         Args:
-            fingerprint_operator: The physics operator mapping loads to responses.
-            max_obs_degree: The maximum spherical harmonic degree of the observations.
-            min_obs_degree: The minimum degree to extract (defaults to 2).
+            observable: The potential change, from the model space into the
+                components of a sphere space, as a response space's
+                `projection("potential_change")` gives it, which is read with
+                no transform, or into a sphere space itself.
+            model: The Earth model, whose sphere the observable lies on and
+                whose units the Stokes coefficients are converted from.
+            max_obs_degree: The maximum degree of the observations.
+            min_obs_degree: The minimum degree (defaults to 2).
             convention: "orthonormal" for the potential change's coefficients
                 in pyslfp's convention, "stokes" for the Stokes coefficients
                 of GRACE Level-2 products; see ``stokes_coefficient_operator``.
@@ -214,67 +248,67 @@ class GraceObservationModel:
                 "stokes".
             reference_radius: The product's reference radius in metres, for
                 "stokes".
+            noise: As for `ObservationModel`.
+
+        Raises:
+            ValueError: If the observable is not on the model's sphere.
         """
         _check_convention(convention)
-        self._fingerprint_operator = fingerprint_operator
+        space = observable.codomain
+        sphere = space.space if isinstance(space, ComponentView) else space
+        if getattr(sphere, "lmax", None) != model.lmax or not np.isclose(
+            sphere.radius,
+            model.parameters.mean_sea_floor_radius,
+            rtol=1e-12,
+            atol=0.0,
+        ):
+            raise ValueError("the observable is not on the model's sphere")
+        self._model = model
         self._max_obs_degree = max_obs_degree
         self._min_obs_degree = min_obs_degree
         self._convention = convention
-
-        self._response_to_data_operator = grace_observation_operator(
-            self.fingerprint_operator.codomain,
-            max_obs_degree,
-            min_obs_degree=min_obs_degree,
-        )
+        sampling = _coefficient_reader(space, max_obs_degree, min_obs_degree)
         if convention == "stokes":
-            self._response_to_data_operator = (
+            sampling = (
                 stokes_coefficient_operator(
-                    fingerprint_operator.model,
+                    model,
                     max_obs_degree,
                     min_obs_degree=min_obs_degree,
                     gravitational_parameter=gravitational_parameter,
                     reference_radius=reference_radius,
                 )
-                @ self._response_to_data_operator
+                @ sampling
             )
+        super().__init__(observable, sampling, noise=noise)
 
-        self._forward_operator = (
-            self._response_to_data_operator @ self.fingerprint_operator
-        )
+    @classmethod
+    def from_fingerprint(
+        cls,
+        fingerprint: FingerPrintOperator,
+        max_obs_degree: int,
+        /,
+        **options,
+    ) -> GraceObservationModel:
+        """GRACE observing the response of a fingerprint operator to its load,
+        the potential change read from the response's components; the options
+        are the constructor's."""
+        observable = fingerprint.codomain.projection(POTENTIAL_CHANGE) @ fingerprint
+        return cls(observable, fingerprint.model, max_obs_degree, **options)
 
     @property
     def min_obs_degree(self) -> int:
-        """
-        Returns the minimum observation degree
-        """
+        """The minimum observation degree."""
         return self._min_obs_degree
 
     @property
     def max_obs_degree(self) -> int:
-        """
-        Returns the maximum observation degree
-        """
+        """The maximum observation degree."""
         return self._max_obs_degree
 
     @property
     def convention(self) -> str:
         """The coefficient convention of the observations."""
         return self._convention
-
-    @property
-    def fingerprint_operator(self) -> FingerPrintOperator:
-        """The underlying fingerprint operator."""
-        return self._fingerprint_operator
-
-    @property
-    def response_to_data_operator(self) -> LinearOperator:
-        """The operator from the response space to the observations."""
-        return self._response_to_data_operator
-
-    @property
-    def forward_operator(self) -> LinearOperator:
-        """The composed operator from model space to the observations."""
-        return self._forward_operator
 
 
 # ================================================================ #

@@ -9,7 +9,9 @@ from pygeoinf.testing import check_operator
 
 from pyslfp.core import EarthState
 from pyslfp.elastic import FingerPrintOperator
+from pyslfp.models import ice_and_ocean
 from pyslfp.observations import (
+    AltimetryObservationModel,
     ocean_altimetry_points,
     ice_altimetry_points,
     altimetry_point_operator,
@@ -139,4 +141,53 @@ def test_altimetry_point_operator(fingerprint_operator, sample_points, remove_ro
         trials=2,
         rtol=1e-4,
         atol=1e-4,
+    )
+
+
+def test_the_model_from_a_fingerprint(fingerprint_operator, sample_points):
+    """From a fingerprint operator the model is the points' sampling of the
+    response's geocentric sea level, as `altimetry_point_operator` reads it."""
+    model = AltimetryObservationModel.from_fingerprint(
+        fingerprint_operator, sample_points
+    )
+    load = fingerprint_operator.load_measure_for_testing().sample(
+        rng=np.random.default_rng(3)
+    )
+    expected = altimetry_point_operator(
+        fingerprint_operator.state, fingerprint_operator.codomain, sample_points
+    )(fingerprint_operator(load))
+    np.testing.assert_allclose(model.forward_operator(load), expected, rtol=1e-12)
+    assert model.averaging_operator().codomain == inf.EuclideanSpace(1)
+
+
+def test_the_model_from_a_set_up(fingerprint_operator, sample_points):
+    """With a set-up's geocentric sea level as its observable, the model
+    observes the ice and the sterodynamic sea level together, the latter's
+    direct term included, and passes the adjoint check."""
+    state = fingerprint_operator.state
+    setup = ice_and_ocean(
+        state,
+        fingerprint_operator.domain,
+        observable_space=fingerprint_operator.field_space,
+    )
+    model = AltimetryObservationModel(
+        setup.geocentric_sea_level(fingerprint_operator), sample_points, noise=0.01
+    )
+    assert model.model_space == setup.space
+    b = state.model.parameters.mean_sea_floor_radius
+    measure = inf.GaussianMeasure.from_product(
+        [c.space.heat_measure(0.3 * b) for c in setup.components], domain=setup.space
+    )
+    x = measure.sample(rng=np.random.default_rng(4))
+    expected = fingerprint_operator.field_space.point_evaluation_operator(
+        sample_points
+    )(setup.geocentric_sea_level(fingerprint_operator)(x))
+    np.testing.assert_allclose(model.forward_operator(x), expected, rtol=1e-12)
+    check_operator(
+        model.forward_operator,
+        rng=np.random.default_rng(5),
+        measure=measure,
+        codomain_measure=model.noise,
+        trials=2,
+        rtol=1e-6,
     )

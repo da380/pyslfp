@@ -226,3 +226,15 @@ def test_the_geocentric_sea_level(budget, fingerprint, state):
         trials=2,
         rtol=1e-7,
     )
+
+
+def test_the_response(budget, fingerprint):
+    """The response to the set-up's load, the observable of the members with
+    no direct terms."""
+    x = _sample(budget, 6)
+    response_space = fingerprint.codomain
+    got = budget.response(fingerprint)(x)
+    expected = fingerprint(budget.load_operator(x))
+    np.testing.assert_allclose(
+        response_space.to_components(got), response_space.to_components(expected)
+    )

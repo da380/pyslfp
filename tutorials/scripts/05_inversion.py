@@ -56,7 +56,9 @@ def build(lmax):
         response_parameters=(SPACE_ORDER, space_scale),
     )
     ice_space = fingerprint.domain
-    gauges = TideGaugeObservationModel(fingerprint, points, names=names)
+    gauges = TideGaugeObservationModel.from_fingerprint(
+        fingerprint, points, names=names
+    )
     forward = gauges.forward_operator * params.ice_density
     prior = ice_space.sobolev_measure(
         PRIOR_ORDER,

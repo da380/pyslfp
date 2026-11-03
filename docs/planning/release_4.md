@@ -78,16 +78,32 @@ the documentation, each entry giving the old form and the new.
     `altimetry_point_operator`, `ocean_altimetry_points`, ...);
   - `pyslfp.models`: the load operators (`ice_thickness_change_to_load_operator`,
     `sea_level_change_to_load_operator`, `steric_sea_level_operator`, ...).
-- **Removed:** `AltimetryObservationModel` and
-  `JointAltimetryObservationModel`, whose model spaces the set-ups now
-  hold, and `joint_ice_ocean_to_load_operator` with them. Old:
-  `AltimetryObservationModel(fingerprint, points).forward_operator`. New:
-  `fingerprint.field_space.point_evaluation_operator(points) @
-  setup.geocentric_sea_level(fingerprint)` for a set-up `setup` on the
-  fingerprint operator's load space. The deprecated wrappers
-  `l2_products_operator` and `spatial_multiplication_operator` are removed;
-  use the pygeoinf space methods of the same names
-  (`space.l2_products_operator`, `space.multiplication_operator`).
+- **Observation models take their observable.** `TideGaugeObservationModel`,
+  `AltimetryObservationModel` and `GraceObservationModel` take, in place of a
+  `FingerPrintOperator`, the observable as an operator from the model space,
+  with the physics and any direct terms already in it, and add the sampling,
+  the stations and an optional noise (`ObservationModel`). Old:
+  `TideGaugeObservationModel(fingerprint, points, names=...)`,
+  `TideGaugeObservationModel.from_gloss_network(fingerprint)`,
+  `GraceObservationModel(fingerprint, degree, ...)`. New:
+  `TideGaugeObservationModel.from_fingerprint(fingerprint, points, names=...)`
+  or `TideGaugeObservationModel(setup.relative_sea_level_change(fingerprint),
+  points)`, `TideGaugeObservationModel.from_gloss_network(observable)`,
+  `GraceObservationModel.from_fingerprint(fingerprint, degree, ...)` or
+  `GraceObservationModel(observable, model, degree, ...)`. The models'
+  `response_to_data_operator` is `sampling_operator`, and
+  `fingerprint_operator` is gone.
+- **Altimetry models.** `AltimetryObservationModel(fingerprint, points)` observed
+  an ice thickness space and `JointAltimetryObservationModel(fingerprint,
+  points)` ice and the sterodynamic sea level; the model spaces are the
+  set-ups' now. New: `AltimetryObservationModel(setup.geocentric_sea_level(
+  fingerprint), points)`, with `ice_and_ocean` for the joint case.
+  `JointAltimetryObservationModel` and `joint_ice_ocean_to_load_operator` are
+  removed.
+- **Removed wrappers.** The deprecated `l2_products_operator` and
+  `spatial_multiplication_operator` are removed; use the pygeoinf space
+  methods of the same names (`space.l2_products_operator`,
+  `space.multiplication_operator`).
 - **GRACE noise.** `WMBMethod.load_measure_to_observation_measure` takes a
   coefficient's variance as the spectral variance over the metric, which v1
   did not; results built on it change.
@@ -111,7 +127,11 @@ sphere space with the product metric, and its vectors, `FieldHistory`. The
 load and response space builders (`lebesgue_load_space`,
 `sobolev_load_space`, `lebesgue_response_space`, `sobolev_response_space`) in
 `pyslfp.core`. `ModelSetup.geocentric_sea_level`, the observable of
-altimetry. `IceHistoryOperator` (`pyslfp.viscoelastic`): the
+altimetry, and `ModelSetup.response`, the response to the set-up's load.
+`ObservationModel`, the shape the observation models share, with their
+noise. `grace_observation_operator` and `GraceObservationModel` read the
+potential change's coefficients from the response's components, with no
+transform. `IceHistoryOperator` (`pyslfp.viscoelastic`): the
 frozen-shoreline map from an ice thickness history to the responses at
 observation dates, whose adjoint gives the Sobolev kernels.
 

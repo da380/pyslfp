@@ -1,10 +1,12 @@
 """
-Operators for satellite altimetry.
+Satellite altimetry: the geocentric sea level change at points.
 
 Altimetry observes the geocentric sea level change
 (`pyslfp.core.geocentric_sea_level_operator`). This module chooses
 independent observation points over the ocean or the ice sheets, samples the
-geocentric sea level at them, and averages the samples to a global mean.
+geocentric sea level at them, and averages the samples to a global mean;
+`AltimetryObservationModel` samples an observable, the geocentric sea level
+change from a model space with any direct terms included.
 """
 
 from __future__ import annotations
@@ -23,6 +25,8 @@ from pygeoinf import (
 
 from pyslfp.core import EarthState
 from pyslfp.core.observables import geocentric_sea_level_operator
+from pyslfp.elastic.operator import FingerPrintOperator
+from pyslfp.observations.base import Noise, ObservationModel
 
 
 # ================================================================ #
@@ -159,3 +163,69 @@ def altimetry_averaging_operator(points: List[Tuple[float, float]]) -> LinearOpe
     weights /= np.sum(weights)
     matrix = weights.reshape(1, n_points)
     return LinearOperator.from_matrix(domain, codomain, matrix, form="components")
+
+
+class AltimetryObservationModel(ObservationModel):
+    """
+    Satellite altimetry: the geocentric sea level change, a field, sampled at
+    the observation points.
+    """
+
+    def __init__(
+        self,
+        observable: LinearOperator,
+        points: List[Tuple[float, float]],
+        /,
+        *,
+        noise: Noise = None,
+        matrix_free: bool = False,
+    ):
+        """
+        Args:
+            observable: The geocentric sea level change, from the model space
+                into a field space, such as a set-up's
+                `geocentric_sea_level(fingerprint)`.
+            points: The observation points, (latitude, longitude) in degrees.
+            noise: As for `ObservationModel`.
+            matrix_free: Whether the point evaluation is matrix-free, slower
+                but without the dense matrix of the points' harmonics.
+        """
+        self._points = list(points)
+        sampling = observable.codomain.point_evaluation_operator(
+            self._points, route="local" if matrix_free else "dense"
+        )
+        super().__init__(observable, sampling, noise=noise)
+
+    @classmethod
+    def from_fingerprint(
+        cls,
+        fingerprint: FingerPrintOperator,
+        points: List[Tuple[float, float]],
+        /,
+        *,
+        remove_rotational_contribution: bool = True,
+        noise: Noise = None,
+        matrix_free: bool = False,
+    ) -> AltimetryObservationModel:
+        """Altimetry observing the response of a fingerprint operator to its
+        load, with no direct terms; `remove_rotational_contribution` as for
+        `geocentric_sea_level_operator`."""
+        observable = (
+            geocentric_sea_level_operator(
+                fingerprint.state,
+                fingerprint.codomain,
+                remove_rotational_contribution=remove_rotational_contribution,
+            )
+            @ fingerprint
+        )
+        return cls(observable, points, noise=noise, matrix_free=matrix_free)
+
+    @property
+    def points(self) -> List[Tuple[float, float]]:
+        """The observation points, (latitude, longitude) in degrees."""
+        return list(self._points)
+
+    def averaging_operator(self) -> LinearOperator:
+        """The latitude-weighted mean of the data, an estimate of the global
+        mean sea level change, into EuclideanSpace(1)."""
+        return altimetry_averaging_operator(self._points)

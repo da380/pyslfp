@@ -256,16 +256,20 @@ sl.plot_displacement(
 # ## Sobolev spaces and point observations
 #
 # A tide gauge reads sea level at a point, and point evaluation is only
-# bounded on a space of functions with some smoothness. Built over
-# Sobolev spaces, the fingerprint composes with point evaluation into a
-# tide gauge observation model, whose adjoint gives the representer of
-# each station.
+# bounded on a space of functions with some smoothness. An observation
+# model takes its observable, here the relative sea level change of the
+# fingerprint's response, and samples it at the stations; built over
+# Sobolev spaces, its adjoint gives the representer of each station.
 
 # %%
 sobolev_fingerprint = FingerPrintOperator.from_defaults(
     lmax=LMAX, load_parameters=(2.0, 0.05), response_parameters=(2.0, 0.05)
 )
-gauges = TideGaugeObservationModel.from_gloss_network(sobolev_fingerprint)
+relative_sea_level = (
+    sobolev_fingerprint.codomain.field_operator("relative_sea_level_change")
+    @ sobolev_fingerprint
+)
+gauges = TideGaugeObservationModel.from_gloss_network(relative_sea_level)
 print(f"{len(gauges.points)} stations")
 
 data = gauges.forward_operator(load) * metre * 1000

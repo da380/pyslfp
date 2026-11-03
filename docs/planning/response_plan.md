@@ -288,6 +288,100 @@ continuous adjoints' representers as the run resolves its rheology.
   `tests/viscoelastic/test_evolution.py` and
   `tests/viscoelastic/test_ice_history.py`.
 
+## Observations and GNSS (package 6)
+
+### The shape of an observation model
+
+An observation model takes its observable as an operator from the model space
+into the observable's own space, and adds what the measurement does: the
+sampling, the network's metadata and the noise. The physics, direct terms
+included, stays with whatever built the observable, so one model serves an
+elastic set-up and a viscoelastic run alike.
+
+- Tide gauges: the relative sea level change, a field, for example
+  `setup.relative_sea_level_change(fingerprint)`; sampled at the stations.
+- Altimetry: the geocentric sea level change, a field,
+  `setup.geocentric_sea_level(fingerprint)`; sampled at the points, or
+  averaged to a global mean.
+- GRACE: the potential change, read as coefficients between two degrees, in
+  pyslfp's convention or as Stokes coefficients.
+- GNSS: the displacement, a `SurfaceDisplacement`; sampled east, north and up
+  at the stations, in the frame of the data (below).
+
+The model holds `observable`, `sampling_operator` (from the observable's space
+to the data space), `forward_operator` (their composition), `data_space`, the
+stations' `points` and `names`, and an optional `noise`: a Gaussian measure on
+the data space, or standard deviations, one for every datum or one per datum,
+for independent noise; `with_noise` gives the same model with another.
+`from_fingerprint` builds each model on a fingerprint operator's response,
+with no direct terms. `ModelSetup.response(fingerprint)`, the response to the set-up's load,
+supplies the members with no direct terms (the displacement, the potential);
+the sea level fields keep their own methods, which add the direct terms. A
+viscoelastic observable at a date is a projection of the ice history
+operator's codomain, and a rate the difference of two dates over their
+interval.
+
+GRACE reads the potential change's coefficients straight from the response's
+components, `GRDSpace.projection("potential_change")` into the components of
+the field space, so that no synthesis and analysis lie between the solver and
+the data; an observable into the field space itself is still taken, at the
+cost of one analysis. `WMBMethod` stays as it is, the spectral surrogate the
+preconditioners use.
+
+### GNSS and the frame of the data
+
+The response's degree 1 is in the centre-of-mass frame. A GNSS solution's
+frame differs from it by a Helmert transformation: a translation T, a small
+rotation R and a scale s, or their rates for velocities. At a station x = b r
+the transformation adds
+
+    delta u = T + s b r + b R x r,
+
+in east, north and up: the translation is a degree-1 spheroidal field with
+V = U, the scale a degree-0 vertical field, and the rotation a rigid toroidal
+motion, which no response holds. `HelmertTransformation(points, radius,
+parameters=("translation", "rotation", "scale"))` is the design operator from
+EuclideanSpace(k) to the data, in the order of the point evaluation.
+
+The model takes the frame in one of two ways:
+
+- `frame="nuisance"`: the Helmert parameters join the model space, and the
+  forward operator acts on DirectSum([model space, EuclideanSpace(k)]) as
+  F u + A h; a prior on h states how well the frame is known.
+- `frame="invariant"`: the data are reduced to the combinations the frame
+  cannot change, Z^T d with Z an orthonormal basis of the complement of A's
+  range, so that the data space has dimension 3N - k, the forward operator is
+  Z^T F, and the noise Z^T C Z. This is the nuisance form with no prior
+  information on h, without a singular covariance.
+
+None leaves the data in the centre-of-mass frame.
+
+### Tests
+
+- Each model's forward operator is its sampling composed with its observable,
+  and passes the adjoint check; the old forms are reproduced (tide gauges and
+  GRACE from `FingerPrintOperator`, altimetry from a set-up).
+- GRACE's coefficients read from the components equal those through the
+  field space, and the Stokes conversion is unchanged.
+- The Helmert design: a uniform translation is the degree-1 field with V = U
+  sampled at the stations, a scale the degree-0 vertical field, and a rotation
+  the rigid motion b R x r in east and north, which a response's horizontal
+  part, being spheroidal, is orthogonal to on the sphere though not at a
+  finite set of stations; Z^T A = 0, and Z^T Z = I.
+- GNSS with `frame="invariant"`: adding any Helmert motion to the data leaves
+  Z^T d unchanged; with `frame="nuisance"` the adjoint check on the direct sum.
+- A viscoelastic GNSS observable, the displacement rate between two dates of
+  `IceHistoryOperator`, gives a model that passes the adjoint check.
+
+### Steps
+
+1. The reshape: tide gauges, altimetry (a model again, now taking its
+   observable) and GRACE, with `ModelSetup.response`, the noise and the
+   direct coefficient read; tutorials 04 and 05 and the Heathcote scripts
+   follow.
+2. GNSS: `HelmertTransformation` and `GnssObservationModel`, with both frames.
+3. The docs: theory.rst, numerics.rst, release_4.md and this file.
+
 ## Work packages
 
 Packages 1 to 5 are built: the solver's coefficient engine with V

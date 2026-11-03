@@ -97,7 +97,7 @@ def test_grace_observation_model_adjoint(fingerprint_operator, convention):
     Tests the full composite forward operator mapping from Mass Load
     straight to GRACE potential coefficients.
     """
-    model = GraceObservationModel(
+    model = GraceObservationModel.from_fingerprint(
         fingerprint_operator, 10, min_obs_degree=2, convention=convention
     )
     A = model.forward_operator
@@ -415,3 +415,48 @@ def test_wmb_stokes_convention(testing_state):
 def test_unknown_convention_is_refused(testing_state):
     with pytest.raises(ValueError, match="convention"):
         WMBMethod(testing_state.model, 8, convention="geodetic")
+
+
+@pytest.mark.parametrize("convention", ["orthonormal", "stokes"])
+def test_the_coefficients_are_read_from_the_components(
+    fingerprint_operator, convention
+):
+    """Read from the response's potential member, with no transform, the
+    coefficients are those of the potential change field analysed, the
+    route of an observable into the field space."""
+    direct = GraceObservationModel.from_fingerprint(
+        fingerprint_operator, 10, convention=convention
+    )
+    response_space = fingerprint_operator.codomain
+    through_field = GraceObservationModel(
+        response_space.field_operator("potential_change") @ fingerprint_operator,
+        fingerprint_operator.model,
+        10,
+        convention=convention,
+    )
+    load = fingerprint_operator.load_measure_for_testing().sample(
+        rng=np.random.default_rng(2)
+    )
+    expected = through_field.forward_operator(load)
+    np.testing.assert_allclose(
+        direct.forward_operator(load),
+        expected,
+        rtol=0.0,
+        atol=1e-10 * np.max(np.abs(expected)),
+    )
+
+
+def test_an_observable_off_the_model_sphere_is_refused(fingerprint_operator):
+    from pyslfp.core import EarthModel
+
+    with pytest.raises(ValueError, match="model's sphere"):
+        GraceObservationModel(
+            fingerprint_operator.codomain.projection("potential_change")
+            @ fingerprint_operator,
+            EarthModel(fingerprint_operator.model.lmax + 2),
+            6,
+        )
+    with pytest.raises(ValueError, match="degrees"):
+        GraceObservationModel.from_fingerprint(
+            fingerprint_operator, fingerprint_operator.model.lmax + 1
+        )

@@ -79,7 +79,9 @@ methods take every generalised channel: `solve_response` the load channels,
 the ready responses (with `horizontal_response`, a ready V) and the
 tangential traction `tangential_load`; `solve_nonlinear_response` returns the
 new state and a `GRDResponse`; and `adjoint_generalised_solve` takes
-`horizontal_dual`.
+`horizontal_dual`. Fields on the sphere through time: `FieldHistorySpace`
+(`pyslfp.core.history`), the product of a pygeoinf interval space and a
+sphere space with the product metric, and its vectors, `FieldHistory`.
 
 ## Planned work still to land
 

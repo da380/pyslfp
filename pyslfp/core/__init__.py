@@ -38,6 +38,7 @@ from .response import (
     SurfaceDisplacement,
     SurfaceDisplacementSpace,
 )
+from .history import FieldHistory, FieldHistorySpace
 
 __all__ = [
     "EarthModel",
@@ -49,6 +50,8 @@ __all__ = [
     "GRDSpace",
     "SurfaceDisplacement",
     "SurfaceDisplacementSpace",
+    "FieldHistory",
+    "FieldHistorySpace",
     "EQUATORIAL_RADIUS",
     "POLAR_RADIUS",
     "MEAN_RADIUS",

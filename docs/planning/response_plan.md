@@ -192,6 +192,25 @@ operator. Both factors are diagonal in their eigenbases, so X is too: its
 components c_kj are on products of the time eigenfunctions phi_k and the
 spherical harmonics, with the metric mu_k nu_j.
 
+The product metric makes the two orders independent: for s > 1/2 the history
+at a time is a field of H^r(S^2), and evaluation at a time is bounded. An
+isotropic space-time norm, (1 + kappa_k + lambda_l)^sigma on the same basis,
+would lose half a derivative in space at each time instead. Histories are
+continuous in time, since the loads change continuously over the times
+considered, so a smooth time basis serves. The time space's mesh is padded at
+both ends, so that no end condition marks the history inside its interval,
+the present included.
+
+The space is built in pyslfp, in core beside `GRDSpace`, as
+`FieldHistorySpace`: a `DiagonalMetricSpace` over the product of a pygeoinf
+interval space and a pygeoinf sphere space, whose vectors, `FieldHistory`,
+hold the components as a K x N array. A generic tensor product is possible
+only when both factors expose their coordinates, as these do, and the
+product metric is the natural one here; whether the construction moves to
+pygeoinf is for later. A time-local forward map, such as an elastic
+fingerprint at each epoch of a GRACE series, commutes with the time basis:
+K solves give the whole history whatever the number of epochs.
+
 The forward map reads I at the date nodes, so its formal adjoint takes the
 node duals. With d_n the thickness duals of the discrete adjoint, exact for
 the discrete map with the deltas lumped in, the L2 dual has components
@@ -209,11 +228,25 @@ of a measurement g is `operator.adjoint(g)`. This is the operator wrapping of
 the viscoelastic adjoints, done for the ice history, and a time-dependent
 model space for a surface field.
 
-pygeoinf has the interval Sobolev spaces (`pygeoinf.interval.Sobolev`, whose
-`basis_matrix` evaluates the eigenfunctions at given times) but no tensor
-product of spaces; `LinearOperator.from_tensor_product` builds rank-one
-operators only. The tensor product of two diagonal-metric spaces goes into
-pygeoinf first.
+pygeoinf's interval Sobolev spaces (`pygeoinf.interval.Sobolev`) give the
+time factor, and their `basis_matrix` the eigenfunctions at given times.
+
+The ice history operator, in `pyslfp.viscoelastic`:
+
+- Domain: a `FieldHistorySpace` of ice thickness, its time coordinate the
+  date in kiloyears before present, over an interval holding the run's dates.
+- Codomain: a pygeoinf `DirectSum` of one `GRDSpace` per observation date,
+  the dates on the run's grid.
+- Forward: the history read at the run's dates, through an ice model that
+  interpolates linearly between them (the `BaseIceModel` contract), and
+  `run_ice_history` under frozen shorelines, where the map is linear.
+- Adjoint: the duals at the observation dates as `GRDResponse` measurements
+  to `adjoint_ice_history`, the exact transpose, whose thickness duals d_n
+  give the history's components (Phi^T D) / (mu (x) nu), with D the rows of
+  the d_n's components. The continuous adjoint is not an exact transpose, so
+  it stays a diagnostic beside the operator.
+- Migrating shorelines make the map nonlinear; they wait for the operator
+  wrapping of the viscoelastic drivers as a whole.
 
 Tests: the gradient identity in X, <g_X, delta I>_X = delta J for delta I in
 X; the convergence of the representer as the date grid is refined at a fixed
@@ -245,9 +278,8 @@ continuous adjoints' representers as the run resolves its rheology.
    reads snapshots, tutorials 06, 07 and 09, and the tests.
 3. The adjoints: `GRDResponse` measurements, the renamed `Measurement` fields,
    and V in the discrete and continuous adjoints.
-4. The Sobolev kernels: the tensor product of spaces in pygeoinf, the
-   space-time model space for the ice history, and the ice history operator
-   whose adjoint gives the kernels.
+4. The Sobolev kernels: `FieldHistorySpace` in core, then the ice history
+   operator whose adjoint gives the kernels.
 5. The docs: the viscoelastic adjoint problem in theory.rst, release_4.md
    and this file.
 

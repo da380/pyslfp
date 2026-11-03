@@ -143,10 +143,12 @@ mantle of viscosity :math:`10^{21}` Pa s beneath an elastic lithosphere:
    ice_model = IceNG(length_scale=earth_model.parameters.length_scale)
    state = sl.EarthState.from_ice_model(ice_model, 26.0, earth_model)
 
-   # Half-kiloyear steps to the present; each snapshot holds the sea level
-   # change, displacement, potential change and angular velocity change.
+   # Half-kiloyear steps to the present; each snapshot holds the response,
+   # whose fields (sea level change, displacement, potential change) are
+   # read by name, with the angular velocity change beside them.
    evolution = SeaLevelEvolution(operator, state)
    snapshots, _ = evolution.run_ice_history(np.arange(26.0, -0.1, -0.5), ice_model)
+   present = snapshots[-1].response.field("relative_sea_level_change")
 
 :meth:`~pyslfp.viscoelastic.evolution.SeaLevelEvolution.run_ice_history` takes
 ``shorelines="migrating"`` to let the shorelines move, and ``final_sea_level=``

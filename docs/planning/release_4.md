@@ -41,6 +41,18 @@ the documentation, each entry giving the old form and the new.
   `ice_average_operator` follow `ice_projection`. `ice_altimetry_points` takes
   `sheets=` in place of `exclude_glaciers`. `glacier_projection` and the region
   "Glaciers" are the RGI 7.0 glaciers outside the ice sheets, not a box.
+- **Viscoelastic snapshots.** A `SeaLevelSnapshot` holds the response as a
+  `GRDResponse`, `response`, in place of the fields
+  `relative_sea_level_change`, `displacement`, `gravity_potential_change` and
+  `angular_velocity_change`. Old: `snap.relative_sea_level_change`,
+  `snap.displacement`, `snap.gravity_potential_change`. New:
+  `snap.response.field("relative_sea_level_change")`,
+  `snap.response.field("displacement")` (or `snap.response.displacement`, the
+  whole `SurfaceDisplacement`), `snap.response.field("potential_change")`.
+  `snap.angular_velocity_change` is `snap.response.angular_velocity_change`,
+  None without rotational feedback where it was zeros. The runs take
+  `space=`, a `GRDSpace`; with the horizontal part the response holds the
+  horizontal displacement, the memory field's included.
 - **Module paths.** `pyslfp.plot` is `pyslfp.plotting`, `pyslfp.regions` is
   `pyslfp.core.regions`, `pyslfp.parallel` is `pyslfp.core.parallel`; the
   top-level names (`pyslfp.plot`, `pyslfp.set_num_threads`, ...) are unchanged.

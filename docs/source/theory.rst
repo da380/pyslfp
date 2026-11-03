@@ -393,7 +393,11 @@ a memory field, the surface displacement and potential of the memory force
 under zero load, together with its degree-0 inertia moment. The step's sea
 level equation is then the generalised equation with the effective table and
 the memory field as a ready response, closed by the same iteration for the
-ocean and rotational feedbacks. The converged load and centrifugal potential
+ocean and rotational feedbacks. The memory field's horizontal displacement
+joins the step's horizontal displacement in the same way, but feeds nothing
+back, since the sea level equation sees only the vertical displacement and the
+potential. Each step's response is a ``GRDResponse`` of the run's response
+space, the same object the elastic solvers return. The converged load and centrifugal potential
 finish the step, updating the internal variables. A run starts from the
 instantaneous elastic response to the load at its first time, the right limit,
 so that a load switched on at the start is stepped at full order. In the limit

@@ -72,6 +72,12 @@ state = sl.EarthState.from_ice_model(ice_model, 0.0, earth_model)
 # converted once. The cap's edge is softened in degree space: a sharp
 # disc rings at a finite truncation, and the taper leaves degree 0,
 # hence the mass, untouched.
+#
+# The run returns a snapshot at every time. Each holds the response to
+# the load so far, a `GRDResponse` as the elastic fingerprint operator
+# returns, whose fields are read by name: the sea level change, the
+# displacement and the potential change, and with rotational feedback
+# the angular velocity change.
 
 # %%
 parameters = earth_model.parameters
@@ -109,7 +115,7 @@ ocean = state.ocean_projection()
 
 fig, ax = sl.create_map_figure(figsize=(12, 8))
 sl.plot(
-    final.relative_sea_level_change * ocean * metre,
+    final.response.field("relative_sea_level_change") * ocean * metre,
     ax=ax,
     vmin=-20.0,
     vmax=20.0,
@@ -119,7 +125,7 @@ ax.set_title("Sea level change, 15 kyr after the onset of melting")
 
 fig, ax = sl.create_map_figure(figsize=(12, 8))
 sl.plot(
-    final.displacement * metre,
+    final.response.field("displacement") * metre,
     ax=ax,
     vmin=-100.0,
     vmax=100.0,
@@ -139,11 +145,16 @@ ax.set_title("Crustal displacement, 15 kyr after the onset of melting")
 lat_index = int(np.argmin(np.abs(earth_model.lats() - 60.0)))
 lon_index = int(np.argmin(np.abs(earth_model.lons() - (360.0 - 85.0))))
 uplift = metre * np.array(
-    [snap.displacement.data[lat_index, lon_index] for snap in snapshots]
+    [
+        snap.response.field("displacement").data[lat_index, lon_index]
+        for snap in snapshots
+    ]
 )
 mean_sea_level = metre * np.array(
     [
-        earth_model.integrate(snap.relative_sea_level_change * state.ocean_function)
+        earth_model.integrate(
+            snap.response.field("relative_sea_level_change") * state.ocean_function
+        )
         / state.ocean_area
         for snap in snapshots
     ]

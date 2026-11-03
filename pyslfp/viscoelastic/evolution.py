@@ -41,10 +41,12 @@ from pyshtools import SHCoeffs, SHGrid
 from planetmodel import units
 
 from ..core import EarthModel
+from ..core.response import RELATIVE_SEA_LEVEL_CHANGE, GRDResponse, GRDSpace
 from ..ice import BaseIceModel, BaseIceSeaLevelModel
 from ..love_numbers import fluid_tidal_number
 from ..core import AndersonMixer, SeaLevelEquation
 from ..core import EarthState
+from ..linear_operators.physics import lebesgue_response_space
 from .operator import ViscoelasticOperator, ViscoelasticState
 from .rheology import Rheology
 
@@ -206,17 +208,17 @@ class IceKernels:
 
 @dataclass(frozen=True)
 class SeaLevelSnapshot:
-    """The surface fields at one time of an evolution, in the Earth
-    model's non-dimensional units: the sea level change, vertical
-    displacement and gravity potential change since the start, and the
-    angular velocity change [omega_x, omega_y, omega_z].  A run driven
-    by an ice history also records `date`, in kiloyears before present."""
+    """The response at one time of an evolution, in the Earth model's
+    non-dimensional units: a `GRDResponse` of the run's response space,
+    holding the sea level change, the displacement (with its horizontal
+    part when the space holds it), the potential change since the start
+    and, with rotational feedback, the angular velocity change.  Fields
+    are read by name, `response.field("relative_sea_level_change")`.  A
+    run driven by an ice history also records `date`, in kiloyears
+    before present."""
 
     t: float
-    relative_sea_level_change: SHGrid = field(repr=False)
-    displacement: SHGrid = field(repr=False)
-    gravity_potential_change: SHGrid = field(repr=False)
-    angular_velocity_change: np.ndarray = field(repr=False)
+    response: GRDResponse = field(repr=False)
     date: float | None = None
     #: The step's ocean function under migrating shorelines (None when
     #: the shorelines are frozen at the background state's): the C(t)
@@ -458,6 +460,7 @@ class SeaLevelEvolution:
         self._to_mat_time = 1.0 / ratio(units.TIME)
         self._sle: dict[tuple[str, float], SeaLevelEquation] = {}
         self._fluid_margin: float | None = None
+        self._spaces: dict[bool, GRDSpace] = {}
 
     # -- plumbing ----------------------------------------------------------
 
@@ -551,6 +554,54 @@ class SeaLevelEvolution:
         psi[0, 0, 0] = self._uniform_rotation_factor * omega[2]
         return psi
 
+    def _space(
+        self, space: Optional[GRDSpace], rotational_feedbacks: bool | str
+    ) -> GRDSpace:
+        """The response space of a run: the one given, or the L2 space
+        without the horizontal part, holding the angular velocity change
+        exactly when there is rotational feedback.  The solves check that
+        a given space is over the model's sphere and matches the
+        feedback."""
+        if space is not None:
+            return space
+        rotation = rotational_feedbacks is not False
+        if rotation not in self._spaces:
+            self._spaces[rotation] = lebesgue_response_space(
+                self.model, rotation=rotation
+            )
+        return self._spaces[rotation]
+
+    def _memory_horizontal(self, step, space: GRDSpace) -> Optional[SHCoeffs]:
+        """The memory field's horizontal displacement potential V, when the
+        response space holds the horizontal part."""
+        if not space.has_horizontal:
+            return None
+        return self._coeffs(step.memory_surface("V"), self._to_nd_length)
+
+    def _load_and_tide(
+        self,
+        load_grid: SHGrid,
+        response: GRDResponse,
+        rotational_feedbacks: bool | str,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """The coefficients of the total surface load the response carries
+        under frozen shorelines, the direct load and the ocean's water
+        rho_w C xi, and of the centrifugal potential of its angular
+        velocity change: the forcings that finish a radial step."""
+        xi = response.field(RELATIVE_SEA_LEVEL_CHANGE).data
+        total = (
+            load_grid.data + self._water_density * self.state.ocean_function.data * xi
+        )
+        sigma = self.model.expand_field(
+            SHGrid.from_array(total, grid=self.model.grid, copy=False)
+        ).coeffs
+        psi = (
+            self._centrifugal(response.angular_velocity_change)
+            if rotational_feedbacks
+            else np.zeros_like(sigma)
+        )
+        return sigma, psi
+
     # -- the loop ------------------------------------------------------------
 
     def run(
@@ -558,6 +609,7 @@ class SeaLevelEvolution:
         times: Sequence[float],
         ice_load: Callable[[float], SHGrid],
         *,
+        space: Optional[GRDSpace] = None,
         rotational_feedbacks: bool = True,
         rtol: float = 1e-9,
         verbose: bool = False,
@@ -569,9 +621,17 @@ class SeaLevelEvolution:
         an SHGrid in the model's units, continuous in t for t >
         times[0].  The start is the instantaneous elastic response to
         `ice_load(times[0])` -- the right limit, so a load switched on
-        at the start is stepped at full order.  Returns the surface
-        fields at every time, the first included, and the final
-        internal state, whose time is in the MATERIAL's units.
+        at the start is stepped at full order.  Returns the response at
+        every time, the first included, and the final internal state,
+        whose time is in the MATERIAL's units.
+
+        `space` is the `GRDSpace` the responses belong to, over the
+        model's sphere, holding the angular velocity change exactly when
+        there is rotational feedback; when it holds the horizontal part,
+        each step adds the memory field's V to the response's.  None
+        gives the L2 space without the horizontal part.  The space sets
+        the inner product alone: the components are the same in every
+        space over the sphere.
 
         `rotational_feedbacks` is True for the full feedback, "axial"
         for the axial component alone, or False.  The full feedback
@@ -596,7 +656,7 @@ class SeaLevelEvolution:
         stride = _record_stride(record)
         last_node = times.size - 1
         op = self.operator
-        ocean = self.state.ocean_function.data
+        space = self._space(space, rotational_feedbacks)
 
         vstate = op.zero_state(ncols=lambda l: 2 * (l + 1))
         vstate.t = times[0] * self._to_mat_time
@@ -605,18 +665,15 @@ class SeaLevelEvolution:
             self._assert_transverse_stable()
 
         load_grid = ice_load(times[0])
-        slc, disp, potential, omega = self._sle_elastic().solve_generalised_equation(
+        response = self._sle_elastic().solve_response(
             self.state,
-            direct_load=load_grid,
+            load_grid,
+            space,
             rotational_feedbacks=rotational_feedbacks,
             rtol=rtol,
             verbose=verbose,
         )
-        total = load_grid.data + self._water_density * ocean * slc.data
-        sigma = self.model.expand_field(
-            SHGrid.from_array(total, grid=self.model.grid, copy=False)
-        ).coeffs
-        psi = self._centrifugal(omega) if rotational_feedbacks else np.zeros_like(sigma)
+        sigma, psi = self._load_and_tide(load_grid, response, rotational_feedbacks)
         if stride:
             op.prime_strain(
                 vstate,
@@ -626,10 +683,7 @@ class SeaLevelEvolution:
         snapshots = [
             SeaLevelSnapshot(
                 float(times[0]),
-                slc,
-                disp,
-                potential,
-                omega,
+                response,
                 internal_state=vstate if stride else None,
                 load_coefficients=sigma if stride else None,
                 tide_coefficients=psi if stride else None,
@@ -650,25 +704,19 @@ class SeaLevelEvolution:
             memory_phi = self._coeffs(step.memory_surface("phi"), self._to_nd_potential)
             moment = step.inertia_moment()[0] * self._to_nd_moment
             load_grid = ice_load(t1)
-            slc, disp, potential, omega = sle.solve_generalised_equation(
+            response = sle.solve_response(
                 self.state,
-                direct_load=load_grid,
+                load_grid,
+                space,
                 displacement_response=memory_u,
                 gravitational_potential_response=memory_phi,
+                horizontal_response=self._memory_horizontal(step, space),
                 inertia_moment_change=moment,
                 rotational_feedbacks=rotational_feedbacks,
                 rtol=rtol,
                 verbose=verbose,
             )
-            total = load_grid.data + self._water_density * ocean * slc.data
-            sigma = self.model.expand_field(
-                SHGrid.from_array(total, grid=self.model.grid, copy=False)
-            ).coeffs
-            psi = (
-                self._centrifugal(omega)
-                if rotational_feedbacks
-                else np.zeros_like(sigma)
-            )
+            sigma, psi = self._load_and_tide(load_grid, response, rotational_feedbacks)
             vstate, _ = step.finish(
                 load=self._columns(sigma, self._to_mat_density),
                 tide=self._columns(psi, self._to_mat_potential),
@@ -677,10 +725,7 @@ class SeaLevelEvolution:
             snapshots.append(
                 SeaLevelSnapshot(
                     float(t1),
-                    slc,
-                    disp,
-                    potential,
-                    omega,
+                    response,
                     internal_state=vstate if keep else None,
                     load_coefficients=sigma if stride else None,
                     tide_coefficients=psi if stride else None,
@@ -698,6 +743,7 @@ class SeaLevelEvolution:
         rtol_step: float = 1e-4,
         atol_step: float | None = None,
         quantise: bool = True,
+        space: Optional[GRDSpace] = None,
         rotational_feedbacks: bool = True,
         rtol: float = 1e-9,
         max_steps: int = 10000,
@@ -713,41 +759,34 @@ class SeaLevelEvolution:
         dt_initial 2^n (`quantise`), holding those costs to a handful
         of flavours; the estimate is the first-order companion's and
         hence conservative.  Times are in the Earth model's units;
-        `ice_load(t)` must be continuous.
+        `ice_load(t)` must be continuous.  `space` is as for `run`.
         """
         if t_final <= t_start:
             raise ValueError("t_final must lie beyond t_start")
         if dt_initial <= 0.0:
             raise ValueError("dt_initial must be positive")
         op = self.operator
-        model = self.model
-        parameters = model.parameters
         if rotational_feedbacks is True:
             self._assert_transverse_stable()
-        ocean = self.state.ocean_function.data
-        water_density = parameters.water_density
         scheme = self.scheme
         if scheme != "exponential_trapezoid":
             raise ValueError("the adaptive loop is the exponential trapezoid's")
+        space = self._space(space, rotational_feedbacks)
 
         vstate = op.zero_state(ncols=lambda l: 2 * (l + 1))
         vstate.t = t_start * self._to_mat_time
 
         # the right limit at the start, as in `run`
         load_grid = ice_load(t_start)
-        start_sle = self._sle_elastic()
-        slc, disp, potential, omega = start_sle.solve_generalised_equation(
+        response = self._sle_elastic().solve_response(
             self.state,
-            direct_load=load_grid,
+            load_grid,
+            space,
             rotational_feedbacks=rotational_feedbacks,
             rtol=rtol,
         )
-        total = load_grid.data + water_density * ocean * slc.data
-        sigma = model.expand_field(
-            SHGrid.from_array(total, grid=model.grid, copy=False)
-        ).coeffs
-        psi = self._centrifugal(omega) if rotational_feedbacks else np.zeros_like(sigma)
-        snapshots = [SeaLevelSnapshot(float(t_start), slc, disp, potential, omega)]
+        sigma, psi = self._load_and_tide(load_grid, response, rotational_feedbacks)
+        snapshots = [SeaLevelSnapshot(float(t_start), response)]
 
         def load_cb(coeffs):
             return self._columns(coeffs, self._to_mat_density)
@@ -779,23 +818,19 @@ class SeaLevelEvolution:
             moment = step.inertia_moment()[0] * self._to_nd_moment
             t1 = t_now + trial / self._to_mat_time
             grid1 = ice_load(t1)
-            slc, disp, potential, omega = sle.solve_generalised_equation(
+            response = sle.solve_response(
                 self.state,
-                direct_load=grid1,
+                grid1,
+                space,
                 displacement_response=memory_u,
                 gravitational_potential_response=memory_phi,
+                horizontal_response=self._memory_horizontal(step, space),
                 inertia_moment_change=moment,
                 rotational_feedbacks=rotational_feedbacks,
                 rtol=rtol,
             )
-            total = grid1.data + water_density * ocean * slc.data
-            sigma_new = model.expand_field(
-                SHGrid.from_array(total, grid=model.grid, copy=False)
-            ).coeffs
-            psi_new = (
-                self._centrifugal(omega)
-                if rotational_feedbacks
-                else np.zeros_like(sigma_new)
+            sigma_new, psi_new = self._load_and_tide(
+                grid1, response, rotational_feedbacks
             )
             candidate, _ = step.finish(load=load_cb(sigma_new), tide=tide_cb(psi_new))
             # the embedded ETD1 estimate on the radial state
@@ -837,7 +872,7 @@ class SeaLevelEvolution:
             sigma = sigma_new
             psi = psi_new
             accepted += 1
-            snapshots.append(SeaLevelSnapshot(float(t1), slc, disp, potential, omega))
+            snapshots.append(SeaLevelSnapshot(float(t1), response))
             if quantise:
                 if dt_next == dt and raw > 1.5 * dt:
                     same_rung += 1
@@ -857,6 +892,7 @@ class SeaLevelEvolution:
         ice_model: BaseIceModel,
         *,
         shorelines: str = "frozen",
+        space: Optional[GRDSpace] = None,
         rotational_feedbacks: bool = True,
         rtol: float = 1e-9,
         verbose: bool = False,
@@ -869,7 +905,8 @@ class SeaLevelEvolution:
         `dates` are in kiloyears before present, decreasing (the past
         first), and should include the history's breakpoints; the model
         interpolates between them, per the `BaseIceModel` contract.
-        The snapshots carry their dates.
+        The snapshots carry their dates, and their responses belong to
+        `space`, as for `run`.
 
         With `shorelines="frozen"` the equation is linear: the direct
         load is the grounded ice change since the first date, grounded
@@ -915,6 +952,7 @@ class SeaLevelEvolution:
                 final_sea_level,
                 shorelines=shorelines,
                 method=calibration,
+                space=space,
                 rotational_feedbacks=rotational_feedbacks,
                 solver_rtol=rtol,
                 verbose=verbose,
@@ -927,6 +965,7 @@ class SeaLevelEvolution:
                 dates,
                 ice_model,
                 shorelines=shorelines,
+                space=space,
                 rotational_feedbacks=rotational_feedbacks,
                 rtol=rtol,
                 verbose=verbose,
@@ -936,6 +975,7 @@ class SeaLevelEvolution:
             return self._run_migrating(
                 dates,
                 ice_model,
+                space=space,
                 rotational_feedbacks=rotational_feedbacks,
                 rtol=rtol,
                 verbose=verbose,
@@ -966,6 +1006,7 @@ class SeaLevelEvolution:
         snapshots, vstate = self.run(
             (date0 - dates) * kyr,
             ice_load,
+            space=space,
             rotational_feedbacks=rotational_feedbacks,
             rtol=rtol,
             verbose=verbose,
@@ -1003,7 +1044,15 @@ class SeaLevelEvolution:
         ).coeffs
 
     def _run_migrating(
-        self, dates, ice_model, *, rotational_feedbacks, rtol, verbose, record=False
+        self,
+        dates,
+        ice_model,
+        *,
+        space,
+        rotational_feedbacks,
+        rtol,
+        verbose,
+        record=False,
     ):
         """The migrating-shoreline loop: each step's equilibrium is the
         nonlinear equation, with the memory field through the response
@@ -1016,6 +1065,7 @@ class SeaLevelEvolution:
         parameters = model.parameters
         if rotational_feedbacks is True:
             self._assert_transverse_stable()
+        space = self._space(space, rotational_feedbacks)
         kyr = KYR / parameters.scales.factor(units.TIME)
         date0 = float(dates[0])
 
@@ -1046,14 +1096,10 @@ class SeaLevelEvolution:
                 load=self._columns(sigma, self._to_mat_density),
                 tide=self._columns(psi, self._to_mat_potential),
             )
-        zero = model.zero_grid()
         snapshots = [
             SeaLevelSnapshot(
                 0.0,
-                zero,
-                zero,
-                zero,
-                np.zeros(3),
+                space.zero(),
                 date=date0,
                 ocean_function=self.state.ocean_function,
                 internal_state=vstate if stride else None,
@@ -1081,11 +1127,13 @@ class SeaLevelEvolution:
                 grid=model.grid,
                 copy=False,
             )
-            final_state, slc, disp, potential, omega = sle.solve_nonlinear_equation(
+            final_state, response = sle.solve_nonlinear_response(
                 self.state,
+                space,
                 ice_thickness_change=change,
                 displacement_response=memory_u,
                 gravitational_potential_response=memory_phi,
+                horizontal_response=self._memory_horizontal(step, space),
                 inertia_moment_change=moment,
                 rotational_feedbacks=rotational_feedbacks,
                 rtol=rtol,
@@ -1093,7 +1141,7 @@ class SeaLevelEvolution:
             )
             sigma = self._total_load_coeffs(final_state)
             psi = (
-                self._centrifugal(omega)
+                self._centrifugal(response.angular_velocity_change)
                 if rotational_feedbacks
                 else np.zeros_like(sigma)
             )
@@ -1105,10 +1153,7 @@ class SeaLevelEvolution:
             snapshots.append(
                 SeaLevelSnapshot(
                     float(vstate.t / self._to_mat_time),
-                    slc,
-                    disp,
-                    potential,
-                    omega,
+                    response,
                     date=float(b),
                     ocean_function=final_state.ocean_function,
                     internal_state=vstate if keep else None,
@@ -1139,6 +1184,7 @@ class SeaLevelEvolution:
         shorelines: str = "frozen",
         weights: Optional[SHGrid] = None,
         gradient: bool = True,
+        space: Optional[GRDSpace] = None,
         rotational_feedbacks: bool = True,
         rtol: float = 1e-9,
         verbose: bool = False,
@@ -1176,7 +1222,7 @@ class SeaLevelEvolution:
             weights: Non-negative weights on the residual, an SHGrid;
                 None weights every point equally.
             gradient: Whether to compute the gradient.
-            rotational_feedbacks, rtol, verbose: As for
+            space, rotational_feedbacks, rtol, verbose: As for
                 `run_ice_history`.
 
         Returns:
@@ -1192,13 +1238,14 @@ class SeaLevelEvolution:
             dates,
             ice_model,
             shorelines=shorelines,
+            space=space,
             rotational_feedbacks=rotational_feedbacks,
             rtol=rtol,
             verbose=verbose,
         )
         residual = (
             self.state.sea_level.data
-            + snapshots[-1].relative_sea_level_change.data
+            + snapshots[-1].response.field(RELATIVE_SEA_LEVEL_CHANGE).data
             - final_sea_level.data
         )
         w = 1.0 if weights is None else weights.data
@@ -1239,6 +1286,7 @@ class SeaLevelEvolution:
         iterations: int = 10,
         rtol: float = 1e-4,
         anderson_memory: int = 5,
+        space: Optional[GRDSpace] = None,
         rotational_feedbacks: bool = True,
         solver_rtol: float = 1e-9,
         verbose: bool = False,
@@ -1309,7 +1357,7 @@ class SeaLevelEvolution:
                 migrating shorelines.
             anderson_memory: The depth of the acceleration; zero gives
                 the plain iteration.
-            rotational_feedbacks: As for `run_ice_history`.
+            space, rotational_feedbacks: As for `run_ice_history`.
             solver_rtol: The tolerance of the sea level solves.
             verbose: Prints each iteration's misfit and update.
 
@@ -1368,6 +1416,7 @@ class SeaLevelEvolution:
                 final_sea_level,
                 weights=weights,
                 gradient=False,
+                space=space,
                 rotational_feedbacks=rotational_feedbacks,
                 rtol=solver_rtol,
             )
@@ -1416,6 +1465,7 @@ class SeaLevelEvolution:
                 shorelines=shorelines,
                 weights=weights,
                 gradient=method == "gradient",
+                space=space,
                 rotational_feedbacks=rotational_feedbacks,
                 rtol=solver_rtol,
             )

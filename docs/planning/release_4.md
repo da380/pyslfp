@@ -56,7 +56,12 @@ horizontal displacement and the
 response classes, with `plot_displacement` (arrows over colour); the water bodies (`pyslfp.core.water_bodies`) and the GTN-G
 regions; the RGI 7.0 glaciers; Stokes coefficients for GRACE
 (`convention="stokes"`); `prem_maxwell`, `maxwell_mantle` and
-`viscoelastic_earth`; `EarthModel.integration_weights`.
+`viscoelastic_earth`; `EarthModel.integration_weights`. The solver's response
+methods take every generalised channel: `solve_response` the load channels,
+the ready responses (with `horizontal_response`, a ready V) and the
+tangential traction `tangential_load`; `solve_nonlinear_response` returns the
+new state and a `GRDResponse`; and `adjoint_generalised_solve` takes
+`horizontal_dual`.
 
 ## Planned work still to land
 

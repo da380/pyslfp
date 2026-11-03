@@ -137,6 +137,7 @@ class LinearSeaLevelEquation:
         direct_load: Optional[SHGrid] = None,
         displacement_load: Optional[SHGrid] = None,
         gravitational_potential_load: Optional[SHGrid] = None,
+        tangential_load: Optional[SHGrid] = None,
         displacement_response: Optional[SHCoeffs] = None,
         gravitational_potential_response: Optional[SHCoeffs] = None,
         inertia_moment_change: float = 0.0,
@@ -156,6 +157,9 @@ class LinearSeaLevelEquation:
             direct_load (Optional[SHGrid]): Standard surface mass forcing.
             displacement_load (Optional[SHGrid]): External vertical surface displacement forcing.
             gravitational_potential_load (Optional[SHGrid]): External gravitational potential forcing.
+            tangential_load (Optional[SHGrid]): The potential of a
+                tangential surface traction, in the units of a surface
+                density.
             displacement_response (Optional[SHCoeffs]): A ready displacement
                 response in coefficient form, joined to the static terms
                 with no Love number applied.
@@ -179,6 +183,7 @@ class LinearSeaLevelEquation:
             direct_load=direct_load,
             displacement_load=displacement_load,
             gravitational_potential_load=gravitational_potential_load,
+            tangential_load=tangential_load,
             displacement_response=displacement_response,
             gravitational_potential_response=gravitational_potential_response,
             inertia_moment_change=inertia_moment_change,

@@ -205,8 +205,9 @@ and :math:`l^t` are in s² m⁻¹ and :math:`k^t` is dimensionless.
 The split into channels is not needed to solve the sea level equation forward,
 for which :math:`h_\ell` and :math:`k_\ell` suffice. It is needed because the
 adjoint is itself a sea level equation in which an observation of displacement
-acts through the traction channel alone and an observation of potential
-through the source channel alone.
+acts through the traction channel alone, an observation of potential through
+the source channel alone, and an observation of horizontal displacement
+through the tangential traction.
 
 Conventional numbers and reciprocity
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

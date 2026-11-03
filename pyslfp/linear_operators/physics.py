@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Optional, Tuple
 import numpy as np
-from pyshtools import SHCoeffs, SHGrid
+from pyshtools import SHGrid
 
 from pygeoinf import (
     HilbertSpace,
@@ -142,7 +142,6 @@ class FingerPrintOperator(LinearOperator[SHGrid, GRDResponse]):
 
         self._g = self.parameters.gravitational_acceleration
         self._r = self.parameters.rotation_factor
-        self._b = self.parameters.mean_sea_floor_radius
 
         l2_domain = underlying_space(domain)
         self._l2_field_space = underlying_space(codomain.field_space)
@@ -369,11 +368,17 @@ class FingerPrintOperator(LinearOperator[SHGrid, GRDResponse]):
             response.angular_velocity_change if self._rotational_feedbacks else None
         )
 
-        direct_term = None
+        # The horizontal part's dual is a tangential traction, as the
+        # vertical displacement's is a normal one. In the L2 metric the V
+        # components c pair as sum l(l + 1) c c', and the traction of matching
+        # scale has the potential zeta^v = -c / b on the coefficients, which
+        # is minus the V member read as a field.
+        adjoint_tangential_load = None
         if self._l2_codomain.has_horizontal:
-            sea_level_dual, angular_velocity_dual, direct_term = self._horizontal_dual(
-                response, sea_level_dual, angular_velocity_dual
-            )
+            field = self._l2_field_space
+            components = np.zeros(field.dim)
+            components[field.degrees >= 1] = response.displacement.horizontal
+            adjoint_tangential_load = -1 * field.from_components(components)
 
         adjoint_direct_load = sea_level_dual
         adjoint_displacement_load = -1 * displacement_dual
@@ -390,58 +395,14 @@ class FingerPrintOperator(LinearOperator[SHGrid, GRDResponse]):
             direct_load=adjoint_direct_load,
             displacement_load=adjoint_displacement_load,
             gravitational_potential_load=adjoint_grav_pot_load,
+            tangential_load=adjoint_tangential_load,
             angular_momentum_change=adjoint_avc,
             rotational_feedbacks=self._rotational_feedbacks,
             rtol=self._rtol,
             max_iterations=self._max_iterations,
             verbose=self._verbose,
         )
-        if direct_term is not None:
-            adjoint_sea_level = adjoint_sea_level + direct_term
         return adjoint_sea_level
-
-    def _horizontal_dual(self, response, sea_level_dual, angular_velocity_dual):
-        """The horizontal displacement's dual carried onto the others.
-
-        In the L2 response metric the V components c pair as
-        sum l(l + 1) c c', which is sum_lm s_lm V_lm with
-        s_lm = b l(l + 1) c' on the coefficients. With d = l s, the tangential
-        Love numbers, that is (1 / b^2) [int zeta d + <rho_w C d, xi>], plus,
-        with rotational feedback, the pairing of the centrifugal potential
-        with e = l^t s at degree 2. Returns the sea level and angular velocity
-        duals with these added, and the direct term d / b^2.
-        """
-        model = self.model
-        b = self._b
-        b2 = b**2
-        field = self._l2_field_space
-        ell = field.degrees[field.degrees >= 1]
-        orders = field.orders[field.degrees >= 1]
-        s_lm = np.zeros((2, model.lmax + 1, model.lmax + 1))
-        s_lm[(orders < 0).astype(int), ell, np.abs(orders)] = (
-            b * ell * (ell + 1.0) * response.displacement.horizontal
-        )
-        love = model.love_numbers
-
-        def synthesise(coefficients):
-            return model.expand_coefficient(
-                SHCoeffs.from_array(
-                    coefficients,
-                    normalization=model.normalization,
-                    csphase=model.csphase,
-                )
-            )
-
-        d = synthesise(love.l[None, :, None] * s_lm)
-        rho_w = self.parameters.water_density
-        sea_level_dual = sea_level_dual + (rho_w / b2) * self.state.ocean_function * d
-        if self._rotational_feedbacks:
-            e_lm = np.zeros_like(s_lm)
-            e_lm[:, 2, :2] = love.l_t[2] * s_lm[:, 2, :2]
-            angular_velocity_dual = (
-                angular_velocity_dual + self._cpc_op.adjoint(synthesise(e_lm)) / b2
-            )
-        return sea_level_dual, angular_velocity_dual, d * (1.0 / b2)
 
 
 # ==================================================================== #

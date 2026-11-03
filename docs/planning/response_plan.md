@@ -57,10 +57,13 @@ load is sigma = zeta + rho_w C xi, so
 and the dual on the direct load is d plus the existing fingerprint adjoint
 applied to the sea level dual rho_w C d. The centrifugal term is
 psi = P(omega), with P the centrifugal potential operator, so it adds the
-angular velocity dual P*(l^t s_2). No new solver channel is needed for the
-elastic adjoint; the tangential-traction numbers (h^v, l^v, k^v) are its
-reciprocal statement and serve as the check. The viscoelastic adjoint needs
-the memory field's horizontal part as well.
+angular velocity dual P*(l^t s_2). This is the form the transposed engine
+takes (`horizontal_dual` of `adjoint_generalised_solve`). Its reciprocal
+statement is a forward solve with a tangential traction, answered through the
+numbers (h^v, l^v, k^v); the fingerprint operator's adjoint takes that form
+(`tangential_load`), as it takes a displacement dual through the traction
+channel zeta^u. The viscoelastic adjoint needs the memory field's horizontal
+part as well.
 
 On grids and at points, grad_1 V comes from ducc0: `synthesis_general` with
 spin 1 and E-mode coefficients sqrt(l(l + 1)) a_lm gives (d/dtheta,
@@ -168,9 +171,9 @@ static term is -(h_v + k_v / g) zeta^v = l s / b^2, since h_v = l(l + 1) l_u
 and k_v = g l(l + 1) l_phi; this is the direct term d / b^2 of the elastic
 adjoint above, and the fixed points of the two forms agree.
 
-The fingerprint operator's adjoint moves onto the same channel, in place of
-`_horizontal_dual`, which carries the V dual onto the sea level and rotation
-duals by hand. Its existing dot-product check then tests the channel.
+The fingerprint operator's adjoint takes the same channel, so its dot-product
+check tests it; the two forms agree to the solver's tolerance in every
+rotation mode.
 
 ### Tests
 

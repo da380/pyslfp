@@ -1,0 +1,252 @@
+# The viscoelastic evolution as an operator
+
+## Decisions
+
+1. **One general operator.** The basic object maps the ice history, the
+   initial sea level and the viscosity to the responses at the observation
+   dates. Every other case comes from it by holding arguments fixed. The
+   initial sea level is a necessary parameter: an ice history that carries no
+   sea level leaves it to be chosen.
+2. **Function spaces, no built-in discretisation.** Each argument is an
+   element of a Hilbert space of functions: the ice history of a
+   `FieldHistorySpace`, the initial sea level of a sphere space, the
+   viscosity of a space of radial functions. The run's dates and the radial
+   mesh are how the operator evaluates them, not its parameters. Simpler
+   parameterisations, such as one viscosity per layer, come by composition.
+3. **Log viscosity, every branch.** The viscosity parameter is
+   chi_k = log(eta_k / eta_0) for each relaxing branch k of the rheology, with
+   eta_0 the unit system's viscosity scale (density times length squared over
+   time), so that in the library's units chi_k = log eta_k. Each chi_k is
+   piecewise continuous on the layered radial mesh, with jumps allowed at the
+   material interfaces.
+4. **Shorelines are an option.** Migrating shorelines are the general case.
+   Frozen shorelines reduce its form: the map becomes linear in the ice
+   history and independent of the initial sea level for observables of change,
+   and remains nonlinear in the viscosity.
+5. **Derivatives with respect to every argument, by either method.** The
+   continuous tangent-linear problem is derived and implemented alongside the
+   discrete one, as the adjoints are. The operator takes `method="discrete"`
+   or `method="continuous"`, which selects the tangent-linear problem and the
+   adjoint together.
+6. **3D viscosity kernels are kernels only.** The derivative with respect to
+   laterally varying viscosity about a radial model exists, but no forward map
+   leaves the radial models, so it is a result computed from the adjoint, not
+   an operator's domain.
+
+## The map
+
+Domain: DirectSum([X_I, X_S, X_chi]).
+
+- X_I: a `FieldHistorySpace` of ice thickness over an interval holding the
+  run's dates, as for `IceHistoryOperator`.
+- X_S: a sphere space (Lebesgue or Sobolev) for the initial sea level S_0.
+- X_chi: the log-viscosity space below, one summand per relaxing branch.
+
+Codomain: a `DirectSum` of one `GRDSpace` per observation date, the dates on
+the run's grid, as for `IceHistoryOperator`. The responses are changes from
+the initial state; an absolute sea level, S_0 + xi(t), is the affine
+composition with the S_0 summand.
+
+Value at (I, S_0, chi):
+
+- the rheology: the reference `Rheology`'s branches, with mu_k fixed and
+  itau_k = mu_k / eta_k = mu_k exp(-chi_k) / eta_0 at the mesh's nodes, and
+  a `ViscoelasticOperator` built from it;
+- the initial state: the thickness I(t_0) and the sea level S_0, with the
+  ocean function by flotation under migrating shorelines, or the prescribed
+  C_0 under frozen ones;
+- `run_ice_history` through an ice model that reads I at the run's dates
+  (the `BaseIceModel` contract), recording what the derivative needs (below).
+
+Under frozen shorelines C_0 is an input of the operator, not a function of the
+arguments, so the shorelines cannot flip as S_0 changes. The value is then
+linear in I, independent of S_0, and nonlinear in chi.
+
+Under migrating shorelines the map is piecewise smooth: it is differentiable
+wherever no cell changes from land to ocean or back, and its derivative there
+holds the forward trajectory's ocean functions C(t) fixed. This is the
+derivative the adjoint already computes.
+
+## The log-viscosity space
+
+For branch k, the layers of the mesh in which the branch relaxes (mu_k > 0
+with a finite viscosity in the reference rheology) each carry an interval
+space on their radial range, `pygeoinf.interval` Sobolev or Lebesgue, padded
+at both ends like the time factor of `FieldHistorySpace`, so that no end
+condition marks the function inside its layer. A branch's space is the direct
+sum over its layers, which makes chi_k continuous within a layer, for a
+Sobolev order above one half, and free to jump at an interface. X_chi is the
+direct sum over branches. Elastic layers (infinite viscosity, the lithosphere)
+and fluid ones are outside it.
+
+The space needs two maps to the mesh:
+
+- evaluation at the layer's GLL radii, through the interval space's
+  `basis_matrix`, giving chi_k as a nodal (nspec, ngll) array. A node shared
+  by two elements of one layer takes one value, and one at an interface takes
+  each layer's own;
+- its transpose, taking a nodal derivative (dJ / d chi_k at each node, the
+  shared nodes' copies summed) to the components of the derivative, which
+  the metric then turns into the Riesz representer, as for the ice history.
+
+The kernels already computed are dJ / d itau_k at the nodes, and
+d itau_k = -itau_k d chi_k, so the nodal derivative is -itau_k dJ / d itau_k,
+which is eta_k dJ / d eta_k.
+
+Layer constants, a reference profile plus a perturbation, or one profile
+shared by all branches come by composition with an inclusion or an affine map.
+
+## The tangent-linear problem
+
+### Continuous
+
+Per degree, after the radial discretisation and continuous in time, the
+forward problem is
+
+    A_U(w(t), w^) = F(w^; zeta(t)) + b_mem(m(t))(w^),
+    dm_k/dt = itau_k (d(w) - m_k),        m_k(t_0) = 0,
+    zeta(t) = rho_i (1 - C(t)) I(t) - rho_i (1 - C_0) I(t_0)
+              + rho_w (C(t) S(t) - C_0 S_0),    S(t) = S_0 + xi(t),
+
+closed at each time by the sea level equation and the rotational feedback.
+The viscosity enters through itau_k alone: the memory force carries mu_k,
+which is fixed. Perturbing (I, S_0, chi) about a trajectory, with
+d itau_k = -itau_k d chi_k and C(t) held,
+
+    A_U(dw, w^) = F(w^; d zeta) + b_mem(dm)(w^),
+    d(dm_k)/dt = itau_k (d(dw) + q_k - dm_k),      dm_k(t_0) = 0,
+    q_k = -(d - m_k) d chi_k,
+    d zeta = rho_i (1 - C(t)) dI(t) - rho_i (1 - C_0) dI(t_0)
+             + rho_w C(t) d xi + rho_w (C(t) - C_0) dS_0.
+
+So the tangent-linear problem is the forward problem with three changes: the
+forward trajectory's shorelines are prescribed, the direct load is the
+perturbation's, and each branch's drive is shifted by q_k, a known function of
+time from the forward trajectory. The forward machinery steps it, as it steps
+the continuous adjoint, with q_k entering the exponential trapezoid like the
+strain, linear in time over each step.
+
+The derivation in the theory note also shows the duality: pairing the
+tangent-linear solution with the measurement duals and integrating by parts in
+time recovers the continuous adjoint's kernels for the ice history, the
+initial sea level and itau (Yu et al. 2025, eqs 61, 65, 81). This confirms
+that the two continuous problems are each other's adjoint before either is
+discretised.
+
+### Discrete
+
+The discrete tangent-linear problem is the forward mode of the time-stepped
+map, the counterpart of the discrete adjoint's reverse sweep. In the ice
+history and the initial sea level it coincides with the continuous one, since
+a step is linear in its load. In chi it differentiates the scheme weights e,
+alpha and beta in h = dt itau, and the effective modulus through phi_1, with
+`scheme_weight_derivatives` already giving the derivatives. The two methods
+therefore differ only in the viscosity in the forward direction, and in every
+argument in the adjoint.
+
+### What a linearisation records
+
+A linearisation at (I, S_0, chi) is one forward run that records the ocean
+functions and the internal states, at every node or at a checkpoint stride.
+The tangent-linear runs need d and m at every node only for q_k, and run
+forwards, so they recompute the gaps from the checkpoints by forward steps,
+exactly, without the backward amplification that the adjoint's
+reconstruction spends digits on. The continuous adjoint's viscosity kernel
+now needs the trajectory at every node; it gains the checkpointed
+reconstruction that the discrete adjoint has.
+
+## The operator
+
+A pygeoinf `Operator` with `linearize`, so that one run yields the value and
+the derivative together. The derivative is a `LinearOperator` on the domain:
+
+- forward: one tangent-linear run, discrete or continuous;
+- adjoint: one adjoint sweep, which returns all three kernels together, the
+  ice kernel carried onto X_I as in `IceHistoryOperator`, the initial sea
+  level kernel onto X_S, and the log-viscosity kernels onto X_chi through the
+  transpose of nodal evaluation.
+
+With `method="continuous"` the ice kernel's representer comes from the
+distributional view, the density integrated against the time basis and each
+delta evaluating it, rather than from the per-node duals.
+
+The discrete pair are exact transposes, and the derivative is exact for the
+computed map. The continuous pair are each a discretisation of the continuum
+problem, consistent with each other and with the derivative of the computed
+map to the order of the time stepping, so `check_operator` holds to a
+tolerance that falls as the steps are refined. Their disagreement is the
+resolution diagnostic that the two adjoints already provide.
+
+Fixing arguments: `operator.fixing(initial_sea_level=..., log_viscosity=...)`,
+or any subset, returns the operator on the remaining arguments, built by
+composition with the affine inclusion, so its derivatives follow by the chain
+rule. Under frozen shorelines with chi fixed the result is a genuine
+`LinearOperator` on X_I, not an operator whose derivative is constant, so
+that pygeoinf's linear machinery applies; this is `IceHistoryOperator`, which
+becomes this special case. It is new in 4.0 and unreleased, so it changes
+without a deprecation.
+
+## Costs
+
+- The value at a new chi rebuilds the `ViscoelasticOperator`: the radial
+  assembly and a factorisation per degree for each step size. A derivative at
+  a fixed point reuses the linearisation's factorisations.
+- A tangent-linear run costs about a forward run of linear steps, one sea
+  level solve per date with the recorded ocean function, plus the forward
+  recomputation between checkpoints when chi varies.
+- An adjoint sweep costs about a forward run, as now.
+- Under frozen shorelines with chi fixed nothing needs recording, and the map
+  is applied directly.
+
+## Tests
+
+- The Taylor test, ||F(x + e v) - F(x) - e F'(x) v|| = O(e^2), for each
+  argument alone and together, under frozen shorelines and about
+  migrating-shoreline trajectories with perturbations that move no shoreline,
+  for both methods (the continuous one to the order of the stepping).
+- `check_operator` on the derivative: to rounding for the discrete pair, and
+  for the continuous pair to a tolerance that falls at the scheme's order
+  under refinement.
+- The two tangent-linear problems agree in the ice history and the initial sea
+  level, and converge to each other in chi at the scheme's order.
+- Under frozen shorelines the derivative in S_0 vanishes, and the fixed form
+  is a `LinearOperator` equal to the present `IceHistoryOperator`.
+- The log-viscosity space: evaluation continuous within a layer and jumping at
+  interfaces; the nodal transpose exact; the viscosity derivative equal to
+  -itau dJ / d itau from the existing kernels; the representer converging as
+  radial modes are added, as the ice kernel does as time modes are.
+- A rheology with two branches (a Burgers mantle), so that every branch is
+  exercised from the start.
+
+## Steps
+
+1. **The theory.** The continuous tangent-linear problem, its
+   discretisation, the discrete tangent-linear problem and the duality with
+   the adjoints, in the theory note's section on sensitivity kernels, with
+   the summary in theory.rst.
+2. **The log-viscosity space**, every branch: the per-layer interval spaces,
+   nodal evaluation and its transpose, and the rheology from chi.
+3. **The tangent-linear runs**, discrete and continuous, in the computational
+   layer beside the adjoints in `SeaLevelEvolution`; the checkpointed
+   trajectory for the continuous adjoint's viscosity kernel.
+4. **The operator**: value, `linearize`, `method`, `shorelines` and
+   `fixing`; `IceHistoryOperator` as its frozen, fixed case.
+5. **The docs**: numerics.rst (the costs, and the agreement of the two
+   methods under refinement), release_4.md and the roadmap.
+
+Later, and separately: the 3D viscosity kernels about a radial model, the
+time integral of the pointwise contraction of the adjoint internal variables
+with d - m, which needs the forward and adjoint fields at every radius,
+multiplied across degrees.
+
+## Open questions
+
+- The class's name. `SeaLevelEvolutionOperator`, after the driver it wraps,
+  as `FingerPrintOperator` wraps the fingerprint, is the proposal.
+- The default method. pygeoinf's factorisations of an assembled normal
+  operator assume an exact adjoint, which only the discrete pair gives; the
+  continuous pair's normal operator is symmetric only to the order of the
+  stepping. The proposal is `"discrete"` by default, with `"continuous"` the
+  choice for a resolved run.
+- How the frozen ocean function is given: a prescribed C_0, or a reference
+  `EarthState` whose ocean function is taken.

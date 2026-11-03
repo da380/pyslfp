@@ -53,10 +53,14 @@ The viscoelastic kernel drivers (`adjoint_ice_history`,
 `ForwardTrajectory`, the decay-time functionals) are a computational layer. The
 inversion-facing surface is pygeoinf 2 `Operator` and `LinearOperator` objects
 wrapping them, as `FingerPrintOperator` wraps the elastic adjoint.
-`IceHistoryOperator` is the frozen-shoreline map from an ice history; the
-migrating-shoreline map, which is nonlinear, and the viscosity kernels remain
-to be wrapped. Until then the drivers should be kept working and documented,
-but not grown into a public API that the wrappers would replace.
+The general operator, from the ice history, the initial sea level and the
+log viscosity to the responses, with frozen or migrating shorelines and the
+derivatives by the discrete or the continuous tangent-linear and adjoint
+problems, is planned in
+[viscoelastic_operator_plan.md](viscoelastic_operator_plan.md);
+`IceHistoryOperator` becomes its frozen-shoreline case with the other
+arguments fixed. Until it is built the drivers should be kept working and
+documented, but not grown into a public API that the operator would replace.
 
 ## Glacial-cycle spin-up
 

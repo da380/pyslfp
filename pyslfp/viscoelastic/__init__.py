@@ -36,6 +36,7 @@ from .operator import (
     ViscoelasticStep,
 )
 from .rheology import Rheology
+from .viscosity import LogViscositySpace
 from .weights import backward_euler_weight, exponential_trapezoid_weights
 
 __all__ = [
@@ -46,6 +47,7 @@ __all__ = [
     "ForwardTrajectory",
     "SCHEMES",
     "Rheology",
+    "LogViscositySpace",
     "IceHistoryOperator",
     "IceKernels",
     "InitialSeaLevelCalibration",

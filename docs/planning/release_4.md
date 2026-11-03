@@ -141,6 +141,11 @@ read the potential change's coefficients from the response's components, with
 no transform. `IceHistoryOperator` (`pyslfp.viscoelastic`): the
 frozen-shoreline map from an ice thickness history to the responses at
 observation dates, whose adjoint gives the Sobolev kernels.
+`LogViscositySpace` (`pyslfp.viscoelastic`): the log viscosity of every
+branch of a rheology as a function of radius, a pygeoinf layered radial
+space per branch with one Sobolev space per relaxing layer, with its values
+at the mesh's nodes, their transpose, the rheology a vector names and the
+functional the inverse-relaxation-time kernels define on it.
 
 ## Planned work still to land
 

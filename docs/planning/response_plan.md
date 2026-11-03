@@ -175,6 +175,51 @@ The fingerprint operator's adjoint takes the same channel, so its dot-product
 check tests it; the two forms agree to the solver's tolerance in every
 rotation mode.
 
+### Sobolev kernels
+
+The ice kernels are L2 objects. The node duals satisfy the gradient identity
+on the date grid but lump the deltas at the observation times into their
+values, so they do not converge pointwise as the grid is refined; the
+distributional view separates the deltas, and the quelled view removes them by
+changing the variable to the thickness rate. The proper treatment is the
+gradient in a space-time Sobolev space: the Riesz representer of the
+derivative.
+
+The ice history I(t, x) is a vector of X = H^s(T) (x) H^r(S^2), with the inner
+product (A_t^s (x) A_x^r u, v): A_t = 1 - L_t^2 d^2/dt^2 on the run's interval
+of time, pygeoinf's interval Sobolev space, and A_x the sphere's Sobolev
+operator. Both factors are diagonal in their eigenbases, so X is too: its
+components c_kj are on products of the time eigenfunctions phi_k and the
+spherical harmonics, with the metric mu_k nu_j.
+
+The forward map reads I at the date nodes, so its formal adjoint takes the
+node duals. With d_n the thickness duals of the discrete adjoint, exact for
+the discrete map with the deltas lumped in, the L2 dual has components
+sum_n phi_k(t_n) d_n,j, and the gradient in X divides them by the metric. For
+s > 1/2 evaluation at a time is bounded on H^s(T), so each delta becomes the
+Green's function of A_t^s, continuous in time, and the representer converges
+as the date grid is refined. Quelling is a one-sided form of the same idea:
+the kernel of the rate, a cumulative integral, is the Green's function of
+d/dt with a terminal condition.
+
+In pygeoinf's terms the ice history operator maps X to the responses at the
+observation dates. It is built by `LinearOperator.from_formal_adjoint` from
+the L2 operator whose adjoint is the discrete adjoint, so the Sobolev kernel
+of a measurement g is `operator.adjoint(g)`. This is the operator wrapping of
+the viscoelastic adjoints, done for the ice history, and a time-dependent
+model space for a surface field.
+
+pygeoinf has the interval Sobolev spaces (`pygeoinf.interval.Sobolev`, whose
+`basis_matrix` evaluates the eigenfunctions at given times) but no tensor
+product of spaces; `LinearOperator.from_tensor_product` builds rank-one
+operators only. The tensor product of two diagonal-metric spaces goes into
+pygeoinf first.
+
+Tests: the gradient identity in X, <g_X, delta I>_X = delta J for delta I in
+X; the convergence of the representer as the date grid is refined at a fixed
+X, where the node duals do not converge; and the agreement of the discrete and
+continuous adjoints' representers as the run resolves its rheology.
+
 ### Tests
 
 - Forward: the V of every snapshot equals the surface V of the step's radial
@@ -200,7 +245,10 @@ rotation mode.
    reads snapshots, tutorials 06, 07 and 09, and the tests.
 3. The adjoints: `GRDResponse` measurements, the renamed `Measurement` fields,
    and V in the discrete and continuous adjoints.
-4. The docs: the viscoelastic adjoint problem in theory.rst, release_4.md
+4. The Sobolev kernels: the tensor product of spaces in pygeoinf, the
+   space-time model space for the ice history, and the ice history operator
+   whose adjoint gives the kernels.
+5. The docs: the viscoelastic adjoint problem in theory.rst, release_4.md
    and this file.
 
 ## Work packages

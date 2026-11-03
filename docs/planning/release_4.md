@@ -53,6 +53,12 @@ the documentation, each entry giving the old form and the new.
   None without rotational feedback where it was zeros. The runs take
   `space=`, a `GRDSpace`; with the horizontal part the response holds the
   horizontal displacement, the memory field's included.
+- **Viscoelastic measurements.** `Measurement`'s fields take the response's
+  member names: `sea_level` is `relative_sea_level_change`,
+  `gravity_potential` is `potential_change` and `angular_velocity` is
+  `angular_velocity_change`; `displacement` is unchanged. The adjoints also
+  take a `GRDResponse` as a measurement, its inner product with the response
+  in its own space, which observes the horizontal displacement as well.
 - **Module paths.** `pyslfp.plot` is `pyslfp.plotting`, `pyslfp.regions` is
   `pyslfp.core.regions`, `pyslfp.parallel` is `pyslfp.core.parallel`; the
   top-level names (`pyslfp.plot`, `pyslfp.set_num_threads`, ...) are unchanged.

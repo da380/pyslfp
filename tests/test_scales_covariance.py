@@ -131,10 +131,10 @@ def _si_outputs(body, scheme):
         float(dates[2]): g_xi,
         0.0: Measurement(
             displacement=g_u,
-            gravity_potential=SHGrid.from_array(
+            potential_change=SHGrid.from_array(
                 pot_conv * g_phi.data, grid=earth.grid_name, copy=False
             ),
-            angular_velocity=om_conv * np.array([0.2, -0.4, 0.8]),
+            angular_velocity_change=om_conv * np.array([0.2, -0.4, 0.8]),
         ),
     }
 

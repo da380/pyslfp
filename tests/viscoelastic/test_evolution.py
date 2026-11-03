@@ -11,7 +11,8 @@ from pyslfp.core import EarthModel
 from pyslfp.ice import AnalyticalIceModel, BaseIceModel
 from pyslfp.core import SeaLevelEquation
 from pyslfp.core import EarthState
-from pyslfp.linear_operators import lebesgue_response_space
+from pyslfp.core.response import GRDResponse
+from pyslfp.linear_operators import lebesgue_response_space, sobolev_response_space
 from pyslfp.love_numbers import Material, fluid_tidal_number, love_numbers
 from pyslfp.viscoelastic import (
     Measurement,
@@ -1246,19 +1247,30 @@ def test_migrating_trajectory_kernels(setting):
     assert coarse["continuous"] / fine["continuous"] > 2.0
 
 
-def test_full_measurement_kernels(setting):
-    """Measurements of all four outputs -- sea level, displacement,
-    potential and rotation -- drive both adjoints: the discrete
-    transpose is exact (the engine adjoint carries the duals; no new
-    radial channels), and the continuous method's jump realises the
-    channel mapping of the elastic adjoint with the split radial load
-    responses, converging in the resolved regime."""
+@pytest.mark.parametrize("sobolev", [False, True])
+def test_full_measurement_kernels(setting, sobolev):
+    """Measurements of every member -- sea level, displacement with its
+    horizontal part, potential and rotation -- drive both adjoints: the
+    discrete transpose is exact, the engine adjoint carrying the duals and
+    the horizontal dual entering the radial solve at the surface V; the
+    continuous method's jump realises the channel mapping of the elastic
+    adjoint, the horizontal dual as a tangential traction, converging in
+    the resolved regime. A `GRDResponse` measurement stands for its inner
+    product in its own space, here an L2 or a Sobolev response space, and
+    the instantaneous kernels of the two methods, both the elastic
+    adjoint, agree."""
     from pyshtools import SHCoeffs
 
     material, earth, _, _, _ = setting
     ice_model, state = _history_state(material, earth)
     rng = np.random.default_rng(9)
     scale = earth.parameters.length_scale
+    b = earth.parameters.mean_sea_floor_radius
+    space = (
+        sobolev_response_space(earth, 2.0, 0.3 * b, horizontal=True)
+        if sobolev
+        else lebesgue_response_space(earth, horizontal=True)
+    )
 
     def smooth(amplitude):
         c = rng.normal(size=(2, LMAX + 1, LMAX + 1))
@@ -1271,13 +1283,17 @@ def test_full_measurement_kernels(setting):
             )
         )
 
+    response_dual = space.heat_measure(0.5 * b, angular_velocity_std=1e3).sample(
+        rng=rng
+    )
     measurement = {
         0.0: Measurement(
-            sea_level=smooth(1.0),
+            relative_sea_level_change=smooth(1.0),
             displacement=smooth(0.7),
-            gravity_potential=smooth(0.4),
-            angular_velocity=rng.normal(size=3) * 1e3,
+            potential_change=smooth(0.4),
+            angular_velocity_change=rng.normal(size=3) * 1e3,
         ),
+        2.5: response_dual,
         5.0: smooth(0.5),
     }
     deltas = {float(d): smooth(10.0 / scale) for d in np.linspace(10.0, 0.0, 5)}
@@ -1299,24 +1315,29 @@ def test_full_measurement_kernels(setting):
             for key, m in measurement.items():
                 if not np.isclose(snap.date, key):
                     continue
+                if isinstance(m, GRDResponse):
+                    total += space.inner_product(m, snap.response)
+                    continue
                 if not isinstance(m, Measurement):
-                    m = Measurement(sea_level=m)
+                    m = Measurement(relative_sea_level_change=m)
+                response = snap.response
                 pairs = (
-                    (m.sea_level, snap.response.field("relative_sea_level_change")),
-                    (m.displacement, snap.response.field("displacement")),
-                    (m.gravity_potential, snap.response.field("potential_change")),
+                    (m.relative_sea_level_change, "relative_sea_level_change"),
+                    (m.displacement, "displacement"),
+                    (m.potential_change, "potential_change"),
                 )
-                for dual, field_grid in pairs:
+                for dual, name in pairs:
                     if dual is not None:
                         total += earth.integrate(
                             SHGrid.from_array(
-                                dual.data * field_grid.data, grid=earth.grid
+                                dual.data * response.field(name).data,
+                                grid=earth.grid,
                             )
                         )
-                if m.angular_velocity is not None:
+                if m.angular_velocity_change is not None:
                     total += float(
-                        np.asarray(m.angular_velocity)
-                        @ snap.response.angular_velocity_change
+                        np.asarray(m.angular_velocity_change)
+                        @ response.angular_velocity_change
                     )
         return total
 
@@ -1333,15 +1354,17 @@ def test_full_measurement_kernels(setting):
         evo = SeaLevelEvolution(operator, state)
 
         def functional(model_in):
-            snaps, _ = evo.run_ice_history(dates, model_in, rtol=1e-12)
+            snaps, _ = evo.run_ice_history(dates, model_in, space=space, rtol=1e-12)
             return objective(snaps)
 
         exact = functional(_Perturbed(length_scale=scale)) - functional(ice_model)
+        instantaneous = {}
         for name, method in (
             ("discrete", evo.adjoint_ice_history),
             ("continuous", evo.continuous_adjoint_ice_history),
         ):
             kernels = method(dates, measurement, rtol=1e-12)
+            instantaneous[name] = kernels.instantaneous
             predicted = sum(
                 earth.integrate(
                     SHGrid.from_array(
@@ -1356,6 +1379,98 @@ def test_full_measurement_kernels(setting):
                 assert error < 1e-8, error
             elif continuous_bound is not None:
                 assert error < continuous_bound, error
+        for date in measurement:
+            discrete = instantaneous["discrete"][date].data
+            continuous = instantaneous["continuous"][date].data
+            error = np.max(np.abs(discrete - continuous)) / np.max(np.abs(discrete))
+            assert error < 1e-8, (date, error)
+
+
+def test_horizontal_measurement_kernels(setting):
+    """An objective on the horizontal displacement alone, at two dates, so
+    that every gate rests on V: the discrete gradient identity, the
+    continuous method's in the resolved regime -- which the tangential
+    traction's radial jump carries -- and the agreement of the two
+    methods' instantaneous kernels."""
+    from pyshtools import SHCoeffs
+
+    material, earth, _, _, _ = setting
+    ice_model, state = _history_state(material, earth)
+    rng = np.random.default_rng(11)
+    scale = earth.parameters.length_scale
+    space = lebesgue_response_space(earth, horizontal=True)
+
+    def horizontal_dual():
+        dual = space.zero()
+        dual.displacement.horizontal = rng.normal(
+            size=dual.displacement.horizontal.size
+        )
+        return dual
+
+    def smooth(amplitude):
+        c = rng.normal(size=(2, LMAX + 1, LMAX + 1))
+        for degree in range(LMAX + 1):
+            c[:, degree, degree + 1 :] = 0.0
+        c[1, :, 0] = 0.0
+        return amplitude * earth.expand_coefficient(
+            SHCoeffs.from_array(
+                c, normalization=earth.normalization, csphase=earth.csphase
+            )
+        )
+
+    dates = np.linspace(10.0, 0.0, 5)
+    measurement = {2.5: horizontal_dual(), 0.0: horizontal_dual()}
+    deltas = {float(d): smooth(10.0 / scale) for d in dates}
+
+    class _Perturbed(BaseIceModel):
+        def get_ice_thickness(
+            self, date, lmax, /, *, grid="DH", sampling=1, extend=True
+        ):
+            base = ice_model.get_ice_thickness(
+                date, lmax, grid=grid, sampling=sampling, extend=extend
+            )
+            return SHGrid.from_array(
+                base.data + deltas[float(date)].data, grid=base.grid
+            )
+
+    evo = SeaLevelEvolution(
+        ViscoelasticOperator(Rheology.from_relaxation_time(material, 10.0 * TAU), LMAX),
+        state,
+    )
+
+    def functional(model_in):
+        snaps, _ = evo.run_ice_history(dates, model_in, space=space, rtol=1e-12)
+        return sum(
+            space.inner_product(measurement[key], snap.response)
+            for snap in snaps
+            for key in measurement
+            if np.isclose(snap.date, key)
+        )
+
+    exact = functional(_Perturbed(length_scale=scale)) - functional(ice_model)
+    instantaneous = {}
+    for name, method, bound in (
+        ("discrete", evo.adjoint_ice_history, 1e-8),
+        ("continuous", evo.continuous_adjoint_ice_history, 2e-3),
+    ):
+        kernels = method(dates, measurement, rtol=1e-12)
+        instantaneous[name] = kernels.instantaneous
+        predicted = sum(
+            earth.integrate(
+                SHGrid.from_array(
+                    kernels.thickness[n].data * deltas[float(dates[n])].data,
+                    grid=earth.grid,
+                )
+            )
+            for n in range(dates.size)
+        )
+        error = abs(predicted - exact) / abs(exact)
+        assert error < bound, (name, error)
+    for date in measurement:
+        discrete = instantaneous["discrete"][date].data
+        continuous = instantaneous["continuous"][date].data
+        error = np.max(np.abs(discrete - continuous)) / np.max(np.abs(discrete))
+        assert error < 1e-8, (date, error)
 
 
 def test_initial_state_kernels(setting):

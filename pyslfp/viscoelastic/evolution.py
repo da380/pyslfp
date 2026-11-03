@@ -71,19 +71,86 @@ MOMENT = units.MASS * units.LENGTH**2
 
 @dataclass(frozen=True)
 class Measurement:
-    """The duals of one observation time: the objective gains
+    """The duals of one observation time on the scalar members of the
+    response: the objective gains
 
-        int g_xi xi dS + int g_u u dS + int g_phi phi dS
+        int g_xi xi dS + int g_u U dS + int g_phi phi dS
         + g_omega . omega
 
-    at that date, with the grids paired by the surface integral.  A
-    bare SHGrid given as a measurement is shorthand for a sea-level
-    dual alone."""
+    at that date, with the grids paired by the surface integral and U
+    the vertical displacement.  The fields are named after the
+    response's members.  A bare SHGrid given as a measurement is
+    shorthand for a sea level dual alone, and a `GRDResponse` stands for
+    its inner product with the response in its own space, which is how
+    the horizontal displacement is observed."""
 
-    sea_level: Optional[SHGrid] = None
+    relative_sea_level_change: Optional[SHGrid] = None
     displacement: Optional[SHGrid] = None
-    gravity_potential: Optional[SHGrid] = None
-    angular_velocity: Optional[np.ndarray] = None
+    potential_change: Optional[SHGrid] = None
+    angular_velocity_change: Optional[np.ndarray] = None
+
+
+@dataclass(frozen=True)
+class _Duals:
+    """A measurement in the form the adjoints take: the scalar members'
+    duals as grids paired by the surface integral, the angular velocity
+    change's, and `horizontal`, the dual s of the coefficients of V in
+    the model's normalisation, J = sum s_lm V_lm."""
+
+    relative_sea_level_change: Optional[SHGrid] = None
+    displacement: Optional[SHGrid] = None
+    potential_change: Optional[SHGrid] = None
+    angular_velocity_change: Optional[np.ndarray] = None
+    horizontal: Optional[np.ndarray] = None
+
+    @classmethod
+    def of_response(cls, dual: GRDResponse) -> _Duals:
+        """The duals of J = <dual, response> in the dual's own space.
+
+        With lambda the space's metric and c the components, J = sum
+        lambda g c, so the duals are the metric-weighted components:
+        the scalar members' as fields, which then pair by the surface
+        integral since the L2 metric of the components is one, and V's,
+        whose components are b V_lm, as s_lm = b lambda g."""
+        space = dual.space
+        weighted = space.from_components(
+            space.metric_values * space.to_components(dual)
+        )
+        field_space = space.field_space
+        horizontal = None
+        if space.has_horizontal:
+            degrees = field_space.degrees
+            orders = field_space.orders
+            mask = degrees >= 1
+            horizontal = np.zeros((2, field_space.lmax + 1, field_space.lmax + 1))
+            horizontal[
+                (orders[mask] < 0).astype(int), degrees[mask], np.abs(orders[mask])
+            ] = field_space.radius * weighted.displacement.horizontal
+        return cls(
+            field_space.from_components(weighted.relative_sea_level_change),
+            field_space.from_components(weighted.displacement.vertical),
+            field_space.from_components(weighted.potential_change),
+            weighted.angular_velocity_change,
+            horizontal,
+        )
+
+    def tangential_load(self, model: EarthModel) -> Optional[SHGrid]:
+        """The tangential traction whose forward response is the adjoint of
+        the horizontal dual: zeta^v_lm = -s_lm / (b^2 l(l + 1)), matching
+        the scale of the traction channel's zeta^u = -g_u."""
+        if self.horizontal is None:
+            return None
+        b = model.parameters.mean_sea_floor_radius
+        ell = np.arange(model.lmax + 1, dtype=float)
+        factor = np.zeros_like(ell)
+        factor[1:] = -1.0 / (b**2 * ell[1:] * (ell[1:] + 1.0))
+        return model.expand_coefficient(
+            SHCoeffs.from_array(
+                factor[None, :, None] * self.horizontal,
+                normalization=model.normalization,
+                csphase=model.csphase,
+            )
+        )
 
 
 @dataclass(frozen=True)
@@ -370,20 +437,42 @@ class _TrajectoryCursor:
 
 
 def _normalise_measurement(
-    measurement: dict[float, SHGrid | Measurement],
+    measurement: dict[float, SHGrid | Measurement | GRDResponse],
     dates: np.ndarray,
     model: EarthModel,
-) -> dict[int, Measurement]:
-    """Measurement duals keyed by date, checked and re-keyed by node
-    index; a bare grid means a sea-level dual."""
-    duals: dict[int, Measurement] = {}
+) -> dict[int, _Duals]:
+    """Measurement duals keyed by date, checked, re-keyed by node index
+    and put in the form the adjoints take; a bare grid means a sea level
+    dual, and a response its inner product in its own space."""
+    duals: dict[int, _Duals] = {}
+    b = model.parameters.mean_sea_floor_radius
     for key, value in measurement.items():
         matches = np.flatnonzero(np.isclose(dates, key))
         if matches.size != 1:
             raise ValueError(f"measurement date {key} is not on the date grid")
-        if not isinstance(value, Measurement):
-            value = Measurement(sea_level=value)
-        for grid in (value.sea_level, value.displacement, value.gravity_potential):
+        if isinstance(value, GRDResponse):
+            field_space = value.space.field_space
+            if field_space.lmax != model.lmax or not np.isclose(
+                field_space.radius, b, rtol=1e-12, atol=0.0
+            ):
+                raise ValueError(
+                    f"the measurement at {key} is not over the model's sphere"
+                )
+            value = _Duals.of_response(value)
+        elif isinstance(value, Measurement):
+            value = _Duals(
+                value.relative_sea_level_change,
+                value.displacement,
+                value.potential_change,
+                value.angular_velocity_change,
+            )
+        else:
+            value = _Duals(relative_sea_level_change=value)
+        for grid in (
+            value.relative_sea_level_change,
+            value.displacement,
+            value.potential_change,
+        ):
             if grid is not None:
                 model.check_field(grid)
         duals[int(matches[0])] = value
@@ -1543,7 +1632,7 @@ class SeaLevelEvolution:
     def continuous_adjoint_ice_history(
         self,
         dates: Sequence[float],
-        measurement: dict[float, SHGrid],
+        measurement: dict[float, SHGrid | Measurement | GRDResponse],
         *,
         ocean_functions: Optional[Sequence[SHGrid]] = None,
         internal_states: Optional[Sequence[ViscoelasticState]] = None,
@@ -1574,6 +1663,12 @@ class SeaLevelEvolution:
         diagnostic for the forward calculation itself.  Returns the
         same `IceKernels` views, the node duals assembled from the
         density and the lumps, so the two methods run the same gates.
+
+        Measurements are as for `adjoint_ice_history`.  A horizontal
+        dual s enters the instantaneous problem, by reciprocity, as the
+        tangential traction zeta^v = -s / (b^2 l(l + 1)), the scale
+        that makes it stand to the horizontal displacement as the
+        traction channel zeta^u = -g_u stands to the vertical.
 
         With `internal_states` -- the recorded forward trajectory, from
         a run with `record=True` (frozen, or migrating together with
@@ -1639,37 +1734,42 @@ class SeaLevelEvolution:
                 ]
             )
 
-        def jump(m: Measurement, node: int):
+        def jump(m: _Duals, node: int):
             """The instantaneous adjoint fingerprint of a measurement,
             through the forward channel mapping of the elastic adjoint
             (zeta_d = g_xi, zeta^u = -g_u, zeta^phi = -g g_phi,
-            L = -g (g_omega - Psi* g_phi)): its sea level (the delta
-            amplitude and the kernel lump), and the converged channel
-            coefficients that drive the radial jump."""
+            zeta^v = -s / (b^2 l(l + 1)), L = -g (g_omega - Psi* g_phi)):
+            its sea level (the delta amplitude and the kernel lump), and
+            the converged channel coefficients that drive the radial
+            jump."""
             avc = None
             if rotational_feedbacks:
                 avc = np.zeros(3)
-                if m.angular_velocity is not None:
-                    avc = avc - g_surface * np.asarray(m.angular_velocity, float)
-                if m.gravity_potential is not None:
-                    avc = avc + g_surface * psi_star(m.gravity_potential)
+                if m.angular_velocity_change is not None:
+                    avc = avc - g_surface * np.asarray(m.angular_velocity_change, float)
+                if m.potential_change is not None:
+                    avc = avc + g_surface * psi_star(m.potential_change)
             zeta_u = None if m.displacement is None else -1.0 * m.displacement
             zeta_phi = (
-                None
-                if m.gravity_potential is None
-                else -g_surface * m.gravity_potential
+                None if m.potential_change is None else -g_surface * m.potential_change
             )
+            zeta_v = m.tangential_load(model)
             xi_a, _, _, omega_a = elastic_sle.solve_generalised_equation(
                 self.state,
-                direct_load=m.sea_level,
+                direct_load=m.relative_sea_level_change,
                 displacement_load=zeta_u,
                 gravitational_potential_load=zeta_phi,
+                tangential_load=zeta_v,
                 angular_momentum_change=avc,
                 ocean_function=C_grid(node),
                 rotational_feedbacks=rotational_feedbacks,
                 rtol=rtol,
             )
-            direct = m.sea_level.data if m.sea_level is not None else np.zeros_like(C)
+            direct = (
+                m.relative_sea_level_change.data
+                if m.relative_sea_level_change is not None
+                else np.zeros_like(C)
+            )
             lam = model.expand_field(
                 SHGrid.from_array(
                     direct + water_density * C_at(node) * xi_a.data,
@@ -1682,22 +1782,25 @@ class SeaLevelEvolution:
                 if rotational_feedbacks
                 else np.zeros_like(lam)
             )
-            zu = None if zeta_u is None else model.expand_field(zeta_u).coeffs
-            zphi = None if zeta_phi is None else model.expand_field(zeta_phi).coeffs
-            return xi_a, lam, psi_a, zu, zphi
+            channels = [
+                None if zeta is None else model.expand_field(zeta).coeffs
+                for zeta in (zeta_u, zeta_phi, zeta_v)
+            ]
+            return xi_a, lam, psi_a, channels
 
-        def apply_jump(vstate: ViscoelasticState, lam, psi_a, zu, zphi) -> None:
+        def apply_jump(vstate: ViscoelasticState, lam, psi_a, channels) -> None:
             """Yu et al. eq. (80): the strain of the instantaneous
             adjoint solution, over the relaxation time, jumps the
             adjoint internal variables; elastic branches do not move.
-            The split load channels carry displacement and potential
+            The split load channels and the tangential traction carry
+            displacement, potential and horizontal displacement
             measurements into the radial field."""
             lam_cols = self._columns(lam, self._to_mat_density)
             psi_cols = self._columns(psi_a, self._to_mat_potential)
-            zu_cols = None if zu is None else self._columns(zu, self._to_mat_density)
-            zphi_cols = (
-                None if zphi is None else self._columns(zphi, self._to_mat_density)
-            )
+            channel_cols = [
+                None if z is None else self._columns(z, self._to_mat_density)
+                for z in channels
+            ]
             for l in vstate.degrees:
                 deg = op.degree(l)
                 units_lv = op.unit_responses(None, 0.0, l)
@@ -1705,12 +1808,11 @@ class SeaLevelEvolution:
                     units_lv[:, 0][:, None] * lam_cols(l, 0.0)[None, :]
                     + units_lv[:, 1][:, None] * psi_cols(l, 0.0)[None, :]
                 )
-                if zu_cols is not None or zphi_cols is not None:
+                if any(cols is not None for cols in channel_cols):
                     split = op.split_unit_responses(None, 0.0, l)
-                    if zu_cols is not None:
-                        x = x + split[:, 0][:, None] * zu_cols(l, 0.0)[None, :]
-                    if zphi_cols is not None:
-                        x = x + split[:, 1][:, None] * zphi_cols(l, 0.0)[None, :]
+                    for column, cols in enumerate(channel_cols):
+                        if cols is not None:
+                            x = x + split[:, column][:, None] * cols(l, 0.0)[None, :]
                 d_tilde = deg.strain(x)
                 for k, itau in enumerate(deg.itau):
                     vstate.m[l][k] += itau[None, :, :, None] * d_tilde
@@ -1822,12 +1924,12 @@ class SeaLevelEvolution:
             jumped internal variables, not in a persistent load."""
             nonlocal sigma_c, psi_c
             if node in duals:
-                xi_a, lam, psi_a, zu, zphi = jump(duals[node], node)
+                xi_a, lam, psi_a, channels = jump(duals[node], node)
                 lump_load[node] = xi_a.data
                 instantaneous[float(dates[node])] = SHGrid.from_array(
                     grounded_at(node) * xi_a.data, grid=model.grid
                 )
-                apply_jump(vstate, lam, psi_a, zu, zphi)
+                apply_jump(vstate, lam, psi_a, channels)
                 early, sigma_c, psi_c = smooth_equilibrium(node)
                 if node > 0:
                     density_early[node] = early
@@ -1932,7 +2034,7 @@ class SeaLevelEvolution:
     def adjoint_ice_history(
         self,
         dates: Sequence[float],
-        measurement: dict[float, SHGrid],
+        measurement: dict[float, SHGrid | Measurement | GRDResponse],
         *,
         ocean_functions: Optional[Sequence[SHGrid]] = None,
         internal_states: Optional[Sequence[ViscoelasticState]] = None,
@@ -1964,8 +2066,13 @@ class SeaLevelEvolution:
         terms cancel), and the grounding factors follow C(t).  The
         gradient identity then holds in the linearised sense.
 
-        A measurement is a sea-level dual grid, or a `Measurement`
-        carrying duals of any of the four outputs.
+        A measurement is a sea level dual grid, a `Measurement` carrying
+        duals of the scalar members and the angular velocity change, or a
+        `GRDResponse` standing for its inner product with the response in
+        its own space, which carries a dual on the horizontal displacement
+        too.  The memory field's V joins V with no Love number, so the
+        horizontal dual enters each reversed step's radial solve at the
+        surface V, beside the engine's duals of the memory's U and phi.
 
         With `internal_states` -- the recorded forward trajectory, one
         state per date node from a run with `record=True` (frozen, or
@@ -2038,6 +2145,13 @@ class SeaLevelEvolution:
                 )
             ).data
 
+        def coefficients(c: Optional[np.ndarray]) -> Optional[SHCoeffs]:
+            if c is None:
+                return None
+            return SHCoeffs.from_array(
+                c, normalization=model.normalization, csphase=model.csphase
+            )
+
         def pack(values: dict[int, np.ndarray], factor: float) -> np.ndarray:
             out = np.zeros((2, lmax + 1, lmax + 1))
             for l, cols in values.items():
@@ -2051,8 +2165,8 @@ class SeaLevelEvolution:
             centrifugal coefficients."""
             m = duals.get(node)
             g_xi = (
-                m.sea_level.data
-                if m is not None and m.sea_level is not None
+                m.relative_sea_level_change.data
+                if m is not None and m.relative_sea_level_change is not None
                 else zero_grid
             ) + water_density * C_at(node) * (synth(sigma_dual) / r2)
             g_omega = np.array(
@@ -2063,12 +2177,13 @@ class SeaLevelEvolution:
                     + parameters.uniform_rotation_factor * psi_dual[0, 0, 0],
                 ]
             )
-            if m is not None and m.angular_velocity is not None:
-                g_omega = g_omega + np.asarray(m.angular_velocity, dtype=float)
+            if m is not None and m.angular_velocity_change is not None:
+                g_omega = g_omega + np.asarray(m.angular_velocity_change, dtype=float)
             extra = {}
             if m is not None:
                 extra["displacement_dual"] = m.displacement
-                extra["potential_dual"] = m.gravity_potential
+                extra["potential_dual"] = m.potential_change
+                extra["horizontal_dual"] = coefficients(m.horizontal)
             return g_xi, g_omega, extra
 
         load_duals = [None] * dates.size
@@ -2109,6 +2224,14 @@ class SeaLevelEvolution:
             load_duals[n] = f_dual.data + synth(sigma_dual) / r2
             su_cols = self._columns(su_dual.coeffs, self._to_nd_length)
             sphi_cols = self._columns(sphi_dual.coeffs, self._to_nd_potential)
+            # the memory's V joins V with no Love number, so the dual of
+            # its surface read is the measurement's horizontal dual itself
+            m = duals.get(n)
+            sv_cols = (
+                None
+                if m is None or m.horizontal is None
+                else self._columns(m.horizontal, self._to_nd_length)
+            )
             for l in op.degrees:
                 deg = op.degree(l)
                 rhs = (
@@ -2116,6 +2239,8 @@ class SeaLevelEvolution:
                     + deg.surface_dual("U", su_cols(l, 0.0))
                     + deg.surface_dual("phi", sphi_cols(l, 0.0))
                 )
+                if sv_cols is not None:
+                    rhs = rhs + deg.surface_dual("V", sv_cols(l, 0.0))
                 if l == 0:
                     rhs[:, 0] += deg.moment_row * (j_dual * self._to_nd_moment)
                 y = op.effective_system(scheme, dt, l).solve(rhs)
@@ -2209,10 +2334,11 @@ class SeaLevelEvolution:
         for node, m in duals.items():
             f_dual, _, _, _ = elastic_sle.adjoint_generalised_solve(
                 self.state,
-                sea_level_dual=m.sea_level,
+                sea_level_dual=m.relative_sea_level_change,
                 displacement_dual=m.displacement,
-                potential_dual=m.gravity_potential,
-                angular_velocity_dual=m.angular_velocity,
+                potential_dual=m.potential_change,
+                angular_velocity_dual=m.angular_velocity_change,
+                horizontal_dual=coefficients(m.horizontal),
                 ocean_function=C_grid(node),
                 rotational_feedbacks=rotational_feedbacks,
                 rtol=rtol,

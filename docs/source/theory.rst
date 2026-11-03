@@ -433,17 +433,25 @@ For an evolution, an objective functional is a sum over observation dates
 
 .. math::
 
-   J = \sum_i\Big[\int g^{(i)}_\xi\,\xi(t_i)\,dS + \int g^{(i)}_u\,u(t_i)\,dS
+   J = \sum_i\Big[\int g^{(i)}_\xi\,\xi(t_i)\,dS + \int g^{(i)}_u\,U(t_i)\,dS
    + \int g^{(i)}_\phi\,\phi(t_i)\,dS + \mathbf{g}^{(i)}_\omega\cdot
-   \boldsymbol{\omega}(t_i)\Big],
+   \boldsymbol{\omega}(t_i) + \sum_{\ell m} s^{(i)}_{\ell m}V_{\ell m}(t_i)\Big],
 
-whose duals a ``Measurement`` carries. The adjoint theory of glacial isostatic
+with :math:`U` and :math:`V` the vertical displacement and the potential of the
+horizontal displacement :math:`\nabla_1 V`. A ``Measurement`` carries the
+duals of the scalar fields and of the angular velocity change. A
+``GRDResponse`` given as a measurement stands for its inner product with the
+response in its own space, which may be a Sobolev space, and carries all the
+duals, the horizontal one included: with :math:`\lambda` the space's metric
+and :math:`c` the components, the duals are the metric-weighted components
+:math:`\lambda g`. The adjoint theory of glacial isostatic
 adjustment was set out by Crawford et al. (2018), and extended to rotational
 feedbacks by Yu et al. (2025), whose formulation the library follows. The
 adjoint problem has the same form as the forward problem with more general
 forces: a sea level dual forces like an ice load, displacement and
-potential duals enter as the generalised channels, and an angular velocity dual
-as an angular momentum forcing. The adjoint ocean function is not determined
+potential duals enter as the generalised channels, a horizontal dual as a
+tangential traction :math:`\zeta^v_{\ell m} = -s_{\ell m}/(b^2\ell(\ell+1))`,
+and an angular velocity dual as an angular momentum forcing. The adjoint ocean function is not determined
 dynamically but is the time-reversed ocean function of the forward run, so the
 adjoint problem is linear whatever the shorelines did, and under migrating
 shorelines only the history :math:`C(t)` of the forward run is needed.

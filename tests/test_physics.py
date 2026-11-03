@@ -2,6 +2,8 @@
 Test suite for the core Sea Level Equation solvers.
 """
 
+import warnings
+
 import pytest
 import numpy as np
 from pyshtools import SHGrid
@@ -139,8 +141,8 @@ def test_nonlinear_solver_smoke_test(analytical_state):
     # Verify that solver iteration tracking works
     assert sle.solver_counter > initial_counter
 
-    # Verify the Caspian Sea policy inherited correctly
-    assert new_state.exclude_caspian == analytical_state.exclude_caspian
+    # The final state holds the same regions as land as the initial one
+    assert (new_state.land is None) == (analytical_state.land is None)
 
 
 @pytest.mark.parametrize("grid", ["DH", "DH2"])
@@ -157,7 +159,7 @@ def test_nonlinear_solver_non_extended_grid(grid):
         ice_thickness, sea_level = ice_model.get_ice_thickness_and_sea_level(
             0.0, lmax, grid=model.grid_name, sampling=model.sampling, extend=extend
         )
-        state = EarthState(ice_thickness, sea_level, model, exclude_caspian=False)
+        state = EarthState(ice_thickness, sea_level, model)
 
         ice_melt_nd = -100.0 / model.parameters.length_scale
         ice_thickness_change = model.zero_grid()
@@ -522,11 +524,42 @@ def test_zero_load_outputs_are_independent_objects(linear_solver):
     assert disp.data[0, 0] == 0.0 and potc.data[0, 0] == 0.0
 
 
-def test_non_convergence_warns(linear_solver):
+def test_non_convergence_at_default_limit_warns(linear_solver, monkeypatch):
+    """Stopping at the solver's own iteration limit is a failure, and says so."""
     np.random.seed(6)
     load = random_load(linear_solver.state)
+    monkeypatch.setattr(SeaLevelEquation, "_DEFAULT_MAX_ITERATIONS", 1)
     with pytest.warns(RuntimeWarning, match="did not converge"):
+        linear_solver.solve_sea_level_equation(load, rtol=1e-12)
+
+
+def test_explicit_iteration_limit_is_silent(linear_solver):
+    """Stopping at a limit the caller set is what was asked for: no warning."""
+    np.random.seed(6)
+    load = random_load(linear_solver.state)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
         linear_solver.solve_sea_level_equation(load, max_iterations=1, rtol=1e-12)
+
+
+def test_nonlinear_default_limit_warns(analytical_state, monkeypatch):
+    """The non-linear solver follows the same rule as the linear one."""
+    sle = SeaLevelEquation(analytical_state.model)
+    change = analytical_state.model.zero_grid()
+    change.data[:] = -0.01 * analytical_state.ice_projection(value=0.0).data
+    monkeypatch.setattr(SeaLevelEquation, "_DEFAULT_MAX_NONLINEAR_ITERATIONS", 1)
+    with pytest.warns(RuntimeWarning, match="did not converge"):
+        sle.solve_nonlinear_equation(
+            analytical_state, ice_thickness_change=change, rtol=1e-12
+        )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        sle.solve_nonlinear_equation(
+            analytical_state,
+            ice_thickness_change=change,
+            rtol=1e-12,
+            max_iterations=1,
+        )
 
 
 def test_nonlinear_solver_without_ice_change(analytical_state):
@@ -569,7 +602,7 @@ def test_solvers_on_dh2_grid():
     ice, sea_level = ice_model.get_ice_thickness_and_sea_level(
         0.0, 16, grid=model.grid_name, sampling=model.sampling, extend=model.extend
     )
-    state = EarthState(ice, sea_level, model, exclude_caspian=False)
+    state = EarthState(ice, sea_level, model)
     assert state.ocean_function.data.shape == model.zero_grid().data.shape
 
     load = state.northern_hemisphere_load(fraction=0.5)

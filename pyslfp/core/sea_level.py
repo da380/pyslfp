@@ -38,7 +38,7 @@ worker processes, set ``OMP_NUM_THREADS=1`` before Python starts.
 """
 
 from __future__ import annotations
-from typing import Optional, Tuple
+from typing import NamedTuple, Optional, Tuple
 import warnings
 
 import numpy as np
@@ -46,7 +46,21 @@ from pyshtools import SHCoeffs, SHGrid
 
 from .anderson import AndersonMixer
 from .model import EarthModel
-from .state import EarthState
+from .state import flotation_fields, EarthState
+from .response import GRDResponse, GRDSpace
+
+
+class _Solution(NamedTuple):
+    """The fields of a generalised solve, as coefficient arrays in the
+    model's normalisation, with the sea level change also on the grid; the
+    horizontal displacement potential V is None unless asked for."""
+
+    relative_sea_level_change: np.ndarray
+    sea_level_lm: np.ndarray
+    displacement_lm: np.ndarray
+    potential_lm: np.ndarray
+    horizontal_lm: Optional[np.ndarray]
+    angular_velocity_change: np.ndarray
 
 
 class SeaLevelEquation:
@@ -57,6 +71,13 @@ class SeaLevelEquation:
     and non-linear forms of the SLE, mapping surface mass redistributions to
     global sea level, surface displacement, and gravity anomalies.
     """
+
+    # The iteration limits used when a caller sets none. Stopping at one of
+    # these without converging is reported with a RuntimeWarning. Stopping at
+    # a limit the caller set is not: a capped solve, such as the one-pass
+    # surrogate of a preconditioner, is what was asked for.
+    _DEFAULT_MAX_ITERATIONS: int = 1000
+    _DEFAULT_MAX_NONLINEAR_ITERATIONS: int = 50
 
     def __init__(self, model: EarthModel, /) -> None:
         """
@@ -93,6 +114,12 @@ class SeaLevelEquation:
         self._k_u = love_numbers.k_u[None, :, None]
         self._h_phi = love_numbers.h_phi[None, :, None]
         self._k_phi = love_numbers.k_phi[None, :, None]
+        self._l = love_numbers.l[None, :, None]
+        self._l_u = love_numbers.l_u[None, :, None]
+        self._l_phi = love_numbers.l_phi[None, :, None]
+        self._h_v = love_numbers.h_v[None, :, None]
+        self._k_v = love_numbers.k_v[None, :, None]
+        self._l_v = love_numbers.l_v[None, :, None]
 
         # Combined factor mapping load coefficients to sea level change
         self._slc_factor = -(self._h + self._k / self._g)
@@ -102,6 +129,7 @@ class SeaLevelEquation:
         self._k2 = love_numbers.k[2]
         self._ht2 = love_numbers.h_t[2]
         self._kt2 = love_numbers.k_t[2]
+        self._lt2 = love_numbers.l_t[2]
         # Degree-0 quantities for the axial feedback: the response to the
         # uniform part of the centrifugal potential and the inertia moments
         # of the degree-0 responses, zero when the table does not hold them
@@ -171,8 +199,7 @@ class SeaLevelEquation:
     def _ocean_average(self, state: EarthState, f: SHGrid) -> float:
         """Computes the spatial average of a field over the oceans."""
         return (
-            self._model._integrate_data(state.ocean_function.data * f.data)
-            / state.ocean_area
+            self._model.integrate(state.ocean_function.data * f.data) / state.ocean_area
         )
 
     def _expand(self, data: np.ndarray) -> np.ndarray:
@@ -322,7 +349,10 @@ class SeaLevelEquation:
             rtol (float): The relative tolerance for convergence, measured as the
                 change in sea level over the oceans between iterations relative
                 to its magnitude.
-            max_iterations (Optional[int]): Hard limit on iteration count.
+            max_iterations (Optional[int]): Hard limit on iteration count,
+                1000 if omitted. Stopping at the default limit without
+                converging raises a RuntimeWarning; stopping at a limit
+                given here does not.
             verbose (bool): If True, prints iteration metrics.
 
         Returns:
@@ -349,6 +379,7 @@ class SeaLevelEquation:
         direct_load: Optional[SHGrid] = None,
         displacement_load: Optional[SHGrid] = None,
         gravitational_potential_load: Optional[SHGrid] = None,
+        tangential_load: Optional[SHGrid] = None,
         displacement_response: Optional[SHCoeffs] = None,
         gravitational_potential_response: Optional[SHCoeffs] = None,
         inertia_moment_change: float = 0.0,
@@ -372,6 +403,12 @@ class SeaLevelEquation:
             direct_load (Optional[SHGrid]): Standard surface mass forcing.
             displacement_load (Optional[SHGrid]): External vertical surface displacement forcing.
             gravitational_potential_load (Optional[SHGrid]): External gravitational potential forcing.
+            tangential_load (Optional[SHGrid]): The potential zeta^v of a
+                tangential surface traction -g grad_1 zeta^v, in the units
+                of a surface density, answered through the tangential Love
+                numbers (h_v, l_v, k_v). An adjoint solve takes a dual on
+                the horizontal displacement through it, as it takes a
+                displacement dual through `displacement_load`.
             displacement_response (Optional[SHCoeffs]): A ready displacement
                 response, in coefficient form, present whatever the loads:
                 it joins the static terms directly, with no Love number
@@ -390,13 +427,75 @@ class SeaLevelEquation:
             rtol (float): The relative tolerance for convergence, measured as the
                 change in sea level over the oceans between iterations relative
                 to its magnitude.
-            max_iterations (Optional[int]): Hard limit on iteration count.
+            max_iterations (Optional[int]): Hard limit on iteration count,
+                1000 if omitted. Stopping at the default limit without
+                converging raises a RuntimeWarning; stopping at a limit
+                given here does not.
             verbose (bool): If True, prints iteration metrics.
 
         Returns:
             Tuple[SHGrid, SHGrid, SHGrid, np.ndarray]: The physical response fields:
                 (Sea Level Change, Displacement, Gravitational Potential, Angular Velocity)
         """
+        solution = self._solve_generalised(
+            state,
+            direct_load=direct_load,
+            displacement_load=displacement_load,
+            gravitational_potential_load=gravitational_potential_load,
+            tangential_load=tangential_load,
+            displacement_response=displacement_response,
+            gravitational_potential_response=gravitational_potential_response,
+            inertia_moment_change=inertia_moment_change,
+            angular_momentum_change=angular_momentum_change,
+            ocean_function=ocean_function,
+            rotational_feedbacks=rotational_feedbacks,
+            rtol=rtol,
+            max_iterations=max_iterations,
+            verbose=verbose,
+        )
+        grid = self._model.grid
+        return (
+            SHGrid.from_array(
+                solution.relative_sea_level_change, grid=grid, copy=False
+            ),
+            SHGrid.from_array(
+                self._synthesise(solution.displacement_lm), grid=grid, copy=False
+            ),
+            SHGrid.from_array(
+                self._synthesise(solution.potential_lm), grid=grid, copy=False
+            ),
+            solution.angular_velocity_change,
+        )
+
+    def _solve_generalised(
+        self,
+        state: EarthState,
+        /,
+        *,
+        direct_load: Optional[SHGrid] = None,
+        displacement_load: Optional[SHGrid] = None,
+        gravitational_potential_load: Optional[SHGrid] = None,
+        tangential_load: Optional[SHGrid] = None,
+        displacement_response: Optional[SHCoeffs] = None,
+        gravitational_potential_response: Optional[SHCoeffs] = None,
+        horizontal_response: Optional[SHCoeffs] = None,
+        inertia_moment_change: float = 0.0,
+        angular_momentum_change: Optional[np.ndarray] = None,
+        ocean_function: Optional[SHGrid] = None,
+        rotational_feedbacks: bool = True,
+        horizontal: bool = False,
+        rtol: float = 1e-9,
+        max_iterations: Optional[int] = None,
+        verbose: bool = False,
+    ) -> _Solution:
+        """The engine of `solve_generalised_equation`: the same solve, its
+        fields left as coefficients, with the horizontal displacement
+        potential V when `horizontal` is True. The sea level change is
+        returned on the grid as well, as the solve computes it there.
+
+        `horizontal_response` is a ready V, a viscoelastic step's memory
+        field: it joins V with no Love number applied and, since V feeds
+        nothing back into the sea level equation, it moves nothing else."""
         model = self._model
         g = self._g
         water_density = self._water_density
@@ -418,6 +517,7 @@ class SeaLevelEquation:
 
         static_disp = None
         static_grav = None
+        static_horizontal = None
 
         if displacement_load is not None:
             model.check_field(displacement_load)
@@ -426,6 +526,7 @@ class SeaLevelEquation:
             disp_lm = self._expand(displacement_load.data)
             static_disp = self._h_u * disp_lm
             static_grav = self._k_u * disp_lm
+            static_horizontal = self._l_u * disp_lm
 
         if gravitational_potential_load is not None:
             model.check_field(gravitational_potential_load)
@@ -437,9 +538,36 @@ class SeaLevelEquation:
             if static_disp is None:
                 static_disp = self._h_phi * grav_lm
                 static_grav = self._k_phi * grav_lm
+                static_horizontal = self._l_phi * grav_lm
             else:
                 static_disp += self._h_phi * grav_lm
                 static_grav += self._k_phi * grav_lm
+                static_horizontal = (
+                    self._l_phi * grav_lm
+                    if static_horizontal is None
+                    else static_horizontal + self._l_phi * grav_lm
+                )
+
+        if tangential_load is not None:
+            model.check_field(tangential_load)
+            loads_present = True
+            non_zero_rhs = non_zero_rhs or np.max(np.abs(tangential_load.data)) > 0
+            tang_lm = self._expand(tangential_load.data)
+            # no degree 0: a tangential traction has none, and h_v, k_v
+            # and l_v vanish there, so the axial trace terms are untouched
+            parts = (self._h_v * tang_lm, self._k_v * tang_lm, self._l_v * tang_lm)
+            static_disp = parts[0] if static_disp is None else static_disp + parts[0]
+            static_grav = parts[1] if static_grav is None else static_grav + parts[1]
+            static_horizontal = (
+                parts[2] if static_horizontal is None else static_horizontal + parts[2]
+            )
+
+        if horizontal_response is not None:
+            self._model.check_coefficient(horizontal_response)
+            resp = horizontal_response.coeffs
+            static_horizontal = (
+                resp.copy() if static_horizontal is None else static_horizontal + resp
+            )
 
         if displacement_response is not None:
             self._model.check_coefficient(displacement_response)
@@ -472,11 +600,22 @@ class SeaLevelEquation:
             non_zero_rhs = non_zero_rhs or np.max(np.abs(angular_momentum_change)) > 0
 
         if not loads_present or not non_zero_rhs:
-            return (
-                model.zero_grid(),
-                model.zero_grid(),
-                model.zero_grid(),
-                np.zeros(3),
+            # a ready V alone moves nothing but V
+            zero_lm = np.zeros_like(model.zero_grid().expand().coeffs)
+            horizontal_lm = None
+            if horizontal:
+                horizontal_lm = (
+                    zero_lm.copy()
+                    if static_horizontal is None
+                    else static_horizontal.copy()
+                )
+            return _Solution(
+                relative_sea_level_change=np.zeros_like(model.zero_grid().data),
+                sea_level_lm=zero_lm,
+                displacement_lm=zero_lm.copy(),
+                potential_lm=zero_lm.copy(),
+                horizontal_lm=horizontal_lm,
+                angular_velocity_change=np.zeros(3),
             )
 
         self._solver_counter += 1
@@ -493,9 +632,7 @@ class SeaLevelEquation:
 
         if direct_load is not None:
             direct_data = direct_load.data
-            mean_slc = -model._integrate_data(direct_data) / (
-                water_density * ocean_area
-            )
+            mean_slc = -model.integrate(direct_data) / (water_density * ocean_area)
         else:
             direct_data = np.zeros_like(ocean_function)
             mean_slc = 0.0
@@ -513,7 +650,9 @@ class SeaLevelEquation:
             0.0 if gravitational_potential_load is None else grav_lm[0, 0, 0]
         )
 
-        def sea_level_from_load(load_lm: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        def sea_level_from_load(
+            load_lm: np.ndarray,
+        ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
             """Synthesises the mass-conserving sea level change for a load."""
             slc_lm = self._slc_factor * load_lm
             if static_slc is not None:
@@ -535,12 +674,19 @@ class SeaLevelEquation:
                 # uniform, and so absorbed by mass conservation below
                 slc_lm[0, 0, 0] -= (self._hc + (self._kc + 1.0) / g) * centrifugal_0
             slc = self._synthesise(slc_lm)
-            slc += mean_slc - model._integrate_data(ocean_function * slc) / ocean_area
-            return slc, omega
+            shift = mean_slc - model.integrate(ocean_function * slc) / ocean_area
+            slc += shift
+            # the uniform shift is the degree-0 term, Y_00 = 1/sqrt(4 pi)
+            slc_lm[0, 0, 0] += shift * np.sqrt(4.0 * np.pi)
+            return slc, omega, slc_lm
 
         load_lm = self._expand(direct_data + water_density * ocean_function * mean_slc)
         mixer = AndersonMixer(self.anderson_memory)
-        iter_limit = max_iterations if max_iterations is not None else 1000
+        iter_limit = (
+            max_iterations
+            if max_iterations is not None
+            else self._DEFAULT_MAX_ITERATIONS
+        )
 
         ocean_slc_prev = None
         err = np.inf
@@ -548,8 +694,10 @@ class SeaLevelEquation:
         count = 0
 
         while count < iter_limit:
-            sea_level_change, angular_velocity_change = sea_level_from_load(load_lm)
-            ocean_slc = ocean_function * sea_level_change
+            relative_sea_level_change, angular_velocity_change, sea_level_lm = (
+                sea_level_from_load(load_lm)
+            )
+            ocean_slc = ocean_function * relative_sea_level_change
 
             if ocean_slc_prev is not None:
                 scale = np.max(np.abs(ocean_slc))
@@ -569,17 +717,20 @@ class SeaLevelEquation:
             load_lm = mixer.update(load_lm, load_new_lm)
             count += 1
 
-        if not converged:
+        if not converged and max_iterations is None:
             self._warn_not_converged("Sea level equation solver", err, count)
 
-        # Synthesise the remaining fields from the same load as the sea level
+        # The remaining fields, from the same load as the sea level
         displacement_lm = self._h * load_lm
         potential_lm = self._k * load_lm
+        horizontal_lm = self._l * load_lm if horizontal else None
         if static_disp is not None:
             displacement_lm += static_disp
             potential_lm += static_grav
+        if horizontal and static_horizontal is not None:
+            horizontal_lm += static_horizontal
         if rotational_feedbacks:
-            _, disp_2, grav_2, _, centrifugal_0 = self._rotation(
+            _, disp_2, grav_2, centrifugal, centrifugal_0 = self._rotation(
                 load_lm[:, 2, :2],
                 load_0=load_lm[0, 0, 0],
                 static_disp_2=static_disp_2,
@@ -594,14 +745,117 @@ class SeaLevelEquation:
             potential_lm[:, 2, :2] = grav_2
             displacement_lm[0, 0, 0] += self._hc * centrifugal_0
             potential_lm[0, 0, 0] += self._kc * centrifugal_0
+            if horizontal:
+                horizontal_lm[:, 2, :2] += self._lt2 * centrifugal
 
-        grid = model.grid
-        return (
-            SHGrid.from_array(sea_level_change, grid=grid, copy=False),
-            SHGrid.from_array(self._synthesise(displacement_lm), grid=grid, copy=False),
-            SHGrid.from_array(self._synthesise(potential_lm), grid=grid, copy=False),
-            angular_velocity_change,
+        return _Solution(
+            relative_sea_level_change=relative_sea_level_change,
+            sea_level_lm=sea_level_lm,
+            displacement_lm=displacement_lm,
+            potential_lm=potential_lm,
+            horizontal_lm=horizontal_lm,
+            angular_velocity_change=angular_velocity_change,
         )
+
+    def _check_response_space(self, space: GRDSpace, rotational_feedbacks) -> None:
+        """Refuses a response space off this model's sphere, or one whose
+        angular velocity member does not match the feedback."""
+        field_space = space.field_space
+        b = self._model.parameters.mean_sea_floor_radius
+        if field_space.lmax != self._model.lmax or not np.isclose(
+            field_space.radius, b, rtol=1e-12, atol=0.0
+        ):
+            raise ValueError("the response space is not over this model's sphere")
+        if space.has_rotation != (rotational_feedbacks is not False):
+            raise ValueError(
+                "the response space holds the angular velocity change exactly "
+                "when there is rotational feedback"
+            )
+
+    @staticmethod
+    def _response(space: GRDSpace, solution: _Solution) -> GRDResponse:
+        """A solution's coefficients as a vector of the response space."""
+        return space.from_coefficients(
+            solution.sea_level_lm,
+            solution.displacement_lm,
+            solution.potential_lm,
+            horizontal=solution.horizontal_lm,
+            angular_velocity_change=(
+                solution.angular_velocity_change if space.has_rotation else None
+            ),
+        )
+
+    def solve_response(
+        self,
+        state: EarthState,
+        direct_load: Optional[SHGrid],
+        space: GRDSpace,
+        /,
+        *,
+        displacement_load: Optional[SHGrid] = None,
+        gravitational_potential_load: Optional[SHGrid] = None,
+        tangential_load: Optional[SHGrid] = None,
+        displacement_response: Optional[SHCoeffs] = None,
+        gravitational_potential_response: Optional[SHCoeffs] = None,
+        horizontal_response: Optional[SHCoeffs] = None,
+        inertia_moment_change: float = 0.0,
+        angular_momentum_change: Optional[np.ndarray] = None,
+        ocean_function: Optional[SHGrid] = None,
+        rotational_feedbacks: bool = True,
+        rtol: float = 1e-9,
+        max_iterations: Optional[int] = None,
+        verbose: bool = False,
+    ) -> GRDResponse:
+        """
+        Solves the linear sea level equation for a surface mass load, and
+        any of the generalised forcings, and returns the response as a
+        vector of `space`, its fields held as coefficients: the horizontal
+        displacement when the space holds it, and the angular velocity
+        change when it holds that.
+
+        The generalised forcings (`displacement_load`,
+        `gravitational_potential_load`, `tangential_load`,
+        `displacement_response`, `gravitational_potential_response`,
+        `inertia_moment_change`, `angular_momentum_change`) and the
+        `ocean_function` override are as for `solve_generalised_equation`.
+
+        Args:
+            state (EarthState): The unperturbed background Earth state.
+            direct_load (Optional[SHGrid]): The surface mass load; None for
+                none.
+            space (GRDSpace): The response space, over this model's grid and
+                radius; it holds the angular velocity change exactly when
+                there is rotational feedback.
+            horizontal_response (Optional[SHCoeffs]): A ready horizontal
+                displacement potential V, a viscoelastic step's memory
+                field, joined to V with no Love number applied.
+            rotational_feedbacks (bool | str): True for the full feedback,
+                "axial" for the axial component alone, False for none.
+            rtol, max_iterations, verbose: As for `solve_sea_level_equation`.
+
+        Raises:
+            ValueError: If the space does not match the model or the feedback.
+        """
+        self._check_response_space(space, rotational_feedbacks)
+        solution = self._solve_generalised(
+            state,
+            direct_load=direct_load,
+            displacement_load=displacement_load,
+            gravitational_potential_load=gravitational_potential_load,
+            tangential_load=tangential_load,
+            displacement_response=displacement_response,
+            gravitational_potential_response=gravitational_potential_response,
+            horizontal_response=horizontal_response,
+            inertia_moment_change=inertia_moment_change,
+            angular_momentum_change=angular_momentum_change,
+            ocean_function=ocean_function,
+            rotational_feedbacks=rotational_feedbacks,
+            horizontal=space.has_horizontal,
+            rtol=rtol,
+            max_iterations=max_iterations,
+            verbose=verbose,
+        )
+        return self._response(space, solution)
 
     def adjoint_generalised_solve(
         self,
@@ -612,6 +866,7 @@ class SeaLevelEquation:
         displacement_dual: Optional[SHGrid] = None,
         potential_dual: Optional[SHGrid] = None,
         angular_velocity_dual: Optional[np.ndarray] = None,
+        horizontal_dual: Optional[SHCoeffs] = None,
         ocean_function: Optional[SHGrid] = None,
         rotational_feedbacks: bool = True,
         rtol: float = 1e-9,
@@ -622,26 +877,30 @@ class SeaLevelEquation:
 
         Consider the linear map of `solve_generalised_equation` (frozen
         shorelines) from the inputs (direct_load, displacement_response,
-        gravitational_potential_response, inertia_moment_change) to the
-        outputs (sea level change, displacement, potential, angular
-        velocity), and a linear functional of the outputs
+        gravitational_potential_response, horizontal_response,
+        inertia_moment_change) to the outputs (sea level change,
+        displacement, potential, angular velocity and the horizontal
+        displacement potential V), and a linear functional of the outputs
 
             J = int g_xi xi dS + int g_u u dS + int g_phi phi dS
-                + g_omega . omega.
+                + g_omega . omega + sum s_v : V.
 
         This method returns the four input duals (f, s_u, s_phi, j) with
 
             J = int f delta_zeta dS + sum s_u : delta_r_u
-                + sum s_phi : delta_r_phi + j delta_moment,
+                + sum s_phi : delta_r_phi + sum s_v : delta_r_v
+                + j delta_moment,
 
-        the response-channel duals paired coefficient-wise.  It is the
-        reverse-mode of the forward code path -- the transposed load
-        fixed point, run through the same Anderson mixer -- so the
-        identity holds to the solvers' tolerance; a viscoelastic adjoint
-        step chains it with the transposed radial updates.  The load
-        channels zeta^u, zeta^phi and the angular momentum input are not
-        carried (the time stepping does not use them); the elastic
-        fingerprint adjoint in `pyslfp.linear_operators` covers them.
+        the response-channel duals paired coefficient-wise.  The ready
+        horizontal response enters V alone and with no Love number, so its
+        dual is s_v itself and is not returned.  It is the reverse-mode of
+        the forward code path -- the transposed load fixed point, run
+        through the same Anderson mixer -- so the identity holds to the
+        solvers' tolerance; a viscoelastic adjoint step chains it with the
+        transposed radial updates.  The load channels zeta^u, zeta^phi,
+        zeta^v and the angular momentum input are not carried (the time
+        stepping does not use them); the adjoint of
+        `pyslfp.elastic.FingerPrintOperator` covers them.
 
         Args:
             state (EarthState): The background state, as in the forward.
@@ -653,6 +912,11 @@ class SeaLevelEquation:
             displacement_dual (Optional[SHGrid]): g_u, likewise.
             potential_dual (Optional[SHGrid]): g_phi, likewise.
             angular_velocity_dual (Optional[np.ndarray]): g_omega, [x, y, z].
+            horizontal_dual (Optional[SHCoeffs]): s_v, paired with the
+                coefficients of V in the model's normalisation.  V is
+                l sigma, plus l^t times the centrifugal potential at
+                degree 2, so s_v adds l s_v to the dual of the total load
+                and l^t s_v to that of the centrifugal potential.
             rotational_feedbacks (bool | str): As in the forward; must
                 match the forward solve being transposed.
             rtol, max_iterations, verbose: As in the forward.
@@ -703,8 +967,14 @@ class SeaLevelEquation:
         g_omega = np.zeros(3)
         if angular_velocity_dual is not None:
             g_omega = np.asarray(angular_velocity_dual, dtype=float)
+        s_v = zero_c.copy()
+        if horizontal_dual is not None:
+            model.check_coefficient(horizontal_dual)
+            s_v = np.array(horizontal_dual.coeffs, dtype=float)
 
-        # duals the synthesised outputs contribute outside the fixed point
+        # duals the synthesised outputs contribute outside the fixed point;
+        # V adds its centrifugal term to l sigma at degree 2 where U and phi
+        # replace theirs, so its dual on the load is never cut there
         if rotational_feedbacks:
             lam_u_base = lam_u.copy()
             lam_u_base[:, 2, :2] = 0.0
@@ -712,11 +982,12 @@ class SeaLevelEquation:
             lam_phi_base[:, 2, :2] = 0.0
             du2_out = lam_u[:, 2, :2]
             dphi2_out = lam_phi[:, 2, :2]
+            dpsi2_out = self._lt2 * s_v[:, 2, :2]
             dpsi0_out = self._hc * lam_u[0, 0, 0] + self._kc * lam_phi[0, 0, 0]
         else:
             lam_u_base = lam_u
             lam_phi_base = lam_phi
-        r_out = self._h * lam_u_base + self._k * lam_phi_base
+        r_out = self._h * lam_u_base + self._k * lam_phi_base + self._l * s_v
         hkc = self._hc + (self._kc + 1.0) / g
 
         def reverse_once(lam: np.ndarray):
@@ -725,7 +996,7 @@ class SeaLevelEquation:
             xi_dual = g_xi + water_density * ocean_function * (
                 self._synthesise(lam) / r2
             )
-            mean_dual = model._integrate_data(xi_dual)
+            mean_dual = model.integrate(xi_dual)
             xg_dual = xi_dual - ocean_function * (mean_dual / ocean_area)
             z_dual = r2 * self._expand(xg_dual)
             new = r_out.copy()
@@ -739,7 +1010,7 @@ class SeaLevelEquation:
                 z_base[:, 2, :2] = 0.0
                 d_disp2 = du2_out - z2
                 d_grav2 = dphi2_out - z2 / g
-                d_psi2 = -z2 / g + self._ht2 * d_disp2 + self._kt2 * d_grav2
+                d_psi2 = -z2 / g + self._ht2 * d_disp2 + self._kt2 * d_grav2 + dpsi2_out
                 d_psi0 = dpsi0_out - hkc * z_dual[0, 0, 0]
                 d_disp_forcing = d_disp2
                 d_grav_forcing = d_grav2.copy()
@@ -776,12 +1047,17 @@ class SeaLevelEquation:
             and np.max(np.abs(lam_u)) == 0.0
             and np.max(np.abs(lam_phi)) == 0.0
             and np.max(np.abs(g_omega)) == 0.0
+            and np.max(np.abs(s_v)) == 0.0
         ):
             return model.zero_grid(), coeffs(zero_c), coeffs(zero_c.copy()), 0.0
 
         self._solver_counter += 1
         mixer = AndersonMixer(self.anderson_memory)
-        iter_limit = max_iterations if max_iterations is not None else 1000
+        iter_limit = (
+            max_iterations
+            if max_iterations is not None
+            else self._DEFAULT_MAX_ITERATIONS
+        )
         lam = np.zeros_like(zero_c)
         err = np.inf
         converged = False
@@ -798,7 +1074,7 @@ class SeaLevelEquation:
                 break
             lam = mixer.update(lam, new)
             count += 1
-        if not converged:
+        if not converged and max_iterations is None:
             self._warn_not_converged("Adjoint sea level solver", err, count)
 
         # the input duals, read at the converged dual load
@@ -832,7 +1108,7 @@ class SeaLevelEquation:
         inertia_moment_change: float = 0.0,
         rotational_feedbacks: bool = True,
         rtol: float = 1e-9,
-        max_iterations: int = 50,
+        max_iterations: Optional[int] = None,
         verbose: bool = False,
     ) -> Tuple[EarthState, SHGrid, SHGrid, SHGrid, np.ndarray]:
         """
@@ -862,7 +1138,10 @@ class SeaLevelEquation:
                 "axial" for the axial component alone, False for none; see
                 `solve_generalised_equation`.
             rtol (float): The relative tolerance for convergence.
-            max_iterations (int): Hard limit on non-linear iteration count.
+            max_iterations (Optional[int]): Hard limit on non-linear
+                iteration count, 50 if omitted. Stopping at the default
+                limit without converging raises a RuntimeWarning; stopping
+                at a limit given here does not.
             verbose (bool): If True, prints iteration metrics.
 
         Returns:
@@ -873,10 +1152,157 @@ class SeaLevelEquation:
                 - Gravity Potential Change
                 - Angular Velocity Change [omega_x, omega_y, omega_z]
         """
+        final_state, solution = self._solve_nonlinear(
+            initial_state,
+            ice_thickness_change=ice_thickness_change,
+            sediment_thickness_change=sediment_thickness_change,
+            dynamic_sea_level_change=dynamic_sea_level_change,
+            sediment_density=sediment_density,
+            displacement_response=displacement_response,
+            gravitational_potential_response=gravitational_potential_response,
+            inertia_moment_change=inertia_moment_change,
+            rotational_feedbacks=rotational_feedbacks,
+            rtol=rtol,
+            max_iterations=max_iterations,
+            verbose=verbose,
+        )
+        grid = self._model.grid
+        return (
+            final_state,
+            SHGrid.from_array(solution.relative_sea_level_change, grid=grid),
+            SHGrid.from_array(
+                self._synthesise(solution.displacement_lm), grid=grid, copy=False
+            ),
+            SHGrid.from_array(
+                self._synthesise(solution.potential_lm), grid=grid, copy=False
+            ),
+            solution.angular_velocity_change,
+        )
+
+    def solve_nonlinear_response(
+        self,
+        initial_state: EarthState,
+        space: GRDSpace,
+        /,
+        *,
+        ice_thickness_change: Optional[SHGrid] = None,
+        sediment_thickness_change: Optional[SHGrid] = None,
+        dynamic_sea_level_change: Optional[SHGrid] = None,
+        sediment_density: Optional[float] = None,
+        displacement_response: Optional[SHCoeffs] = None,
+        gravitational_potential_response: Optional[SHCoeffs] = None,
+        horizontal_response: Optional[SHCoeffs] = None,
+        inertia_moment_change: float = 0.0,
+        rotational_feedbacks: bool = True,
+        rtol: float = 1e-9,
+        max_iterations: Optional[int] = None,
+        verbose: bool = False,
+    ) -> Tuple[EarthState, GRDResponse]:
+        """
+        Solves the non-linear sea level equation, as
+        `solve_nonlinear_equation`, and returns the new equilibrium state
+        with the response as a vector of `space`.
+
+        The sea level change is band-limited here too: the synthesis of the
+        last iteration's coefficients plus the uniform shift of the mass
+        budget, which joins degree 0. The displacement, potential and V
+        are those of the last iteration's load. The forcings and options
+        not listed below are those of `solve_nonlinear_equation`.
+
+        Args:
+            initial_state (EarthState): The unperturbed background state.
+            space (GRDSpace): The response space, as for `solve_response`.
+            horizontal_response (Optional[SHCoeffs]): A ready horizontal
+                displacement potential V, joined to V with no Love number
+                applied.
+
+        Raises:
+            ValueError: If the space does not match the model or the feedback.
+        """
+        self._check_response_space(space, rotational_feedbacks)
+        final_state, solution = self._solve_nonlinear(
+            initial_state,
+            ice_thickness_change=ice_thickness_change,
+            sediment_thickness_change=sediment_thickness_change,
+            dynamic_sea_level_change=dynamic_sea_level_change,
+            sediment_density=sediment_density,
+            displacement_response=displacement_response,
+            gravitational_potential_response=gravitational_potential_response,
+            horizontal_response=horizontal_response,
+            inertia_moment_change=inertia_moment_change,
+            rotational_feedbacks=rotational_feedbacks,
+            horizontal=space.has_horizontal,
+            rtol=rtol,
+            max_iterations=max_iterations,
+            verbose=verbose,
+        )
+        return final_state, self._response(space, solution)
+
+    def _solve_nonlinear(
+        self,
+        initial_state: EarthState,
+        /,
+        *,
+        ice_thickness_change: Optional[SHGrid] = None,
+        sediment_thickness_change: Optional[SHGrid] = None,
+        dynamic_sea_level_change: Optional[SHGrid] = None,
+        sediment_density: Optional[float] = None,
+        displacement_response: Optional[SHCoeffs] = None,
+        gravitational_potential_response: Optional[SHCoeffs] = None,
+        horizontal_response: Optional[SHCoeffs] = None,
+        inertia_moment_change: float = 0.0,
+        rotational_feedbacks: bool = True,
+        horizontal: bool = False,
+        rtol: float = 1e-9,
+        max_iterations: Optional[int] = None,
+        verbose: bool = False,
+    ) -> Tuple[EarthState, _Solution]:
+        """
+        The engine of the non-linear solvers: the new equilibrium state and
+        the solution's fields as coefficients, with V when `horizontal` is
+        True, and the sea level change on the grid as well.
+
+        Args:
+            initial_state (EarthState): The unperturbed background Earth state.
+            ice_thickness_change (Optional[SHGrid]): Change in ice thickness.
+            sediment_thickness_change (Optional[SHGrid]): Change in sediment.
+            dynamic_sea_level_change (Optional[SHGrid]): Ocean dynamic sea level forcing.
+            sediment_density (Optional[float]): Non-dimensional density of the
+                sediment layer. Defaults to 2300 kg/m^3 non-dimensionalised.
+            displacement_response (Optional[SHCoeffs]): A ready displacement
+                response, in coefficient form, present whatever the loads,
+                with no Love number applied: a viscoelastic step's memory
+                field.  The water it displaces is conserved by the explicit
+                mass budget.
+            gravitational_potential_response (Optional[SHCoeffs]): The
+                matching ready potential response.
+            horizontal_response (Optional[SHCoeffs]): A ready V, joined to V
+                with no Love number applied.
+            inertia_moment_change (float): A ready change of the inertia
+                moment accompanying the responses, for the trace term of
+                the axial feedback; see `solve_generalised_equation`.
+            rotational_feedbacks (bool | str): True for the full feedback,
+                "axial" for the axial component alone, False for none; see
+                `solve_generalised_equation`.
+            horizontal (bool): Whether V is computed.
+            rtol (float): The relative tolerance for convergence.
+            max_iterations (Optional[int]): Hard limit on non-linear
+                iteration count, 50 if omitted. Stopping at the default
+                limit without converging raises a RuntimeWarning; stopping
+                at a limit given here does not.
+            verbose (bool): If True, prints iteration metrics.
+
+        Returns:
+            The new equilibrium EarthState and the solution.
+        """
         model = self._model
         g = self._g
         water_density = self._water_density
         ice_density = self._ice_density
+        static_horizontal = None
+        if horizontal_response is not None:
+            model.check_coefficient(horizontal_response)
+            static_horizontal = horizontal_response.coeffs.copy()
 
         if sediment_density is None:
             sediment_density = 2300.0 / model.parameters.density_scale
@@ -928,12 +1354,12 @@ class SeaLevelEquation:
 
         if sediment_thickness_change is not None:
             sediment_load = sediment_density * sediment_thickness_change.data
-            sediment_mass_change = model._integrate_data(sediment_load)
+            sediment_mass_change = model.integrate(sediment_load)
         else:
             sediment_load = None
             sediment_mass_change = 0.0
 
-        initial_water_mass = water_density * model._integrate_data(
+        initial_water_mass = water_density * model.integrate(
             initial_ocean_func * initial_bathy
         )
 
@@ -942,22 +1368,23 @@ class SeaLevelEquation:
         slc_data = np.zeros_like(initial_bathy)
         angular_velocity_change = np.zeros(3)
 
-        exclude_caspian = initial_state.exclude_caspian
-        caspian_mask = (
-            initial_state.caspian_sea_projection(value=0).data
-            if exclude_caspian
-            else None
-        )
+        land = initial_state.land
+        land_mask = None if land is None else land.data > 0.0
 
         self._solver_counter += 1
 
         err = np.inf
         converged = False
         count = 0
-        disp_2 = grav_2 = None
+        disp_2 = grav_2 = centrifugal = None
         centrifugal_0 = 0.0
 
-        while count < max_iterations:
+        iter_limit = (
+            max_iterations
+            if max_iterations is not None
+            else self._DEFAULT_MAX_NONLINEAR_ITERATIONS
+        )
+        while count < iter_limit:
             grounded_ice_change = ice_density * (
                 (1.0 - current_ocean_func) * new_ice
                 - (1.0 - initial_ocean_func) * initial_ice
@@ -998,14 +1425,14 @@ class SeaLevelEquation:
             if dynamic_sea_level_change is not None:
                 raw_bathy += dynamic_sea_level_change.data
 
-            total_ice_mass_change = model._integrate_data(grounded_ice_change)
+            total_ice_mass_change = model.integrate(grounded_ice_change)
             target_water_mass = (
                 initial_water_mass - total_ice_mass_change - sediment_mass_change
             )
-            current_raw_water_mass = water_density * model._integrate_data(
+            current_raw_water_mass = water_density * model.integrate(
                 current_ocean_func * raw_bathy
             )
-            current_ocean_density_area = water_density * model._integrate_data(
+            current_ocean_density_area = water_density * model.integrate(
                 current_ocean_func
             )
 
@@ -1016,11 +1443,14 @@ class SeaLevelEquation:
             new_slc_data = slc_local + eustatic_shift
             new_bathy = raw_bathy + eustatic_shift
 
-            new_ocean_func = np.where(
-                water_density * new_bathy - ice_density * new_ice > 0, 1.0, 0.0
+            new_ocean_func, _, _ = flotation_fields(
+                new_bathy,
+                new_ice,
+                water_density,
+                ice_density,
+                width=initial_state.flotation_width,
+                land_mask=land_mask,
             )
-            if exclude_caspian:
-                new_ocean_func = np.where(caspian_mask == 1, 0.0, new_ocean_func)
 
             max_slc = np.max(np.abs(slc_data))
             if max_slc > 0:
@@ -1044,7 +1474,7 @@ class SeaLevelEquation:
                 converged = True
                 break
 
-        if not converged:
+        if not converged and max_iterations is None:
             self._warn_not_converged("Non-linear sea level equation solver", err, count)
 
         # Displacement and potential for the load of the final iteration
@@ -1053,26 +1483,43 @@ class SeaLevelEquation:
         if static_disp is not None:
             displacement_lm += static_disp
             potential_lm += static_grav
+        horizontal_lm = None
+        if horizontal:
+            horizontal_lm = self._l * load_lm
+            if static_horizontal is not None:
+                horizontal_lm += static_horizontal
         if rotational_feedbacks:
             # disp_2 and grav_2 already include the response terms
             displacement_lm[:, 2, :2] = disp_2
             potential_lm[:, 2, :2] = grav_2
             displacement_lm[0, 0, 0] += self._hc * centrifugal_0
             potential_lm[0, 0, 0] += self._kc * centrifugal_0
+            if horizontal:
+                horizontal_lm[:, 2, :2] += self._lt2 * centrifugal
+
+        # the sea level change of the last iteration: its coefficients and
+        # the uniform shift of the mass budget, Y_00 = 1/sqrt(4 pi)
+        sea_level_lm = slc_lm.copy()
+        sea_level_lm[0, 0, 0] += eustatic_shift * np.sqrt(4.0 * np.pi)
 
         grid = model.grid
         final_sea_level = SHGrid.from_array(current_bathy, grid=grid)
         final_ice = SHGrid.from_array(new_ice, grid=grid)
 
-        # Inherit the Caspian masking policy properly from the initial state
+        # The final state holds the same regions as land as the initial one.
         final_state = EarthState(
-            final_ice, final_sea_level, model, exclude_caspian=exclude_caspian
+            final_ice,
+            final_sea_level,
+            model,
+            land=land,
+            flotation_width=initial_state.flotation_width,
         )
 
-        return (
-            final_state,
-            SHGrid.from_array(slc_data, grid=grid),
-            SHGrid.from_array(self._synthesise(displacement_lm), grid=grid, copy=False),
-            SHGrid.from_array(self._synthesise(potential_lm), grid=grid, copy=False),
-            angular_velocity_change,
+        return final_state, _Solution(
+            relative_sea_level_change=slc_data,
+            sea_level_lm=sea_level_lm,
+            displacement_lm=displacement_lm,
+            potential_lm=potential_lm,
+            horizontal_lm=horizontal_lm,
+            angular_velocity_change=angular_velocity_change,
         )

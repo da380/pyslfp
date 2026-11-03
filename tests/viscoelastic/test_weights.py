@@ -75,3 +75,32 @@ def test_backward_euler_formula():
     m, d = 3.0, -2.0
     w = backward_euler_weight(h)
     assert np.allclose(w * m + (1.0 - w) * d, (m + h * d) / (1.0 + h), rtol=1e-15)
+
+
+def test_second_derivatives_match_differences_of_the_first():
+    """The second h-derivatives against central differences of the first,
+    across the series switch, and their exact values at h = 0."""
+    from pyslfp.viscoelastic import (
+        backward_euler_weight_derivative,
+        backward_euler_weight_second_derivative,
+        exponential_trapezoid_weight_derivatives,
+        exponential_trapezoid_weight_second_derivatives,
+    )
+
+    h = np.array([0.0, 5e-4, 2e-3, 0.1, 1.0, 5.0])
+    # the step is large enough that the first derivatives' rounding, of
+    # order 1e-12 just above the series switch, does not enter the quotient
+    step = 1e-4
+    inside = h > step
+    first = np.stack(exponential_trapezoid_weight_derivatives(h[inside] + step))
+    minus = np.stack(exponential_trapezoid_weight_derivatives(h[inside] - step))
+    difference = (first - minus) / (2.0 * step)
+    second = np.stack(exponential_trapezoid_weight_second_derivatives(h))
+    np.testing.assert_allclose(second[:, inside], difference, rtol=1e-6)
+    np.testing.assert_allclose(second[:, 0], [1.0, 1.0 / 3.0 - 1.0, -1.0 / 3.0])
+    w = backward_euler_weight_derivative
+    difference = (w(h[inside] + step) - w(h[inside] - step)) / (2.0 * step)
+    np.testing.assert_allclose(
+        backward_euler_weight_second_derivative(h[inside]), difference, rtol=1e-6
+    )
+    assert backward_euler_weight_second_derivative(0.0) == 2.0

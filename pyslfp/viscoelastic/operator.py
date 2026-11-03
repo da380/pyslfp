@@ -58,6 +58,8 @@ from .weights import (
     backward_euler_weight_derivative,
     exponential_trapezoid_weight_derivatives,
     exponential_trapezoid_weights,
+    backward_euler_weight_second_derivative,
+    exponential_trapezoid_weight_second_derivatives,
 )
 
 __all__ = [
@@ -149,6 +151,7 @@ class _Degree:
         self._tide_vec: np.ndarray | None = None
         self._load_force_vec: np.ndarray | None = None
         self._load_potential_vec: np.ndarray | None = None
+        self._tangential_vec: np.ndarray | None = None
         self._moment_row: np.ndarray | None = None
         # the dof-assembly of nodal force values, [U-block; V-block]
         # flattened, as one sparse product: shared nodes accumulate
@@ -194,6 +197,14 @@ class _Degree:
         if self._load_potential_vec is None:
             self._load_potential_vec = self.system.load(part="potential")
         return self._load_potential_vec
+
+    @property
+    def tangential_vec(self) -> np.ndarray:
+        """The unit tangential traction in the units of a surface
+        density: the zeta^v channel."""
+        if self._tangential_vec is None:
+            self._tangential_vec = self.system.tangential()
+        return self._tangential_vec
 
     def _gather(self, x: np.ndarray, dofs: np.ndarray, mask: np.ndarray) -> np.ndarray:
         """Nodal values (ne, ngll, ncols) of one component, zero where absent."""
@@ -335,6 +346,9 @@ class ViscoelasticOperator:
         )
         self._weights: dict[tuple[str, float], list[tuple[np.ndarray, ...]]] = {}
         self._weight_derivatives: dict[
+            tuple[str, float], list[tuple[np.ndarray, ...]]
+        ] = {}
+        self._weight_second_derivatives: dict[
             tuple[str, float], list[tuple[np.ndarray, ...]]
         ] = {}
         self._effective_love: dict[tuple[str, float], LoveNumbers] = {}
@@ -868,9 +882,10 @@ class ViscoelasticOperator:
 
     def split_unit_responses(self, scheme: str | None, dt: float, l: int) -> np.ndarray:
         """The flavour's solutions of the SPLIT unit load channels of
-        one degree, as two columns: the traction-only (zeta^u) and
-        attraction-only (zeta^phi) pieces, which the continuous
-        adjoint's jump needs for displacement and potential
+        one degree, as three columns: the traction-only (zeta^u) and
+        attraction-only (zeta^phi) pieces and the tangential traction
+        (zeta^v), which the continuous adjoint's jump needs for
+        displacement, potential and horizontal displacement
         measurements; `scheme=None` gives the unrelaxed flavour's."""
         deg = self._deg(l)
         key = (
@@ -884,7 +899,9 @@ class ViscoelasticOperator:
                 deg.system if scheme is None else self._effective_system(scheme, dt, l)
             )
             per_degree[l] = system.solve(
-                np.column_stack((deg.load_force_vec, deg.load_potential_vec))
+                np.column_stack(
+                    (deg.load_force_vec, deg.load_potential_vec, deg.tangential_vec)
+                )
             )
         return per_degree[l]
 
@@ -906,6 +923,24 @@ class ViscoelasticOperator:
                     out.append(exponential_trapezoid_weight_derivatives(h))
             self._weight_derivatives[key] = out
         return self._weight_derivatives[key]
+
+    def scheme_weight_second_derivatives(
+        self, scheme: str, dt: float
+    ) -> list[tuple[np.ndarray, ...]]:
+        """The second h-derivatives of the per-branch scheme weights at
+        this step size, full-mesh nodal arrays: (d2w,) for backward Euler
+        and (d2e, d2alpha, d2beta) for the exponential trapezoid."""
+        key = (scheme, float(dt))
+        if key not in self._weight_second_derivatives:
+            out = []
+            for itau in self.rheology.itau:
+                h = dt * itau
+                if scheme == "backward_euler":
+                    out.append((backward_euler_weight_second_derivative(h),))
+                else:
+                    out.append(exponential_trapezoid_weight_second_derivatives(h))
+            self._weight_second_derivatives[key] = out
+        return self._weight_second_derivatives[key]
 
     def scheme_weights(self, scheme: str, dt: float) -> list[tuple[np.ndarray, ...]]:
         """The per-branch nodal weight arrays of a flavour: (w,) for
@@ -970,6 +1005,17 @@ class ViscoelasticStep:
 
     def _system(self, l: int) -> DegreeSystem:
         return self.operator._effective_system(self.scheme, self.dt, l)
+
+    def add_memory(self, extra: dict[int, np.ndarray]) -> None:
+        """Adds a known term to the step's memory state, degree by
+        degree, shaped as the state's internal variables: the drive a
+        tangent-linear step takes from the forward trajectory, which
+        enters the step as the start-of-step strain does, through the
+        memory force and the update alike."""
+        for l, value in extra.items():
+            self._mem[l] = self._mem[l] + value
+        self._bmem.clear()
+        self._memory_solutions = None
 
     def _memory_force(self, l: int) -> np.ndarray:
         if l not in self._bmem:

@@ -1,17 +1,44 @@
 """
-Extended Altimetry Bias Evaluation (3-Component Model)
-======================================================
+The error of the standard altimetry estimate of global mean sea level change
+(Heathcote et al., 2026).
 
-This script calculates the analytical method bias and error distribution for
-satellite altimetry using a 3-component physical model (Ice Thickness,
-Sterodynamic SL, and Ocean Density). It strictly evaluates the difference
-between the true global mean sea level rise (GMSLR, as water column
-thickness change) and the standard geocentric-sea-level (SSH)
-area-averaging estimator.
+The model is the ice thickness change, the sterodynamic sea level change eta
+and the vertically averaged ocean density change of the set-up
+`pyslfp.models.ice_ocean_and_density`, under the prior of
+`common.ocean_prior`: global fields conditioned exactly on the conservation
+of the ocean's mass. The data are the geocentric sea level change at the
+altimetry track points, with the local and large-scale correlated noise of
+`common.altimetry_noise`.
+
+The standard estimator of the global mean sea level (GMSL) change is the
+cos-latitude-weighted mean of the data. The true GMSL change is the ocean
+average of the relative sea level change, the sea level equation's response
+to the loads plus eta. The error is the estimate less the true GMSL change,
+(C A - B) m + C e, with A the forward operator, B the GMSL change, C the
+weighted mean and e the noise. It is linear in the model and the noise, so it
+is Gaussian, and its mean and standard deviation follow exactly by
+push-forward of the joint measure of model and noise. The script compares
+that error with the nominal one, C e alone, which is what the estimator would
+make were the geocentric sea level change equal to the GMSL change
+everywhere.
+
+Outputs, in output_plots_altimetry_bias/ at 600 dpi:
+
+- bias_pdf.png: the densities of the actual and the nominal error, with a
+  secondary axis in units of the true GMSL change's standard deviation, and
+  a histogram of Monte Carlo errors with --samples.
+- With --plot-maps, from one prior sample: bias_sterodynamic.png (a),
+  bias_density.png (b), bias_ice_thickness.png (c), each shown on its
+  component's support; bias_geocentric_sl_map.png, the geocentric sea level
+  change over the ocean; and bias_altimetry_data.png (d), the synthetic data
+  at the track points, on the same colour scale.
+
+The defaults are the paper's resolution; `FAST=1 ./run_all.sh altimetry_bias`
+runs at lmax 64 with the points 8 degrees apart.
 """
 
 import argparse
-import os
+
 import numpy as np
 
 import matplotlib
@@ -21,517 +48,166 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 import pygeoinf as inf
-from pyslfp.parallel import set_num_threads
 import pyslfp as sl
-import altimetry_utils as utils
+from pyslfp.observations import altimetry_averaging_operator
 
-from pyslfp import EarthState
-from pyslfp.linear_operators import ocean_altimetry_points, altimetry_averaging_operator
+import common
+from common import ETA, ICE, RHO
+from figures import error_density, field_label, field_map, panel_label, style_map
+
+OUTPUT_DIR = "output_plots_altimetry_bias"
 
 
-def parse_arguments():
-    """Parses command-line arguments to configure the extended altimetry bias evaluation."""
+def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Calculate 3-Component Altimetry method bias using analytical Gaussian measures."
+        description="The error of the altimetry GMSL estimator under the "
+        "ice, eta and density model."
     )
     parser.add_argument(
         "--samples",
         type=int,
         default=0,
-        help="Number of Monte Carlo samples to draw for validating analytical error distributions.",
+        help="Monte Carlo samples drawn to check the analytical error distribution.",
     )
     parser.add_argument(
         "--plot-maps",
         action="store_true",
-        help="Plot an example of the sampled fields, SSH, and altimetry points.",
+        help="Plot a prior sample's fields, its geocentric sea level change and "
+        "the data.",
     )
-
-    # --- Resolution Settings ---
-    parser.add_argument(
-        "--lmax", type=int, default=256, help="Exact model max SH degree."
-    )
-    parser.add_argument(
-        "--load-order", type=float, default=2.0, help="Sobolev space order."
-    )
-    parser.add_argument(
-        "--load-scale-km", type=float, default=500.0, help="Sobolev length scale."
-    )
-    parser.add_argument(
-        "--spacing", type=float, default=1.0, help="Altimetry observation spacing."
-    )
-
-    # --- Prior Settings ---
-    parser.add_argument(
-        "--ice-scale-factor", type=float, default=1.0, help="Ice correlation scale."
-    )
-    parser.add_argument(
-        "--gmsl-bary-steric-ratio",
-        type=float,
-        default=1.7,
-        help=(
-            "Ratio of the barystatic to steric GMSL prior stds (the "
-            "steric value being the realised one under the mass "
-            "constraint); sets the ice amplitude."
-        ),
-    )
-
-    parser.add_argument(
-        "--ocean-dyn-scale-factor",
-        type=float,
-        default=0.2,
-        help="Sterodynamic correlation scale factor.",
-    )
-    parser.add_argument(
-        "--ocean-dyn-std-mm",
-        type=float,
-        default=4.0,
-        help=(
-            "Pointwise std of the sterodynamic sea level field (mm, "
-            "pre-mass-constraint): the single dimensioned prior "
-            "amplitude, anchoring the chain."
-        ),
-    )
-
-    parser.add_argument(
-        "--ocean-rho-scale-factor",
-        type=float,
-        default=1.0,
-        help="Ocean density correlation scale.",
-    )
-    parser.add_argument(
-        "--steric-dyn-std-ratio",
-        type=float,
-        default=0.75,
-        help=(
-            "Mean-depth steric sea level std as a fraction of the "
-            "sterodynamic std; sets the density amplitude."
-        ),
-    )
-
-    parser.add_argument(
-        "--noise-std-factor",
-        type=float,
-        default=0.5,
-        help=(
-            "Local (uncorrelated) altimetry noise std as factor of the "
-            "sterodynamic pointwise prior std."
-        ),
-    )
-    parser.add_argument(
-        "--noise-corr-std-factor",
-        type=float,
-        default=0.01,
-        help=(
-            "Std of the optional large-scale correlated altimetry error "
-            "component, as a factor of the sterodynamic pointwise prior std (0 disables). "
-            "Represents long-wavelength systematics such as orbit and "
-            "reference-frame errors; because it barely averages down, it "
-            "sets the error floor for large-scale averages (the implied "
-            "GMSL floor is printed with the calibration report)."
-        ),
-    )
-    parser.add_argument(
-        "--noise-corr-scale-factor",
-        type=float,
-        default=4.0,
-        help=(
-            "Correlation scale of the correlated altimetry error "
-            "component, as a factor of the load scale (default 4.0 = "
-            "2000 km at the default load scale). Follows --prior-kernel."
-        ),
-    )
-    parser.add_argument(
-        "--ocean-corr",
-        type=float,
-        default=0.9,
-        help=(
-            "Magnitude of the long-wavelength anti-correlation between the "
-            "sterodynamic and density fields (0 disables; must lie in "
-            "[0, 1); the sign is applied internally."
-        ),
-    )
-    parser.add_argument(
-        "--ocean-corr-scale-factor",
-        type=float,
-        default=0.4,
-        help=(
-            "Decay scale of the (Dyn, Rho) spectral correlation with "
-            "wavenumber, as a factor of the load scale."
-        ),
-    )
-    parser.add_argument(
-        "--prior-kernel",
-        choices=["heat", "sobolev"],
-        default="sobolev",
-        help=(
-            "Covariance family for the three model priors and any "
-            "spatially correlated noise models (applied consistently; "
-            "white-noise settings unaffected): 'heat' or "
-            "'sobolev' (default)."
-        ),
-    )
-    parser.add_argument(
-        "--prior-order",
-        type=float,
-        default=3.0,
-        help=("Common spectral order for covariances. Must be > 1."),
-    )
-    parser.add_argument(
-        "--prior-shift", type=float, default=0.0, help="Prior mean shift factor."
-    )
-
-    # --- Parallelisation ---
-    parser.add_argument(
-        "--parallel",
-        action="store_true",
-        help="Enable process-level parallelism at the supported call sites.",
-    )
-    parser.add_argument(
-        "--max-jobs",
-        type=int,
-        default=os.cpu_count() or 1,
-        help=(
-            "Cap on the number of worker processes when --parallel is "
-            "set; call sites with fewer independent tasks use fewer. "
-            "Ignored without --parallel."
-        ),
-    )
-
-    parser.add_argument(
-        "--serial-threads",
-        type=int,
-        default=None,
-        help=(
-            "Threads used by the transforms and BLAS in the main process, "
-            "i.e. during the serial phases of the run. Worker processes "
-            "take their thread count from OMP_NUM_THREADS instead. "
-            "Default: leave the process settings unchanged."
-        ),
-    )
-
+    common.add_ocean_arguments(parser)
+    common.add_altimetry_noise_arguments(parser)
+    common.add_parallel_arguments(parser)
     return parser.parse_args()
+
+
+def geocentric_maps(physics, model, data_mm):
+    """The geocentric sea level change of a model over the ocean, and the
+    data at the track points, on one colour scale."""
+    mm = physics.scale_mm
+    ocean = physics.state.ocean_projection(value=0.0)
+    geocentric_mm = mm * physics.geocentric_sea_level(model) * ocean
+    vmax = max(np.max(np.abs(geocentric_mm.data)), np.max(np.abs(data_mm)))
+
+    label = "Geocentric Sea Level Change (mm)"
+    fig, ax = sl.create_map_figure(figsize=(12, 6))
+    _, im = sl.plot(
+        geocentric_mm,
+        ax=ax,
+        cmap="seismic",
+        vmin=-vmax,
+        vmax=vmax,
+        colorbar_kwargs={"label": label},
+    )
+    style_map(ax, im, label)
+    geocentric_fig = fig
+
+    label = "Synthetic Altimetry Data (mm)"
+    fig, ax = sl.create_map_figure(figsize=(12, 6))
+    ax.set_global()
+    _, im = sl.plot_points(
+        physics.points,
+        data=data_mm,
+        ax=ax,
+        cmap="seismic",
+        vmin=-vmax,
+        vmax=vmax,
+        s=4,
+        edgecolors="none",
+        colorbar=True,
+        colorbar_kwargs={"label": label},
+        zorder=5,
+    )
+    style_map(ax, im, label)
+    panel_label(ax, "(d)")
+    return geocentric_fig, fig
 
 
 def main():
     args = parse_arguments()
-    if args.serial_threads is not None:
-        set_num_threads(args.serial_threads)
+    rng = common.configure(args)
+    common.start_run(OUTPUT_DIR, args)
+    figures = {}
 
-    # Setup directory to save plots
-    output_dir = "output_plots_altimetry_bias"
-    os.makedirs(output_dir, exist_ok=True)
-    figures_to_save = {}
-
-    print("Initialising Earth State and 3-Component Physics Operators...")
-    state_dummy = EarthState.from_defaults(lmax=args.lmax)
-    points = ocean_altimetry_points(state_dummy, spacing=args.spacing)
-
-    (
-        state,
-        load_space,
-        fp_op,
-        continuous_ssh_op,
-        continuous_sl_op,
-        forward_op,
-        scale_mm,
-        point_eval,
-    ) = utils.build_physics_components(
-        args.lmax, args.load_order, args.load_scale_km, points, is_surrogate=False
-    )
-
-    print("Building analytical measures (with strict global mass conservation)...")
-    model_prior, noise_meas, calib = utils.build_measures(
-        state,
-        load_space,
-        args.ice_scale_factor,
-        args.gmsl_bary_steric_ratio,
-        args.ocean_dyn_scale_factor,
-        args.ocean_dyn_std_mm,
-        args.ocean_rho_scale_factor,
-        args.steric_dyn_std_ratio,
-        args.noise_corr_scale_factor,
+    print("Building the physics, prior and noise...")
+    physics = common.ocean_physics(args)
+    setup = physics.setup
+    mm = physics.scale_mm
+    prior, calib = common.ocean_prior(physics, args, rng)
+    noise, _ = common.altimetry_noise(
+        physics,
+        calib["derived_stds"]["dyn_std"],
+        args.prior_order,
         args.noise_std_factor,
-        points,
-        scale_mm,
-        prior_shift=args.prior_shift,
-        is_surrogate=False,
-        ocean_corr=args.ocean_corr,
-        ocean_corr_scale_factor=args.ocean_corr_scale_factor,
-        prior_kernel=args.prior_kernel,
-        prior_order=args.prior_order,
-        noise_corr_std_factor=args.noise_corr_std_factor,
-        point_evaluation_operator=point_eval,
+        args.noise_corr_std_factor,
+        args.noise_corr_scale_factor,
+        calib=calib,
     )
-    utils.print_calibration_report(
-        calib, scale_mm, state.model.parameters.density_scale
+    common.print_calibration_report(calib, physics)
+
+    # The error acts on the pair (model, noise): the estimator applied to the
+    # noise-free data, less the true GMSL change, plus the estimator applied
+    # to the noise.
+    true_gmsl = setup.gmsl(physics.fingerprint)
+    averaging = altimetry_averaging_operator(physics.points)
+    error = inf.RowLinearOperator(
+        [averaging @ physics.altimetry - true_gmsl, averaging]
     )
+    joint = inf.GaussianMeasure.from_product([prior, noise])
 
-    joint_meas = inf.GaussianMeasure.from_direct_sum([model_prior, noise_meas])
-    data_space = noise_meas.domain
-
-    # The TRUE GMSLR uses the Sea Level Operator (SLC)
-    true_gmsl_op = utils.true_gmsl_operator(state, load_space, continuous_sl_op)
-
-    # The ESTIMATOR averages the SSH evaluated at the altimetry points
-    alt_avg_op = altimetry_averaging_operator(points)
-    est_gmsl_op = alt_avg_op @ forward_op
-
-    # Error Operator = True GMSLR - Estimated GMSLR
-    err_gmsl_op = true_gmsl_op - est_gmsl_op
-
-    op_true = inf.RowLinearOperator(
-        [true_gmsl_op, data_space.zero_operator(inf.EuclideanSpace(1))]
-    )
-    op_err = inf.RowLinearOperator([err_gmsl_op, -1.0 * alt_avg_op])
-
-    print("Calculating exact analytical moments of the bias...")
-    true_meas = joint_meas.affine_mapping(operator=op_true)
-    err_meas = joint_meas.affine_mapping(operator=op_err)
-    alt_noise_meas = noise_meas.affine_mapping(operator=alt_avg_op)
-
-    true_std = np.sqrt(true_meas.covariance.matrix(dense=True)[0, 0]) * scale_mm
-    err_std = np.sqrt(err_meas.covariance.matrix(dense=True)[0, 0]) * scale_mm
-    err_mean = err_meas.expectation[0] * scale_mm
-    alt_noise_std = (
-        np.sqrt(alt_noise_meas.covariance.matrix(dense=True)[0, 0]) * scale_mm
+    print("Computing the exact moments of the error...")
+    true_std = common.standard_deviations(common.dense(prior, mm * true_gmsl))[0]
+    error_measure = common.dense(joint, mm * error)
+    err_std = common.standard_deviations(error_measure)[0]
+    err_mean = error_measure.expectation[0]
+    nominal_std = common.standard_deviations(common.dense(noise, mm * averaging))[0]
+    print(
+        f"  GMSL error (estimate less true): mean = {err_mean:.4f} mm, std = "
+        f"{err_std:.4f} mm; nominal (noise only) std = {nominal_std:.4f} mm; "
+        f"true GMSL std = {true_std:.4f} mm"
     )
 
-    # -- Plotting --
     if args.plot_maps:
-        print("Drawing a sample to visualise map components...")
-        model_sample = model_prior.sample()
-        ssh_sample = continuous_ssh_op(model_sample)
-
-        ice_thickness, ocean_dyn, ocean_rho = model_sample
-
-        ocean_mask_raw = state.ocean_projection(value=0.0)
-        ocean_mask_mm = scale_mm * ocean_mask_raw
-        ice_mask = scale_mm * state.ice_projection(value=0.0)
-
-        # Physical density units for the raw density map (nondimensional
-        # density x density_scale = kg/m^3; x1000 -> g/m^3).
-        rho_scale_gm3 = 1.0e3 * state.model.parameters.density_scale
-        ocean_mask_gm3 = rho_scale_gm3 * ocean_mask_raw
-
-        fig1, ax1 = sl.create_map_figure(figsize=(12, 6))
-        _, im1 = sl.plot(
-            ice_thickness * ice_mask,
-            ax=ax1,
-            cmap="seismic",
-            symmetric=True,
-        )
-
-        im1.colorbar.set_label("Ice Thickness Change (mm)", fontsize=16)
-        im1.colorbar.ax.tick_params(labelsize=14)
-
-        ax1.gridliner.xlabel_style = {"size": 12, "color": "black"}
-        ax1.gridliner.ylabel_style = {"size": 12, "color": "black"}
-
-        ax1.text(
-            0.02,
-            0.98,
-            "(c)",
-            transform=ax1.transAxes,
-            fontsize=16,
-            fontweight="bold",
-            va="top",
-            ha="left",
-            bbox=dict(facecolor="white", alpha=0.8, edgecolor="none", pad=3.0),
-            zorder=10,
-        )
-
-        figures_to_save["bias_ice_thickness"] = fig1
-
-        fig2, ax2 = sl.create_map_figure(figsize=(12, 6))
-        _, im2 = sl.plot(
-            ocean_dyn * ocean_mask_mm,
-            ax=ax2,
-            cmap="seismic",
-            symmetric=True,
-        )
-
-        im2.colorbar.set_label("Sterodynamic SL Change (mm)", fontsize=16)
-        im2.colorbar.ax.tick_params(labelsize=14)
-
-        ax2.gridliner.xlabel_style = {"size": 12, "color": "black"}
-        ax2.gridliner.ylabel_style = {"size": 12, "color": "black"}
-
-        ax2.text(
-            0.02,
-            0.98,
-            "(a)",
-            transform=ax2.transAxes,
-            fontsize=16,
-            fontweight="bold",
-            va="top",
-            ha="left",
-            bbox=dict(facecolor="white", alpha=0.8, edgecolor="none", pad=3.0),
-            zorder=10,
-        )
-
-        figures_to_save["bias_sterodynamic"] = fig2
-
-        fig3, ax3 = sl.create_map_figure(figsize=(12, 6))
-        _, im3 = sl.plot(
-            ocean_rho * ocean_mask_gm3,
-            ax=ax3,
-            cmap="seismic",
-            symmetric=True,
-        )
-
-        im3.colorbar.set_label(r"Averaged Density Change (g m$^{-3}$)", fontsize=16)
-        im3.colorbar.ax.tick_params(labelsize=14)
-
-        ax3.gridliner.xlabel_style = {"size": 12, "color": "black"}
-        ax3.gridliner.ylabel_style = {"size": 12, "color": "black"}
-
-        ax3.text(
-            0.02,
-            0.98,
-            "(b)",
-            transform=ax3.transAxes,
-            fontsize=16,
-            fontweight="bold",
-            va="top",
-            ha="left",
-            bbox=dict(facecolor="white", alpha=0.8, edgecolor="none", pad=3.0),
-            zorder=10,
-        )
-
-        figures_to_save["bias_density"] = fig3
-
-        ssh_grid_mm = ssh_sample * ocean_mask_mm
-        observed_data_mm = (forward_op(model_sample) + noise_meas.sample()) * scale_mm
-        shared_vmax = max(
-            np.max(np.abs(ssh_grid_mm.data)), np.max(np.abs(observed_data_mm))
-        )
-
-        fig4, ax4 = sl.create_map_figure(figsize=(12, 6))
-        _, im4 = sl.plot(
-            ssh_grid_mm,
-            ax=ax4,
-            cmap="seismic",
-            vmin=-shared_vmax,
-            vmax=shared_vmax,
-            colorbar_kwargs={"label": "Geocentric Sea Level Change (mm)"},
-        )
-
-        im4.colorbar.set_label("Geocentric Sea Level Change (mm)", fontsize=16)
-        im4.colorbar.ax.tick_params(labelsize=14)
-
-        ax4.gridliner.xlabel_style = {"size": 12, "color": "black"}
-        ax4.gridliner.ylabel_style = {"size": 12, "color": "black"}
-
-        figures_to_save["bias_geocentric_sl_map"] = fig4
-
-        fig5, ax5 = sl.create_map_figure(figsize=(12, 6))
-        ax5.set_global()
-        _, im5 = sl.plot_points(
-            points,
-            data=observed_data_mm,
-            ax=ax5,
-            cmap="seismic",
-            vmin=-shared_vmax,
-            vmax=shared_vmax,
-            s=4,
-            edgecolors="none",
-            colorbar=True,
-            colorbar_kwargs={"label": "Synthetic Altimetry Data (mm)"},
-            zorder=5,
-        )
-
-        im5.colorbar.set_label("Synthetic Altimetry Data (mm)", fontsize=16)
-        im5.colorbar.ax.tick_params(labelsize=14)
-
-        ax5.text(
-            0.02,
-            0.98,
-            "(d)",
-            transform=ax5.transAxes,
-            fontsize=16,
-            fontweight="bold",
-            va="top",
-            ha="left",
-            bbox=dict(facecolor="white", alpha=0.8, edgecolor="none", pad=3.0),
-            zorder=10,
-        )
-
-        ax5.gridliner.xlabel_style = {"size": 12, "color": "black"}
-        ax5.gridliner.ylabel_style = {"size": 12, "color": "black"}
-
-        figures_to_save["bias_altimetry_data"] = fig5
+        print("Drawing a sample to show the fields...")
+        model = prior.sample(rng=rng)
+        shown = physics.display(model)
+        for file, name, panel in [
+            ("bias_ice_thickness.png", ICE, "(c)"),
+            ("bias_sterodynamic.png", ETA, "(a)"),
+            ("bias_density.png", RHO, "(b)"),
+        ]:
+            figures[file] = field_map(shown[name], field_label(name), panel)
+        data_mm = mm * (physics.altimetry(model) + noise.sample(rng=rng))
+        (
+            figures["bias_geocentric_sl_map.png"],
+            figures["bias_altimetry_data.png"],
+        ) = geocentric_maps(physics, model, data_mm)
 
     err_samples = None
     if args.samples > 0:
-        print(
-            f"Drawing {args.samples} Monte Carlo samples to validate analytical bias..."
-        )
-        joint_samples_list = joint_meas.samples(
-            args.samples, parallel=args.parallel, n_jobs=args.max_jobs
-        )
-        err_samples = np.array(
-            [op_err(sample)[0] * scale_mm for sample in joint_samples_list]
-        )
+        print(f"Drawing {args.samples} Monte Carlo samples of the error...")
+        samples = joint.samples(args.samples, rng=rng, n_jobs=common.jobs(args))
+        err_samples = np.array([mm * error(sample)[0] for sample in samples])
 
-    print("Plotting Extended Bias PDFs...")
-
-    def gaussian_pdf(x, mean, std):
-        return (1.0 / (std * np.sqrt(2 * np.pi))) * np.exp(
-            -0.5 * ((x - mean) / std) ** 2
-        )
-
-    fig_pdf, ax = plt.subplots(figsize=(10, 6), layout="constrained")
-    x_vals = np.linspace(err_mean - 4 * err_std, err_mean + 4 * err_std, 300)
-
-    if err_samples is not None:
-        ax.hist(
-            err_samples,
-            bins=50,
-            alpha=0.3,
-            color="red",
-            density=True,
-            label="MC Samples",
-        )
-
-    ax.plot(
-        x_vals,
-        gaussian_pdf(x_vals, err_mean, err_std),
-        "r-",
+    print("Plotting the error densities...")
+    fig, ax = plt.subplots(figsize=(10, 6), layout="constrained")
+    error_density(
+        ax,
+        err_mean,
+        err_std,
+        nominal_std,
+        true_std,
+        samples=err_samples,
         linewidth=2.5,
-        label=r"Actual error",
+        top_fontsize=12,
     )
-    ax.plot(
-        x_vals,
-        gaussian_pdf(x_vals, 0, alt_noise_std),
-        "b",
-        linewidth=2,
-        label=r"Nominal error (noise only)",
-    )
-
     ax.set_xlabel("Error in GMSLR estimate (mm)", fontsize=14)
     ax.set_ylabel("Probability Density", fontsize=14)
-    ax.axvline(0, color="black", linestyle="--", linewidth=1.5)
-    ax.grid(True, linestyle=":", alpha=0.6)
     ax.legend(loc="upper right", fontsize=11)
+    figures["bias_pdf.png"] = fig
 
-    sec_ax = ax.secondary_xaxis(
-        "top", functions=(lambda x: x / true_std, lambda x: x * true_std)
-    )
-    sec_ax.set_xlabel(
-        r"Error Standardised by True Signal $\sigma$", fontsize=12, color="darkgreen"
-    )
-    sec_ax.tick_params(axis="x", colors="darkgreen")
-
-    figures_to_save["bias_pdf"] = fig_pdf
-
-    # -- Save all figures --
-    if figures_to_save:
-        print(f"\nSaving {len(figures_to_save)} plots to '{output_dir}/'...")
-        for name, fig in figures_to_save.items():
-            filepath = os.path.join(output_dir, f"{name}.png")
-            fig.savefig(filepath, dpi=600, bbox_inches="tight")
-            print(f"  Saved: {filepath}")
-            plt.close(fig)
+    print(f"\nSaving {len(figures)} plots to '{OUTPUT_DIR}/'...")
+    common.save_figures(figures, OUTPUT_DIR, dpi=600)
 
 
 if __name__ == "__main__":

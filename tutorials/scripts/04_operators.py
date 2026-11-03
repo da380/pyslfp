@@ -2,9 +2,10 @@
 # # 4. Operators, composition and sensitivity kernels
 #
 # The sea level equation is linear in the load, so the fingerprint is a
-# linear operator from loads to responses. `pyslfp.linear_operators`
-# expresses it as one, on Hilbert spaces from `pygeoinf`, together with
-# the projections, averages and observation models that compose with it.
+# linear operator from loads to responses. `FingerPrintOperator`, in
+# `pyslfp.elastic`, expresses it as one, on Hilbert spaces from `pygeoinf`;
+# the projections and averages of `pyslfp.core` and the observation models
+# of `pyslfp.observations` compose with it.
 # Composition gives derived quantities in a line, and the adjoint of any
 # composition is its sensitivity kernel: the field that says how much
 # each unit of mass, wherever it is placed, contributes to the quantity.
@@ -14,17 +15,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 from cartopy import crs as ccrs
 
+from pygeoinf.testing import check_operator
+
 import pyslfp as sl
-from pyslfp.linear_operators import (
-    FingerPrintOperator,
-    TideGaugeObservationModel,
+from pyslfp.elastic import FingerPrintOperator
+from pyslfp.observations import TideGaugeObservationModel
+from pyslfp.core import (
     averaging_operator,
     ice_sheet_basis_operator,
-    ice_thickness_change_to_load_operator,
     lebesgue_load_space,
     ocean_average_operator,
     remove_ocean_average_operator,
 )
+from pyslfp.models import ice_thickness_change_to_load_operator
 
 LMAX = 128
 
@@ -32,9 +35,11 @@ LMAX = 128
 # ## The fingerprint operator
 #
 # The operator carries its domain, the space of loads, and its codomain,
-# a direct sum of three fields and a three-vector: sea level change,
-# vertical displacement, potential change and angular velocity change.
-# Applying it solves the sea level equation.
+# the response space. A response holds the sea level change, the surface
+# displacement, the gravitational potential change and the angular
+# velocity change, each by name; the fields are held as spherical harmonic
+# coefficients, all of them band-limited, and `field` gives one as a grid.
+# Applying the operator solves the sea level equation.
 
 # %%
 fingerprint = FingerPrintOperator.from_defaults(lmax=LMAX)
@@ -43,7 +48,7 @@ params = state.model.parameters
 metre = params.length_scale
 
 response_space = fingerprint.codomain
-field_space = response_space.subspace(0)
+field_space = response_space.field_space
 print(
     "domain dimension",
     fingerprint.domain.dim,
@@ -52,11 +57,13 @@ print(
 )
 
 load = state.west_antarctic_load(fraction=0.1)
-sea_level_change, displacement, potential_change, angular_velocity = fingerprint(load)
+response = fingerprint(load)
+print("members of the response:", response_space.names)
+relative_sea_level_change = response.field("relative_sea_level_change")
 
 fig, ax = sl.create_map_figure(figsize=(10, 5))
 sl.plot(
-    sea_level_change * state.ocean_projection() * metre,
+    relative_sea_level_change * state.ocean_projection() * metre,
     ax=ax,
     vmin=-1.0,
     vmax=1.0,
@@ -66,12 +73,12 @@ sl.plot(
 # %% [markdown]
 # ## Composition
 #
-# A projection picks the sea level out of the response, an ocean average
+# `field_operator` picks the sea level out of the response, an ocean average
 # turns it into the global mean, and removing that average leaves the
 # departure from it. Each is an operator, and `@` composes them.
 
 # %%
-sea_level = response_space.subspace_projection(0)
+sea_level = response_space.field_operator("relative_sea_level_change")
 mean_sea_level = ocean_average_operator(state, field_space) @ sea_level @ fingerprint
 print(f"global mean sea level change: {mean_sea_level(load)[0] * metre * 1000:.1f} mm")
 
@@ -126,19 +133,23 @@ for i, label in enumerate(labels):
 # ## Adjoints and kernels
 #
 # The adjoint of a composition is available without further work, and
-# `check` verifies the adjoint identity on random inputs. The adjoint of
+# `check_operator` from `pygeoinf.testing` verifies the adjoint identity
+# on random inputs, raising an error if it fails. The adjoint of
 # the global mean applied to one is its kernel, which is a constant: every
 # unit of mass raises the global mean by the same amount. The kernel of
 # the local anomaly has structure, and is shown in millimetres of local
 # sea level per thousand gigatonnes of mass added.
 
 # %%
-fingerprint.check(
-    n_checks=2,
-    check_rtol=1e-4,
-    domain_measure=fingerprint.load_measure_for_testing(),
+report = check_operator(
+    fingerprint,
+    rng=np.random.default_rng(0),
+    measure=fingerprint.load_measure_for_testing(),
     codomain_measure=fingerprint.response_measure_for_testing(),
+    trials=2,
+    rtol=1e-4,
 )
+print(report)
 
 kernel = mean_sea_level.adjoint(np.array([1.0]))
 print(f"kernel range: {kernel.data.min():.12e} to {kernel.data.max():.12e}")
@@ -164,7 +175,7 @@ sl.plot(
 # %% [markdown]
 # ## Polar wander and the length of day
 #
-# The fourth component of the response is the change in angular velocity.
+# The angular velocity change is the response's last member.
 # Its two components orthogonal to the rotation axis give the shift of the
 # pole, and their kernels are spherical harmonics of degree two and order
 # one. The component along the axis gives the change in the length of day,
@@ -172,7 +183,7 @@ sl.plot(
 # poles towards the equator slows the Earth.
 
 # %%
-rotation = response_space.subspace_projection(3) @ fingerprint
+rotation = response_space.projection("angular_velocity_change") @ fingerprint
 omega = rotation(load)
 pole_factor = params.mean_sea_floor_radius / params.rotation_frequency
 shift = omega[:2] * pole_factor * metre
@@ -208,19 +219,57 @@ sl.plot(
 )
 
 # %% [markdown]
+# ## Horizontal displacement
+#
+# A load moves the surface sideways as well as up and down. The
+# displacement is one field, u = U r + grad V, where V is the potential
+# of the horizontal part; a surface load drives no rotation of the
+# surface about the vertical, so V is all the horizontal part there is.
+# Built with `horizontal=True`, the operator's response holds V as well,
+# and the displacement gives east, north and up at points and the
+# horizontal part on the grid. `plot_displacement` draws both parts: the
+# vertical in colour and the horizontal as arrows, here outward from the
+# uplift where the ice was lost.
+
+# %%
+horizontal_fingerprint = FingerPrintOperator.from_defaults(lmax=LMAX, horizontal=True)
+displacement = horizontal_fingerprint(load).displacement
+sites = [(-75.0, 250.0), (-80.0, 200.0), (-70.0, 290.0)]
+for (lat, lon), (east, north, up) in zip(sites, displacement.at(sites) * metre * 1000):
+    print(
+        f"{lat:6.1f}N {lon:6.1f}E: east {east:7.2f} mm, north {north:7.2f} mm, "
+        f"up {up:7.2f} mm"
+    )
+
+fig, ax = sl.create_map_figure(figsize=(7, 7), projection=ccrs.SouthPolarStereo())
+sl.plot_displacement(
+    displacement,
+    ax=ax,
+    scale=metre * 1000,
+    units="mm",
+    arrows=25,
+    map_extent=[-180, 180, -90, -60],
+    colorbar_kwargs={"label": "Vertical displacement (mm)"},
+)
+
+# %% [markdown]
 # ## Sobolev spaces and point observations
 #
 # A tide gauge reads sea level at a point, and point evaluation is only
-# bounded on a space of functions with some smoothness. Built over
-# Sobolev spaces, the fingerprint composes with point evaluation into a
-# tide gauge observation model, whose adjoint gives the representer of
-# each station.
+# bounded on a space of functions with some smoothness. An observation
+# model takes its observable, here the relative sea level change of the
+# fingerprint's response, and samples it at the stations; built over
+# Sobolev spaces, its adjoint gives the representer of each station.
 
 # %%
 sobolev_fingerprint = FingerPrintOperator.from_defaults(
     lmax=LMAX, load_parameters=(2.0, 0.05), response_parameters=(2.0, 0.05)
 )
-gauges = TideGaugeObservationModel.from_gloss_network(sobolev_fingerprint)
+relative_sea_level = (
+    sobolev_fingerprint.codomain.field_operator("relative_sea_level_change")
+    @ sobolev_fingerprint
+)
+gauges = TideGaugeObservationModel.from_gloss_network(relative_sea_level)
 print(f"{len(gauges.points)} stations")
 
 data = gauges.forward_operator(load) * metre * 1000

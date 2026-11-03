@@ -1,0 +1,415 @@
+"""
+The elastic fingerprint as a pygeoinf operator.
+
+`FingerPrintOperator` maps a surface load to the response of the linear
+elastic sea level equation, a `GRDResponse`, on Lebesgue or Sobolev spaces:
+the solver's forward and adjoint solves as a LinearOperator, the form an
+inversion consumes.
+"""
+
+from __future__ import annotations
+
+from typing import Optional, Tuple
+import numpy as np
+from pyshtools import SHGrid
+
+from pygeoinf import (
+    HilbertSpace,
+    LinearOperator,
+    GaussianMeasure,
+)
+
+from pyslfp.core import EarthModelParameters, EarthModel
+from .fingerprint import LinearSeaLevelEquation
+from pyslfp.core import EarthState
+from pyslfp.core.response import (
+    ANGULAR_VELOCITY_CHANGE,
+    GRDResponse,
+    GRDSpace,
+)
+from pyslfp.core.spaces import (
+    lebesgue_load_space,
+    lebesgue_response_space,
+    sobolev_load_space,
+    sobolev_response_space,
+)
+
+from pyslfp.core.observables import centrifugal_potential_operator
+from pyslfp.core.spaces import underlying_space
+
+
+class FingerPrintOperator(LinearOperator[SHGrid, GRDResponse]):
+    """
+    A pygeoinf LinearOperator associated with the solution of the linearised elastic
+    sea level equation: from a surface mass load to the response, a
+    `GRDResponse` of a `GRDSpace`.
+
+    The response holds the sea level change, the displacement -- its
+    horizontal part on request -- the gravitational potential change and,
+    with rotational feedback, the angular velocity change. The adjoint is one
+    forward solve whatever the response holds, by reciprocity: a sea level
+    dual acts as a direct load, a dual on the vertical displacement as a
+    normal traction, a potential dual as a potential load, a dual on the
+    horizontal displacement as a tangential traction, and an angular
+    velocity dual as an angular momentum.
+    """
+
+    def __init__(
+        self,
+        state: EarthState,
+        /,
+        *,
+        load_parameters: Tuple[float, float] = None,
+        response_parameters: Tuple[float, float] = None,
+        rotational_feedbacks: bool = True,
+        horizontal: bool = False,
+        rtol: float = 1e-9,
+        max_iterations: Optional[int] = None,
+        verbose: bool = False,
+    ):
+        """
+        Args:
+            state: The backgroud state for the finger print calculations. This state
+                also provides access to the associated earth model.
+            load_parameters: A tuple of the Sobolev order and scale for the
+                load space. If not provided, defaults to a Lebesgue space.
+            response_parameters: A tuple of the Sobolev order and scale for the
+                response fields. If not provided, defaults to a Lebesgue space.
+            rotational_feedbacks (bool | str): True for the full feedback,
+                "axial" for the axial component alone, False for none. The
+                response holds the angular velocity change unless it is
+                False.
+            horizontal (bool): Whether the response's displacement holds its
+                horizontal part.
+            rtol (float): The relative tolerance for convergence.
+            max_iterations (Optional[int]): Hard limit on iteration count.
+            verbose (bool): If True, prints iteration metrics.
+
+        Raises:
+            ValueError: If load and response parameters are provided, and internal
+                checks for mathematical consistency is carried out and an exception
+                is raised these fails.
+
+        Notes:
+            Due to elliptic regularity, the response fields gain one Sobolev order
+                over the loads. This means that the response order can only be less
+                than equal to one plus the load order.
+        """
+
+        self._state = state
+
+        sobolev_load = load_parameters is not None
+        sobolev_response = response_parameters is not None
+
+        if sobolev_load:
+            load_order, load_scale = load_parameters
+        else:
+            load_order = 0
+            load_scale = None
+
+        if sobolev_response:
+            response_order, response_scale = response_parameters
+        else:
+            response_order = 0
+            response_scale = None
+
+        if response_order > load_order + 1:
+            raise ValueError(
+                "Response order cannot be greater than one plus the load order"
+            )
+
+        domain = (
+            sobolev_load_space(state.model, load_order, load_scale)
+            if sobolev_load
+            else lebesgue_load_space(state.model)
+        )
+
+        rotation = rotational_feedbacks is not False
+        codomain = (
+            sobolev_response_space(
+                state.model,
+                response_order,
+                response_scale,
+                horizontal=horizontal,
+                rotation=rotation,
+            )
+            if sobolev_response
+            else lebesgue_response_space(
+                state.model, horizontal=horizontal, rotation=rotation
+            )
+        )
+
+        self._sle = LinearSeaLevelEquation(state)
+        self._rotational_feedbacks = rotational_feedbacks
+        self._rtol = rtol
+        self._max_iterations = max_iterations
+        self._verbose = verbose
+
+        self._g = self.parameters.gravitational_acceleration
+        self._r = self.parameters.rotation_factor
+
+        l2_domain = underlying_space(domain)
+        self._l2_field_space = underlying_space(codomain.field_space)
+        l2_codomain = GRDSpace(
+            self._l2_field_space, horizontal=horizontal, rotation=rotation
+        )
+        self._l2_codomain = l2_codomain
+
+        self._cpc_op = centrifugal_potential_operator(state.model)
+
+        # The solver's forward and adjoint solves are written on the L2
+        # spaces; the Sobolev adjoint follows from the change of metric.
+        l2_operator = LinearOperator.from_callables(
+            l2_domain,
+            l2_codomain,
+            self._l2_mapping_impl,
+            adjoint=self._l2_adjoint_mapping_impl,
+        )
+        self._operator = LinearOperator.from_formal_adjoint(
+            domain, codomain, l2_operator
+        )
+
+        super().__init__(domain, codomain)
+
+    @staticmethod
+    def from_defaults(
+        *,
+        lmax: int = 256,
+        load_parameters: Optional[Tuple[float, float]] = None,
+        response_parameters: Optional[Tuple[float, float]] = None,
+        rotational_feedbacks: bool = True,
+        horizontal: bool = False,
+        rtol: float = 1e-9,
+        max_iterations: Optional[int] = None,
+        verbose: bool = False,
+    ) -> FingerPrintOperator:
+        """
+        Returns the FingerPrintOperator using default initialisations for the
+        Earth model and state.
+
+        If no parameters are provided, it defaults to a standard L2 (Lebesgue) space.
+        To regularize the inversion, provide (order, relative_scale) tuples for the
+        Sobolev spaces. The relative scale is automatically multiplied by the Earth's
+        mean radius.
+
+        Args:
+            lmax: Truncation degree for the calculations.
+            load_parameters: Tuple of (Sobolev order, relative length scale).
+            response_parameters: Tuple of (Sobolev order, relative length scale).
+            rotational_feedbacks: True for the full feedback, "axial" for
+                the axial component alone, False for none.
+            horizontal: Whether the response holds the horizontal displacement.
+            rtol: The relative tolerance for convergence.
+            max_iterations: Hard limit on iteration count.
+            verbose: If True, prints iteration metrics.
+        """
+        state = EarthState.from_defaults(lmax=lmax)
+        radius = state.model.parameters.mean_sea_floor_radius
+
+        abs_load = (
+            (load_parameters[0], load_parameters[1] * radius)
+            if load_parameters
+            else None
+        )
+        abs_resp = (
+            (response_parameters[0], response_parameters[1] * radius)
+            if response_parameters
+            else None
+        )
+
+        return FingerPrintOperator(
+            state,
+            load_parameters=abs_load,
+            response_parameters=abs_resp,
+            rotational_feedbacks=rotational_feedbacks,
+            horizontal=horizontal,
+            rtol=rtol,
+            max_iterations=max_iterations,
+            verbose=verbose,
+        )
+
+    @staticmethod
+    def for_testing(
+        lmax: int,
+        /,
+        *,
+        load_parameters: Optional[Tuple[float, float]] = None,
+        response_parameters: Optional[Tuple[float, float]] = None,
+        rotational_feedbacks: bool = True,
+        horizontal: bool = False,
+        rtol: float = 1e-9,
+        max_iterations: Optional[int] = None,
+        verbose: bool = False,
+    ) -> FingerPrintOperator:
+        """
+        Returns the FingerPrintOperator using analytical testing initialisations
+        for the Earth model and initial state.
+
+        If no parameters are provided, it defaults to a standard L2 (Lebesgue) space.
+        To regularize the inversion, provide (order, relative_scale) tuples for the
+        Sobolev spaces. The relative scale is automatically multiplied by the Earth's
+        mean radius.
+
+        Args:
+            lmax: Truncation degree for the calculations.
+            load_parameters: Tuple of (Sobolev order, relative length scale).
+            response_parameters: Tuple of (Sobolev order, relative length scale).
+            rotational_feedbacks: True for the full feedback, "axial" for
+                the axial component alone, False for none.
+            horizontal: Whether the response holds the horizontal displacement.
+            rtol: The relative tolerance for convergence.
+            max_iterations: Hard limit on iteration count.
+            verbose: If True, prints iteration metrics.
+        """
+        state = EarthState.for_testing(lmax)
+        radius = state.model.parameters.mean_sea_floor_radius
+
+        abs_load = (
+            (load_parameters[0], load_parameters[1] * radius)
+            if load_parameters
+            else None
+        )
+        abs_resp = (
+            (response_parameters[0], response_parameters[1] * radius)
+            if response_parameters
+            else None
+        )
+
+        return FingerPrintOperator(
+            state,
+            load_parameters=abs_load,
+            response_parameters=abs_resp,
+            rotational_feedbacks=rotational_feedbacks,
+            horizontal=horizontal,
+            rtol=rtol,
+            max_iterations=max_iterations,
+            verbose=verbose,
+        )
+
+    @property
+    def state(self) -> EarthState:
+        """
+        Returns the EarthState associated with the operator
+        """
+        return self._state
+
+    @property
+    def model(self) -> EarthModel:
+        """
+        Returns the EarthModel associated with the operator
+        """
+        return self.state.model
+
+    @property
+    def parameters(self) -> EarthModelParameters:
+        """
+        Returns the EarthModelParameters associated with the operator
+        """
+        return self.model.parameters
+
+    @property
+    def field_space(self) -> HilbertSpace:
+        """
+        Returns the sphere space of the response fields.
+        """
+        return self.codomain.field_space
+
+    @property
+    def avc_space(self) -> HilbertSpace:
+        """
+        Returns the space of the angular velocity change, EuclideanSpace(3).
+        """
+        return self.codomain.member_space(ANGULAR_VELOCITY_CHANGE)
+
+    # ================================================================ #
+    #                Measures for convenience in testing               #
+    # ================================================================ #
+
+    def load_measure_for_testing(self) -> GaussianMeasure:
+        """
+        Returns a measure on the load space that is suitable for testing purposes.
+        """
+        return self.domain.heat_measure(0.5 * self.parameters.mean_sea_floor_radius)
+
+    def response_measure_for_testing(self) -> GaussianMeasure:
+        """
+        Returns a measure on the response space that is suitable for testing purposes.
+        """
+        amc_std = (
+            self.parameters.rotation_frequency
+            * self.parameters.mean_sea_floor_radius**4
+        )
+        return self.codomain.heat_measure(
+            0.5 * self.parameters.mean_sea_floor_radius,
+            angular_velocity_std=amc_std,
+        )
+
+    # ================================================================= #
+    #                          Private methods                          #
+    # ================================================================= #
+
+    def _value(self, zeta: SHGrid) -> GRDResponse:
+        return self._operator(zeta)
+
+    def _adjoint_value(self, response: GRDResponse) -> SHGrid:
+        return self._operator.adjoint(response)
+
+    def _l2_mapping_impl(self, zeta: SHGrid) -> GRDResponse:
+        return self._sle.solve_response(
+            zeta,
+            self._l2_codomain,
+            rotational_feedbacks=self._rotational_feedbacks,
+            rtol=self._rtol,
+            max_iterations=self._max_iterations,
+            verbose=self._verbose,
+        )
+
+    def _l2_adjoint_mapping_impl(self, response: GRDResponse) -> SHGrid:
+        field = self._l2_field_space
+        sea_level_dual = field.from_components(response.relative_sea_level_change)
+        displacement_dual = field.from_components(response.displacement.vertical)
+        potential_dual = field.from_components(response.potential_change)
+        angular_velocity_dual = (
+            response.angular_velocity_change if self._rotational_feedbacks else None
+        )
+
+        # The horizontal part's dual is a tangential traction, as the
+        # vertical displacement's is a normal one. In the L2 metric the V
+        # components c pair as sum l(l + 1) c c', and the traction of matching
+        # scale has the potential zeta^v = -c / b on the coefficients, which
+        # is minus the V member read as a field.
+        adjoint_tangential_load = None
+        if self._l2_codomain.has_horizontal:
+            field = self._l2_field_space
+            components = np.zeros(field.dim)
+            components[field.degrees >= 1] = response.displacement.horizontal
+            adjoint_tangential_load = -1 * field.from_components(components)
+
+        adjoint_direct_load = sea_level_dual
+        adjoint_displacement_load = -1 * displacement_dual
+        adjoint_grav_pot_load = -self._g * potential_dual
+
+        if self._rotational_feedbacks:
+            adjoint_avc = -self._g * (
+                angular_velocity_dual - self._cpc_op.adjoint(potential_dual)
+            )
+        else:
+            adjoint_avc = None
+
+        adjoint_sea_level, _, _, _ = self._sle.solve_generalised_equation(
+            direct_load=adjoint_direct_load,
+            displacement_load=adjoint_displacement_load,
+            gravitational_potential_load=adjoint_grav_pot_load,
+            tangential_load=adjoint_tangential_load,
+            angular_momentum_change=adjoint_avc,
+            rotational_feedbacks=self._rotational_feedbacks,
+            rtol=self._rtol,
+            max_iterations=self._max_iterations,
+            verbose=self._verbose,
+        )
+        return adjoint_sea_level
+
+
+# ================================================================ #
+#                 Solid Earth Response Operators                   #
+# ================================================================ #

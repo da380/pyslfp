@@ -16,13 +16,15 @@ rotational feedbacks, for two descriptions of the solid Earth:
 Around these it provides Love numbers for any spherically layered model that
 planetmodel_ describes; sensitivity kernels by adjoint methods, for
 fingerprints and for a viscoelastic evolution with respect to the ice history,
-the initial sea level and the mantle viscosity; the elastic physics as linear
-operators between Hilbert spaces, with observation models for tide gauges,
-satellite altimetry and GRACE, for Bayesian inversions built on pygeoinf_; and
-ice histories, regional masks and plotting.
+the initial sea level and the mantle viscosity; the fingerprint and the
+viscoelastic response to an ice history as linear operators between Hilbert
+spaces, with observation models for tide gauges, satellite altimetry, GRACE
+and GNSS, for Bayesian inversions built on pygeoinf_; and ice histories,
+regional masks and plotting.
 
 :doc:`theory` summarises the physics and methods, :doc:`numerics` their
-discretisation and cost, and :doc:`units` the non-dimensionalisation. The
+discretisation and cost, :doc:`units` the non-dimensionalisation and
+:doc:`changes` what changed in 4.0. The
 source is on GitHub_, and the package is on PyPI_.
 
 .. _planetmodel: https://github.com/da380/planetmodel
@@ -59,7 +61,8 @@ The git hooks, the documentation build and the release process are described in
 `CONTRIBUTING.md <https://github.com/da380/pyslfp/blob/main/CONTRIBUTING.md>`_.
 
 The datasets the package needs (a table of Love numbers for PREM, the ICE-NG ice
-histories, the GLOSS tide gauge network and the regional shapefiles) are
+histories, ETOPO 2022 topography, the GLOSS tide gauge network, the Randolph
+Glacier Inventory and the regional shapefiles) are
 downloaded from Zenodo_ on first use and cached in ``~/.pyslfp_data``, or
 wherever the ``PYSLFP_DATA`` environment variable points.
 ``pyslfp.data.ensure_data(key, refresh=True)`` fetches a dataset afresh.
@@ -86,7 +89,7 @@ resulting sea level change:
 
    # Sea level change, vertical displacement, potential change, and the angular
    # velocity change (polar wander and length of day).
-   sea_level_change, displacement, potential_change, angular_velocity_change = (
+   relative_sea_level_change, displacement, potential_change, angular_velocity_change = (
        sle.solve_sea_level_equation(direct_load)
    )
 
@@ -94,7 +97,7 @@ resulting sea level change:
    metre = sle.state.model.parameters.length_scale
    fig, ax = sl.create_map_figure(figsize=(12, 6))
    sl.plot(
-       sea_level_change * sle.state.ocean_projection() * metre,
+       relative_sea_level_change * sle.state.ocean_projection() * metre,
        ax=ax,
        colorbar_kwargs={"label": "Sea level change (m)"},
    )
@@ -105,7 +108,10 @@ fixed, the usual assumption for present-day and near-future problems. The
 engine beneath it, :class:`~pyslfp.core.sea_level.SeaLevelEquation`, also solves
 the nonlinear equation with migrating shorelines, and the generalised equation
 that adjoint calculations need. The same physics is exposed as a ``pygeoinf``
-operator by :class:`~pyslfp.linear_operators.physics.FingerPrintOperator`.
+operator by :class:`~pyslfp.elastic.operator.FingerPrintOperator`, from a
+load to a :class:`~pyslfp.core.response.GRDResponse`: the sea level change, the
+surface displacement (its horizontal part on request), the gravitational
+potential change and the angular velocity change, held spectrally and named.
 
 
 A glacial isostatic adjustment run
@@ -117,34 +123,34 @@ mantle of viscosity :math:`10^{21}` Pa s beneath an elastic lithosphere:
 .. code-block:: python
 
    import numpy as np
-   from planetmodel import PREM, units
 
    import pyslfp as sl
    from pyslfp.ice import IceNG
-   from pyslfp.love_numbers import Material, graded_mesh
-   from pyslfp.viscoelastic import Rheology, SeaLevelEvolution, ViscoelasticOperator
+   from pyslfp.viscoelastic import (
+       SeaLevelEvolution,
+       ViscoelasticOperator,
+       prem_maxwell,
+       viscoelastic_earth,
+   )
 
    lmax = 64
 
-   # PREM, made isotropic and converted into the library's units.
-   scales = sl.EarthModelParameters.from_defaults().scales
-   model = PREM(ocean=False).isotropic().converted(scales)
-   mesh = graded_mesh(model, lmax)
-
-   # A Maxwell mantle (PREM's layers 2 to 8), the top 77 km left elastic.
-   viscosity = 1.0e21 / scales.factor(units.VISCOSITY)
-   rheology = Rheology.maxwell(Material(mesh, model), {i: viscosity for i in range(2, 9)})
+   # PREM with a Maxwell mantle of 10^21 Pa s, its top 77 km left elastic,
+   # made into the Earth model and the rheology in the library's units.
+   model = prem_maxwell(upper_mantle=1.0e21, lower_mantle=1.0e21)
+   earth_model, rheology = viscoelastic_earth(model, lmax)
    operator = ViscoelasticOperator(rheology, lmax)
 
    # The background state that ICE-7G records at 26 ka.
-   earth_model = sl.EarthModel.from_planet_model(model, lmax, mesh=mesh)
    ice_model = IceNG(length_scale=earth_model.parameters.length_scale)
    state = sl.EarthState.from_ice_model(ice_model, 26.0, earth_model)
 
-   # Half-kiloyear steps to the present; each snapshot holds the sea level
-   # change, displacement, potential change and angular velocity change.
+   # Half-kiloyear steps to the present; each snapshot holds the response,
+   # whose fields (sea level change, displacement, potential change) are
+   # read by name, with the angular velocity change beside them.
    evolution = SeaLevelEvolution(operator, state)
    snapshots, _ = evolution.run_ice_history(np.arange(26.0, -0.1, -0.5), ice_model)
+   present = snapshots[-1].response.field("relative_sea_level_change")
 
 :meth:`~pyslfp.viscoelastic.evolution.SeaLevelEvolution.run_ice_history` takes
 ``shorelines="migrating"`` to let the shorelines move, and ``final_sea_level=``
@@ -208,6 +214,7 @@ recorded on the `Zenodo record <https://zenodo.org/records/19494463>`_.
    theory
    numerics
    units
+   changes
 
 .. toctree::
    :maxdepth: 2

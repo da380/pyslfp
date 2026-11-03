@@ -30,12 +30,15 @@
 # %%
 import matplotlib.pyplot as plt
 import numpy as np
-from planetmodel import PREM, units
 
 import pyslfp as sl
 from pyslfp.ice import IceNG
-from pyslfp.love_numbers import Material, graded_mesh
-from pyslfp.viscoelastic import Rheology, SeaLevelEvolution, ViscoelasticOperator
+from pyslfp.viscoelastic import (
+    SeaLevelEvolution,
+    ViscoelasticOperator,
+    prem_maxwell,
+    viscoelastic_earth,
+)
 
 LMAX = 64
 
@@ -43,24 +46,15 @@ LMAX = 64
 # ## The earth model and its rheology
 #
 # As in the forward tutorial: PREM without its ocean, collapsed to
-# isotropy, with a two-layer Maxwell mantle under an elastic
-# lithosphere. The model is converted into the library's frame -- unit
-# radius, G equal to one -- before its mesh is built, and the
-# viscosities, quoted in Pa s, convert once on the way in.
+# isotropy, with a two-layer Maxwell mantle under an elastic lithosphere
+# (`prem_maxwell`), converted into the library's frame -- unit radius,
+# G equal to one -- and made into the Earth model and rheology on one
+# mesh (`viscoelastic_earth`).
 
 # %%
-scales = sl.EarthModelParameters.from_defaults().scales
-model = PREM(ocean=False).isotropic().converted(scales)
-mesh = graded_mesh(model, LMAX)
-material = Material(mesh, model)
-
-pascal_second = 1.0 / scales.factor(units.VISCOSITY)
-viscosity = {i: 2.0e21 * pascal_second for i in (2, 3, 4)}
-viscosity.update({i: 5.0e20 * pascal_second for i in (5, 6, 7, 8)})
-rheology = Rheology.maxwell(material, viscosity)
+earth_model, rheology = viscoelastic_earth(prem_maxwell(), LMAX)
 operator = ViscoelasticOperator(rheology, LMAX)
 
-earth_model = sl.EarthModel.from_planet_model(model, LMAX, mesh=mesh)
 ice_model = IceNG(length_scale=earth_model.parameters.length_scale)
 state = sl.EarthState.from_ice_model(ice_model, 0.0, earth_model)
 evolution = SeaLevelEvolution(operator, state)

@@ -43,17 +43,16 @@
 # %%
 import matplotlib.pyplot as plt
 import numpy as np
-from planetmodel import PREM, units
 from pyshtools import SHGrid
 
 import pyslfp as sl
 from pyslfp.ice import BaseIceModel, IceNG
-from pyslfp.love_numbers import Material, graded_mesh
 from pyslfp.viscoelastic import (
-    Rheology,
     SeaLevelEvolution,
     ViscoelasticOperator,
     decay_time_measurement,
+    prem_maxwell,
+    viscoelastic_earth,
 )
 
 LMAX = 64
@@ -61,22 +60,14 @@ LMAX = 64
 # %% [markdown]
 # ## The earth model and rheology
 #
-# Those of the forward tutorial, converted into the library's frame, with
-# the viscosities converted once.
+# Those of the forward tutorial, in the library's frame. The kernel
+# below lives on the rheology's mesh.
 
 # %%
-scales = sl.EarthModelParameters.from_defaults().scales
-model = PREM(ocean=False).isotropic().converted(scales)
-mesh = graded_mesh(model, LMAX)
-material = Material(mesh, model)
-
-pascal_second = 1.0 / scales.factor(units.VISCOSITY)
-viscosity = {i: 2.0e21 * pascal_second for i in (2, 3, 4)}
-viscosity.update({i: 5.0e20 * pascal_second for i in (5, 6, 7, 8)})
-rheology = Rheology.maxwell(material, viscosity)
+earth_model, rheology = viscoelastic_earth(prem_maxwell(), LMAX)
 operator = ViscoelasticOperator(rheology, LMAX)
+mesh = rheology.material.mesh
 
-earth_model = sl.EarthModel.from_planet_model(model, LMAX, mesh=mesh)
 background = IceNG(length_scale=earth_model.parameters.length_scale)
 state = sl.EarthState.from_ice_model(background, 0.0, earth_model)
 evolution = SeaLevelEvolution(operator, state)
@@ -134,7 +125,9 @@ site_dual = (metre / earth_model.integrate(patch)) * patch
 window = dates[dates <= 4.0 + 1e-9]
 series = np.array(
     [
-        earth_model.integrate(site_dual * snap.sea_level_change)
+        earth_model.integrate(
+            site_dual * snap.response.field("relative_sea_level_change")
+        )
         for snap in snapshots
         if snap.date <= 4.0 + 1e-9
     ]
@@ -173,7 +166,10 @@ ax.set_title("Post-melt emergence at the cap's centre")
 #
 # $$\delta\tau_d = \int k(r)\, \delta(\ln\eta)(r)\, dr,$$
 #
-# sampled at the GLL nodes and plotted against depth. Its integrals over
+# drawn against radius with `plot_profile`, which takes a nodal array on the
+# material's mesh and draws it layer by layer, as planetmodel draws the
+# model's own fields, with a line across each discontinuity. Beside it the
+# viscosity profile itself, `plot_viscosity`. The kernel's integrals over
 # the two mantle regions, quoted below, are the responses to uniform
 # fractional viscosity changes there.
 
@@ -185,17 +181,20 @@ measure = mesh.jac[:, None] * mesh.w[None, :]
 km = parameters.length_scale / 1e3
 density_r = log_eta_nodal / measure / km  # kyr per d(ln eta) per km
 
-node_depth = (mesh.r.max() - mesh.r) * km
-depth_km = node_depth.ravel()
-order = np.argsort(depth_km)
+relaxing = rheology.itau[0] > 0.0
+mantle = [int(i) for i in np.unique(mesh.layer) if relaxing[mesh.layer == i].all()]
 
-fig, ax = plt.subplots(figsize=(10, 6))
-mantle = depth_km[order] < 2900.0
-ax.plot(depth_km[order][mantle], density_r.ravel()[order][mantle])
-ax.axhline(0.0, color="black", linewidth=0.5)
-ax.set_xlabel("Depth (km)")
-ax.set_ylabel("d(decay time) / d(ln eta) (kyr per km)")
-ax.set_title("Viscosity sensitivity of the decay time")
+fig, (ax_eta, ax_k) = plt.subplots(1, 2, figsize=(10, 6), sharey=True)
+sl.plot_viscosity(ax_eta, rheology, scale=km)
+ax_eta.set_xlabel("Viscosity (Pa s)")
+ax_eta.set_ylabel("Radius (km)")
+sl.plot_profile(ax_k, rheology.material, density_r, layers=mantle, scale=km)
+ax_k.axvline(0.0, color="black", linewidth=0.5)
+ax_k.set_xlabel("d(decay time) / d(ln eta) (kyr per km)")
+ax_k.set_ylim(mesh.r[relaxing].min() * km, mesh.r.max() * km)
+fig.suptitle("Viscosity sensitivity of the decay time")
+
+node_depth = (mesh.r.max() - mesh.r) * km
 
 upper = float(np.sum(log_eta_nodal[(node_depth > 77.0) & (node_depth < 670.0)]))
 lower = float(np.sum(log_eta_nodal[(node_depth >= 670.0) & (node_depth < 2900.0)]))

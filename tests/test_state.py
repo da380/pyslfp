@@ -152,16 +152,87 @@ def test_ocean_projection_ice_shelves(analytical_state):
     assert np.sum(ocean_no_shelves.data) <= np.sum(ocean_all.data)
 
 
-@pytest.mark.parametrize(
-    "exclude_shelves,exclude_glaciers",
-    [(False, False), (False, True), (True, False), (True, True)],
-)
-def test_ice_projection_exclusions(analytical_state, exclude_shelves, exclude_glaciers):
-    """Tests all boolean combinations for ice projection exclusions."""
+@pytest.mark.parametrize("exclude_shelves", [False, True])
+def test_ice_projection_is_all_ice(analytical_state, exclude_shelves):
+    """The ice projection is 1 wherever there is ice, floating ice only
+    when shelves are kept."""
     ice_proj = analytical_state.ice_projection(
-        value=0, exclude_ice_shelves=exclude_shelves, exclude_glaciers=exclude_glaciers
+        value=0, exclude_ice_shelves=exclude_shelves
     )
     assert np.all((ice_proj.data == 0) | (ice_proj.data == 1))
+    ice = analytical_state.ice_thickness.data > 0
+    if not exclude_shelves:
+        np.testing.assert_array_equal(ice_proj.data > 0, ice)
+
+
+# ==================================================================== #
+#             The ice-sheet rule and the glaciers (real state)         #
+# ==================================================================== #
+
+
+@pytest.fixture(scope="module")
+def real_state():
+    return EarthState.from_defaults(lmax=32)
+
+
+def test_ice_sheet_rule(real_state):
+    """The Antarctic sheet is all ice south of 60S, the Greenland sheet all ice
+    in GTN-G region 5; the two make up the ice sheets, and ice outside both
+    (Arctic Canada, Alaska) belongs to neither."""
+    ice = real_state.ice_projection(value=0.0).data > 0
+    lats, _ = np.meshgrid(real_state.lats(), real_state.lons(), indexing="ij")
+    antarctic = real_state.ice_sheet_projection(value=0.0, sheets="antarctic").data > 0
+    greenland = real_state.ice_sheet_projection(value=0.0, sheets="greenland").data > 0
+    both = real_state.ice_sheet_projection(value=0.0).data > 0
+    region_5 = real_state.gtng_projection("Greenland Periphery", value=0.0).data > 0
+
+    np.testing.assert_array_equal(antarctic, ice & (lats < -60.0))
+    np.testing.assert_array_equal(greenland, ice & region_5)
+    np.testing.assert_array_equal(both, antarctic | greenland)
+    assert greenland.sum() > 0 and antarctic.sum() > 0
+    assert np.sum(ice & ~both) > 0
+    floating = real_state.ocean_function.data > 0
+    no_shelves = real_state.ice_sheet_projection(value=0.0, exclude_ice_shelves=True)
+    np.testing.assert_array_equal(no_shelves.data > 0, both & ~floating)
+    with pytest.raises(ValueError, match="Unknown ice sheets"):
+        real_state.ice_sheet_projection(sheets="laurentide")
+
+
+def test_glacier_area_density_conserves_area(real_state):
+    """The density integrates to the glacier area exactly: here Alaska's,
+    none of which lies in the ice sheets. The regions partition the total,
+    and the ice sheets hold none of it."""
+    table = real_state.rgi7_glaciers
+    length_scale = real_state.model.parameters.length_scale
+    alaska = real_state.glacier_area_density(regions=["Alaska"])
+    expected = table["area"].values[table["o1region"].values == 1].sum()
+    got = real_state.model.integrate(alaska) * length_scale**2
+    np.testing.assert_allclose(got, expected, rtol=1e-12)
+    np.testing.assert_array_equal(
+        alaska.data, real_state.glacier_area_density(regions=[1]).data
+    )
+
+    total = real_state.glacier_area_density()
+    parts = sum(real_state.glacier_area_density(regions=[n]).data for n in range(1, 21))
+    np.testing.assert_allclose(parts, total.data, rtol=1e-12, atol=0.0)
+    sheets = real_state.ice_sheet_projection(value=0.0).data > 0
+    assert np.all(total.data[sheets] == 0.0)
+    assert 0 < real_state.model.integrate(total) * length_scale**2 < table["area"].sum()
+    with pytest.raises(ValueError, match="GTN-G"):
+        real_state.glacier_area_density(regions=[21])
+
+
+def test_glaciers_region_name(real_state):
+    """ "Glaciers" names the nodes holding glaciers outside the ice sheets,
+    alone or with other regions."""
+    glaciers = real_state.glacier_projection(value=0.0).data
+    np.testing.assert_array_equal(
+        real_state.get_projection("Glaciers", value=0.0).data, glaciers
+    )
+    with_iceland = real_state.get_projection(["Glaciers", "Iceland"], value=0.0).data
+    iceland = real_state.gtng_projection("Iceland", value=0.0).data
+    np.testing.assert_array_equal(with_iceland, np.maximum(glaciers, iceland))
+    assert "Glaciers" in real_state.list_all_regions()["State-dependent"]
 
 
 def test_altimetry_projection_bounds(analytical_state):

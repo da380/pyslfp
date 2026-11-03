@@ -17,12 +17,16 @@
 # %%
 import matplotlib.pyplot as plt
 import numpy as np
-from planetmodel import PREM, units
+from planetmodel import units
 
 import pyslfp as sl
-from pyslfp.viscoelastic import Rheology, SeaLevelEvolution, ViscoelasticOperator
+from pyslfp.viscoelastic import (
+    SeaLevelEvolution,
+    ViscoelasticOperator,
+    prem_maxwell,
+    viscoelastic_earth,
+)
 from pyslfp.ice import IceNG
-from pyslfp.love_numbers import Material, graded_mesh
 
 LMAX = 64
 
@@ -31,38 +35,30 @@ LMAX = 64
 #
 # The radial model is PREM without its ocean, collapsed to its Voigt
 # isotropic average, since the viscoelastic solver relaxes an isotropic
-# shear modulus. The library computes in one non-dimensional frame, that
-# of the default Earth model parameters, so the model is converted into
-# it before its mesh is built, and the viscosities, quoted in Pa s,
-# convert once on the way in. PREM's layers, by index: 0 the inner core
-# and 1 the fluid outer core, 2-4 the lower mantle, 5-8 the upper mantle
-# and transition zone, and 9-11 the top 77 km, left elastic as the
-# lithosphere.
+# shear modulus, and without its quality factors. `prem_maxwell` gives
+# it with a Maxwell mantle: PREM's lid, the top 77 km, left elastic as
+# the lithosphere, 5 x 10^20 Pa s from there down to the 670 km
+# discontinuity, and 2 x 10^21 Pa s below. The viscosity is a field of
+# the model, in Pa s like the rest of it; `maxwell_mantle` places other
+# structures on any radial model, by radii.
+#
+# The library computes in one non-dimensional frame, that of the
+# default Earth model parameters. `viscoelastic_earth` converts the
+# model into it, builds one mesh, and reads the model twice on that
+# mesh: for its elastic Love numbers, in the Earth model, and for its
+# viscosity, in the rheology.
 
 # %%
-scales = sl.EarthModelParameters.from_defaults().scales
-model = PREM(ocean=False).isotropic().converted(scales)
-mesh = graded_mesh(model, LMAX)
-material = Material(mesh, model)
-
-pascal_second = 1.0 / scales.factor(units.VISCOSITY)
-LOWER_MANTLE = 2.0e21 * pascal_second
-UPPER_MANTLE = 5.0e20 * pascal_second
-
-viscosity = {i: LOWER_MANTLE for i in (2, 3, 4)}
-viscosity.update({i: UPPER_MANTLE for i in (5, 6, 7, 8)})
-rheology = Rheology.maxwell(material, viscosity)
+earth_model, rheology = viscoelastic_earth(prem_maxwell(), LMAX)
 operator = ViscoelasticOperator(rheology, LMAX)
 
 # %% [markdown]
 # ## The sea level side
 #
-# An Earth model whose elastic Love numbers come from the same radial
-# model and mesh, and the present-day ICE-7G background state, whose
+# The present-day ICE-7G background state on that Earth model, whose
 # ocean function the linear equation freezes.
 
 # %%
-earth_model = sl.EarthModel.from_planet_model(model, LMAX, mesh=mesh)
 ice_model = IceNG(length_scale=earth_model.parameters.length_scale)
 state = sl.EarthState.from_ice_model(ice_model, 0.0, earth_model)
 
@@ -76,6 +72,12 @@ state = sl.EarthState.from_ice_model(ice_model, 0.0, earth_model)
 # converted once. The cap's edge is softened in degree space: a sharp
 # disc rings at a finite truncation, and the taper leaves degree 0,
 # hence the mass, untouched.
+#
+# The run returns a snapshot at every time. Each holds the response to
+# the load so far, a `GRDResponse` as the elastic fingerprint operator
+# returns, whose fields are read by name: the sea level change, the
+# displacement and the potential change, and with rotational feedback
+# the angular velocity change.
 
 # %%
 parameters = earth_model.parameters
@@ -113,7 +115,7 @@ ocean = state.ocean_projection()
 
 fig, ax = sl.create_map_figure(figsize=(12, 8))
 sl.plot(
-    final.sea_level_change * ocean * metre,
+    final.response.field("relative_sea_level_change") * ocean * metre,
     ax=ax,
     vmin=-20.0,
     vmax=20.0,
@@ -123,7 +125,7 @@ ax.set_title("Sea level change, 15 kyr after the onset of melting")
 
 fig, ax = sl.create_map_figure(figsize=(12, 8))
 sl.plot(
-    final.displacement * metre,
+    final.response.field("displacement") * metre,
     ax=ax,
     vmin=-100.0,
     vmax=100.0,
@@ -143,11 +145,16 @@ ax.set_title("Crustal displacement, 15 kyr after the onset of melting")
 lat_index = int(np.argmin(np.abs(earth_model.lats() - 60.0)))
 lon_index = int(np.argmin(np.abs(earth_model.lons() - (360.0 - 85.0))))
 uplift = metre * np.array(
-    [snap.displacement.data[lat_index, lon_index] for snap in snapshots]
+    [
+        snap.response.field("displacement").data[lat_index, lon_index]
+        for snap in snapshots
+    ]
 )
 mean_sea_level = metre * np.array(
     [
-        earth_model.integrate(snap.sea_level_change * state.ocean_function)
+        earth_model.integrate(
+            snap.response.field("relative_sea_level_change") * state.ocean_function
+        )
         / state.ocean_area
         for snap in snapshots
     ]

@@ -3,8 +3,8 @@
 An elastic earth responds instantaneously, so a fingerprint is one
 equilibrium solve of the sea level equation: this module wraps the
 engine of `pyslfp.core` with a fixed background state, which is all
-the elastic problem adds to it.  The operator layer for inference,
-built on these solves, is `pyslfp.linear_operators`.
+the elastic problem adds to it.  `FingerPrintOperator`, in
+`operator`, is these solves and their adjoint as a pygeoinf operator.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Optional, Tuple
 import numpy as np
 from pyshtools import SHCoeffs, SHGrid
 
-from ..core import EarthState, SeaLevelEquation
+from ..core import EarthState, GRDResponse, GRDSpace, SeaLevelEquation
 
 __all__ = ["LinearSeaLevelEquation"]
 
@@ -104,6 +104,32 @@ class LinearSeaLevelEquation:
             verbose=verbose,
         )
 
+    def solve_response(
+        self,
+        direct_load: SHGrid,
+        space: GRDSpace,
+        /,
+        *,
+        rotational_feedbacks: bool = True,
+        rtol: float = 1e-9,
+        max_iterations: Optional[int] = None,
+        verbose: bool = False,
+    ) -> GRDResponse:
+        """
+        Solves the linear sea level equation for a surface mass load, the
+        response returned as a vector of `space`; see
+        `SeaLevelEquation.solve_response`.
+        """
+        return self._sle.solve_response(
+            self._state,
+            direct_load,
+            space,
+            rotational_feedbacks=rotational_feedbacks,
+            rtol=rtol,
+            max_iterations=max_iterations,
+            verbose=verbose,
+        )
+
     def solve_generalised_equation(
         self,
         /,
@@ -111,6 +137,7 @@ class LinearSeaLevelEquation:
         direct_load: Optional[SHGrid] = None,
         displacement_load: Optional[SHGrid] = None,
         gravitational_potential_load: Optional[SHGrid] = None,
+        tangential_load: Optional[SHGrid] = None,
         displacement_response: Optional[SHCoeffs] = None,
         gravitational_potential_response: Optional[SHCoeffs] = None,
         inertia_moment_change: float = 0.0,
@@ -130,6 +157,9 @@ class LinearSeaLevelEquation:
             direct_load (Optional[SHGrid]): Standard surface mass forcing.
             displacement_load (Optional[SHGrid]): External vertical surface displacement forcing.
             gravitational_potential_load (Optional[SHGrid]): External gravitational potential forcing.
+            tangential_load (Optional[SHGrid]): The potential of a
+                tangential surface traction, in the units of a surface
+                density.
             displacement_response (Optional[SHCoeffs]): A ready displacement
                 response in coefficient form, joined to the static terms
                 with no Love number applied.
@@ -153,6 +183,7 @@ class LinearSeaLevelEquation:
             direct_load=direct_load,
             displacement_load=displacement_load,
             gravitational_potential_load=gravitational_potential_load,
+            tangential_load=tangential_load,
             displacement_response=displacement_response,
             gravitational_potential_response=gravitational_potential_response,
             inertia_moment_change=inertia_moment_change,

@@ -110,7 +110,7 @@ def export_ice_history(
     surfacefile = _surfacefile()
     from planetmodel.units import LENGTH, Scales
 
-    from pyslfp.viscoelastic.evolution import KYR
+    from pyslfp.core.model import SECONDS_PER_KILOYEAR as KYR
 
     ensure_data(version)
     stored = standard_dates(version)

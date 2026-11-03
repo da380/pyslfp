@@ -1,9 +1,9 @@
 # The models submodule: a component vocabulary for inversion spaces
 
-Drafted 16 October 2026 from the model-spaces discussion with David.
-Status: design agreed in outline, not started; the steric and
-mass-conservation lego it builds on landed with the Heathcote2026
-harvest (see pyslfp/linear_operators/loads.py).
+Status: built, WP1 to WP4, for 4.0.0 with the pygeoinf 2 port; the
+design below is revised against pygeoinf 2 (see "Against pygeoinf 2"). The
+steric and mass-conservation pieces it builds on are in
+pyslfp/models/loads.py.
 
 ## Goal
 
@@ -11,7 +11,7 @@ Give the library a vocabulary of physically named load components and
 an assembler that turns a list of them into a ready inversion space,
 so that common set-ups are one-liners while full generality stays
 where it already lives, in pygeoinf. The three-component space of the
-Heathcote2026 scripts — grounded ice, dynamic topography, ocean
+Heathcote2026 scripts — grounded ice, sterodynamic sea level, ocean
 density — is one instance, not the design: land water storage,
 glaciers separated from ice sheets, and firn separated from ice (the
 ice-altimetry case, where the two load with different densities but
@@ -51,11 +51,11 @@ without touching the assembler.
    submodule is called `models` (matching pygeoinf's `model_space`,
    disambiguated in docstrings from `EarthModel` and the ice models);
    no deep inheritance even though the spaces nest physically; no
-   design for viscous or time-dependent physics (time dependence
-   arrives as linked single-epoch models via filtering);
+   design here for viscous or time-dependent physics, whose spaces
+   build on `FieldHistorySpace` (`pyslfp.core.history`);
    `AltimetryObservationModel` and `JointAltimetryObservationModel`
-   become deprecated aliases for a release when their replacements
-   land.
+   are removed in 4.0, a set-up's `geocentric_sea_level` replacing
+   them.
 6. **Direct observable contributions belong to the set-up.** The
    physics that made the August reorganisation necessary is that
    altimetry is model-dependent: sea surface height carries eta's
@@ -68,12 +68,96 @@ without touching the assembler.
    Observation models remain consumers of the set-up — they add
    sampling, averaging and noise, never physics.
 
+7. **Scalar diagnostics map into Euclidean space.** GMSL functionals and
+   the other scalar diagnostics are operators into `EuclideanSpace(1)`
+   (or `EuclideanSpace(k)` for a split), pyslfp's existing convention,
+   so that they compose with operators, push-forwards and dense
+   covariances as they do now. pygeoinf's `LinearFunctional` is not
+   used here.
+
+8. **Fields are global; supports are part of the physics.** A
+   component's space holds functions on the whole sphere, and a prior is
+   a measure on that space as it stands. A prior is never masked by
+   pushing it forward through a support projection: the masked samples
+   jump at the support's edge, so the result is not a measure on a
+   Sobolev space of order 1/2 or more, and it is only semidefinite. The
+   support enters through the operators, as their regularity allows.
+   Multiplication by the indicator of a Lipschitz region is bounded on
+   H^s for |s| < 1/2 and on no H^s with s >= 1/2, and the sea level
+   equation gains one order, so the spaces follow the chain
+
+       components H^t --load--> H^s, 0 <= s < 1/2 --SLE--> H^(s+1)
+
+   with s above 0 when the response is sampled at points.
+   - Loads carry the supports (the ocean function, the ice and land
+     indicators), so the load space has an order below 1/2.
+   - Pointwise observables (sea and ice surface heights) take the field
+     unmasked, into an observable space of order above 1, normally the
+     response's field space; the observation points carry the support,
+     since a field and its masked version agree inside it.
+   - Integrated diagnostics (GMSL, regional averages, the steric sea
+     level they are taken of) carry the supports; they are bounded on
+     L^2.
+
+   Loads, integrals and averages see a field only on its support, and
+   point observations do when their points lie in it, so posteriors are
+   those of a masked prior. The field off its support keeps its prior,
+   and plots show `support(u)`. The intermediate spaces' metrics cancel
+   in the adjoint of a chain from the fields to data, so the choice of
+   load and response orders changes no result: the chain from H^2 fields
+   to altimetry points built with H^2 loads and response, and with
+   H^(1/4) loads and an H^(5/4) response, agrees exactly in the forward
+   map and to 1e-13 in the adjoint at lmax 32 and 64.
+
+## Against pygeoinf 2
+
+- **Component names are labels.** The joint space is
+  `DirectSum(spaces, labels=names)`, so `projection(name)`,
+  `inclusion(name)`, `subspace(name)` and a product measure's
+  `marginal(name)` work by name, and the assembler keeps no name-to-index
+  bookkeeping of its own. Labels do not enter a direct sum's identity, so
+  the row and block operators, which carry none, compose with it.
+- **Constraints claim surjectivity.** Exact conditioning in pygeoinf 2
+  needs the constraint operator to claim `SURJECTIVE`, so the set-up's
+  constraints carry it. A prior on the global fields is positive
+  definite (decision 8), so it is conditioned on a constraint as it
+  stands; pygeoinf's refusal to condition a semidefinite prior does not
+  arise.
+- **Supports are multiplications by an indicator**
+  (`multiplication_operator`), idempotent on any space and self-adjoint on
+  a Lebesgue space; the traits they claim are verified with
+  `testing.check_traits`. They serve display and diagnostics.
+- **One product per load.** Each load is a single pointwise product,
+  the support's indicator folded into its multiplier, never a support
+  projection composed with a product. A product is left on the grid
+  untruncated, and the next product acts on all of it, while a lifted
+  operator's adjoint passes through the space's components, which keep
+  only the part up to the truncation degree. The computed adjoint of
+  g (f u) is therefore the exact adjoint of g T(f u), with T the
+  truncation, and the composition fails the adjoint identity by the
+  pairing of the two products' parts above the truncation degree. For
+  the ice mask and load the failure, relative to the norms, is about
+  2e-3 at lmax 32, 3e-4 at 64, 1e-4 at 128 and 1e-5 at 256: a
+  discretisation error that falls with the degree. A single product
+  satisfies the identity to rounding at every degree.
+- **The steric map is a direct observable contribution.** The density
+  component contributes to the observable `steric_sea_level` through
+  `steric_sea_level_operator`, so the assembler derives the steric GMSL
+  the way it derives every other observable, from the components alone.
+- **Reference operators.** The Heathcote2026 scripts run on pygeoinf 2,
+  so WP2 is cross-checked against their hand-built operators at small
+  lmax by a one-off script, outside the test suite since the folder is
+  to go; the suite tests the assembler against the same operators built
+  from `loads.py`. Their `gmsl_split_operators` and
+  `regional_decomposition_operators` are ported and ready for WP3.
+
 ## Design
 
 **The component record.** A frozen `LoadComponent`: name, Hilbert
 space, the to-load operator (None for a component that loads nothing),
-the support projection, its direct contributions to named observables
-(decision 6), and its role. The role is the organising principle and
+its support (decision 8), its direct contributions to named observables
+(decision 6), each into that observable's space, and its role. The
+pointwise factories take the observable space as an argument. The role is the organising principle and
 takes one of two values:
 
 - **mass source** (grounded ice, glaciers, land water storage, firn):
@@ -91,10 +175,20 @@ takes one of two values:
 **Component factories**, each a few lines on the existing lego
 (state projections plus the load operators):
 
-- grounded ice sheets: rho_i (1 - C), ice mask excluding glaciers;
-- glaciers: the same rule on the glacier mask;
-- land water storage: rho_w on the land mask, water-equivalent
-  thickness;
+- grounded ice sheets: rho_i (1 - C) times the state's ice-sheet
+  indicator, the ice sheets selected by rule (`ice_sheet_projection`):
+  all ice south of 60S, and all ice within GTN-G region 5 (Greenland);
+- glaciers: the RGI 7.0 glaciers as point masses at their grid nodes,
+  rho_i a h with a the glacier area density and h a regional thickness
+  change. Glaciers are far smaller than the grid's resolution and sea
+  level is wanted well away from them; the whole area loads, with no
+  (1 - C), since the glaciers are grounded whatever the ocean function
+  says of their node. Glaciers at ice-sheet nodes belong to the ice
+  sheets, which hold them in the ice model. Spreading the largest
+  glaciers over their own area is the refinement to make if degree 512
+  needs it;
+- land water storage: rho_w times the ice-free land indicator,
+  water-equivalent thickness;
 - firn: the ice rule with a caller-supplied firn density — the reason
   it exists as a separate component is exactly that altimetry observes
   the height sum while the loads differ;
@@ -103,7 +197,7 @@ takes one of two values:
 
 **The assembler.** `ModelSetup(components)` derives: the joint space
 (direct sum in the given order), the row load operator, the block
-projection operator, the per-component and total barystatic GMSL
+support, the per-component and total barystatic GMSL
 functionals, the steric GMSL functional and barystatic/steric split
 where the roles admit them, and the available constraints. Everything
 is derived from the components' roles; adding a component never means
@@ -132,24 +226,124 @@ uniform change to the bathtub answer.
 assembled three-component set-up reproduces the hand-built operators
 of the harvest exactly; a steric (eta, delta rho) pair lies in the
 assembled constraint's kernel; the per-component GMSL functionals sum
-to the total.
+to the total; a global prior conditions exactly on the mass
+constraint. Built as `pyslfp.models.ModelSetup`. On the real state at
+lmax 32 and 64, on the scripts' own spaces, the continuous sea level and
+sea surface height operators and the steric GMSL agree with the
+scripts' exactly in the forward map. The adjoints differ: the scripts
+compose the ice mask with the ice load, and their sea level and sea
+surface height operators fail the adjoint identity, relative to the
+norms, by 2e-3 and 1e-3 at lmax 32 and by 2e-4 and 6e-5 at lmax 64,
+where the set-up's hold to the solver's tolerance. The scripts'
+barystatic GMSL pairs the weighting with the masked field spectrally,
+while the set-up's is the grid integral of the load, the mass the sea
+level equation sees; at worst over H^2 fields the two differ by 7% at
+lmax 32, 1.5% at 64, 0.5% at 128 and 0.09% at 256.
 
-**WP3 — the pre-built set-ups and the remaining harvest**: the
+**WP3 — the pre-built set-ups and the remaining harvest** (built): the
 scripts' `gmsl_split_operators` and the SSLC/DMSLC/BMSLC regional
 decomposition land as derived diagnostics of a `ModelSetup` rather
-than free functions, completing the Heathcote2026 harvest list.
+than free functions, completing the Heathcote2026 harvest list. The
+scripts move onto set-ups, which drops their prior masking (decision 8)
+and with it the composed mask-and-load rows and the spectral barystatic
+pairing, and puts their loads in a space of order below 1/2.
+
+- **Diagnostics that need the sea level equation** (the true GMSL, the
+  residual form of the steric GMSL, the SSLC/DMSLC/BMSLC decomposition)
+  take the fingerprint operator as an argument; a set-up holds none and
+  stays passive. The decomposition is written through the roles: BMSLC
+  is the response to the mass sources' loads, DMSLC the response to the
+  ocean-internal loads plus the sterodynamic sea level change less its
+  steric part,
+  SSLC the steric sea level. The scripts' zeta (dynamic manometric
+  change) is renamed, zeta being the load in the library.
+- **Ready-made set-ups**: ice + eta; ice + eta + delta rho; ice + firn;
+  the budget (ice + glaciers + land water + eta + delta rho). Each takes
+  the load space, the field space and the observable space, as the
+  factories do.
+- **The scripts are replaced by new, simplified ones** built on set-ups,
+  sharing `Heathcote2026/common.py` and `figures.py`. They were checked in
+  quick mode against a local record of the old ones; every difference
+  traces to a fix or to the change of formulation. The formulation is in
+  `Heathcote2026/FORMULATION.md`, and the points the paper's revision must
+  take up are in `Heathcote2026/PAPER_NOTES.md`.
+- **Order.** WP3 follows the clean-up of the hard-coded regions (see the
+  roadmap), so that the ready-made set-ups and the paper's revision runs
+  use the physical definitions of the ice sheets, the glaciers and the
+  ocean.
+
+## Histories (WP4)
+
+A set-up describes one epoch. A history set-up is the same vocabulary
+through time: the set-up's joint space tensored with a time space, so that
+every component becomes a history and every derived operator acts at each
+time. pygeoinf's tensor products of coordinate spaces make this a thin layer:
+the product metric is the natural one, a lift applies an operator on the
+field factor at every time at one application per time mode, and a
+contraction with a functional on the time factor samples a history.
+
+**The space.** `HistorySetup(setup, time_space)` has
+`space = TensorProduct([time_space, setup.space])`, whose vectors are
+(K, N) arrays, K the time modes and N the set-up's dimension; the time
+coordinate is the model's non-dimensional time, as everywhere in the
+library, with `EarthModel.times_from_dates` and `dates_from_times` the
+conveniences for dates in kiloyears before present, and the components'
+labels are the set-up's. A component's
+history is reached by `history(name)`, the lift of the set-up's projection,
+onto `FieldHistorySpace(time_space, component.space)`, which equals the lifted
+codomain.
+
+**Derived operators are lifts.** The load operator maps a history of the
+set-up to the load history, `FieldHistorySpace(time_space, load_space)`; the
+observables, the support and the response to a fingerprint operator likewise,
+the last the elastic physics at every epoch, costing one fingerprint solve
+per time mode. The scalar diagnostics, the barystatic and steric GMSL and
+their split, and the constraints, map into the time space itself, functions
+of time in its basis, through the isometry from `TensorProduct([time_space,
+EuclideanSpace(k)])`; the ocean mass constraint keeps its surjectivity, since
+a lift's traits are its factors'.
+
+**Sampling in time** is a contraction with a functional on the time factor,
+on any product whose first factor is the time space, in `pyslfp.core.history`:
+`at_time(space, t)`, bounded for a time order above one half; `time_average(space,
+t0, t1)`, the mean over a window by the time space's quadrature, bounded on
+any order; and `difference_quotient(space, t0, t1)`, the change over a window
+per unit time, which is what a rate observed over a span is, GNSS velocities
+and altimetry trends included, and avoids the pointwise derivative that would
+need an order above three halves. Each returns an operator onto the product
+of the remaining factors, the set-up's space or a response space, which the
+observation models then sample; a series of epochs is a column of these.
+
+**The viscoelastic coupling** is composition, not a method of the set-up: the
+ice history of a set-up is `history("ice_sheets")`, whose codomain is the
+history space `SeaLevelEvolutionOperator` and `IceHistoryOperator` take, so
+`evolution_operator.fixing(...) @ history_setup.history("ice_sheets")` is the
+viscoelastic response of the set-up's ice. A set-up stays passive.
+
+**Priors through time** are the priors layer's: a Gaussian on the product
+with a separable covariance, `GaussianMeasure.from_tensor_product` of a
+time measure and the set-up's prior, and non-separable ones as their own
+measures on the same vectors.
+
+Tests: the product space's axioms; a lifted operator at a time equals the
+set-up's operator applied to the history at that time; the GMSL history of a
+rank-one history is the profile times the field's GMSL; the lifted constraint
+holds for a history in its kernel; the window average and the difference
+quotient against quadrature of the evaluation; a tide gauge series on the
+lifted response against the fingerprint at each epoch; the composition with
+`IceHistoryOperator` passing the adjoint check.
 
 ## Non-goals
 
 - Priors, calibration chains, solver and conditioning choices.
 - Observation models: they consume a set-up's spaces and components,
   they are not part of one.
-- Time dependence; the set-ups describe single-epoch (rate) spaces.
+- Priors: a separate layer that takes a set-up, built later.
 
 ## Risks
 
 - Record scope creep: the component holds name, space, load,
-  projection, role and direct observable contributions — nothing
+  support, role and direct observable contributions — nothing
   else. Sampling, averaging and noise belong to the observation
   operators.
 - The firn density is a modelling choice, so it is an argument, never
@@ -157,3 +351,6 @@ than free functions, completing the Heathcote2026 harvest list.
 - Land-mask subtleties (the Caspian, lakes) are inherited from the
   state's projections; the factories reuse them rather than redefining
   masks.
+- A support supplied by the caller (a mask, named regions or custom
+  glacier positions) would serve any component whose support the state's
+  projections do not describe.

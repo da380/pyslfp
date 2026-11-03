@@ -13,6 +13,7 @@ from scipy.interpolate import RegularGridInterpolator
 from pyshtools import SHGrid
 
 from pyslfp.data import DATADIR, ensure_data
+from pyslfp.core.water_bodies import landlocked_mask
 from .ice_models import BaseIceSeaLevelModel
 
 
@@ -191,6 +192,25 @@ class IceNG(BaseIceSeaLevelModel):
             topography = fraction * topography1 + (1 - fraction) * topography2
 
         return ice_thickness, topography
+
+    def get_land(
+        self,
+        lmax: int,
+        /,
+        *,
+        grid: str = "DH",
+        sampling: int = 1,
+        extend: bool = True,
+    ) -> SHGrid:
+        """The present-day landlocked depressions (`pyslfp.core.water_bodies`),
+        held as land at every date: ICE-NG describes the Earth, where
+        flotation alone would extend the ocean into the Caspian and the other
+        basins below sea level that are cut off from it. Arguments as
+        `BaseIceSeaLevelModel.get_land`."""
+        grid, sampling = self.resolve_grid(grid, sampling)
+        template = SHGrid.from_zeros(lmax, grid=grid, sampling=sampling, extend=extend)
+        mask = landlocked_mask(template.lats(), template.lons(), extend=extend)
+        return SHGrid.from_array(mask.astype(float), grid=grid)
 
     def get_ice_thickness_and_sea_level(
         self,

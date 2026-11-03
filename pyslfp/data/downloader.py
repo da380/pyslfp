@@ -19,7 +19,7 @@ from .config import DATADIR
 
 # The Zenodo record the datasets are fetched from: one version of the
 # concept record, so it changes whenever a new version is published.
-RECORD_ID: str = "22891291"
+RECORD_ID: str = "23885494"
 
 # The zip file on the record holding each dataset. These are the names as
 # they appear on the record, not derived from anything else.
@@ -34,6 +34,7 @@ DATASET_FILES: Dict[str, str] = {
     "IMBIE_ANT": "pyslfp_imbie_ant.zip",
     "MOUGINOT_GRL": "pyslfp_mouginot_grl.zip",
     "ETOPO": "pyslfp_etopo.zip",
+    "RGI7": "pyslfp_rgi7.zip",
 }
 
 # The folder each zip extracts to under DATADIR. The folder is whatever the
@@ -51,6 +52,7 @@ FOLDER_MAP: Dict[str, str] = {
     "IMBIE_ANT": "ANT_Basins_IMBIE2",
     "MOUGINOT_GRL": "Greenland_Basins",
     "ETOPO": "pyslfp_etopo",
+    "RGI7": "RGI7",
 }
 
 DATASET_URLS: Dict[str, str] = {

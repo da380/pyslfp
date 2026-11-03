@@ -38,14 +38,14 @@ direct_load = sle.state.west_antarctic_load(fraction=0.1)
 # into metres.
 
 # %%
-sea_level_change, displacement, potential_change, angular_velocity = (
+relative_sea_level_change, displacement, potential_change, angular_velocity = (
     sle.solve_sea_level_equation(direct_load)
 )
 metre = sle.state.model.parameters.length_scale
 
 print(
-    f"sea level change from {sea_level_change.data.min() * metre:.3f} "
-    f"to {sea_level_change.data.max() * metre:.3f} m"
+    f"sea level change from {relative_sea_level_change.data.min() * metre:.3f} "
+    f"to {relative_sea_level_change.data.max() * metre:.3f} m"
 )
 
 # %% [markdown]
@@ -59,7 +59,7 @@ print(
 # %%
 fig, ax = sl.create_map_figure(figsize=(12, 8))
 sl.plot(
-    sea_level_change * sle.state.ocean_projection() * metre,
+    relative_sea_level_change * sle.state.ocean_projection() * metre,
     ax=ax,
     colorbar_kwargs={"label": "Sea level change (m)"},
 )

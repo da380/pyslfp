@@ -193,6 +193,78 @@ Kernels have the regularity of the measurements that drive them. A measurement
 patch with a sharp edge rings through every relaxation mode at a finite
 truncation, so patches should be tapered in degree, as the tutorials do.
 
+The horizontal displacement adds little to either direction. Forward, each step
+reads the memory field's V at the surface, one value per coefficient, and the
+sea level solve gains one product per coefficient, since V feeds nothing back.
+In reverse, a horizontal dual adds one surface term per degree to the radial
+solve, and in the continuous adjoint one more unit response per degree, the
+tangential traction's, computed once with the others.
+
+The Sobolev kernel, the adjoint of ``IceHistoryOperator``, costs one discrete
+reversed sweep and the product of its per-node duals with the time
+eigenfunctions at the dates, which is negligible beside the sweep. On the
+homogeneous test body of the test suite it converges at second order as the
+date grid is refined, changing by :math:`5\times10^{-3}`,
+:math:`5\times10^{-4}` and :math:`1\times10^{-4}` of its size from 5 to 33
+dates, and at time order one it settles as time modes are added, the change
+halving with each doubling of the modes, where the per-node dual at an
+observation date doubles with each halving of the spacing.
+
+``SeaLevelEvolutionOperator`` wraps the runs and the sweeps. Its value is one
+recorded forward run; its linearisation reuses that run, so the derivative's
+forward action costs one tangent-linear run, a forward run of linear steps
+with the trajectory's ocean functions prescribed, and its adjoint one reversed
+sweep, by whichever method was chosen. A Hessian-vector product costs the
+direction's tangent-linear run once, and then, per application, one reversed
+sweep carrying both the first- and the second-order adjoint, about twice a
+sweep; the forward action of the second derivative, which the checks use,
+costs a tangent-linear run and a second-order one. The run at a point is kept,
+so that a linearisation and a second derivative at the same point share it.
+
+The discrete pair, tangent-linear run and adjoint sweep, are exact transposes,
+and the discrete second derivative is symmetric to rounding and the exact
+derivative of the exact gradient: central differences of the gradient of a
+misfit along a direction land on it after extrapolation to :math:`10^{-6}`.
+The continuous pair are transposes to the order of the scheme. On the
+homogeneous test body with a relaxation time of ten Maxwell times, the
+mismatch :math:`\langle F'v, g\rangle - \langle v, F'^{*}g\rangle` of the
+first derivative falls by about four with each halving of the dates in each
+block of the model space, and so do the gap between the continuous and the
+discrete second derivatives and the mismatch of the continuous second-order
+adjoint with its tangent-linear run, from :math:`3.6\times10^{-2}` through
+:math:`9.2\times10^{-3}` to :math:`2.3\times10^{-3}` from 5 to 17 dates,
+for directions smooth in time. Directions rough in time, random on the time
+modes say, are pre-asymptotic at these spacings, as the time quadrature of
+the continuous adjoint's density then is.
+
+Under migrating shorelines with the sharp flotation rule the second
+derivative holds the trajectory's ocean functions (:doc:`theory`), and
+``tools/shoreline_hessian.py`` measures what that omits on a marine cap, a
+12 km cap on a 3 km ocean melting over ten kiloyears at degree 16. Between
+flips of flotation cells the held-C Hessian is the whole Hessian, to
+:math:`10^{-7}` against second differences of an objective, in every
+argument. Across flips the omitted term is the entire Hessian in the initial
+sea level and the ice history, where the held-C map is affine, and on the
+grid it is the sum of the jumps the gradient makes at each flip. Its size
+scales with the shoreline motion the perturbation induces: against the
+Gauss-Newton term of a misfit whose residual is ten per cent of the response,
+it is three to five per cent for a rise of the initial sea level of 100 m
+and a quarter to a third for a thickness change of 100 m at every date, both
+at 50 to 100 m, and nothing for a change of viscosity of ten per cent, which
+flips no cell.
+
+With the flotation condition smoothed over 500 m (``flotation_width``) the
+same tool shows the Hessian complete: second differences of the objective
+match it to :math:`10^{-4}` of the linear term at small perturbations in
+every direction, with the cells within the width partly ocean, and the part
+of the Gauss-Newton term the sharp rule omitted falls to :math:`3\times10^{-4}`
+for the sea level rise and to one per cent for the thickness change at 50 m,
+the residue being the third derivative over a perturbation a tenth of the
+width. The width is a modelling choice: a point within it of flotation is a
+fraction of ocean, the forward run differs from the sharp one by those cells,
+and tends to it as the width shrinks. The derivatives cost nothing more than
+under the sharp rule, since the solver takes the ocean function as a weight;
+only the second derivative carries one more field per node.
 
 Calibrating the initial sea level
 ---------------------------------
@@ -218,6 +290,33 @@ reduces the misfit from about 150 m to about a centimetre in five runs, and the
 gradient method to a few centimetres in seven.
 
 
+Observations
+------------
+
+An observation model adds little to the solve behind its observable. The
+displacement at stations, horizontal part included, is synthesised from the
+coefficients by ``ducc0``'s general synthesis at arbitrary points, spin 0 for
+:math:`U` and spin 1 for :math:`\nabla_1 V`, and its adjoint is the adjoint
+synthesis, exact to the synthesis tolerance of :math:`10^{-13}`. At degree 256
+on one thread either direction takes about 13 ms for anything from a hundred
+to ten thousand stations, the cost lying in the harmonic part rather than the
+points, against 220 ms for a sea level solve; at degree 128 it is about 3 ms.
+GRACE's coefficients are a selection of the response's components, with no
+transform at all.
+
+The frame-invariant reduction :math:`Z^{\mathsf T}` is held as the
+:math:`k` Householder reflectors of the QR factorisation of the Helmert
+design, :math:`k` vectors of the length of the data, and each application is
+one pass over the data per parameter. A dense :math:`Z` would be quadratic in
+the data: for ten thousand stations, three components each, about 7 GB, where
+the reflectors take under 2 MB and reduce the data in under a tenth of a
+millisecond. The design's columns are scaled to unit length before the
+factorisation, since the range does not depend on their scales and the
+translation's differ from the rotation's and the scale's by the radius, and a
+design whose columns are dependent at the stations is refused, as is a network
+with no more data than parameters.
+
+
 Threads and processes
 ---------------------
 
@@ -228,8 +327,8 @@ is unset. For a single interactive calculation the default is what is wanted,
 though the transforms scale modestly, giving about a factor of two on eight
 cores at degree 256 to 512.
 
-For many independent solves, as in the ``parallel`` options of the
-``pygeoinf`` operators, processes scale far better than threads. Set
+For many independent solves, as in the ``n_jobs`` options of ``pygeoinf``,
+processes scale far better than threads. Set
 ``OMP_NUM_THREADS=1`` before starting Python, so that each worker runs
 single-threaded and the cores are shared between workers rather than
 oversubscribed. The main process can still use several cores for its serial
@@ -264,6 +363,11 @@ than to stored outputs:
 * dot-product tests of every adjoint, gradient identities for the kernels at
   machine precision, and central finite differences converging at second order
   about migrating-shoreline trajectories;
+* the GNSS frame: the Helmert design against the transformation computed in
+  three dimensions, the translation and scale against their fields sampled at
+  the stations, and the frame-invariant posterior against the nuisance
+  posterior, which approaches it as one over the variance of the frame's
+  prior;
 * covariance gates: the same physical problem run under deliberately different
   non-dimensional schemes, compared after conversion to SI, which catches any
   factor dropped because the default scheme makes it one.

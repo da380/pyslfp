@@ -8,7 +8,7 @@ from planetmodel import PREM, frozen, units
 
 from pyslfp import EarthModel, EarthModelParameters, EarthState
 from pyslfp.ice import AnalyticalIceModel
-from pyslfp.linear_operators import FingerPrintOperator
+from pyslfp.elastic import FingerPrintOperator
 from pyslfp.love_numbers import love_numbers
 
 LMAX = 16
@@ -28,7 +28,7 @@ def _state(model: EarthModel) -> EarthState:
         sampling=model.sampling,
         extend=model.extend,
     )
-    return EarthState(h, sl, model, exclude_caspian=False)
+    return EarthState(h, sl, model)
 
 
 def _adjoint_mismatch(model: EarthModel, *, seed: int = 0) -> float:

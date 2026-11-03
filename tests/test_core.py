@@ -326,6 +326,19 @@ def test_integration_matches_degree_zero_coefficient(grid, extend):
     assert np.isclose(model.integrate(field), expected, rtol=1e-12)
 
 
+@pytest.mark.parametrize("extend", [True, False])
+@pytest.mark.parametrize("grid", ["DH", "DH2", "GLQ"])
+def test_integration_of_grid_values(grid, extend):
+    """An array laid out as the model's grid integrates as the SHGrid that
+    holds it; an array of another shape is refused."""
+    model = EarthModel(12, grid=grid, extend=extend)
+    field = model.expand_coefficient(model.zero_coefficients())
+    field.data += np.random.default_rng(2).standard_normal(field.data.shape)
+    assert model.integrate(field.data) == model.integrate(field)
+    with pytest.raises(ValueError, match="grid shape"):
+        model.integrate(field.data[:-1])
+
+
 def test_check_field_rejects_wrong_sampling():
     """A DH1 grid must not be accepted by a DH2 model of the same degree."""
     model = EarthModel(16, grid="DH2")
@@ -378,3 +391,18 @@ def test_with_degree_preserves_extend():
     refined = model.with_degree(32)
     assert refined.lmax == 32
     assert refined.extend is False
+
+
+def test_times_from_dates_and_back():
+    """Dates in kiloyears before present and the model's times from a run's
+    first date, through the kiloyear in the model's unit of time."""
+    from pyslfp.core import EarthState
+    from pyslfp.core.model import SECONDS_PER_KILOYEAR
+
+    model = EarthState.for_testing(4).model
+    kiloyear = model.parameters.kiloyear
+    assert kiloyear == SECONDS_PER_KILOYEAR / model.parameters.time_scale
+    dates = np.array([10.0, 6.0, 0.0])
+    times = model.times_from_dates(dates, 10.0)
+    np.testing.assert_allclose(times, [0.0, 4.0 * kiloyear, 10.0 * kiloyear])
+    np.testing.assert_allclose(model.dates_from_times(times, 10.0), dates)

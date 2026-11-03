@@ -42,9 +42,11 @@ The library is one sea level engine with two drivers.
   viscoelastic evolution is an equilibrium solve of the same engine, with
   per-step effective Love numbers and a memory field from the internal
   variables. It also computes sensitivity kernels by adjoint methods.
-* ``pyslfp.linear_operators`` exposes the elastic physics as linear operators
-  between Hilbert spaces, with their adjoints, for inverse problems built on
-  ``pygeoinf``.
+* Each driver exposes its physics as linear operators between Hilbert spaces,
+  with their adjoints, for inverse problems built on ``pygeoinf``:
+  ``FingerPrintOperator`` in ``pyslfp.elastic`` and ``IceHistoryOperator`` in
+  ``pyslfp.viscoelastic``. ``pyslfp.observations`` samples the response as
+  tide gauges, altimetry, GRACE and GNSS do.
 
 The two drivers are named for the physical approximation they make, not for an
 application: GIA is a use of the viscoelastic driver. They are not symmetric,
@@ -205,8 +207,9 @@ and :math:`l^t` are in s² m⁻¹ and :math:`k^t` is dimensionless.
 The split into channels is not needed to solve the sea level equation forward,
 for which :math:`h_\ell` and :math:`k_\ell` suffice. It is needed because the
 adjoint is itself a sea level equation in which an observation of displacement
-acts through the traction channel alone and an observation of potential
-through the source channel alone.
+acts through the traction channel alone, an observation of potential through
+the source channel alone, and an observation of horizontal displacement
+through the tangential traction.
 
 Conventional numbers and reciprocity
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -392,7 +395,11 @@ a memory field, the surface displacement and potential of the memory force
 under zero load, together with its degree-0 inertia moment. The step's sea
 level equation is then the generalised equation with the effective table and
 the memory field as a ready response, closed by the same iteration for the
-ocean and rotational feedbacks. The converged load and centrifugal potential
+ocean and rotational feedbacks. The memory field's horizontal displacement
+joins the step's horizontal displacement in the same way, but feeds nothing
+back, since the sea level equation sees only the vertical displacement and the
+potential. Each step's response is a ``GRDResponse`` of the run's response
+space, the same object the elastic solvers return. The converged load and centrifugal potential
 finish the step, updating the internal variables. A run starts from the
 instantaneous elastic response to the load at its first time, the right limit,
 so that a load switched on at the start is stepped at full order. In the limit
@@ -416,9 +423,9 @@ Elastic kernels
 
 The adjoint of the fingerprint operator is a generalised sea level equation,
 as above, so a sensitivity kernel costs one solve.
-``pyslfp.linear_operators`` wraps the forward and adjoint solves as
-``pygeoinf`` linear operators, where they compose with observation operators
-for tide gauges, altimetry and GRACE.
+``FingerPrintOperator`` wraps the forward and adjoint solves as a ``pygeoinf``
+linear operator, where it composes with the observation models of
+``pyslfp.observations`` (below).
 
 The viscoelastic adjoint problem
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -428,17 +435,25 @@ For an evolution, an objective functional is a sum over observation dates
 
 .. math::
 
-   J = \sum_i\Big[\int g^{(i)}_\xi\,\xi(t_i)\,dS + \int g^{(i)}_u\,u(t_i)\,dS
+   J = \sum_i\Big[\int g^{(i)}_\xi\,\xi(t_i)\,dS + \int g^{(i)}_u\,U(t_i)\,dS
    + \int g^{(i)}_\phi\,\phi(t_i)\,dS + \mathbf{g}^{(i)}_\omega\cdot
-   \boldsymbol{\omega}(t_i)\Big],
+   \boldsymbol{\omega}(t_i) + \sum_{\ell m} s^{(i)}_{\ell m}V_{\ell m}(t_i)\Big],
 
-whose duals a ``Measurement`` carries. The adjoint theory of glacial isostatic
+with :math:`U` and :math:`V` the vertical displacement and the potential of the
+horizontal displacement :math:`\nabla_1 V`. A ``Measurement`` carries the
+duals of the scalar fields and of the angular velocity change. A
+``GRDResponse`` given as a measurement stands for its inner product with the
+response in its own space, which may be a Sobolev space, and carries all the
+duals, the horizontal one included: with :math:`\lambda` the space's metric
+and :math:`c` the components, the duals are the metric-weighted components
+:math:`\lambda g`. The adjoint theory of glacial isostatic
 adjustment was set out by Crawford et al. (2018), and extended to rotational
 feedbacks by Yu et al. (2025), whose formulation the library follows. The
 adjoint problem has the same form as the forward problem with more general
 forces: a sea level dual forces like an ice load, displacement and
-potential duals enter as the generalised channels, and an angular velocity dual
-as an angular momentum forcing. The adjoint ocean function is not determined
+potential duals enter as the generalised channels, a horizontal dual as a
+tangential traction :math:`\zeta^v_{\ell m} = -s_{\ell m}/(b^2\ell(\ell+1))`,
+and an angular velocity dual as an angular momentum forcing. The adjoint ocean function is not determined
 dynamically but is the time-reversed ocean function of the forward run, so the
 adjoint problem is linear whatever the shorelines did, and under migrating
 shorelines only the history :math:`C(t)` of the forward run is needed.
@@ -491,6 +506,27 @@ with finite jumps at the observation times only, and pairs with thickness
 histories continuous in time. ``IceKernels.at_dates`` maps the kernels onto an
 ice model's own dates by the transpose of its linear interpolation.
 
+The Sobolev kernel is the derivative's Riesz representer in a space of ice
+histories, ``FieldHistorySpace``: the product of a Sobolev space
+:math:`H^s(T)` on the run's interval of time, in the model's non-dimensional
+time from the run's first date, and one :math:`H^r(S^2)` on the sphere, with the inner product :math:`(A_t^s\otimes A_x^r\,u, v)`, where
+:math:`A_t = 1 - L_t^2\,\partial_t^2`. Both factors are diagonal in their
+eigenbases, so the history's components :math:`c_{kj}` lie on the products
+:math:`\phi_k(t)Y_j(\mathbf{x})` with the metric :math:`\mu_k\nu_j`. The forward
+map reads a history at the date nodes, so its derivative has the components
+:math:`\sum_n \phi_k(t_n)\,d_{n,j}`, with :math:`d_n` the discrete per-node
+duals, and the representer divides them by the metric. For :math:`s > 1/2`
+evaluation at a time is bounded on :math:`H^s(T)`, so each delta of
+:math:`K_I` becomes the Green's function of :math:`A_t^s`, continuous in time:
+the representer converges as time modes are added, where an L2 representer
+grows without bound, and as the date grid is refined. The quelled view is a
+one-sided form of the same idea, the Green's function of :math:`\partial_t`
+with a terminal condition. The time space's mesh is padded at both ends, so
+that no end condition distorts the kernel near the present.
+``IceHistoryOperator`` is the frozen-shoreline map from a history to the
+responses at the observation dates as a ``pygeoinf`` operator, and its adjoint
+applied to the duals of a measurement is this kernel.
+
 Initial sea level and viscosity
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -509,6 +545,77 @@ continuous one integrates the adjoint internal variables against the forward
 :math:`\mathbf{d} - \mathbf{m}`, contracted with the weights of the degree-basis
 scalars. ``IceKernels.viscosity`` maps them to viscosity through
 :math:`\partial\tau^{-1}/\partial\eta = -\tau^{-2}/\mu`.
+
+The tangent-linear problem and second derivatives
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For a given history of ocean functions :math:`C(t)` and given relaxation
+times, the forward problem is one linear system over the run's interval,
+:math:`\mathcal{M}(\Lambda)\,y = \mathcal{B}\,\zeta_d`, in which the inverse
+relaxation times :math:`\Lambda` enter the internal-variable equations alone
+and the ice history and the initial sea level enter the direct load alone,
+:math:`\zeta_d = \rho_i(1-C)I - \rho_i(1-C_0)I_0 + \rho_w(C-C_0)S_0`. With the
+viscosity parameterised as :math:`\chi_k = \log(\eta_k/\eta_0)` per branch, the
+tangent-linear problem, the derivative's forward action, is the forward
+problem once more: the shorelines prescribed from the trajectory, the direct
+load replaced by the perturbation's, and the drive of each branch shifted by
+:math:`\mathbf{q}_k = -(\mathbf{d}-\mathbf{m}_k)\,\delta\chi_k`, a known function
+of time. Holding the ocean functions is exact: their variation is a line
+distribution on the shoreline multiplying :math:`\rho_w S - \rho_i I`, which
+vanishes there (Yu et al. 2025). The adjoint of the tangent-linear operator is
+the continuous adjoint problem, so the two are each other's adjoint before
+either is discretised. The discrete tangent-linear problem is the forward mode
+of the time-stepped map; in the ice history and the initial sea level it
+coincides with the continuous one, and in the viscosity the two differ by the
+order of the scheme, as the adjoints do.
+
+Differentiating once more gives the second derivative of the map with the
+ocean functions held. It vanishes unless a direction perturbs the viscosity,
+since the map is then affine in the ice history and the initial sea level,
+and its adjoint is the second-order adjoint problem of Yu et al. (2025): the
+adjoint problem forced not by a measurement but by the first-order adjoint and
+the viscosity perturbation. A Hessian-vector product of any objective on the
+map costs four runs: the forward run, the first-order adjoint, a tangent-linear
+run and the second-order adjoint sweep. Under migrating shorelines the
+cancellation that makes the first derivative exact fails at second order, and
+Yu et al.'s second-order load and Hessian kernels carry line distributions on
+the shorelines, which the library omits: what it computes is the second
+derivative of the map with the ocean functions held, exact under frozen
+shorelines. Their approximate kernels, which drop the second-order variables,
+are the Gauss-Newton Hessian.
+
+The remedy on the grid is to make the ocean function differentiable. With
+``flotation_width`` set on an ``EarthState``, the flotation condition is
+smoothed over that height: with :math:`x = (S - \rho_i I/\rho_w)/w` the
+ocean function is :math:`\sigma(x)`, the quintic smoothstep over
+:math:`[-1, 1]`, so that a point more than :math:`w` from floating its ice is
+land or ocean exactly and the rest are partly ocean. Every load carries the
+variation of :math:`C` multiplied by the flotation margin
+:math:`\rho_w S - \rho_i I = \rho_w w x`, and the product is
+:math:`\rho_w\Lambda\,\delta y` with :math:`\Lambda = x\sigma'(x)` and
+:math:`y = \xi + S_0 - \rho_i I/\rho_w`: the derivatives see the effective
+ocean function :math:`\hat C = C + \Lambda` in the feedback and in every
+grounding factor, which is the cancellation of the sharp rule turned into a
+bounded term on the strip, and the second derivative gains the load
+:math:`\rho_w K\,\delta_u y\,\delta_v y` with
+:math:`K = d\hat C/dS = (2\sigma' + x\sigma'')/w`, continuous since
+:math:`\sigma` is twice continuously differentiable. The generalised solver
+takes the ocean function as a weight, so nothing changes in it; the
+tangent-linear run, both adjoints and both second-order sweeps take
+:math:`\hat C` and :math:`K` from the trajectory, and the Hessian is then
+complete, at the price of shorelines smoothed over :math:`w` in the forward
+run, which tends to the sharp one as :math:`w \to 0`.
+
+``SeaLevelEvolutionOperator`` is the evolution as a ``pygeoinf`` operator on
+the ice history, the initial sea level and the log viscosity of every branch,
+each an element of a Hilbert space of functions: a ``FieldHistorySpace``, a
+sphere space, and a ``LogViscositySpace``, one Sobolev space of radial
+profiles per layer in which the branch relaxes, continuous within a layer and
+free to jump at the material interfaces. It supplies its derivative and its
+second derivative by either method, so that ``pygeoinf``'s Newton methods,
+Laplace approximations and exact Hessians apply to any objective built on
+it, and ``fixing`` holds arguments fixed by composition, giving the linear
+``IceHistoryOperator`` under frozen shorelines with the other two fixed.
 
 Decay times
 ^^^^^^^^^^^
@@ -621,6 +728,129 @@ genuine blend of prior and data, :math:`K = P(P + R)^{-1}` when
 :math:`\mathcal{H}' = I`; the weights of the misfit are the simplest instance,
 the inverse of a diagonal noise covariance without a prior. The full Bayesian
 estimate is a natural application of ``pygeoinf``.
+
+
+Observations
+------------
+
+Observables and sampling
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+An observation model in ``pyslfp.observations`` keeps the physics apart from
+the measurement. Its observable :math:`O` is a linear operator from the model
+space into the space of the quantity observed (a field, a surface
+displacement, the coefficients of the potential change), its sampling
+:math:`S` takes that quantity to the data, and the data are
+
+.. math::
+
+   d = S\,O\,u + e,
+
+with the noise :math:`e` a Gaussian measure on the data space, or independent
+noise of given standard deviations. Whatever builds the observable holds the
+physics, the direct terms of a model set-up included, so one observation model
+serves a fingerprint operator, a set-up and ``IceHistoryOperator`` alike; a
+rate is the difference of the responses at two observation dates over their
+interval.
+
+* Tide gauges observe the relative sea level change :math:`\xi` at the
+  stations.
+* Satellite altimetry observes the geocentric sea level change
+  :math:`\xi + U`, the height of the sea surface measured from the centre of
+  mass. By default the height of the centrifugal potential perturbation,
+  :math:`\psi/g`, is removed from it (``remove_rotational_contribution``).
+* GRACE observes the coefficients of the potential change between two
+  degrees, read directly from the response's components, so that no synthesis
+  and analysis lie between the solver and the data. Level-2 products give the
+  Stokes coefficients of the potential, positive near mass, at their reference
+  radius :math:`a` and gravitational parameter :math:`GM`:
+  :math:`\Delta C_{\ell m} = -(a/GM)(b/a)^{\ell+1}\phi_{\ell m}/\sqrt{4\pi}`,
+  and :math:`\Delta S_{\ell m}` likewise.
+* GNSS observes the surface displacement at the stations in east, north and
+  up, its horizontal part :math:`\nabla_1 V` included, in the frame of the
+  data (below).
+
+A set-up describes one epoch. ``HistorySetup`` is the same vocabulary
+through time: the tensor product of a time space and the set-up's space, on
+which every operator of the set-up acts at each time by a lift, at one
+application per time mode, and a history is sampled by a contraction with a
+functional on the time factor: its value at a time, bounded for a time
+order above one half; its mean over a window; or its change over a span per
+unit time, which is what a velocity or a trend observed over years is, and
+needs no more of the time space than evaluation does. The response to a
+fingerprint operator at every epoch is such a lift, the elastic physics
+through time, and the ice history of a set-up is the argument of the
+viscoelastic operators.
+
+Evaluation at a point is bounded only on fields of Sobolev order above one on
+the sphere, so the observables of tide gauges, altimetry at points and GNSS
+must take values in such a space. The displacement's norm weights the
+coefficients of :math:`V` by :math:`\ell(\ell+1)`, so :math:`\nabla_1 V` has
+the regularity of :math:`U` and one order serves both. A finite set of
+coefficients is bounded on any of the spaces.
+
+The frame of GNSS data
+^^^^^^^^^^^^^^^^^^^^^^
+
+A response's displacement is in the frame of the centre of mass. A GNSS
+solution realises its own frame, which differs from it by a Helmert
+transformation: a translation :math:`\mathbf{T}`, a small rotation
+:math:`\mathbf{R}` and a change of scale :math:`s`, or their rates for
+velocities. At a station :math:`\mathbf{x} = b\,\hat{\mathbf{r}}` it adds
+
+.. math::
+
+   \delta\mathbf{u} = \mathbf{T} + s\,\mathbf{x} + \mathbf{R}\times\mathbf{x},
+
+whose east, north and up components are
+
+.. math::
+
+   \delta u_e = \mathbf{T}\cdot\hat{\mathbf{e}} + b\,\mathbf{R}\cdot\hat{\mathbf{n}},
+   \qquad
+   \delta u_n = \mathbf{T}\cdot\hat{\mathbf{n}} - b\,\mathbf{R}\cdot\hat{\mathbf{e}},
+   \qquad
+   \delta u_r = \mathbf{T}\cdot\hat{\mathbf{r}} + b\,s.
+
+As a field on the sphere the translation is
+:math:`(\mathbf{T}\cdot\hat{\mathbf{r}})\,\hat{\mathbf{r}} +
+\nabla_1(\mathbf{T}\cdot\hat{\mathbf{r}})`, of degree 1 with :math:`V = U`: a
+change of origin changes the degree-1 displacement by equal amounts in
+:math:`U` and :math:`V`, and only their difference is independent of it. The
+scale is a degree-0 vertical field. The rotation is a rigid toroidal motion,
+which no response holds, the response of a spherically symmetric Earth to a
+surface load being spheroidal. ``HelmertTransformation`` is the design matrix
+:math:`A` from the :math:`k` chosen parameters to the station data, with the
+translation a length, the rotation in radians and the scale a ratio, in
+Earth-fixed axes.
+
+``GnssObservationModel`` takes the frame in one of three ways.
+
+* Without a frame, the data are taken to be in the centre-of-mass frame.
+* As nuisance parameters, :math:`h` joins the model space,
+  :math:`d = F u + A h + e` on the direct sum, and a prior on :math:`h`,
+  independent of that on :math:`u`, states how well the frame is known.
+* Frame-invariant, the data are reduced to :math:`Z^{\mathsf T} d`, with
+  :math:`Z` an orthonormal basis of the orthogonal complement of the range of
+  :math:`A`. Since :math:`Z^{\mathsf T}A = 0`, the reduced data
+  :math:`Z^{\mathsf T}F u + Z^{\mathsf T}e` do not depend on the frame, and
+  their noise has the covariance :math:`Z^{\mathsf T}CZ`, of full rank
+  :math:`3N - k` for :math:`N` stations.
+
+The invariant form is the nuisance form with no prior information on the
+frame. Integrating the nuisance likelihood over :math:`h` under a flat prior
+leaves the quadratic form of
+
+.. math::
+
+   C^{-1} - C^{-1}A\,(A^{\mathsf T}C^{-1}A)^{-1}A^{\mathsf T}C^{-1}
+   = Z\,(Z^{\mathsf T}CZ)^{-1}Z^{\mathsf T}
+
+in :math:`d - F u`, which is the likelihood of :math:`Z^{\mathsf T}d`. A flat
+prior is the singular limit of the nuisance form; the invariant form reaches
+it with a covariance of full rank and :math:`k` fewer data. The nuisance form
+is the one to use when the frame is partly known, or its parameters are
+wanted.
 
 
 References

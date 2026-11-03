@@ -25,9 +25,10 @@ Around these it provides:
 - Sensitivity kernels by adjoint methods: for elastic fingerprints, and for a
   viscoelastic evolution with respect to the ice history, the initial sea
   level and the mantle viscosity.
-- The elastic physics as linear operators between Hilbert spaces, with
-  observation models for tide gauges, satellite altimetry and GRACE, for
-  Bayesian inversions built on [`pygeoinf`](https://github.com/da380/pygeoinf).
+- The fingerprint and the viscoelastic response to an ice history as linear
+  operators between Hilbert spaces, with observation models for tide gauges,
+  satellite altimetry, GRACE and GNSS, for Bayesian inversions built on
+  [`pygeoinf`](https://github.com/da380/pygeoinf).
 - Ice histories (ICE-5G, ICE-6G and ICE-7G), regional masks, and plotting on
   map projections.
 
@@ -83,7 +84,7 @@ direct_load = sle.state.west_antarctic_load(fraction=0.1)
 
 # Sea level change, vertical displacement, potential change, and the angular
 # velocity change (polar wander and length of day).
-sea_level_change, displacement, potential_change, angular_velocity_change = (
+relative_sea_level_change, displacement, potential_change, angular_velocity_change = (
     sle.solve_sea_level_equation(direct_load)
 )
 
@@ -91,7 +92,7 @@ sea_level_change, displacement, potential_change, angular_velocity_change = (
 metre = sle.state.model.parameters.length_scale
 fig, ax = sl.create_map_figure(figsize=(12, 6))
 sl.plot(
-    sea_level_change * sle.state.ocean_projection() * metre,
+    relative_sea_level_change * sle.state.ocean_projection() * metre,
     ax=ax,
     colorbar_kwargs={"label": "Sea level change (m)"},
 )
@@ -113,34 +114,34 @@ about half a minute.
 
 ```python
 import numpy as np
-from planetmodel import PREM, units
 
 import pyslfp as sl
 from pyslfp.ice import IceNG
-from pyslfp.love_numbers import Material, graded_mesh
-from pyslfp.viscoelastic import Rheology, SeaLevelEvolution, ViscoelasticOperator
+from pyslfp.viscoelastic import (
+    SeaLevelEvolution,
+    ViscoelasticOperator,
+    prem_maxwell,
+    viscoelastic_earth,
+)
 
 lmax = 64
 
-# PREM, made isotropic and converted into the library's units.
-scales = sl.EarthModelParameters.from_defaults().scales
-model = PREM(ocean=False).isotropic().converted(scales)
-mesh = graded_mesh(model, lmax)
-
-# A Maxwell mantle (PREM's layers 2 to 8), the top 77 km left elastic.
-viscosity = 1.0e21 / scales.factor(units.VISCOSITY)
-rheology = Rheology.maxwell(Material(mesh, model), {i: viscosity for i in range(2, 9)})
+# PREM with a Maxwell mantle of 10^21 Pa s, its top 77 km left elastic,
+# made into the Earth model and the rheology in the library's units.
+model = prem_maxwell(upper_mantle=1.0e21, lower_mantle=1.0e21)
+earth_model, rheology = viscoelastic_earth(model, lmax)
 operator = ViscoelasticOperator(rheology, lmax)
 
 # The background state that ICE-7G records at 26 ka.
-earth_model = sl.EarthModel.from_planet_model(model, lmax, mesh=mesh)
 ice_model = IceNG(length_scale=earth_model.parameters.length_scale)
 state = sl.EarthState.from_ice_model(ice_model, 26.0, earth_model)
 
-# Half-kiloyear steps to the present; each snapshot holds the sea level
-# change, displacement, potential change and angular velocity change.
+# Half-kiloyear steps to the present; each snapshot holds the response,
+# whose fields (sea level change, displacement, potential change) are
+# read by name, with the angular velocity change beside them.
 evolution = SeaLevelEvolution(operator, state)
 snapshots, _ = evolution.run_ice_history(np.arange(26.0, -0.1, -0.5), ice_model)
+present = snapshots[-1].response.field("relative_sea_level_change")
 ```
 
 `run_ice_history` takes `shorelines="migrating"` to let the shorelines move,
@@ -195,8 +196,9 @@ in Google Colab. They read the real datasets, so the first run downloads them.
 ## Data
 
 The package needs a number of external datasets: a table of Love numbers for
-PREM, the ICE-NG ice histories, the GLOSS tide gauge network, and shapefiles for
-the regional definitions. They are not distributed with the package, but
+PREM, the ICE-NG ice histories, ETOPO 2022 topography, the GLOSS tide gauge
+network, the Randolph Glacier Inventory, and shapefiles for the regional
+definitions. They are not distributed with the package, but
 downloaded from [Zenodo](https://zenodo.org/records/19494463) on first use and
 cached locally, so the first call that needs a dataset pauses while it is
 fetched. Datasets are fetched individually, so only what is used is downloaded.
@@ -224,15 +226,14 @@ costs and the details.
 
 | Module | Contents |
 | :--- | :--- |
-| `core/` | The shared engine: `EarthModelParameters` and `EarthModel` (physical constants, scales, the spherical harmonic discretisation and the Love numbers), `EarthState` (ice thickness and sea level, the ocean function, projections and ready-made loads), and `SeaLevelEquation`, the linear, generalised, adjoint and nonlinear solvers. |
-| `elastic/` | `LinearSeaLevelEquation`, the fingerprint driver. |
-| `viscoelastic/` | `Rheology`, `ViscoelasticOperator` (the radial time stepping), `SeaLevelEvolution` (the coupled evolution and its adjoints), the kernel and measurement types, decay-time functionals and `calibrate_initial_sea_level`. |
+| `core/` | The shared engine: `EarthModelParameters` and `EarthModel` (physical constants, scales, the spherical harmonic discretisation and the Love numbers), `EarthState` (ice thickness and sea level, the ocean function, projections and ready-made loads), `SeaLevelEquation`, the linear, generalised, adjoint and nonlinear solvers, `GRDResponse`, the response to a load as one spectral object with its Hilbert space, and `FieldHistorySpace`, the space of fields through time, a `pygeoinf` tensor product. The load and response spaces, the operators both drivers share (the centrifugal potential, the geocentric sea level) and the spatial projections and averages as `pygeoinf` operators. Also the regional masks (IMBIE Antarctic basins, Mouginot Greenland basins, IHO seas, HydroBASINS catchments, AR6 and GTN-G regions, Natural Earth oceans), the landlocked depressions and the labelling of water bodies, and the thread control for the transforms and BLAS. |
+| `elastic/` | `LinearSeaLevelEquation`, the fingerprint driver, and `FingerPrintOperator`, the fingerprint and its adjoint as a `pygeoinf` operator. |
+| `viscoelastic/` | `Rheology`, `ViscoelasticOperator` (the radial time stepping), `SeaLevelEvolution` (the coupled evolution and its adjoints), the kernel and measurement types, decay-time functionals and `calibrate_initial_sea_level`, `SeaLevelEvolutionOperator`, the evolution as a `pygeoinf` operator on the ice history, the initial sea level and the log viscosity (`LogViscositySpace`), with its derivative and second derivative by the discrete or the continuous method, and `IceHistoryOperator`, its linear case under frozen shorelines, whose adjoint gives the Sobolev kernels. |
 | `love_numbers/` | `LoveNumbers` and the radial spectral-element solver that computes them from any `planetmodel` model. |
-| `linear_operators/` | The elastic physics as `pygeoinf` operators, spatial projections and averages, load mappings, and the tide gauge, altimetry and GRACE observation models. |
+| `observations/` | Tide gauges, satellite altimetry, GRACE and GNSS: the observation models, each an observable from the model space with its sampling at stations, points or coefficients and its noise; the networks' data; and the frame of GNSS solutions, as Helmert parameters or frame-invariant data. |
 | `ice/` | The ice model interfaces, `IceNG` for the ICE-5G, ICE-6G and ICE-7G histories, `AnalyticalIceModel` for testing, and export to `planetmodel` surface histories. |
-| `regions.py` | Regional masks: IMBIE Antarctic basins, Mouginot Greenland basins, IHO seas, HydroBASINS catchments, AR6 regions and Natural Earth oceans. |
-| `plot.py` | Plotting of `pyshtools.SHGrid` fields on Cartopy projections. |
-| `parallel.py` | Thread control for the transforms and BLAS. |
+| `models/` | Model spaces for inversions: named load components (ice sheets, glaciers, land water, firn, sterodynamic sea level, ocean density), `ModelSetup`, which assembles them with their loads, observables and constraints, `HistorySetup`, the same through time on a tensor product with a time space, and the operators from the components' fields to their loads. |
+| `plotting/` | Plotting of `pyshtools.SHGrid` fields on Cartopy projections, and radial profiles (viscosities, kernels) on a material's mesh. |
 | `data/` | Location and retrieval of the external datasets. |
 
 ## Tests
@@ -269,8 +270,9 @@ If you use `pyslfp` in published work, please cite:
 - D.A. Heathcote, T.Holland, A.M. Mag, M.E. Tamisiea, S. Coulson, S. Dangendorf, A.J. Lloyd, A. Mashayek, J.X. Mitrovica, D. Al-Attar, 2026.
   *A scalable Bayesian framework for modern sea-level inference*. arXiv, 2608.22336, https://arxiv.org/abs/2608.22336.
 
-The datasets that `pyslfp` downloads (the ice histories, Love numbers, tide
-gauge network and regional definitions) are the work of others and are
+The datasets that `pyslfp` downloads (the ice histories, topography, tide
+gauge network, glacier inventory and regional definitions) are the work of
+others and are
 redistributed here only for convenience. If you use them, please cite their
 original sources, which are recorded on the
 [Zenodo record](https://zenodo.org/records/19494463).

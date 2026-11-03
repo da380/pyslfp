@@ -5,11 +5,11 @@
 # the Last Glacial Maximum to today, on isotropic PREM with a two-layer
 # Maxwell mantle and an elastic lithosphere, with the sea level equation
 # and the full rotational feedback closed at every half-kiloyear step
-# under the 26 ka shorelines. Three figures result: the map of
-# present-day crustal uplift rates, whose peak sits over southeast
-# Hudson Bay at the observed level of about 13 mm per year; the
-# ocean-mean sea level curve against ICE-7G's own inverted record; and
-# the emergence curve at Richmond Gulf, the classic Hudson Bay record.
+# under the 26 ka shorelines. The figures show the present-day crustal
+# velocities, whose uplift peaks over southeast Hudson Bay at the
+# observed level of about 13 mm per year; the ocean-mean sea level curve
+# against ICE-7G's own inverted record; and the emergence curve at
+# Richmond Gulf, the classic Hudson Bay record.
 #
 # Two caveats worth knowing. The run cold-starts at 26 ka with no
 # internal memory, as if the ice had sat on an undisturbed elastic
@@ -23,23 +23,29 @@
 # degree 256. The ICE-7G files are downloaded on first use.
 
 # %%
+import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 import numpy as np
-from planetmodel import PREM, units
 
 import pyslfp as sl
-from pyslfp.viscoelastic import Rheology, SeaLevelEvolution, ViscoelasticOperator
+from pyslfp.core import lebesgue_response_space
+from pyslfp.viscoelastic import (
+    SeaLevelEvolution,
+    ViscoelasticOperator,
+    prem_maxwell,
+    viscoelastic_earth,
+)
 from pyslfp.ice import IceNG
-from pyslfp.love_numbers import Material, graded_mesh
 
 LMAX = 128
 
 # %% [markdown]
 # ## The earth model and rheology
 #
-# As in the previous tutorial: PREM collapsed to isotropy and converted
-# into the library's frame, 5 x 10^20 Pa s above the 670 km
-# discontinuity and 2 x 10^21 Pa s below, the top 77 km elastic. PREM
+# As in the previous tutorial: `prem_maxwell`, PREM collapsed to
+# isotropy with 5 x 10^20 Pa s above the 670 km discontinuity and
+# 2 x 10^21 Pa s below, the top 77 km elastic, made into the Earth model
+# and rheology in the library's frame by `viscoelastic_earth`. PREM
 # with Earth's observed moments of inertia is a consistent pairing for
 # the rotational feedback: the oblateness the moments sustain exceeds
 # the model's hydrostatic fluid limit, so the transverse (polar wander)
@@ -47,15 +53,8 @@ LMAX = 128
 # `EarthModelParameters.with_hydrostatic_moments`.
 
 # %%
-scales = sl.EarthModelParameters.from_defaults().scales
-model = PREM(ocean=False).isotropic().converted(scales)
-mesh = graded_mesh(model, LMAX)
-material = Material(mesh, model)
-
-pascal_second = 1.0 / scales.factor(units.VISCOSITY)
-viscosity = {i: 2.0e21 * pascal_second for i in (2, 3, 4)}
-viscosity.update({i: 5.0e20 * pascal_second for i in (5, 6, 7, 8)})
-operator = ViscoelasticOperator(Rheology.maxwell(material, viscosity), LMAX)
+earth_model, rheology = viscoelastic_earth(prem_maxwell(), LMAX)
+operator = ViscoelasticOperator(rheology, LMAX)
 
 # %% [markdown]
 # ## The background state
@@ -69,7 +68,6 @@ operator = ViscoelasticOperator(Rheology.maxwell(material, viscosity), LMAX)
 # `SeaLevelEvolution.calibrate_initial_sea_level`.
 
 # %%
-earth_model = sl.EarthModel.from_planet_model(model, LMAX, mesh=mesh)
 ice_model = IceNG(length_scale=earth_model.parameters.length_scale)
 state = sl.EarthState.from_ice_model(ice_model, 26.0, earth_model)
 
@@ -78,35 +76,59 @@ state = sl.EarthState.from_ice_model(ice_model, 26.0, earth_model)
 #
 # Dates are in kiloyears before present, decreasing, on the
 # half-kiloyear grid of the ICE-7G files, so the history's breakpoints
-# fall on step boundaries.
+# fall on step boundaries. The responses belong to the L2 response space
+# with the horizontal part of the displacement, so that each step adds
+# the horizontal flow of the mantle's memory as well as the vertical.
 
 # %%
 dates = np.arange(26.0, -0.0001, -0.5)
 evolution = SeaLevelEvolution(operator, state)
-snapshots, _ = evolution.run_ice_history(dates, ice_model)
+space = lebesgue_response_space(earth_model, horizontal=True)
+snapshots, _ = evolution.run_ice_history(dates, ice_model, space=space)
 
 # %% [markdown]
-# ## Present-day uplift rates
+# ## Present-day crustal velocities
 #
-# From the last half-kiloyear of the run. The twin peaks of postglacial
+# From the last half-kiloyear of the run: the difference of the last two
+# responses, a vector of the same space. The twin peaks of postglacial
 # rebound stand over the former Laurentide and Fennoscandian ice sheets,
-# ringed by the subsiding peripheral bulges.
+# ringed by the subsiding peripheral bulges. Over North America the
+# horizontal velocities, drawn as arrows over the uplift rate, point away
+# from the centres of uplift at a few millimetres per year, the pattern
+# that GNSS stations across Canada record.
 
 # %%
 metre = earth_model.parameters.length_scale
-rate = (
-    (snapshots[-1].displacement - snapshots[-2].displacement) * metre * 1000.0 / 500.0
-)  # mm per year
+per_year = metre * 1000.0 / 500.0  # mm per year over the last half-kiloyear
+velocity = space.subtract(snapshots[-1].response, snapshots[-2].response).displacement
+uplift_rate = velocity.vertical_field() * per_year
 
 fig, ax = sl.create_map_figure(figsize=(12, 8))
 sl.plot(
-    rate,
+    uplift_rate,
     ax=ax,
     vmin=-14.0,
     vmax=14.0,
     colorbar_kwargs={"label": "Uplift rate (mm/yr)"},
 )
 ax.set_title("Present-day crustal uplift rate")
+
+fig, ax = sl.create_map_figure(
+    figsize=(9, 8),
+    projection=ccrs.LambertConformal(central_longitude=-90.0, central_latitude=55.0),
+)
+sl.plot_displacement(
+    velocity,
+    ax=ax,
+    scale=per_year,
+    units="mm/yr",
+    arrows=25,
+    map_extent=[-135, -50, 35, 75],
+    vmin=-14.0,
+    vmax=14.0,
+    colorbar_kwargs={"label": "Uplift rate (mm/yr)"},
+)
+ax.set_title("Present-day crustal velocities over North America")
 
 # %% [markdown]
 # ## The ocean-mean sea level curve
@@ -125,7 +147,9 @@ def ocean_mean(field):
     return metre * earth_model.integrate(field * ocean) / area
 
 
-run_curve = np.array([ocean_mean(snap.sea_level_change) for snap in snapshots])
+run_curve = np.array(
+    [ocean_mean(snap.response.field("relative_sea_level_change")) for snap in snapshots]
+)
 sl26 = ice_model.get_sea_level(
     26.0, LMAX, grid=earth_model.grid_name, extend=earth_model.extend
 )
@@ -155,7 +179,8 @@ i = int(np.argmin(np.abs(lats - 56.5)))
 j = int(np.argmin(np.abs(lons - (360.0 - 76.2))))
 site = metre * np.array(
     [
-        snap.sea_level_change.data[i, j] - snapshots[-1].sea_level_change.data[i, j]
+        snap.response.field("relative_sea_level_change").data[i, j]
+        - snapshots[-1].response.field("relative_sea_level_change").data[i, j]
         for snap in snapshots
     ]
 )
@@ -175,6 +200,6 @@ print(
     f"ocean-mean rise 26 ka to present: {run_curve[-1]:.1f} m "
     f"(ICE-7G's own record: {own_curve[-1]:.1f} m)"
 )
-print(f"peak present-day uplift rate: {rate.data.max():.1f} mm/yr")
+print(f"peak present-day uplift rate: {uplift_rate.data.max():.1f} mm/yr")
 
 plt.show()

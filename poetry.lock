@@ -2870,14 +2870,14 @@ xmp = ["defusedxml"]
 
 [[package]]
 name = "planetmodel"
-version = "1.3.1"
+version = "1.5.0"
 description = "Spherically layered planetary models: reference bodies, fields, mappings and meshes"
 optional = false
 python-versions = ">=3.12"
 groups = ["main"]
 files = [
-    {file = "planetmodel-1.3.1-py3-none-any.whl", hash = "sha256:21ace375eb1d1b6876e399dd1bed7f6d85155f15820f83d31ec8fed3f56985d3"},
-    {file = "planetmodel-1.3.1.tar.gz", hash = "sha256:fef51f78d01bf811f4eca146b3e9fea539bcc236e5fd44bd2682e7b06a3af4cf"},
+    {file = "planetmodel-1.5.0-py3-none-any.whl", hash = "sha256:ff361bd08a598382591db69d2afbecb622c838ff2d1b5b00ac33903d7a43633b"},
+    {file = "planetmodel-1.5.0.tar.gz", hash = "sha256:f991bcd471fd0f0ba0315b8213229485e9fa95498f29f197304538f141c9b47d"},
 ]
 
 [package.dependencies]
@@ -3102,29 +3102,36 @@ test = ["pytest", "pytest-doctestplus (>=0.7)"]
 
 [[package]]
 name = "pygeoinf"
-version = "1.8.9"
+version = "2.2.0"
 description = "A package for solving geophysical inference and inverse problems"
 optional = false
 python-versions = ">=3.12"
 groups = ["main"]
 files = [
-    {file = "pygeoinf-1.8.9-py3-none-any.whl", hash = "sha256:0e09679c87464dace73343cccb6600a00daa21726008105b7e2cbc1096da15d8"},
-    {file = "pygeoinf-1.8.9.tar.gz", hash = "sha256:d09b4f92e68e9dd204d63fc9cd26d1091d9aa13d4c22e326db94b4d04fa088fa"},
+    {file = "pygeoinf-2.2.0-py3-none-any.whl", hash = "sha256:08445728d47fdaeeb4a5db00247cd98c17f7dad84767e5bf8d98c61fc3812d89"},
+    {file = "pygeoinf-2.2.0.tar.gz", hash = "sha256:b5007cebf4869999ff2fc2e1066cac5eedc2efce11385055fd12d34a81ca1989"},
 ]
 
 [package.dependencies]
+Cartopy = {version = ">=0.25.0", optional = true, markers = "extra == \"sphere\""}
+ducc0 = {version = ">=0.15", optional = true, markers = "extra == \"sphere\""}
 finufft = ">=2.5.1"
 joblib = ">=1.5.3"
 matplotlib = ">=3.9.0"
 numpy = ">=2.0.0"
+pyshtools = {version = ">=4.14.1", optional = true, markers = "extra == \"sphere\""}
 scipy = ">=1.13.0"
+shapely = {version = ">=2.0.0", optional = true, markers = "extra == \"sphere\""}
 threadpoolctl = ">=3.6.0"
 
 [package.extras]
 clarabel = ["clarabel (>=0.9.0)"]
 interactive = ["plotly (>=5.0.0)"]
+mfem = ["mfem (>=4.8.0) ; sys_platform == \"linux\""]
 osqp = ["osqp (>=1.0.0)"]
-sphere = ["Cartopy (>=0.25.0)", "pyshtools (>=4.14.1)", "shapely (>=2.0.0)"]
+planetmodel = ["planetmodel (>=1.4.1)"]
+plot3d = ["plotly (>=5.18,<7)"]
+sphere = ["Cartopy (>=0.25.0)", "ducc0 (>=0.15)", "pyshtools (>=4.14.1)", "shapely (>=2.0.0)"]
 
 [[package]]
 name = "pygments"
@@ -4750,4 +4757,4 @@ interactive = ["pyqt6"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12"
-content-hash = "e44b3a2407b48217f0d4dd300c61c768afefb73d8e05591d775b9dd1bd25adce"
+content-hash = "f0fd81806c7a6f33f83b70d694de261d2fffde278f74324c224ab2c847bf98a5"

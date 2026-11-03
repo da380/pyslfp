@@ -94,7 +94,7 @@ def _si_outputs(body, scheme):
     material, earth = _setting(body, scheme)
     scales = earth.parameters.scales
     ice_model = AnalyticalIceModel(length_scale=earth.parameters.length_scale)
-    state = EarthState.from_ice_model(ice_model, 10.0, earth, exclude_caspian=False)
+    state = EarthState.from_ice_model(ice_model, 10.0, earth, land=None)
     # the Maxwell time, authored in the geophysical frame, in this
     # scheme's units
     tau = (
@@ -131,16 +131,19 @@ def _si_outputs(body, scheme):
         float(dates[2]): g_xi,
         0.0: Measurement(
             displacement=g_u,
-            gravity_potential=SHGrid.from_array(
+            potential_change=SHGrid.from_array(
                 pot_conv * g_phi.data, grid=earth.grid_name, copy=False
             ),
-            angular_velocity=om_conv * np.array([0.2, -0.4, 0.8]),
+            angular_velocity_change=om_conv * np.array([0.2, -0.4, 0.8]),
         ),
     }
 
     snapshots, _ = evo.run_ice_history(dates, ice_model, record=True)
     states = [snap.internal_state for snap in snapshots]
-    out = {"xi": snapshots[-1].sea_level_change.data * scales.factor(units.LENGTH)}
+    out = {
+        "xi": snapshots[-1].response.field("relative_sea_level_change").data
+        * scales.factor(units.LENGTH)
+    }
     load_si = 1.0 / (scales.factor(SURFACE_DENSITY) * scales.factor(units.LENGTH) ** 2)
     for name, method in (
         ("discrete", evo.adjoint_ice_history),

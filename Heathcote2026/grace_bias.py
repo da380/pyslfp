@@ -1,432 +1,174 @@
 """
-WMB Method Bias Evaluation
-==========================
+The error of the WMB estimate of regional mass change (Heathcote et al., 2026).
 
-This script quantifies the systematic bias introduced by the Wahr, Molenaar, & Bryan (1998)
-(WMB) method when estimating regional surface mass changes from satellite gravimetry
-(e.g., GRACE / GRACE-FO).
+The model is the direct surface mass load zeta, a global field with a Sobolev
+prior. The quantities of interest are the averages over the GRACE regions
+(`common.GRACE_REGIONS`) of the total load: zeta plus the ocean load
+rho_w C xi that it induces through the sea level equation. The WMB method
+(Wahr, Molenaar and Bryan, 1998) estimates them from GRACE's potential
+coefficients, degrees 2 to --obs-degree, by inverting each degree through the
+elastic load Love numbers. It ignores the induced ocean load and the degrees
+GRACE does not see, and reports as its error only the propagated data noise.
 
-The WMB method isolates surface mass anomalies by applying a purely spectral scaling
-(via load Love numbers) to observed gravitational potential coefficients. However, this
-approach inherently neglects gravitational self-attraction and loading (SAL) effects—most
-notably the induced redistribution of water mass across the global ocean (governed by the
-sea-level equation).
+The error is the estimate less the true average, (C A - B) zeta + C e, with
+A the forward operator, B the true averages, C WMB's averaging of the data
+and e the data noise. It is linear in the pair (zeta, e), so its law is the
+push-forward of the product of the prior and the noise, computed exactly.
+The script compares, region by region, the actual error with the nominal
+one, C e alone. The actual error has zero mean unless the prior is shifted
+(--prior-shift).
+
+Outputs, in output_plots_grace_bias/ at 600 dpi:
+
+- grace_bias_pdfs.png: per region, the densities of the actual and the
+  nominal error in mm of equivalent water thickness (EWT), with a second axis
+  in units of the true average's prior standard deviation. With --samples, a
+  histogram of Monte Carlo errors checks the actual error's density.
+- With --plot-maps, grace_bias_direct_load.png and grace_bias_induced_load.png:
+  a prior sample of the direct load, and the ocean load it induces, with the
+  region boundaries.
+
+The defaults are the paper's resolution, which runs for a long time;
+`FAST=1 ./run_all.sh grace_bias` runs at lmax 64 and observation degree 32.
 """
 
 import argparse
-import os
-import numpy as np
 
 import matplotlib
 
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
+import numpy as np
 
 import pygeoinf as inf
-import grace_utils as utils
+from pyslfp.observations import WMBMethod
 
-from pyslfp.parallel import set_num_threads
-from pyslfp import create_map_figure, plot
-from pyslfp.linear_operators import (
-    WMBMethod,
-    grace_observation_operator,
-    sea_level_change_to_load_operator,
-)
+import common
+from figures import error_density, field_map
+
+OUTPUT_DIR = "output_plots_grace_bias"
 
 
-def parse_arguments():
-    """Parses command-line arguments to configure the WMB bias evaluation."""
+def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Calculate WMB method bias using analytical Gaussian measures."
+        description="The error of the WMB regional averages of the total load."
     )
+    common.add_grace_arguments(parser)
+    common.add_parallel_arguments(parser)
     parser.add_argument(
         "--samples",
         type=int,
         default=0,
-        help="Number of Monte Carlo samples to draw for validating analytical error distributions.",
+        help="Monte Carlo samples to check the analytic error densities.",
     )
     parser.add_argument(
         "--plot-maps",
         action="store_true",
-        help="Plot an example of the direct load and the induced water load with region boxes.",
+        help="Plot a prior sample of the direct load and the load it induces.",
     )
-    parser.add_argument(
-        "--lmax",
-        type=int,
-        default=256,
-        help="Maximum spherical harmonic degree for the Earth model.",
-    )
-    parser.add_argument(
-        "--obs-degree",
-        type=int,
-        default=100,
-        help="Maximum spherical harmonic degree of the GRACE observations.",
-    )
-    parser.add_argument(
-        "--load-order",
-        type=float,
-        default=2.0,
-        help="Sobolev space order for the load.",
-    )
-    parser.add_argument(
-        "--load-scale-km",
-        type=float,
-        default=500.0,
-        help="Length scale (in km) defining the load space.",
-    )
-    parser.add_argument(
-        "--smoothing-scale-km",
-        type=float,
-        default=None,
-        help="Scale (in km) for spatial smoothing. Defaults to --load-scale-km.",
-    )
-    parser.add_argument(
-        "--direct-scale-km",
-        type=float,
-        default=250.0,
-        help="Correlation length scale (in km) for the prior.",
-    )
-    parser.add_argument(
-        "--direct-std-m",
-        type=float,
-        default=0.01,
-        help="Pointwise standard deviation (in m EWT) for the prior.",
-    )
-    parser.add_argument(
-        "--prior-order",
-        type=float,
-        default=3.0,
-        help=("Spectral order for --prior-kernel sobolev (must be > 1). "),
-    )
-    parser.add_argument(
-        "--prior-shift",
-        type=float,
-        default=0.0,
-        help="Shift the prior expectation by drawing a sample and multiplying by this factor.",
-    )
-    parser.add_argument(
-        "--noise-scale-factor",
-        type=float,
-        default=0.5,
-        help=("Noise correlation scale as a factor of --direct-scale-km."),
-    )
-    parser.add_argument(
-        "--snr-low-degree",
-        type=float,
-        default=10.0,
-        help=(
-            "Amplitude signal-to-noise ratio of the per-coefficient "
-            "spectra at --snr-reference-degree; together with "
-            "--snr-crossover-degree this solves the noise exponent and "
-            "amplitude in closed form."
-        ),
-    )
-    parser.add_argument(
-        "--snr-reference-degree",
-        type=float,
-        default=2.0,
-        help="Degree at which --snr-low-degree is imposed.",
-    )
-    parser.add_argument(
-        "--snr-crossover-degree",
-        type=float,
-        default=64,
-        help=(
-            "Degree at which the per-coefficient noise and signal "
-            "variances are equal."
-        ),
-    )
-    parser.add_argument(
-        "--remove-degree-1",
-        action="store_true",
-        help="Remove degree 1 components from the prior measure.",
-    )
+    return parser.parse_args()
 
-    # --- Parallelisation ---
-    parser.add_argument(
-        "--parallel",
-        action="store_true",
-        help="Enable process-level parallelism at the supported call sites.",
-    )
-    parser.add_argument(
-        "--max-jobs",
-        type=int,
-        default=os.cpu_count() or 1,
-        help=(
-            "Cap on the number of worker processes when --parallel is "
-            "set; call sites with fewer independent tasks use fewer. "
-            "Ignored without --parallel."
-        ),
-    )
 
-    parser.add_argument(
-        "--serial-threads",
-        type=int,
-        default=None,
-        help=(
-            "Threads used by the transforms and BLAS in the main process, "
-            "i.e. during the serial phases of the run. Worker processes "
-            "take their thread count from OMP_NUM_THREADS instead. "
-            "Default: leave the process settings unchanged."
-        ),
+def plot_error_densities(
+    names, means, stds, nominal_stds, true_stds, /, *, samples=None
+):
+    """Per region, the actual error against the nominal error; the top axis
+    divides the error by the true average's standard deviation."""
+    nrows = int(np.ceil(len(names) / 2))
+    fig, axes = plt.subplots(
+        nrows=nrows, ncols=2, figsize=(14, 5 * nrows), layout="constrained"
     )
-
-    args = parser.parse_args()
-    return args
+    axes = axes.flatten()
+    for i, name in enumerate(names):
+        ax = axes[i]
+        error_density(
+            ax,
+            means[i],
+            stds[i],
+            nominal_stds[i],
+            true_stds[i],
+            samples=None if samples is None else samples[:, i],
+        )
+        ax.set_title(name, fontsize=14)
+        ax.set_xlabel("Error (mm)", fontsize=12)
+        if i == 1:
+            ax.legend(loc="best", fontsize=9)
+    for ax in axes[len(names) :]:
+        ax.set_visible(False)
+    return fig
 
 
 def main():
     args = parse_arguments()
-    if args.serial_threads is not None:
-        set_num_threads(args.serial_threads)
-    if args.smoothing_scale_km is None:
-        args.smoothing_scale_km = args.load_scale_km
+    rng = common.configure(args)
+    common.start_run(OUTPUT_DIR, args)
 
-    # Setup directory to save plots
-    output_dir = "output_plots_grace_bias"
-    os.makedirs(output_dir, exist_ok=True)
-    figures_to_save = {}
+    physics = common.grace_physics(args.lmax, args.load_order, args.load_scale_km)
+    state, load_space, scale_mm = physics.state, physics.load_space, physics.scale_mm
+    _, prior, noise_load, _ = common.grace_measures(physics, args, rng)
+    names, average = common.regional_averaging(physics, args)
 
-    state, load_space, response_space, fp_op, scale_mm = utils.build_physics_components(
-        args.lmax, args.load_order, args.load_scale_km
-    )
+    wmb = WMBMethod(state.model, args.obs_degree)
+    noise = wmb.load_measure_to_observation_measure(noise_load)
+    total_load = common.total_load_operator(physics)
+    forward = common.grace_forward_operator(physics, args.obs_degree)
+    true_average = average @ total_load
+    wmb_average = average @ wmb.potential_coefficient_to_load_operator(load_space)
 
-    state = fp_op.state
-    model = fp_op.model
-
-    _, cond_prior, noise, _, _ = utils.build_measures(
-        state,
-        load_space,
-        args.direct_scale_km,
-        args.direct_std_m,
-        args.noise_scale_factor,
-        remove_degree_1=args.remove_degree_1,
-        prior_shift=args.prior_shift,
-        prior_order=args.prior_order,
-        snr_crossover_degree=args.snr_crossover_degree,
-        snr_low_degree=args.snr_low_degree,
-        snr_reference_degree=args.snr_reference_degree,
-        obs_degree=args.obs_degree,
-    )
-
-    wmb = WMBMethod(model, args.obs_degree)
-
-    region_names, avg_op, _, regions_dict = utils.get_regional_averaging(
-        state, load_space, smoothing_scale_km=args.smoothing_scale_km
-    )
-
-    wmb_avg_op = avg_op @ wmb.potential_coefficient_to_load_operator(load_space)
-
-    data_err = wmb.load_measure_to_observation_measure(noise)
-    data_space = data_err.domain
-
-    sea_level_proj = response_space.subspace_projection(0)
-
-    sle_to_load = sea_level_change_to_load_operator(
-        state, sea_level_proj.codomain, load_space
-    )
-
-    # ------------------ OPTION: PLOT EXAMPLE LOADS ------------------
+    figures = {}
     if args.plot_maps:
-        print("Plotting example direct and induced loads...")
-
-        sample_direct = cond_prior.sample()
-        sample_induced = (sle_to_load @ sea_level_proj @ fp_op)(sample_direct)
-
-        fig1, ax1 = create_map_figure(figsize=(12, 6))
-        _, im1 = plot(
-            sample_direct * scale_mm,
-            ax=ax1,
-            cmap="seismic",
-            symmetric=True,
-        )
-
-        im1.colorbar.set_label("Direct Load (mm EWT)", fontsize=16)
-        im1.colorbar.ax.tick_params(labelsize=14)
-
-        ax1.gridliner.xlabel_style = {"size": 12, "color": "black"}
-        ax1.gridliner.ylabel_style = {"size": 12, "color": "black"}
-
-        ax1.text(
-            0.02,
-            0.98,
-            "(a)",
-            transform=ax1.transAxes,
-            fontsize=16,
-            fontweight="bold",
-            va="top",
-            ha="left",
-            bbox=dict(facecolor="white", alpha=0.8, edgecolor="none", pad=3.0),
-            zorder=10,
-        )
-
-        utils.draw_region_boundaries(state, ax1, regions_dict)
-        figures_to_save["grace_bias_direct_load"] = fig1
-
-        fig2, ax2 = create_map_figure(figsize=(12, 6))
-        _, im2 = plot(
-            sample_induced * scale_mm,
-            ax=ax2,
-            cmap="seismic",
-            symmetric=True,
-        )
-
-        im2.colorbar.set_label("Induced Load  (mm EWT)", fontsize=16)
-        im2.colorbar.ax.tick_params(labelsize=14)
-
-        ax2.gridliner.xlabel_style = {"size": 12, "color": "black"}
-        ax2.gridliner.ylabel_style = {"size": 12, "color": "black"}
-
-        utils.draw_region_boundaries(state, ax2, regions_dict)
-
-        ax2.text(
-            0.02,
-            0.98,
-            "(b)",
-            transform=ax2.transAxes,
-            fontsize=16,
-            fontweight="bold",
-            va="top",
-            ha="left",
-            bbox=dict(facecolor="white", alpha=0.8, edgecolor="none", pad=3.0),
-            zorder=10,
-        )
-
-        figures_to_save["grace_bias_induced_load"] = fig2
-
-    # ------------------ CORE BIAS EVALUATION ------------------
-    op1 = inf.BlockLinearOperator(
-        [
-            [load_space.identity_operator(), data_space.zero_operator(load_space)],
-            [fp_op, data_space.zero_operator(response_space)],
-            [load_space.zero_operator(data_space), data_space.identity_operator()],
-        ]
-    )
-    op2 = inf.BlockLinearOperator(
-        [
-            [
-                load_space.identity_operator(),
-                sle_to_load @ sea_level_proj,
-                data_space.zero_operator(load_space),
-            ],
-            [
-                load_space.zero_operator(data_space),
-                grace_observation_operator(response_space, args.obs_degree),
-                data_space.identity_operator(),
-            ],
-        ]
-    )
-
-    avgs_space = avg_op.codomain
-    true_op = (
-        inf.RowLinearOperator([avg_op, data_space.zero_operator(avgs_space)])
-        @ op2
-        @ op1
-    )
-    err_op = inf.RowLinearOperator([avg_op, -1 * wmb_avg_op]) @ op2 @ op1
-
-    joint_meas = inf.GaussianMeasure.from_direct_sum([cond_prior, data_err])
-    true_meas = joint_meas.affine_mapping(operator=true_op)
-    err_meas = joint_meas.affine_mapping(operator=err_op)
-
-    true_stds = np.sqrt(np.diag(true_meas.covariance.matrix(dense=True))) * scale_mm
-    err_stds = np.sqrt(np.diag(err_meas.covariance.matrix(dense=True))) * scale_mm
-    err_means = err_meas.expectation * scale_mm
-
-    wmb_noise_meas = data_err.affine_mapping(operator=wmb_avg_op)
-    wmb_stds = np.sqrt(np.diag(wmb_noise_meas.covariance.matrix(dense=True))) * scale_mm
-
-    if args.samples > 0:
-        print(f"Drawing {args.samples} MC samples...")
-        joint_samples_list = joint_meas.samples(
-            args.samples, parallel=args.parallel, n_jobs=args.max_jobs
-        )
-        err_samples = np.zeros((args.samples, len(region_names)))
-        for idx, sample in enumerate(joint_samples_list):
-            err_samples[idx, :] = err_op(sample) * scale_mm
-
-    print("Plotting Bias PDFs...")
-
-    def gaussian_pdf(x, mean, std):
-        return (1.0 / (std * np.sqrt(2 * np.pi))) * np.exp(
-            -0.5 * ((x - mean) / std) ** 2
-        )
-
-    def make_forward(std_val):
-        return lambda x: x / std_val
-
-    def make_inverse(std_val):
-        return lambda x: x * std_val
-
-    nrows = int(np.ceil(len(region_names) / 2))
-    fig_pdf, axes = plt.subplots(
-        nrows=nrows, ncols=2, figsize=(14, 5 * nrows), layout="constrained"
-    )
-    for i, region in enumerate(region_names):
-        ax = axes.flatten()[i]
-        mu, std = err_means[i], err_stds[i]
-
-        norm_std = true_stds[i]
-        norm_label = r"Error Standardised by True Signal $\sigma$"
-
-        if args.samples > 0:
-            ax.hist(
-                err_samples[:, i],
-                bins=50,
-                alpha=0.3,
-                color="red",
-                density=True,
-                label="MC Samples",
+        print("Plotting a prior sample of the direct load and the load it induces...")
+        direct = prior.sample(rng=rng)
+        induced = total_load(direct) - direct
+        for name, field, label, panel in [
+            ("direct", direct, "Direct Load (mm EWT)", "(a)"),
+            ("induced", induced, "Induced Load (mm EWT)", "(b)"),
+        ]:
+            figures[f"grace_bias_{name}_load.png"] = field_map(
+                field * scale_mm,
+                label,
+                panel,
+                state=state,
+                regions=common.GRACE_REGIONS,
             )
 
-        plot_min = mu - 4 * std
-        plot_max = mu + 4 * std
-        x_vals = np.linspace(plot_min, plot_max, 300)
+    # WMB's error as a function of (zeta, e): WMB applied to the data,
+    # GRACE's coefficients of the response plus the noise, less the true
+    # average.
+    error = inf.RowLinearOperator([wmb_average @ forward - true_average, wmb_average])
+    joint = inf.GaussianMeasure.from_product([prior, noise])
 
-        ax.plot(
-            x_vals,
-            gaussian_pdf(x_vals, mu, std),
-            "r-",
-            linewidth=2,
-            label=r"Actual error",
+    print("Computing the error distributions...")
+    true_stds = common.standard_deviations(common.dense(prior, true_average)) * scale_mm
+    errors = common.dense(joint, error)
+    error_means = errors.expectation * scale_mm
+    error_stds = common.standard_deviations(errors) * scale_mm
+    nominal_stds = (
+        common.standard_deviations(common.dense(noise, wmb_average)) * scale_mm
+    )
+
+    error_samples = None
+    if args.samples > 0:
+        print(f"Drawing {args.samples} Monte Carlo samples...")
+        draws = joint.samples(args.samples, rng=rng, n_jobs=common.jobs(args))
+        error_samples = np.array([error(draw) for draw in draws]) * scale_mm
+
+    print("Regional averages of the total load, in mm EWT (error = WMB less true):")
+    for i, name in enumerate(names):
+        line = (
+            f"  {name:<16} true std {true_stds[i]:6.3f}, WMB error mean "
+            f"{error_means[i]:+6.3f}, std {error_stds[i]:6.3f} (nominal "
+            f"{nominal_stds[i]:6.3f})"
         )
+        if error_samples is not None:
+            line += f"; Monte Carlo error std {np.std(error_samples[:, i]):6.3f}"
+        print(line)
 
-        ax.plot(
-            x_vals,
-            gaussian_pdf(x_vals, 0, wmb_stds[i]),
-            "b-",
-            linewidth=2,
-            label=r"Nominal error (noise only)",
-        )
-
-        ax.set_title(region, fontsize=14)
-        ax.set_xlabel("Error (mm)", fontsize=12)
-        ax.axvline(0, color="black", linestyle="--", linewidth=1.5)
-        ax.grid(True, linestyle=":", alpha=0.6)
-
-        if i == 1:
-            ax.legend(loc="best", fontsize=9)
-
-        sec_ax = ax.secondary_xaxis(
-            "top", functions=(make_forward(norm_std), make_inverse(norm_std))
-        )
-        sec_ax.set_xlabel(norm_label, fontsize=10, color="darkgreen")
-        sec_ax.tick_params(axis="x", colors="darkgreen")
-
-    for j in range(i + 1, len(axes.flatten())):
-        axes.flatten()[j].set_visible(False)
-
-    figures_to_save["grace_bias_pdfs"] = fig_pdf
-
-    # ------------------ SAVE ALL FIGURES ------------------
-    if figures_to_save:
-        print(f"\nSaving {len(figures_to_save)} plots to '{output_dir}/'...")
-        for name, fig_obj in figures_to_save.items():
-            filepath = os.path.join(output_dir, f"{name}.png")
-            fig_obj.savefig(filepath, dpi=600, bbox_inches="tight")
-            print(f"  Saved: {filepath}")
-            plt.close(fig_obj)
+    figures["grace_bias_pdfs.png"] = plot_error_densities(
+        names, error_means, error_stds, nominal_stds, true_stds, samples=error_samples
+    )
+    common.save_figures(figures, OUTPUT_DIR, dpi=600)
 
 
 if __name__ == "__main__":

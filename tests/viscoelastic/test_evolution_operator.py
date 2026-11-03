@@ -386,3 +386,123 @@ def test_what_is_refused(setting):
     other = LogViscositySpace(Rheology.from_relaxation_time(elsewhere, TAU), 4)
     with pytest.raises(ValueError, match="material"):
         SeaLevelEvolutionOperator(evolution, DATES, spaces[0], spaces[1], other, [0.0])
+
+
+# ==================================================================== #
+#                      The second derivative                           #
+# ==================================================================== #
+
+
+@pytest.mark.parametrize("shorelines", ["frozen", "migrating"])
+def test_the_second_derivative_passes_the_adjoint_check(setting, shorelines):
+    operator, ice_model, state, earth = (
+        _frozen(setting) if shorelines == "frozen" else _migrating(setting)
+    )
+    assert operator.has_second_derivative
+    rng = np.random.default_rng(7)
+    x = _point(operator, ice_model, state, earth)
+    v = _direction(operator, rng, earth, ice=1.0)
+    second = operator.second_derivative(x, v)
+    check_operator(second, rng=np.random.default_rng(8), trials=2, rtol=1e-8)
+    # symmetric in its two directions
+    u = _direction(operator, rng, earth, ice=1.0)
+    space = operator.response_space
+    for a, b in zip(second(u), operator.second_derivative(x, u)(v)):
+        np.testing.assert_allclose(
+            space.to_components(a), space.to_components(b), rtol=1e-9, atol=1e-16
+        )
+
+
+def test_the_hessian_of_a_misfit_matches_differences_of_its_gradient(setting):
+    """For J = |F(x) - d|^2 / 2, H u = F'* F' u + (F''[u, .])* (F(x) - d):
+    central differences of the gradient along u converge to it at second
+    order and land on it after extrapolation."""
+    operator, ice_model, state, earth = _frozen(setting)
+    rng = np.random.default_rng(9)
+    x = _point(operator, ice_model, state, earth)
+    u = _direction(operator, rng, earth)
+    domain, codomain = operator.domain, operator.codomain
+    data = codomain.from_components(
+        codomain.to_components(operator(x))
+        + 0.1
+        * rng.standard_normal(codomain.dim)
+        * np.abs(codomain.to_components(operator(x))).max()
+    )
+
+    def gradient(point):
+        linearization = operator.at(point)
+        residual = codomain.subtract(linearization.value, data)
+        return linearization.derivative.adjoint(residual), residual
+
+    base, residual = gradient(x)
+    linearization = operator.at(x)
+    hessian_u = domain.add(
+        linearization.derivative.adjoint(linearization.derivative(u)),
+        operator.second_derivative(x, u).adjoint(residual),
+    )
+    differences = {}
+    for eps in (0.02, 0.01):
+        plus, _ = gradient(domain.axpy(eps, u, domain.copy(x)))
+        minus, _ = gradient(domain.axpy(-eps, u, domain.copy(x)))
+        differences[eps] = domain.scale(1.0 / (2.0 * eps), domain.subtract(plus, minus))
+    residuals = {
+        eps: domain.norm(domain.subtract(d, hessian_u))
+        for eps, d in differences.items()
+    }
+    assert 3.0 < residuals[0.02] / residuals[0.01] < 5.0
+    richardson = domain.axpy(
+        -1.0 / 3.0, differences[0.02], domain.scale(4.0 / 3.0, differences[0.01])
+    )
+    assert domain.norm(domain.subtract(richardson, hessian_u)) < 1e-6 * domain.norm(
+        hessian_u
+    )
+
+
+def test_the_continuous_second_derivative(setting):
+    """By the continuous method the second derivative is symmetric in its
+    directions, and its adjoint check holds to the order of the scheme: on a
+    slowly relaxing body, along directions smooth in time, the mismatch
+    falls by about four when the dates are halved."""
+    material, earth, _, _, _ = setting
+    ice_model, state = _history_state(material, earth)
+    rheology = Rheology.from_relaxation_time(material, 10.0 * TAU)
+    evolution = SeaLevelEvolution(ViscoelasticOperator(rheology, LMAX), state)
+    gaps = []
+    for npts in (5, 9):
+        dates = np.linspace(10.0, 0.0, npts)
+        operator = SeaLevelEvolutionOperator(
+            evolution, dates, *_spaces(earth, rheology), [0.0], method="continuous"
+        )
+        x = _point(operator, ice_model, state, earth)
+        rng = np.random.default_rng(10)
+        history_space, sea_level_space, viscosity_space = operator.domain.subspaces
+        scale = earth.parameters.length_scale
+
+        def direction(mode, seed):
+            profile = history_space.time_space.from_components(
+                np.eye(history_space.time_space.dim)[mode]
+            )
+            field = sea_level_space.from_components(
+                (20.0 / scale)
+                * np.random.default_rng(seed).standard_normal(sea_level_space.dim)
+            )
+            chi = viscosity_space.from_components(
+                0.1
+                * np.random.default_rng(seed + 1).standard_normal(viscosity_space.dim)
+            )
+            return (history_space.rank_one(profile, field), sea_level_space.zero(), chi)
+
+        u, v = direction(1, 21), direction(2, 31)
+        second = operator.second_derivative(x, v)
+        space = operator.response_space
+        for a, b in zip(second(u), operator.second_derivative(x, u)(v)):
+            np.testing.assert_allclose(
+                space.to_components(a), space.to_components(b), rtol=1e-9, atol=1e-16
+            )
+        g = operator.codomain.from_components(
+            rng.standard_normal(operator.codomain.dim)
+        )
+        lhs = operator.codomain.inner_product(second(u), g)
+        rhs = operator.domain.inner_product(u, second.adjoint(g))
+        gaps.append(abs(lhs - rhs) / abs(lhs))
+    assert gaps[0] < 0.1 and gaps[0] / gaps[1] > 3.0

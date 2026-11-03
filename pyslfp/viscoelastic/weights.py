@@ -40,6 +40,8 @@ __all__ = [
     "backward_euler_weight",
     "exponential_trapezoid_weight_derivatives",
     "backward_euler_weight_derivative",
+    "exponential_trapezoid_weight_second_derivatives",
+    "backward_euler_weight_second_derivative",
 ]
 
 _SERIES_SWITCH = 1e-3
@@ -116,3 +118,38 @@ def backward_euler_weight_derivative(h: ArrayLike) -> np.ndarray:
     if np.any(h < 0.0):
         raise ValueError("h = dt / tau must be non-negative")
     return -1.0 / (1.0 + h) ** 2
+
+
+def _d2phi1(h: np.ndarray, e: np.ndarray, dphi1: np.ndarray) -> np.ndarray:
+    """d^2 phi1 / dh^2 = -(e + 2 dphi1) / h, by the quotient above the
+    switch and by the alternating series below it, exact at h = 0."""
+    small = np.abs(h) < _SERIES_SWITCH
+    hs = np.where(small, h, 1.0)
+    series = 1.0 / 3.0 - hs / 4.0 + hs**2 / 10.0 - hs**3 / 36.0 + hs**4 / 168.0
+    with np.errstate(divide="ignore", invalid="ignore"):
+        quotient = -(e + 2.0 * dphi1) / np.where(small, 1.0, h)
+    return np.where(small, series, quotient)
+
+
+def exponential_trapezoid_weight_second_derivatives(
+    h: ArrayLike,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(d2e, d2alpha, d2beta), the second h-derivatives of the
+    exponential trapezoid weights, elementwise for h = dt / tau >= 0:
+    d2e = e, d2alpha = d2phi1 - d2e and d2beta = -d2phi1.  A second
+    derivative in the viscosity needs these at fixed dt."""
+    h = np.asarray(h, dtype=float)
+    if np.any(h < 0.0):
+        raise ValueError("h = dt / tau must be non-negative")
+    e = np.exp(-h)
+    phi1 = _phi1(h, e)
+    d2phi1 = _d2phi1(h, e, _dphi1(h, e, phi1))
+    return e, d2phi1 - e, -d2phi1
+
+
+def backward_euler_weight_second_derivative(h: ArrayLike) -> np.ndarray:
+    """d^2/dh^2 of the backward Euler weight: 2 / (1 + h)^3."""
+    h = np.asarray(h, dtype=float)
+    if np.any(h < 0.0):
+        raise ValueError("h = dt / tau must be non-negative")
+    return 2.0 / (1.0 + h) ** 3

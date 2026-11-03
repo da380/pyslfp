@@ -157,13 +157,17 @@ history, the initial sea level and the log viscosity to the responses at
 observation dates, under frozen or migrating shorelines, with its derivative
 by either method, one run forwards and one sweep backwards; `fixing` holds
 arguments fixed by composition, and gives `IceHistoryOperator`, the linear
-case, under frozen shorelines with the other two fixed.
+case, under frozen shorelines with the other two fixed. Its second derivative,
+by `SeaLevelEvolution.second_order_tangent_linear_ice_history` forwards and
+`second_order_adjoint_ice_history` backwards (the second-order adjoint
+equations of Yu et al. 2025, with the shoreline terms omitted), gives pygeoinf
+exact Hessians; `KernelDerivatives` holds the derivative of the kernels along
+a direction, and the scheme weights gain their second derivatives.
 
 ## Planned work still to land
 
-- The rest of the scope set with the port: the second derivative of
-  `SeaLevelEvolutionOperator` (the second-order tangent-linear and adjoint
-  problems), planetmodel 1.4's plots, the priors layer, and
+- The rest of the scope set with the port: planetmodel 1.4's plots, the
+  priors layer, and
   time-dependent model spaces for the set-ups' components, on
   `FieldHistorySpace`, which moves onto pygeoinf's tensor products of
   coordinate spaces when they land.

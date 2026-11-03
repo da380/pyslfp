@@ -58,6 +58,8 @@ from .weights import (
     backward_euler_weight_derivative,
     exponential_trapezoid_weight_derivatives,
     exponential_trapezoid_weights,
+    backward_euler_weight_second_derivative,
+    exponential_trapezoid_weight_second_derivatives,
 )
 
 __all__ = [
@@ -344,6 +346,9 @@ class ViscoelasticOperator:
         )
         self._weights: dict[tuple[str, float], list[tuple[np.ndarray, ...]]] = {}
         self._weight_derivatives: dict[
+            tuple[str, float], list[tuple[np.ndarray, ...]]
+        ] = {}
+        self._weight_second_derivatives: dict[
             tuple[str, float], list[tuple[np.ndarray, ...]]
         ] = {}
         self._effective_love: dict[tuple[str, float], LoveNumbers] = {}
@@ -918,6 +923,24 @@ class ViscoelasticOperator:
                     out.append(exponential_trapezoid_weight_derivatives(h))
             self._weight_derivatives[key] = out
         return self._weight_derivatives[key]
+
+    def scheme_weight_second_derivatives(
+        self, scheme: str, dt: float
+    ) -> list[tuple[np.ndarray, ...]]:
+        """The second h-derivatives of the per-branch scheme weights at
+        this step size, full-mesh nodal arrays: (d2w,) for backward Euler
+        and (d2e, d2alpha, d2beta) for the exponential trapezoid."""
+        key = (scheme, float(dt))
+        if key not in self._weight_second_derivatives:
+            out = []
+            for itau in self.rheology.itau:
+                h = dt * itau
+                if scheme == "backward_euler":
+                    out.append((backward_euler_weight_second_derivative(h),))
+                else:
+                    out.append(exponential_trapezoid_weight_second_derivatives(h))
+            self._weight_second_derivatives[key] = out
+        return self._weight_second_derivatives[key]
 
     def scheme_weights(self, scheme: str, dt: float) -> list[tuple[np.ndarray, ...]]:
         """The per-branch nodal weight arrays of a flavour: (w,) for

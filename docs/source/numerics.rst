@@ -210,6 +210,33 @@ dates, and at time order one it settles as time modes are added, the change
 halving with each doubling of the modes, where the per-node dual at an
 observation date doubles with each halving of the spacing.
 
+``SeaLevelEvolutionOperator`` wraps the runs and the sweeps. Its value is one
+recorded forward run; its linearisation reuses that run, so the derivative's
+forward action costs one tangent-linear run, a forward run of linear steps
+with the trajectory's ocean functions prescribed, and its adjoint one reversed
+sweep, by whichever method was chosen. A Hessian-vector product costs the
+direction's tangent-linear run once, and then, per application, one reversed
+sweep carrying both the first- and the second-order adjoint, about twice a
+sweep; the forward action of the second derivative, which the checks use,
+costs a tangent-linear run and a second-order one. The run at a point is kept,
+so that a linearisation and a second derivative at the same point share it.
+
+The discrete pair, tangent-linear run and adjoint sweep, are exact transposes,
+and the discrete second derivative is symmetric to rounding and the exact
+derivative of the exact gradient: central differences of the gradient of a
+misfit along a direction land on it after extrapolation to :math:`10^{-6}`.
+The continuous pair are transposes to the order of the scheme. On the
+homogeneous test body with a relaxation time of ten Maxwell times, the
+mismatch :math:`\langle F'v, g\rangle - \langle v, F'^{*}g\rangle` of the
+first derivative falls by about four with each halving of the dates in each
+block of the model space, and so do the gap between the continuous and the
+discrete second derivatives and the mismatch of the continuous second-order
+adjoint with its tangent-linear run, from :math:`3.6\times10^{-2}` through
+:math:`9.2\times10^{-3}` to :math:`2.3\times10^{-3}` from 5 to 17 dates,
+for directions smooth in time. Directions rough in time, random on the time
+modes say, are pre-asymptotic at these spacings, as the time quadrature of
+the continuous adjoint's density then is.
+
 
 Calibrating the initial sea level
 ---------------------------------

@@ -584,6 +584,17 @@ derivative of the map with the ocean functions held, exact under frozen
 shorelines. Their approximate kernels, which drop the second-order variables,
 are the Gauss-Newton Hessian.
 
+``SeaLevelEvolutionOperator`` is the evolution as a ``pygeoinf`` operator on
+the ice history, the initial sea level and the log viscosity of every branch,
+each an element of a Hilbert space of functions: a ``FieldHistorySpace``, a
+sphere space, and a ``LogViscositySpace``, one Sobolev space of radial
+profiles per layer in which the branch relaxes, continuous within a layer and
+free to jump at the material interfaces. It supplies its derivative and its
+second derivative by either method, so that ``pygeoinf``'s Newton methods,
+Laplace approximations and exact Hessians apply to any objective built on
+it, and ``fixing`` holds arguments fixed by composition, giving the linear
+``IceHistoryOperator`` under frozen shorelines with the other two fixed.
+
 Decay times
 ^^^^^^^^^^^
 

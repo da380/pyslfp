@@ -287,3 +287,162 @@ def test_the_initial_sea_level_about_a_migrating_trajectory(setting):
     }
     richardson = (4.0 * fd[0.01] - fd[0.02]) / 3.0
     assert abs(richardson - predicted) < 1e-6 * abs(predicted)
+
+
+# ==================================================================== #
+#                       The second-order run                           #
+# ==================================================================== #
+
+
+def _thickness_at(ice_model, dates, earth):
+    return [
+        ice_model.get_ice_thickness(
+            float(d), LMAX, grid=earth.grid_name, extend=earth.extend
+        )
+        for d in dates
+    ]
+
+
+def test_the_second_order_run_is_the_derivative_of_the_first(setting):
+    """The second-order run along (u, v) is the derivative, in the base
+    point along u, of the first-order run along v: central differences of
+    the latter converge to it at second order, for both schemes; and it is
+    symmetric in u and v."""
+    material, earth, _, _, _ = setting
+    ice_model, state = _history_state(material, earth)
+    dates = np.linspace(10.0, 0.0, 6)
+    rng = np.random.default_rng(7)
+    scale = earth.parameters.length_scale
+    base = _thickness_at(ice_model, dates, earth)
+    delta_u = [_smooth(earth, rng, 20.0 / scale) for _ in dates]
+    delta_v = [_smooth(earth, rng, 20.0 / scale) for _ in dates]
+    ditau_u = _ditau(material)
+    ditau_v = [rng.normal(size=material.mesh.r.shape) / TAU]
+    g = _smooth(earth, rng)
+    mesh_ice = lambda eps: _NodalIceModel(  # noqa: E731
+        dates,
+        [
+            SHGrid.from_array(b.data + eps * d.data, grid=earth.grid)
+            for b, d in zip(base, delta_u)
+        ],
+        length_scale=scale,
+    )
+    for scheme in ("exponential_trapezoid", "backward_euler"):
+        evolution = SeaLevelEvolution(_maxwell_operator(material), state, scheme=scheme)
+        snapshots, _ = evolution.run_ice_history(dates, mesh_ice(0.0), record=True)
+        tangent_u, _ = evolution.tangent_linear_ice_history(
+            dates, snapshots, ice_thickness=delta_u, itau=ditau_u, record=True
+        )
+        tangent_v, _ = evolution.tangent_linear_ice_history(
+            dates, snapshots, ice_thickness=delta_v, itau=ditau_v, record=True
+        )
+        second, _ = evolution.second_order_tangent_linear_ice_history(
+            dates, snapshots, tangent_u, tangent_v, itau_u=ditau_u, itau_v=ditau_v
+        )
+        predicted = _pair(earth, g, _sea_level(second[-1]))
+
+        def first_order_at(eps):
+            moved = SeaLevelEvolution(
+                ViscoelasticOperator(_rheology_along(material, ditau_u, eps), LMAX),
+                state,
+                scheme=scheme,
+            )
+            snaps, _ = moved.run_ice_history(dates, mesh_ice(eps), record=True)
+            tangent, _ = moved.tangent_linear_ice_history(
+                dates, snaps, ice_thickness=delta_v, itau=ditau_v
+            )
+            return _pair(earth, g, _sea_level(tangent[-1]))
+
+        fd = {
+            eps: (first_order_at(eps) - first_order_at(-eps)) / (2.0 * eps)
+            for eps in (0.02, 0.01)
+        }
+        resid = {eps: abs(f - predicted) for eps, f in fd.items()}
+        assert 3.0 < resid[0.02] / resid[0.01] < 5.0, scheme
+        richardson = (4.0 * fd[0.01] - fd[0.02]) / 3.0
+        assert abs(richardson - predicted) < 1e-6 * abs(predicted), scheme
+
+        swapped, _ = evolution.second_order_tangent_linear_ice_history(
+            dates, snapshots, tangent_v, tangent_u, itau_u=ditau_v, itau_v=ditau_u
+        )
+        space = snapshots[-1].response.space
+        for a, b in zip(second, swapped):
+            np.testing.assert_allclose(
+                space.to_components(a.response),
+                space.to_components(b.response),
+                rtol=1e-10,
+                atol=1e-14,
+            )
+
+
+def test_the_second_order_run_vanishes_without_a_viscosity_perturbation(setting):
+    """With the ocean functions held the map is affine in the ice history
+    and the initial sea level, about frozen and migrating runs alike."""
+    material, earth, _, _, _ = setting
+    rng = np.random.default_rng(8)
+    scale = earth.parameters.length_scale
+    dates = np.linspace(10.0, 0.0, 6)
+    for shorelines, (ice_model, state) in (
+        ("frozen", _history_state(material, earth)),
+        ("migrating", _marine_history_state(material, earth)),
+    ):
+        evolution = SeaLevelEvolution(_maxwell_operator(material), state)
+        snapshots, _ = evolution.run_ice_history(
+            dates, ice_model, shorelines=shorelines, record=True
+        )
+        tangents = []
+        for seed in (1, 2):
+            deltas = [_smooth(earth, rng, 20.0 / scale) for _ in dates]
+            tangent, _ = evolution.tangent_linear_ice_history(
+                dates,
+                snapshots,
+                ice_thickness=deltas,
+                initial_sea_level=_smooth(earth, rng, 20.0 / scale),
+                record=True,
+            )
+            tangents.append(tangent)
+        second, _ = evolution.second_order_tangent_linear_ice_history(
+            dates, snapshots, *tangents
+        )
+        space = snapshots[-1].response.space
+        assert all(np.all(space.to_components(s.response) == 0.0) for s in second)
+
+
+def test_the_continuous_second_order_run_converges_to_the_discrete(setting):
+    material, earth, _, _, _ = setting
+    ice_model, state = _history_state(material, earth)
+    rng = np.random.default_rng(9)
+    g = _smooth(earth, rng)
+    ditau_u = _ditau(material, 0.1)
+    ditau_v = [0.1 * (1.0 + material.mesh.r) / TAU]
+    operator = ViscoelasticOperator(
+        Rheology.from_relaxation_time(material, 10.0 * TAU), LMAX
+    )
+    evolution = SeaLevelEvolution(operator, state)
+    gaps = []
+    for npts in (5, 9):
+        dates = np.linspace(10.0, 0.0, npts)
+        snapshots, _ = evolution.run_ice_history(dates, ice_model, record=True)
+        values = {}
+        for method in ("discrete", "continuous"):
+            tangent_u, _ = evolution.tangent_linear_ice_history(
+                dates, snapshots, itau=ditau_u, method=method, record=True
+            )
+            tangent_v, _ = evolution.tangent_linear_ice_history(
+                dates, snapshots, itau=ditau_v, method=method, record=True
+            )
+            second, _ = evolution.second_order_tangent_linear_ice_history(
+                dates,
+                snapshots,
+                tangent_u,
+                tangent_v,
+                itau_u=ditau_u,
+                itau_v=ditau_v,
+                method=method,
+            )
+            values[method] = _pair(earth, g, _sea_level(second[-1]))
+        gaps.append(
+            abs(values["discrete"] - values["continuous"]) / abs(values["discrete"])
+        )
+    assert gaps[0] < 0.2
+    assert gaps[0] / gaps[1] > 3.0

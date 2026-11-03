@@ -56,6 +56,7 @@ __all__ = [
     "ForwardTrajectory",
     "IceKernels",
     "InitialSeaLevelCalibration",
+    "KernelDerivatives",
     "Measurement",
     "SeaLevelSnapshot",
     "SeaLevelEvolution",
@@ -273,6 +274,21 @@ class IceKernels:
             safe = np.where(mu_k > 0.0, mu_k, 1.0)
             out.append(np.where(mu_k > 0.0, -(itau_k**2) / safe, 0.0) * kernel)
         return out
+
+
+@dataclass(frozen=True)
+class KernelDerivatives:
+    """The derivative of an objective's kernels along a perturbation of the
+    model parameters: what a second-order adjoint returns, the components
+    of the Hessian's action on that perturbation.  `thickness` and
+    `initial_sea_level` are the derivatives of the discrete node duals of
+    `IceKernels`, in the same pairing, and `itau` that of the
+    inverse-relaxation-time kernels."""
+
+    dates: np.ndarray
+    thickness: list[SHGrid] = field(repr=False)
+    initial_sea_level: SHGrid = field(repr=False)
+    itau: list[np.ndarray] = field(repr=False)
 
 
 @dataclass(frozen=True)
@@ -1294,7 +1310,242 @@ class SeaLevelEvolution:
             )
         return snapshots, vstate
 
-    # -- the tangent-linear run ------------------------------------------------
+    # -- the tangent-linear runs -----------------------------------------------
+
+    def _first_order_drive(
+        self,
+        method: str,
+        dt: float,
+        prev: ViscoelasticState,
+        nxt: ViscoelasticState,
+        ditau: Sequence[np.ndarray],
+    ) -> dict[int, np.ndarray]:
+        """The memory increment of a step from `prev` to `nxt`, two states
+        of a trajectory with their strains, for a perturbation `ditau` of
+        the inverse relaxation times, bilinear in the two: the forward mode
+        of the scheme's weights ("discrete"), or the continuous drive
+        q_k = (d - m_k) delta itau_k / itau_k discretised by the scheme
+        ("continuous")."""
+        op = self.operator
+        implicit = self.scheme == "backward_euler"
+        if method == "discrete":
+            dweights = op.scheme_weight_derivatives(self.scheme, dt)
+        else:
+            weights = op.scheme_weights(self.scheme, dt)
+        out = {}
+        for l in op.degrees:
+            deg = op.degree(l)
+            m_prev = prev.m[l]
+            d0 = prev.cached_strain[l]
+            d1 = nxt.cached_strain[l]
+            extra = np.zeros_like(m_prev)
+            for k in range(op.rheology.num_branches):
+                dh = (dt * ditau[k][deg.e0 :])[None, :, :, None]
+                if method == "discrete":
+                    if implicit:
+                        dw = dweights[k][0][deg.e0 :][None, :, :, None]
+                        extra[k] = dw * dh * (m_prev[k] - d1)
+                    else:
+                        de, dalpha, dbeta = (
+                            w[deg.e0 :][None, :, :, None] for w in dweights[k]
+                        )
+                        extra[k] = dh * (de * m_prev[k] + dalpha * d0 + dbeta * d1)
+                else:
+                    itau_k = deg.itau[k][None, :, :, None]
+                    ratio = np.where(
+                        itau_k > 0.0,
+                        dh / (dt * np.where(itau_k > 0.0, itau_k, 1.0)),
+                        0.0,
+                    )
+                    q0 = (d0 - m_prev[k]) * ratio
+                    q1 = (d1 - nxt.m[l][k]) * ratio
+                    if implicit:
+                        w = weights[k][0][deg.e0 :][None, :, :, None]
+                        extra[k] = (1.0 - w) * q1
+                    else:
+                        alpha = weights[k][1][deg.e0 :][None, :, :, None]
+                        beta = weights[k][2][deg.e0 :][None, :, :, None]
+                        extra[k] = alpha * q0 + beta * q1
+            out[l] = extra
+        return out
+
+    def _second_weight_drive(
+        self,
+        dt: float,
+        prev: ViscoelasticState,
+        nxt: ViscoelasticState,
+        ditau_u: Sequence[np.ndarray],
+        ditau_v: Sequence[np.ndarray],
+    ) -> dict[int, np.ndarray]:
+        """The discrete method's term from the second derivatives of the
+        scheme's weights, paired with the forward trajectory and the two
+        perturbations of the inverse relaxation times."""
+        op = self.operator
+        implicit = self.scheme == "backward_euler"
+        d2weights = op.scheme_weight_second_derivatives(self.scheme, dt)
+        out = {}
+        for l in op.degrees:
+            deg = op.degree(l)
+            m_prev = prev.m[l]
+            d0 = prev.cached_strain[l]
+            d1 = nxt.cached_strain[l]
+            extra = np.zeros_like(m_prev)
+            for k in range(op.rheology.num_branches):
+                dh2 = (dt * dt * ditau_u[k][deg.e0 :] * ditau_v[k][deg.e0 :])[
+                    None, :, :, None
+                ]
+                if implicit:
+                    d2w = d2weights[k][0][deg.e0 :][None, :, :, None]
+                    extra[k] = d2w * dh2 * (m_prev[k] - d1)
+                else:
+                    d2e, d2alpha, d2beta = (
+                        w[deg.e0 :][None, :, :, None] for w in d2weights[k]
+                    )
+                    extra[k] = dh2 * (d2e * m_prev[k] + d2alpha * d0 + d2beta * d1)
+            out[l] = extra
+        return out
+
+    def _check_dates_and_snapshots(self, dates, snapshots):
+        dates = np.asarray(dates, dtype=float)
+        if dates.ndim != 1 or dates.size < 2 or np.any(np.diff(dates) >= 0.0):
+            raise ValueError(
+                "dates must be decreasing (kiloyears before present, the "
+                "past first), with at least two entries"
+            )
+        snapshots = list(snapshots)
+        if len(snapshots) != dates.size:
+            raise ValueError("the snapshots must give one entry per date node")
+        migrating = snapshots[0].ocean_function is not None
+        if migrating and any(snap.ocean_function is None for snap in snapshots):
+            raise ValueError(
+                "every snapshot of a migrating run carries its ocean function"
+            )
+        return dates, snapshots, migrating
+
+    def _check_itau(self, itau: Sequence[np.ndarray]) -> list[np.ndarray]:
+        op = self.operator
+        ditau = [np.asarray(a, dtype=float) for a in itau]
+        shape = op.material.mesh.r.shape
+        K = op.rheology.num_branches
+        if len(ditau) != K or any(a.shape != shape for a in ditau):
+            raise ValueError(
+                f"itau must give {K} nodal arrays of shape {shape}, one per branch"
+            )
+        return ditau
+
+    def _full_trajectory(self, snapshots, dates, what: str) -> ForwardTrajectory:
+        """A tangent-linear run's trajectory, which must be recorded at every
+        node."""
+        trajectory = self._as_trajectory(snapshots, dates)
+        if any(state is None for state in trajectory.states):
+            raise ValueError(f"{what} must be recorded at every node")
+        return trajectory
+
+    def _tangent_run(
+        self,
+        dates: np.ndarray,
+        snapshots: list[SeaLevelSnapshot],
+        migrating: bool,
+        direct_load: Callable[[int], Optional[SHGrid]],
+        drive: Optional[Callable[[int, float], dict[int, np.ndarray]]],
+        *,
+        space: Optional[GRDSpace],
+        rotational_feedbacks: bool | str,
+        rtol: float,
+        record: bool,
+    ) -> tuple[list[SeaLevelSnapshot], ViscoelasticState]:
+        """The loop the tangent-linear runs share: the forward problem with
+        the trajectory's ocean functions prescribed, the direct load given
+        per node, and a memory increment per step."""
+        op = self.operator
+        model = self.model
+        parameters = model.parameters
+        if rotational_feedbacks is True:
+            self._assert_transverse_stable()
+        space = self._space(space, rotational_feedbacks)
+        kyr = KYR / parameters.scales.factor(units.TIME)
+        rho_w = parameters.water_density
+        C0 = self.state.ocean_function.data
+
+        def C_at(node: int) -> np.ndarray:
+            return snapshots[node].ocean_function.data if migrating else C0
+
+        def C_grid(node: int) -> Optional[SHGrid]:
+            return snapshots[node].ocean_function if migrating else None
+
+        vstate = op.zero_state(ncols=lambda l: 2 * (l + 1))
+        op.prime_strain(vstate)
+        sigma = np.zeros((2, model.lmax + 1, model.lmax + 1))
+        psi = np.zeros_like(sigma)
+        # the direct load vanishes at the first date, so the start, the
+        # instantaneous response to it, is zero
+        out = [
+            SeaLevelSnapshot(
+                0.0,
+                space.zero(),
+                date=float(dates[0]),
+                ocean_function=C_grid(0),
+                internal_state=vstate if record else None,
+                load_coefficients=sigma if record else None,
+                tide_coefficients=psi if record else None,
+            )
+        ]
+        for node, (a, b) in enumerate(zip(dates[:-1], dates[1:]), start=1):
+            dt = (a - b) * kyr * self._to_mat_time
+            step = op.start_step(
+                vstate,
+                dt,
+                scheme=self.scheme,
+                load=self._columns(sigma, self._to_mat_density),
+                tide=self._columns(psi, self._to_mat_potential),
+            )
+            if drive is not None:
+                step.add_memory(drive(node, dt))
+            sle = self._sle_for(dt)
+            memory_u = self._coeffs(step.memory_surface("U"), self._to_nd_length)
+            memory_phi = self._coeffs(step.memory_surface("phi"), self._to_nd_potential)
+            moment = step.inertia_moment()[0] * self._to_nd_moment
+            load_grid = direct_load(node)
+            response = sle.solve_response(
+                self.state,
+                load_grid,
+                space,
+                displacement_response=memory_u,
+                gravitational_potential_response=memory_phi,
+                horizontal_response=self._memory_horizontal(step, space),
+                inertia_moment_change=moment,
+                ocean_function=C_grid(node),
+                rotational_feedbacks=rotational_feedbacks,
+                rtol=rtol,
+            )
+            xi = response.field(RELATIVE_SEA_LEVEL_CHANGE).data
+            total = rho_w * C_at(node) * xi
+            if load_grid is not None:
+                total = total + load_grid.data
+            sigma = model.expand_field(
+                SHGrid.from_array(total, grid=model.grid, copy=False)
+            ).coeffs
+            psi = (
+                self._centrifugal(response.angular_velocity_change)
+                if rotational_feedbacks
+                else np.zeros_like(sigma)
+            )
+            vstate, _ = step.finish(
+                load=self._columns(sigma, self._to_mat_density),
+                tide=self._columns(psi, self._to_mat_potential),
+            )
+            out.append(
+                SeaLevelSnapshot(
+                    float(vstate.t / self._to_mat_time),
+                    response,
+                    date=float(b),
+                    ocean_function=C_grid(node),
+                    internal_state=vstate if record else None,
+                    load_coefficients=sigma if record else None,
+                    tide_coefficients=psi if record else None,
+                )
+            )
+        return out, vstate
 
     def tangent_linear_ice_history(
         self,
@@ -1308,6 +1559,7 @@ class SeaLevelEvolution:
         space: Optional[GRDSpace] = None,
         rotational_feedbacks: bool = True,
         rtol: float = 1e-9,
+        record: bool = False,
     ) -> tuple[list[SeaLevelSnapshot], ViscoelasticState]:
         """The tangent-linear run: the derivative of a run's responses
         along a perturbation of the ice history, the initial sea level
@@ -1361,6 +1613,9 @@ class SeaLevelEvolution:
             method: "discrete" or "continuous".
             space, rotational_feedbacks, rtol: As for `run_ice_history`,
                 and as the forward run was made.
+            record: Whether the snapshots carry the tangent-linear
+                internal states and loads at every node, which a
+                second-order run about this one needs.
 
         Returns:
             The perturbed responses at every date, as snapshots carrying
@@ -1371,37 +1626,12 @@ class SeaLevelEvolution:
             raise ValueError(
                 f"method must be 'discrete' or 'continuous', got {method!r}"
             )
-        dates = np.asarray(dates, dtype=float)
-        if dates.ndim != 1 or dates.size < 2 or np.any(np.diff(dates) >= 0.0):
-            raise ValueError(
-                "dates must be decreasing (kiloyears before present, the "
-                "past first), with at least two entries"
-            )
-        snapshots = list(snapshots)
-        if len(snapshots) != dates.size:
-            raise ValueError("the snapshots must give one entry per date node")
-        op = self.operator
+        dates, snapshots, migrating = self._check_dates_and_snapshots(dates, snapshots)
         model = self.model
         parameters = model.parameters
-        if rotational_feedbacks is True:
-            self._assert_transverse_stable()
-        space = self._space(space, rotational_feedbacks)
-        kyr = KYR / parameters.scales.factor(units.TIME)
         rho_i = parameters.ice_density
         rho_w = parameters.water_density
         C0 = self.state.ocean_function.data
-        migrating = snapshots[0].ocean_function is not None
-        if migrating and any(snap.ocean_function is None for snap in snapshots):
-            raise ValueError(
-                "every snapshot of a migrating run carries its ocean function"
-            )
-
-        def C_at(node: int) -> np.ndarray:
-            return snapshots[node].ocean_function.data if migrating else C0
-
-        def C_grid(node: int) -> Optional[SHGrid]:
-            return snapshots[node].ocean_function if migrating else None
-
         if ice_thickness is not None:
             ice_thickness = list(ice_thickness)
             if len(ice_thickness) != dates.size:
@@ -1410,146 +1640,160 @@ class SeaLevelEvolution:
                 model.check_field(grid)
             delta_ice = [grid.data for grid in ice_thickness]
         else:
-            delta_ice = [np.zeros_like(C0) for _ in range(dates.size)]
+            delta_ice = None
         delta_sea = None
-        if initial_sea_level is not None:
+        if initial_sea_level is not None and migrating:
             model.check_field(initial_sea_level)
             delta_sea = initial_sea_level.data
 
-        def direct_load(node: int) -> SHGrid:
-            load = (
-                rho_i * (1.0 - C_at(node)) * delta_ice[node]
-                - rho_i * (1.0 - C0) * delta_ice[0]
-            )
-            if delta_sea is not None and migrating:
+        def C_at(node: int) -> np.ndarray:
+            return snapshots[node].ocean_function.data if migrating else C0
+
+        def direct_load(node: int) -> Optional[SHGrid]:
+            if delta_ice is None and delta_sea is None:
+                return None
+            load = np.zeros_like(C0)
+            if delta_ice is not None:
+                load = (
+                    rho_i * (1.0 - C_at(node)) * delta_ice[node]
+                    - rho_i * (1.0 - C0) * delta_ice[0]
+                )
+            if delta_sea is not None:
                 load = load + rho_w * (C_at(node) - C0) * delta_sea
             return SHGrid.from_array(load, grid=model.grid, copy=False)
 
-        K = op.rheology.num_branches
-        cursor = None
+        drive = None
         if itau is not None:
-            ditau = [np.asarray(a, dtype=float) for a in itau]
-            shape = op.material.mesh.r.shape
-            if len(ditau) != K or any(a.shape != shape for a in ditau):
-                raise ValueError(
-                    f"itau must give {K} nodal arrays of shape {shape}, one per branch"
-                )
+            ditau = self._check_itau(itau)
             trajectory = self._as_trajectory(snapshots, dates)
             cursor = _ForwardCursor(self, trajectory, dates, self.scheme)
-        implicit = self.scheme == "backward_euler"
 
-        def drive(node: int, dt: float) -> dict[int, np.ndarray]:
-            """The memory increment of the step onto `node` from the
-            relaxation-time perturbation: the forward mode of the
-            scheme's weights, or the continuous drive q_k discretised
-            by the scheme."""
-            fwd_prev = cursor.state(node - 1)
-            fwd_n = cursor.state(node)
-            if method == "discrete":
-                dweights = op.scheme_weight_derivatives(self.scheme, dt)
-            else:
-                weights = op.scheme_weights(self.scheme, dt)
-            out = {}
-            for l in op.degrees:
-                deg = op.degree(l)
-                m_prev = fwd_prev.m[l]
-                d0 = fwd_prev.cached_strain[l]
-                d1 = fwd_n.cached_strain[l]
-                extra = np.zeros_like(m_prev)
-                for k in range(K):
-                    dh = (dt * ditau[k][deg.e0 :])[None, :, :, None]
-                    if method == "discrete":
-                        if implicit:
-                            dw = dweights[k][0][deg.e0 :][None, :, :, None]
-                            extra[k] = dw * dh * (m_prev[k] - d1)
-                        else:
-                            de, dalpha, dbeta = (
-                                w[deg.e0 :][None, :, :, None] for w in dweights[k]
-                            )
-                            extra[k] = dh * (de * m_prev[k] + dalpha * d0 + dbeta * d1)
-                    else:
-                        itau_k = deg.itau[k][None, :, :, None]
-                        ratio = np.where(
-                            itau_k > 0.0,
-                            dh / (dt * np.where(itau_k > 0.0, itau_k, 1.0)),
-                            0.0,
-                        )
-                        q0 = (d0 - m_prev[k]) * ratio
-                        q1 = (d1 - fwd_n.m[l][k]) * ratio
-                        if implicit:
-                            w = weights[k][0][deg.e0 :][None, :, :, None]
-                            extra[k] = (1.0 - w) * q1
-                        else:
-                            alpha = weights[k][1][deg.e0 :][None, :, :, None]
-                            beta = weights[k][2][deg.e0 :][None, :, :, None]
-                            extra[k] = alpha * q0 + beta * q1
-                out[l] = extra
-            return out
+            def drive(node: int, dt: float) -> dict[int, np.ndarray]:
+                return self._first_order_drive(
+                    method, dt, cursor.state(node - 1), cursor.state(node), ditau
+                )
 
-        vstate = op.zero_state(ncols=lambda l: 2 * (l + 1))
-        op.prime_strain(vstate)
-        sigma = np.zeros((2, model.lmax + 1, model.lmax + 1))
-        psi = np.zeros_like(sigma)
-        date0 = float(dates[0])
-        # the direct load vanishes at the first date, so the start, the
-        # instantaneous response to it, is zero
-        out = [
-            SeaLevelSnapshot(0.0, space.zero(), date=date0, ocean_function=C_grid(0))
-        ]
-        for node, (a, b) in enumerate(zip(dates[:-1], dates[1:]), start=1):
-            dt = (a - b) * kyr * self._to_mat_time
-            step = op.start_step(
-                vstate,
-                dt,
-                scheme=self.scheme,
-                load=self._columns(sigma, self._to_mat_density),
-                tide=self._columns(psi, self._to_mat_potential),
+        return self._tangent_run(
+            dates,
+            snapshots,
+            migrating,
+            direct_load,
+            drive,
+            space=space,
+            rotational_feedbacks=rotational_feedbacks,
+            rtol=rtol,
+            record=record,
+        )
+
+    def second_order_tangent_linear_ice_history(
+        self,
+        dates: Sequence[float],
+        snapshots: Sequence[SeaLevelSnapshot],
+        tangent_u: Sequence[SeaLevelSnapshot],
+        tangent_v: Sequence[SeaLevelSnapshot],
+        *,
+        itau_u: Optional[Sequence[np.ndarray]] = None,
+        itau_v: Optional[Sequence[np.ndarray]] = None,
+        itau_uv: Optional[Sequence[np.ndarray]] = None,
+        method: str = "discrete",
+        space: Optional[GRDSpace] = None,
+        rotational_feedbacks: bool = True,
+        rtol: float = 1e-9,
+        record: bool = False,
+    ) -> tuple[list[SeaLevelSnapshot], ViscoelasticState]:
+        """The second-order tangent-linear run: the second derivative of a
+        run's responses along two perturbations u and v, about the forward
+        run whose `snapshots` are given and the tangent-linear runs of u
+        and of v about it.
+
+        With the ocean functions held the map is affine in the ice history
+        and the initial sea level, so the second derivative is non-zero
+        only through the relaxation times: it is the forward problem with
+        no direct load, the shorelines prescribed, and the drive of each
+        branch shifted by the bilinear term of `tangent_linear_ice_history`
+        taken with v's tangent-linear trajectory and u's perturbation,
+        with u's trajectory and v's perturbation, with the forward
+        trajectory and the second variation `itau_uv` of the
+        parameterisation, and, by the discrete method, by the second
+        derivatives of the scheme's weights with the forward trajectory
+        and both perturbations.  It is symmetric in u and v.
+
+        Args:
+            dates, snapshots: As for `tangent_linear_ice_history`; the
+                forward run must have recorded its internal states.
+            tangent_u, tangent_v: The tangent-linear runs of u and v,
+                recorded at every node (`record=True`).
+            itau_u, itau_v: The perturbations of the inverse relaxation
+                times in u and in v, as for `tangent_linear_ice_history`;
+                None for none.
+            itau_uv: The second variation of the inverse relaxation times
+                along u and v, for a parameterisation that is not linear
+                in them, such as itau delta_u chi delta_v chi for the log
+                viscosity; None for a linear one.
+            method, space, rotational_feedbacks, rtol, record: As for
+                `tangent_linear_ice_history`.
+
+        Returns:
+            The responses of the second derivative at every date, and the
+            final internal state.
+        """
+        if method not in ("discrete", "continuous"):
+            raise ValueError(
+                f"method must be 'discrete' or 'continuous', got {method!r}"
             )
-            if cursor is not None:
-                step.add_memory(drive(node, dt))
-            sle = self._sle_for(dt)
-            memory_u = self._coeffs(step.memory_surface("U"), self._to_nd_length)
-            memory_phi = self._coeffs(step.memory_surface("phi"), self._to_nd_potential)
-            moment = step.inertia_moment()[0] * self._to_nd_moment
-            load_grid = direct_load(node)
-            response = sle.solve_response(
-                self.state,
-                load_grid,
-                space,
-                displacement_response=memory_u,
-                gravitational_potential_response=memory_phi,
-                horizontal_response=self._memory_horizontal(step, space),
-                inertia_moment_change=moment,
-                ocean_function=C_grid(node),
-                rotational_feedbacks=rotational_feedbacks,
-                rtol=rtol,
+        dates, snapshots, migrating = self._check_dates_and_snapshots(dates, snapshots)
+        parts = []
+        if itau_u is not None:
+            parts.append(("v", self._check_itau(itau_u)))
+        if itau_v is not None:
+            parts.append(("u", self._check_itau(itau_v)))
+        if itau_uv is not None:
+            parts.append(("base", self._check_itau(itau_uv)))
+        drive = None
+        if parts or (itau_u is not None and itau_v is not None):
+            base = _ForwardCursor(
+                self, self._as_trajectory(snapshots, dates), dates, self.scheme
             )
-            xi = response.field(RELATIVE_SEA_LEVEL_CHANGE).data
-            sigma = model.expand_field(
-                SHGrid.from_array(
-                    load_grid.data + rho_w * C_at(node) * xi,
-                    grid=model.grid,
-                    copy=False,
-                )
-            ).coeffs
-            psi = (
-                self._centrifugal(response.angular_velocity_change)
-                if rotational_feedbacks
-                else np.zeros_like(sigma)
+            u_states = self._full_trajectory(tangent_u, dates, "tangent_u").states
+            v_states = self._full_trajectory(tangent_v, dates, "tangent_v").states
+            both = (
+                (self._check_itau(itau_u), self._check_itau(itau_v))
+                if method == "discrete" and itau_u is not None and itau_v is not None
+                else None
             )
-            vstate, _ = step.finish(
-                load=self._columns(sigma, self._to_mat_density),
-                tide=self._columns(psi, self._to_mat_potential),
-            )
-            out.append(
-                SeaLevelSnapshot(
-                    float(vstate.t / self._to_mat_time),
-                    response,
-                    date=float(b),
-                    ocean_function=C_grid(node),
-                )
-            )
-        return out, vstate
+
+            def drive(node: int, dt: float) -> dict[int, np.ndarray]:
+                base_prev, base_next = base.state(node - 1), base.state(node)
+                pairs = {
+                    "base": (base_prev, base_next),
+                    "u": (u_states[node - 1], u_states[node]),
+                    "v": (v_states[node - 1], v_states[node]),
+                }
+                terms = [
+                    self._first_order_drive(method, dt, *pairs[which], ditau)
+                    for which, ditau in parts
+                ]
+                if both is not None:
+                    terms.append(
+                        self._second_weight_drive(dt, base_prev, base_next, *both)
+                    )
+                total: dict[int, np.ndarray] = {}
+                for term in terms:
+                    for l, value in term.items():
+                        total[l] = value if l not in total else total[l] + value
+                return total
+
+        return self._tangent_run(
+            dates,
+            snapshots,
+            migrating,
+            lambda node: None,
+            drive,
+            space=space,
+            rotational_feedbacks=rotational_feedbacks,
+            rtol=rtol,
+            record=record,
+        )
 
     # -- the initial sea level ------------------------------------------------
 
@@ -1927,6 +2171,837 @@ class SeaLevelEvolution:
                 "internal_states must be recorded forward states " "(a run with record)"
             )
         return trajectory
+
+    def second_order_adjoint_ice_history(
+        self,
+        dates: Sequence[float],
+        measurement: dict[float, SHGrid | Measurement | GRDResponse],
+        tangent: Sequence[SeaLevelSnapshot],
+        *,
+        itau: Optional[Sequence[np.ndarray]] = None,
+        ocean_functions: Optional[Sequence[SHGrid]] = None,
+        internal_states: Sequence[ViscoelasticState],
+        rotational_feedbacks: bool = True,
+        rtol: float = 1e-9,
+        method: str = "discrete",
+    ) -> tuple[IceKernels, KernelDerivatives]:
+        """The second-order adjoint: the kernels of an objective and their
+        derivative along a perturbation v of the model parameters, the
+        action of the objective's Hessian on v.
+
+        The adjoint sweep that gives the kernels is itself a function of
+        the parameters, through the forward trajectory and the
+        relaxation times; differentiating it along v gives a second sweep
+        of the same form, forced not by the measurement but by the first
+        sweep's state and v's perturbation of the relaxation times, with
+        v's tangent-linear trajectory entering where the forward
+        trajectory enters the kernels.  By the discrete method this is
+        the exact derivative of the exact gradient, so the Hessian it gives
+        is symmetric to rounding; by the continuous method it discretises
+        the second-order adjoint equations of Yu et al. (2025), with the
+        terms of shoreline motion omitted, the ocean functions being held.
+
+        Args:
+            dates, measurement: As for `adjoint_ice_history`.
+            tangent: v's tangent-linear run about the forward run,
+                recorded at every node (`tangent_linear_ice_history` with
+                `record=True`).
+            itau: v's perturbation of the inverse relaxation times, nodal
+                arrays per branch as for `tangent_linear_ice_history`;
+                None for none.
+            ocean_functions: The trajectory's, under migrating shorelines.
+            internal_states: The recorded forward trajectory, as for
+                `adjoint_ice_history`; required here.
+            rotational_feedbacks, rtol: As for `adjoint_ice_history`.
+            method: "discrete" or "continuous".
+
+        Returns:
+            The kernels, as `adjoint_ice_history` or
+            `continuous_adjoint_ice_history` would give them, and their
+            derivatives along v.
+        """
+        if method not in ("discrete", "continuous"):
+            raise ValueError(
+                f"method must be 'discrete' or 'continuous', got {method!r}"
+            )
+        if method == "continuous":
+            return self._second_order_continuous_sweep(
+                dates,
+                measurement,
+                tangent,
+                itau=itau,
+                ocean_functions=ocean_functions,
+                internal_states=internal_states,
+                rotational_feedbacks=rotational_feedbacks,
+                rtol=rtol,
+            )
+        dates = np.asarray(dates, dtype=float)
+        if dates.ndim != 1 or dates.size < 2 or np.any(np.diff(dates) >= 0.0):
+            raise ValueError(
+                "dates must be decreasing (kiloyears before present, the "
+                "past first), with at least two entries"
+            )
+        duals = _normalise_measurement(measurement, dates, self.model)
+        op = self.operator
+        model = self.model
+        parameters = model.parameters
+        if rotational_feedbacks is True:
+            self._assert_transverse_stable()
+        kyr = KYR / parameters.scales.factor(units.TIME)
+        scheme = self.scheme
+        implicit = scheme == "backward_euler"
+        C = self.state.ocean_function.data
+        if ocean_functions is not None:
+            if len(ocean_functions) != dates.size:
+                raise ValueError("ocean_functions must give one grid per date node")
+            for grid in ocean_functions:
+                model.check_field(grid)
+
+        def C_at(node: int) -> np.ndarray:
+            return ocean_functions[node].data if ocean_functions is not None else C
+
+        def C_grid(node: int) -> Optional[SHGrid]:
+            return ocean_functions[node] if ocean_functions is not None else None
+
+        water_density = parameters.water_density
+        r2 = parameters.mean_sea_floor_radius**2
+        lmax = model.lmax
+        zero_grid = np.zeros_like(C)
+        ngll = op.material.mesh.ngll
+        K = op.rheology.num_branches
+        trajectory = self._as_trajectory(internal_states, dates)
+        cursor = _TrajectoryCursor(self, trajectory, dates, scheme)
+        v_states = self._full_trajectory(tangent, dates, "tangent").states
+        ditau = (
+            self._check_itau(itau)
+            if itau is not None
+            else [np.zeros(op.material.mesh.r.shape) for _ in range(K)]
+        )
+
+        mdual, ddual, dmdual, dddual = {}, {}, {}, {}
+        for l in op.degrees:
+            deg = op.degree(l)
+            ncols = 2 * (l + 1)
+            mdual[l] = np.zeros((K, 3, deg.ne, ngll, ncols))
+            dmdual[l] = np.zeros((K, 3, deg.ne, ngll, ncols))
+            ddual[l] = np.zeros((3, deg.ne, ngll, ncols))
+            dddual[l] = np.zeros((3, deg.ne, ngll, ncols))
+        itau_kernel = [np.zeros((op.material.mesh.nspec, ngll)) for _ in range(K)]
+        d_itau_kernel = [np.zeros((op.material.mesh.nspec, ngll)) for _ in range(K)]
+
+        def synth(coeffs: np.ndarray) -> np.ndarray:
+            return model.expand_coefficient(
+                SHCoeffs.from_array(
+                    coeffs, normalization=model.normalization, csphase=model.csphase
+                )
+            ).data
+
+        def coefficients(c: Optional[np.ndarray]) -> Optional[SHCoeffs]:
+            if c is None:
+                return None
+            return SHCoeffs.from_array(
+                c, normalization=model.normalization, csphase=model.csphase
+            )
+
+        def pack(values: dict[int, np.ndarray], factor: float) -> np.ndarray:
+            out = np.zeros((2, lmax + 1, lmax + 1))
+            for l, cols in values.items():
+                out[0, l, : l + 1] = cols[: l + 1]
+                out[1, l, : l + 1] = cols[l + 1 :]
+            return factor * out
+
+        def sle_dual_inputs(sigma_dual, psi_dual, node, *, measured):
+            m = duals.get(node) if measured else None
+            g_xi = (
+                m.relative_sea_level_change.data
+                if m is not None and m.relative_sea_level_change is not None
+                else zero_grid
+            ) + water_density * C_at(node) * (synth(sigma_dual) / r2)
+            g_omega = np.array(
+                [
+                    parameters.rotation_factor * psi_dual[0, 2, 1],
+                    parameters.rotation_factor * psi_dual[1, 2, 1],
+                    parameters.axial_rotation_factor * psi_dual[0, 2, 0]
+                    + parameters.uniform_rotation_factor * psi_dual[0, 0, 0],
+                ]
+            )
+            if m is not None and m.angular_velocity_change is not None:
+                g_omega = g_omega + np.asarray(m.angular_velocity_change, dtype=float)
+            extra = {}
+            if m is not None:
+                extra["displacement_dual"] = m.displacement
+                extra["potential_dual"] = m.potential_change
+                extra["horizontal_dual"] = coefficients(m.horizontal)
+            return g_xi, g_omega, extra
+
+        def triples(dt: float, deg):
+            """Per branch, the scheme weights (E, A, B) of the step, their
+            h-derivatives and their second h-derivatives, over the degree's
+            sub-mesh, broadcast over the scalar and column axes."""
+            weights = op.scheme_weights(scheme, dt)
+            first = op.scheme_weight_derivatives(scheme, dt)
+            second = op.scheme_weight_second_derivatives(scheme, dt)
+
+            def cut(a):
+                return a[deg.e0 :][None, :, :, None]
+
+            out = []
+            for k in range(K):
+                if implicit:
+                    w, dw, d2w = cut(weights[k][0]), cut(first[k][0]), cut(second[k][0])
+                    out.append(((w, 0.0, 1.0 - w), (dw, 0.0, -dw), (d2w, 0.0, -d2w)))
+                else:
+                    out.append(
+                        tuple(
+                            tuple(cut(a) for a in group)
+                            for group in (weights[k], first[k], second[k])
+                        )
+                    )
+            return out
+
+        load_duals = [None] * dates.size
+        dload_duals = [None] * dates.size
+        for n in range(dates.size - 1, 0, -1):
+            dt = (dates[n - 1] - dates[n]) * kyr * self._to_mat_time
+            fwd_n = cursor.state(n)
+            fwd_prev = cursor.state(n - 1)
+            v_n = v_states[n]
+            v_prev = v_states[n - 1]
+            x_duals, dx_duals = {}, {}
+            sig_cols, psi_cols, dsig_cols, dpsi_cols = {}, {}, {}, {}
+            per_degree = {}
+            for l in op.degrees:
+                deg = op.degree(l)
+                T = triples(dt, deg)
+                dh = [(dt * ditau[k][deg.e0 :])[None, :, :, None] for k in range(K)]
+                per_degree[l] = (T, dh)
+                summed = ddual[l].copy()
+                for k in range(K):
+                    (_, _, B), _, _ = T[k]
+                    summed += B * mdual[l][k]
+                xd = deg.strain_transpose(summed)
+                x_duals[l] = xd
+                units_lv = op.unit_responses(scheme, dt, l)
+                sig_cols[l] = units_lv[:, 0] @ xd
+                psi_cols[l] = units_lv[:, 1] @ xd
+            sigma_dual = pack(sig_cols, self._to_mat_density)
+            psi_dual = pack(psi_cols, self._to_mat_potential)
+            g_xi, g_omega, extra = sle_dual_inputs(
+                sigma_dual, psi_dual, n, measured=True
+            )
+            sle = self._sle_for(dt)
+            f_dual, su_dual, sphi_dual, j_dual = sle.adjoint_generalised_solve(
+                self.state,
+                sea_level_dual=SHGrid.from_array(g_xi, grid=model.grid, copy=False),
+                angular_velocity_dual=g_omega,
+                ocean_function=C_grid(n),
+                rotational_feedbacks=rotational_feedbacks,
+                rtol=rtol,
+                **extra,
+            )
+            load_duals[n] = f_dual.data + synth(sigma_dual) / r2
+            su_cols = self._columns(su_dual.coeffs, self._to_nd_length)
+            sphi_cols = self._columns(sphi_dual.coeffs, self._to_nd_potential)
+            m = duals.get(n)
+            sv_cols = (
+                None
+                if m is None or m.horizontal is None
+                else self._columns(m.horizontal, self._to_nd_length)
+            )
+            # the first sweep's radial solve, and from it the second
+            # sweep's dual of the step's solution: the derivative of the
+            # effective system acting on the first sweep's solution lands
+            # on the full solution, so it reaches the load and the tide
+            # and passes through the sea level adjoint with the rest
+            solves = {}
+            for l in op.degrees:
+                deg = op.degree(l)
+                T, dh = per_degree[l]
+                system = op.effective_system(scheme, dt, l)
+                rhs = (
+                    x_duals[l]
+                    + deg.surface_dual("U", su_cols(l, 0.0))
+                    + deg.surface_dual("phi", sphi_cols(l, 0.0))
+                )
+                if sv_cols is not None:
+                    rhs = rhs + deg.surface_dual("V", sv_cols(l, 0.0))
+                if l == 0:
+                    rhs[:, 0] += deg.moment_row * (j_dual * self._to_nd_moment)
+                y = system.solve(rhs)
+                sy = deg.strain(y)
+                wsy = deg.apply_weights(sy)
+                solves[l] = (y, sy, wsy)
+                dsummed = dddual[l].copy()
+                for k in range(K):
+                    (_, _, B), (_, _, Bh), _ = T[k]
+                    dsummed += B * dmdual[l][k] + Bh * dh[k] * mdual[l][k]
+                source = sum(T[k][1][2] * dh[k] * wsy[k] for k in range(K))
+                dxd = deg.strain_transpose(dsummed) + deg.dual_from_scalars(
+                    source[0], source[1], source[2]
+                )
+                dx_duals[l] = dxd
+                units_lv = op.unit_responses(scheme, dt, l)
+                dsig_cols[l] = units_lv[:, 0] @ dxd
+                dpsi_cols[l] = units_lv[:, 1] @ dxd
+            dsigma_dual = pack(dsig_cols, self._to_mat_density)
+            dpsi_dual = pack(dpsi_cols, self._to_mat_potential)
+            dg_xi, dg_omega, _ = sle_dual_inputs(
+                dsigma_dual, dpsi_dual, n, measured=False
+            )
+            df_dual, dsu_dual, dsphi_dual, dj_dual = sle.adjoint_generalised_solve(
+                self.state,
+                sea_level_dual=SHGrid.from_array(dg_xi, grid=model.grid, copy=False),
+                angular_velocity_dual=dg_omega,
+                ocean_function=C_grid(n),
+                rotational_feedbacks=rotational_feedbacks,
+                rtol=rtol,
+            )
+            dload_duals[n] = df_dual.data + synth(dsigma_dual) / r2
+            dsu_cols = self._columns(dsu_dual.coeffs, self._to_nd_length)
+            dsphi_cols = self._columns(dsphi_dual.coeffs, self._to_nd_potential)
+            for l in op.degrees:
+                deg = op.degree(l)
+                T, dh = per_degree[l]
+                system = op.effective_system(scheme, dt, l)
+                y, sy, wsy = solves[l]
+                mtilde_dual = mdual[l] + wsy
+                drhs = (
+                    dx_duals[l]
+                    + deg.surface_dual("U", dsu_cols(l, 0.0))
+                    + deg.surface_dual("phi", dsphi_cols(l, 0.0))
+                )
+                if l == 0:
+                    drhs[:, 0] += deg.moment_row * (dj_dual * self._to_nd_moment)
+                dy = system.solve(drhs)
+                dsy = deg.strain(dy)
+                dmtilde_dual = dmdual[l] + deg.apply_weights(dsy)
+                m_prev = fwd_prev.m[l]
+                d0 = fwd_prev.cached_strain[l]
+                d1 = fwd_n.cached_strain[l]
+                vm_prev = v_prev.m[l]
+                vd0 = v_prev.cached_strain[l]
+                vd1 = v_n.cached_strain[l]
+                Wd1 = deg.apply_weights(d1)
+                Wvd1 = deg.apply_weights(vd1)
+                new_m = np.empty_like(mdual[l])
+                new_dm = np.empty_like(mdual[l])
+                new_d = np.zeros_like(ddual[l])
+                new_dd = np.zeros_like(ddual[l])
+                for k in range(K):
+                    (E, A, B), (Eh, Ah, Bh), (Ehh, Ahh, Bhh) = T[k]
+                    g = (
+                        mtilde_dual[k] * (Eh * m_prev[k] + Ah * d0)
+                        + (mdual[l][k] * d1 + Wd1[k] * sy) * Bh
+                    ).sum(axis=(0, 3))
+                    itau_kernel[k][deg.e0 :] += dt * g
+                    dg = (
+                        dmtilde_dual[k] * (Eh * m_prev[k] + Ah * d0)
+                        + mtilde_dual[k] * (Eh * vm_prev[k] + Ah * vd0)
+                        + mtilde_dual[k] * (Ehh * m_prev[k] + Ahh * d0) * dh[k]
+                        + (
+                            dmdual[l][k] * d1
+                            + mdual[l][k] * vd1
+                            + Wvd1[k] * sy
+                            + Wd1[k] * dsy
+                        )
+                        * Bh
+                        + (mdual[l][k] * d1 + Wd1[k] * sy) * Bhh * dh[k]
+                    ).sum(axis=(0, 3))
+                    d_itau_kernel[k][deg.e0 :] += dt * dg
+                    new_m[k] = E * mtilde_dual[k]
+                    new_dm[k] = E * dmtilde_dual[k] + Eh * dh[k] * mtilde_dual[k]
+                    new_d += A * mtilde_dual[k]
+                    new_dd += A * dmtilde_dual[k] + Ah * dh[k] * mtilde_dual[k]
+                mdual[l], dmdual[l], ddual[l], dddual[l] = new_m, new_dm, new_d, new_dd
+        # the start: the instantaneous elastic solve at dates[0], whose
+        # system does not depend on the relaxation times
+        sig_cols, psi_cols, dsig_cols, dpsi_cols = {}, {}, {}, {}
+        for l in op.degrees:
+            deg = op.degree(l)
+            xd = deg.strain_transpose(ddual[l])
+            dxd = deg.strain_transpose(dddual[l])
+            units_lv = op.unit_responses(None, 0.0, l)
+            sig_cols[l] = units_lv[:, 0] @ xd
+            psi_cols[l] = units_lv[:, 1] @ xd
+            dsig_cols[l] = units_lv[:, 0] @ dxd
+            dpsi_cols[l] = units_lv[:, 1] @ dxd
+        elastic_sle = self._sle_elastic()
+        for which, (sc, pc) in enumerate(
+            ((sig_cols, psi_cols), (dsig_cols, dpsi_cols))
+        ):
+            sigma_dual = pack(sc, self._to_mat_density)
+            psi_dual = pack(pc, self._to_mat_potential)
+            g_xi, g_omega, extra = sle_dual_inputs(
+                sigma_dual, psi_dual, 0, measured=which == 0
+            )
+            f_dual, _, _, _ = elastic_sle.adjoint_generalised_solve(
+                self.state,
+                sea_level_dual=SHGrid.from_array(g_xi, grid=model.grid, copy=False),
+                angular_velocity_dual=g_omega,
+                ocean_function=C_grid(0),
+                rotational_feedbacks=rotational_feedbacks,
+                rtol=rtol,
+                **extra,
+            )
+            (load_duals if which == 0 else dload_duals)[0] = (
+                f_dual.data + synth(sigma_dual) / r2
+            )
+
+        def views(duals_by_node):
+            raw = [
+                parameters.ice_density * (1.0 - C_at(n)) * duals_by_node[n]
+                for n in range(dates.size)
+            ]
+            baseline = -parameters.ice_density * (1.0 - C) * sum(duals_by_node)
+            thickness = list(raw)
+            thickness[0] = thickness[0] + baseline
+            initial_sea_level = water_density * sum(
+                (C_at(n) - C) * duals_by_node[n] for n in range(dates.size)
+            )
+            return raw, baseline, thickness, initial_sea_level
+
+        raw, baseline, thickness, initial_sea_level = views(load_duals)
+        _, _, dthickness, dinitial_sea_level = views(dload_duals)
+        instantaneous = {}
+        lumps = {}
+        for node, m in duals.items():
+            f_dual, _, _, _ = elastic_sle.adjoint_generalised_solve(
+                self.state,
+                sea_level_dual=m.relative_sea_level_change,
+                displacement_dual=m.displacement,
+                potential_dual=m.potential_change,
+                angular_velocity_dual=m.angular_velocity_change,
+                horizontal_dual=coefficients(m.horizontal),
+                ocean_function=C_grid(node),
+                rotational_feedbacks=rotational_feedbacks,
+                rtol=rtol,
+            )
+            lumps[node] = parameters.ice_density * (1.0 - C_at(node)) * f_dual.data
+            instantaneous[float(dates[node])] = SHGrid.from_array(
+                lumps[node], grid=model.grid
+            )
+        w = np.empty(dates.size)
+        w[0] = 0.5 * (dates[0] - dates[1])
+        w[-1] = 0.5 * (dates[-2] - dates[-1])
+        w[1:-1] = 0.5 * (dates[:-2] - dates[2:])
+        density = [(raw[n] - lumps.get(n, 0.0)) / w[n] for n in range(dates.size)]
+        rate = []
+        tail = np.zeros_like(C)
+        for n in range(dates.size - 1, 0, -1):
+            tail = tail + raw[n]
+            rate.append(tail.copy())
+        rate.reverse()
+        kernels = IceKernels(
+            dates,
+            [SHGrid.from_array(ld, grid=model.grid) for ld in load_duals],
+            [SHGrid.from_array(th, grid=model.grid) for th in thickness],
+            SHGrid.from_array(baseline, grid=model.grid),
+            SHGrid.from_array(initial_sea_level, grid=model.grid),
+            instantaneous,
+            [SHGrid.from_array(d, grid=model.grid) for d in density],
+            [SHGrid.from_array(r, grid=model.grid) for r in rate],
+            itau_kernel,
+        )
+        derivatives = KernelDerivatives(
+            dates,
+            [SHGrid.from_array(th, grid=model.grid) for th in dthickness],
+            SHGrid.from_array(dinitial_sea_level, grid=model.grid),
+            d_itau_kernel,
+        )
+        return kernels, derivatives
+
+    def _second_order_continuous_sweep(
+        self,
+        dates,
+        measurement,
+        tangent,
+        *,
+        itau,
+        ocean_functions,
+        internal_states,
+        rotational_feedbacks,
+        rtol,
+    ) -> tuple[IceKernels, KernelDerivatives]:
+        """The continuous adjoint sweep carrying its own derivative along
+        v: the second-order adjoint equations of Yu et al. (2025),
+        discretised by the forward stepper as the first-order ones are.
+        The derivative state is stepped with the continuous drive of the
+        tangent-linear problem built from the adjoint trajectory, jumps at
+        each observation by v's perturbation of the inverse relaxation
+        times times the instantaneous strain, and the viscosity pairing is
+        differentiated with v's tangent-linear trajectory in place of the
+        forward one."""
+        dates = np.asarray(dates, dtype=float)
+        if dates.ndim != 1 or dates.size < 2 or np.any(np.diff(dates) >= 0.0):
+            raise ValueError(
+                "dates must be decreasing (kiloyears before present, the "
+                "past first), with at least two entries"
+            )
+        duals = _normalise_measurement(measurement, dates, self.model)
+        op = self.operator
+        model = self.model
+        parameters = model.parameters
+        if rotational_feedbacks is True:
+            self._assert_transverse_stable()
+        kyr = KYR / parameters.scales.factor(units.TIME)
+        C = self.state.ocean_function.data
+        water_density = parameters.water_density
+        g_surface = parameters.gravitational_acceleration
+        r2 = parameters.mean_sea_floor_radius**2
+        if ocean_functions is not None:
+            if len(ocean_functions) != dates.size:
+                raise ValueError("ocean_functions must give one grid per date node")
+            for grid in ocean_functions:
+                model.check_field(grid)
+
+        def C_at(node: int) -> np.ndarray:
+            return ocean_functions[node].data if ocean_functions is not None else C
+
+        def C_grid(node: int) -> Optional[SHGrid]:
+            return ocean_functions[node] if ocean_functions is not None else None
+
+        def grounded_at(node: int) -> np.ndarray:
+            return parameters.ice_density * (1.0 - C_at(node))
+
+        K = op.rheology.num_branches
+        ngll = op.material.mesh.ngll
+        trajectory = self._as_trajectory(internal_states, dates)
+        cursor = _TrajectoryCursor(self, trajectory, dates, self.scheme)
+        v_states = self._full_trajectory(tangent, dates, "tangent").states
+        ditau = (
+            self._check_itau(itau)
+            if itau is not None
+            else [np.zeros(op.material.mesh.r.shape) for _ in range(K)]
+        )
+        elastic_sle = self._sle_elastic()
+        psi_star = centrifugal_potential_operator(model).adjoint
+
+        def jump(m: _Duals, node: int):
+            avc = None
+            if rotational_feedbacks:
+                avc = np.zeros(3)
+                if m.angular_velocity_change is not None:
+                    avc = avc - g_surface * np.asarray(m.angular_velocity_change, float)
+                if m.potential_change is not None:
+                    avc = avc + g_surface * psi_star(m.potential_change)
+            zeta_u = None if m.displacement is None else -1.0 * m.displacement
+            zeta_phi = (
+                None if m.potential_change is None else -g_surface * m.potential_change
+            )
+            zeta_v = m.tangential_load(model)
+            xi_a, _, _, omega_a = elastic_sle.solve_generalised_equation(
+                self.state,
+                direct_load=m.relative_sea_level_change,
+                displacement_load=zeta_u,
+                gravitational_potential_load=zeta_phi,
+                tangential_load=zeta_v,
+                angular_momentum_change=avc,
+                ocean_function=C_grid(node),
+                rotational_feedbacks=rotational_feedbacks,
+                rtol=rtol,
+            )
+            direct = (
+                m.relative_sea_level_change.data
+                if m.relative_sea_level_change is not None
+                else np.zeros_like(C)
+            )
+            lam = model.expand_field(
+                SHGrid.from_array(
+                    direct + water_density * C_at(node) * xi_a.data,
+                    grid=model.grid,
+                    copy=False,
+                )
+            ).coeffs
+            psi_a = (
+                self._centrifugal(omega_a)
+                if rotational_feedbacks
+                else np.zeros_like(lam)
+            )
+            channels = [
+                None if zeta is None else model.expand_field(zeta).coeffs
+                for zeta in (zeta_u, zeta_phi, zeta_v)
+            ]
+            return xi_a, lam, psi_a, channels
+
+        def jump_strains(lam, psi_a, channels) -> dict[int, np.ndarray]:
+            """The strain of the instantaneous adjoint solution, per
+            degree, which jumps the adjoint internal variables over the
+            relaxation time (Yu et al. eq. 80) and their derivative by
+            v's perturbation of its inverse."""
+            lam_cols = self._columns(lam, self._to_mat_density)
+            psi_cols = self._columns(psi_a, self._to_mat_potential)
+            channel_cols = [
+                None if z is None else self._columns(z, self._to_mat_density)
+                for z in channels
+            ]
+            out = {}
+            for l in op.degrees:
+                deg = op.degree(l)
+                units_lv = op.unit_responses(None, 0.0, l)
+                x = (
+                    units_lv[:, 0][:, None] * lam_cols(l, 0.0)[None, :]
+                    + units_lv[:, 1][:, None] * psi_cols(l, 0.0)[None, :]
+                )
+                if any(cols is not None for cols in channel_cols):
+                    split = op.split_unit_responses(None, 0.0, l)
+                    for column, cols in enumerate(channel_cols):
+                        if cols is not None:
+                            x = x + split[:, column][:, None] * cols(l, 0.0)[None, :]
+                out[l] = deg.strain(x)
+            return out
+
+        def apply_jump(state: ViscoelasticState, strains, factors) -> None:
+            for l in state.degrees:
+                deg = op.degree(l)
+                for k in range(K):
+                    state.m[l][k] += factors[k][deg.e0 :][None, :, :, None] * strains[l]
+            state.invalidate()
+
+        def smooth_equilibrium(state: ViscoelasticState, node: int):
+            solutions = op.solve_elastic(state)
+            memory_u = self._coeffs(op.surface(solutions, "U"), self._to_nd_length)
+            memory_phi = self._coeffs(
+                op.surface(solutions, "phi"), self._to_nd_potential
+            )
+            moment = (
+                float(op.degree(0).moment_row @ solutions[0][:, 0]) * self._to_nd_moment
+            )
+            xi, _, _, omega = elastic_sle.solve_generalised_equation(
+                self.state,
+                displacement_response=memory_u,
+                gravitational_potential_response=memory_phi,
+                inertia_moment_change=moment,
+                ocean_function=C_grid(node),
+                rotational_feedbacks=rotational_feedbacks,
+                rtol=rtol,
+            )
+            sig = model.expand_field(
+                SHGrid.from_array(
+                    water_density * C_at(node) * xi.data, grid=model.grid, copy=False
+                )
+            ).coeffs
+            psi_new = (
+                self._centrifugal(omega) if rotational_feedbacks else np.zeros_like(sig)
+            )
+            return xi.data, sig, psi_new
+
+        vstate = op.zero_state(ncols=lambda l: 2 * (l + 1))
+        dstate = op.zero_state(ncols=lambda l: 2 * (l + 1))
+        sigma_c = np.zeros((2, model.lmax + 1, model.lmax + 1))
+        psi_c = np.zeros_like(sigma_c)
+        dsigma_c = np.zeros_like(sigma_c)
+        dpsi_c = np.zeros_like(sigma_c)
+        N = dates.size - 1
+        w_early = np.zeros(dates.size)
+        w_late = np.zeros(dates.size)
+        w_early[1:] = 0.5 * (dates[:-1] - dates[1:])
+        w_late[:-1] = 0.5 * (dates[:-1] - dates[1:])
+        per_ka = kyr * self._to_mat_time
+        itau_kernel = [np.zeros((op.material.mesh.nspec, ngll)) for _ in range(K)]
+        d_itau_kernel = [np.zeros((op.material.mesh.nspec, ngll)) for _ in range(K)]
+        pairing = (
+            r2
+            * self._to_nd_length
+            / (op.material.radius**2 * self._to_mat_density)
+            / op.material.surface_gravity
+        )
+
+        def accumulate_itau(node: int, weight: float) -> None:
+            """Both pairings at a node: the branch-weighted adjoint state
+            over itau against the forward d - m, and its derivative, with
+            the derivative state, v's tangent-linear trajectory and the
+            perturbation of itau each in their place."""
+            if weight == 0.0:
+                return
+            fwd = cursor.state(node)
+            tl = v_states[node]
+            for l in vstate.degrees:
+                deg = op.degree(l)
+                dm = fwd.cached_strain[l][None] - fwd.m[l]
+                vdm = tl.cached_strain[l][None] - tl.m[l]
+                weighted = deg.apply_weights(vstate.m[l])
+                dweighted = deg.apply_weights(dstate.m[l])
+                for k in range(K):
+                    itau_k = deg.itau[k]
+                    live = itau_k > 0.0
+                    inv = np.where(live, itau_k, 1.0)
+                    ratio = np.where(live, ditau[k][deg.e0 :] / inv, 0.0)
+                    g = (weighted[k] * dm[k]).sum(axis=(0, 3))
+                    itau_kernel[k][deg.e0 :] += weight * np.where(
+                        live, pairing * g / inv, 0.0
+                    )
+                    dg = (dweighted[k] * dm[k] + weighted[k] * vdm[k]).sum(
+                        axis=(0, 3)
+                    ) - ratio * g
+                    d_itau_kernel[k][deg.e0 :] += weight * np.where(
+                        live, pairing * dg / inv, 0.0
+                    )
+
+        lump_load: dict[int, np.ndarray] = {}
+        instantaneous: dict[float, SHGrid] = {}
+        density_late = [np.zeros_like(C) for _ in range(dates.size)]
+        density_early = [None] * dates.size
+        ddensity_late = [np.zeros_like(C) for _ in range(dates.size)]
+        ddensity_early = [None] * dates.size
+
+        def observe(node: int) -> None:
+            nonlocal sigma_c, psi_c, dsigma_c, dpsi_c
+            if node in duals:
+                xi_a, lam, psi_a, channels = jump(duals[node], node)
+                lump_load[node] = xi_a.data
+                instantaneous[float(dates[node])] = SHGrid.from_array(
+                    grounded_at(node) * xi_a.data, grid=model.grid
+                )
+                strains = jump_strains(lam, psi_a, channels)
+                apply_jump(vstate, strains, op.rheology.itau)
+                apply_jump(dstate, strains, ditau)
+                early, sigma_c, psi_c = smooth_equilibrium(vstate, node)
+                dearly, dsigma_c, dpsi_c = smooth_equilibrium(dstate, node)
+                if node > 0:
+                    density_early[node] = early
+                    ddensity_early[node] = dearly
+
+        observe(N)
+        accumulate_itau(N, per_ka * w_early[N])
+        for n in range(N, 0, -1):
+            dt = (dates[n - 1] - dates[n]) * kyr * self._to_mat_time
+            load_cols = self._columns(sigma_c, self._to_mat_density)
+            tide_cols = self._columns(psi_c, self._to_mat_potential)
+            # the adjoint state before the step, with its strains, is the
+            # start of the derivative state's drive
+            op.prime_strain(vstate, load=load_cols, tide=tide_cols)
+            before = vstate
+            step = op.start_step(
+                vstate, dt, scheme=self.scheme, load=load_cols, tide=tide_cols
+            )
+            sle = self._sle_for(dt)
+            memory_u = self._coeffs(step.memory_surface("U"), self._to_nd_length)
+            memory_phi = self._coeffs(step.memory_surface("phi"), self._to_nd_potential)
+            moment = step.inertia_moment()[0] * self._to_nd_moment
+            xi, _, _, omega = sle.solve_generalised_equation(
+                self.state,
+                displacement_response=memory_u,
+                gravitational_potential_response=memory_phi,
+                inertia_moment_change=moment,
+                ocean_function=C_grid(n - 1),
+                rotational_feedbacks=rotational_feedbacks,
+                rtol=rtol,
+            )
+            density_late[n - 1] = xi.data
+            sigma_c = model.expand_field(
+                SHGrid.from_array(
+                    water_density * C_at(n - 1) * xi.data, grid=model.grid, copy=False
+                )
+            ).coeffs
+            psi_c = (
+                self._centrifugal(omega)
+                if rotational_feedbacks
+                else np.zeros_like(sigma_c)
+            )
+            vstate, _ = step.finish(
+                load=self._columns(sigma_c, self._to_mat_density),
+                tide=self._columns(psi_c, self._to_mat_potential),
+            )
+            # the derivative state's step: the same reversed step, driven
+            # by v's perturbation through the adjoint trajectory
+            dstep = op.start_step(
+                dstate,
+                dt,
+                scheme=self.scheme,
+                load=self._columns(dsigma_c, self._to_mat_density),
+                tide=self._columns(dpsi_c, self._to_mat_potential),
+            )
+            dstep.add_memory(
+                self._first_order_drive("continuous", dt, before, vstate, ditau)
+            )
+            memory_u = self._coeffs(dstep.memory_surface("U"), self._to_nd_length)
+            memory_phi = self._coeffs(
+                dstep.memory_surface("phi"), self._to_nd_potential
+            )
+            moment = dstep.inertia_moment()[0] * self._to_nd_moment
+            dxi, _, _, domega = sle.solve_generalised_equation(
+                self.state,
+                displacement_response=memory_u,
+                gravitational_potential_response=memory_phi,
+                inertia_moment_change=moment,
+                ocean_function=C_grid(n - 1),
+                rotational_feedbacks=rotational_feedbacks,
+                rtol=rtol,
+            )
+            ddensity_late[n - 1] = dxi.data
+            dsigma_c = model.expand_field(
+                SHGrid.from_array(
+                    water_density * C_at(n - 1) * dxi.data, grid=model.grid, copy=False
+                )
+            ).coeffs
+            dpsi_c = (
+                self._centrifugal(domega)
+                if rotational_feedbacks
+                else np.zeros_like(dsigma_c)
+            )
+            dstate, _ = dstep.finish(
+                load=self._columns(dsigma_c, self._to_mat_density),
+                tide=self._columns(dpsi_c, self._to_mat_potential),
+            )
+            accumulate_itau(n - 1, per_ka * w_late[n - 1])
+            observe(n - 1)
+            accumulate_itau(n - 1, per_ka * w_early[n - 1])
+
+        def assemble(late, early, lumps):
+            late = [d * per_ka for d in late]
+            early = [None if d is None else d * per_ka for d in early]
+            node_duals = []
+            density_load = []
+            for n in range(dates.size):
+                e = early[n] if early[n] is not None else late[n]
+                node_duals.append(
+                    w_early[n] * e + w_late[n] * late[n] + lumps.get(n, 0.0)
+                )
+                density_load.append(
+                    (w_early[n] * e + w_late[n] * late[n]) / (w_early[n] + w_late[n])
+                )
+            raw = [grounded_at(n) * node_duals[n] for n in range(dates.size)]
+            baseline = -parameters.ice_density * (1.0 - C) * sum(node_duals)
+            thickness = list(raw)
+            thickness[0] = thickness[0] + baseline
+            initial_sea_level = water_density * sum(
+                (C_at(n) - C) * node_duals[n] for n in range(dates.size)
+            )
+            return node_duals, density_load, raw, baseline, thickness, initial_sea_level
+
+        load_duals, density_load, raw, baseline, thickness, initial_sea_level = (
+            assemble(density_late, density_early, lump_load)
+        )
+        _, _, _, _, dthickness, dinitial_sea_level = assemble(
+            ddensity_late, ddensity_early, {}
+        )
+        rate = []
+        tail = np.zeros_like(C)
+        for n in range(dates.size - 1, 0, -1):
+            tail = tail + raw[n]
+            rate.append(tail.copy())
+        rate.reverse()
+        kernels = IceKernels(
+            dates,
+            [SHGrid.from_array(ld, grid=model.grid) for ld in load_duals],
+            [SHGrid.from_array(t, grid=model.grid) for t in thickness],
+            SHGrid.from_array(baseline, grid=model.grid),
+            SHGrid.from_array(initial_sea_level, grid=model.grid),
+            instantaneous,
+            [
+                SHGrid.from_array(grounded_at(n) * density_load[n], grid=model.grid)
+                for n in range(dates.size)
+            ],
+            [SHGrid.from_array(r, grid=model.grid) for r in rate],
+            itau_kernel,
+        )
+        derivatives = KernelDerivatives(
+            dates,
+            [SHGrid.from_array(t, grid=model.grid) for t in dthickness],
+            SHGrid.from_array(dinitial_sea_level, grid=model.grid),
+            d_itau_kernel,
+        )
+        return kernels, derivatives
 
     def continuous_adjoint_ice_history(
         self,

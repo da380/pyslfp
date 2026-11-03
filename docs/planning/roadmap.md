@@ -46,21 +46,22 @@ arc-minutes by `tools/build_landlocked.py` and shipped as
   channel from a dyke, so bodies within 15 km of the open ocean are joined to
   it; a finer bedrock, or more stated channels, would settle them.
 
-## Operator wrappers for the viscoelastic adjoints
+## The viscoelastic operator
 
-The viscoelastic kernel drivers (`adjoint_ice_history`,
-`continuous_adjoint_ice_history`, `IceKernels`, `Measurement`,
-`ForwardTrajectory`, the decay-time functionals) are a computational layer. The
-inversion-facing surface is pygeoinf 2 `Operator` and `LinearOperator` objects
-wrapping them, as `FingerPrintOperator` wraps the elastic adjoint.
-The general operator, from the ice history, the initial sea level and the
-log viscosity to the responses, with frozen or migrating shorelines and the
-derivatives by the discrete or the continuous tangent-linear and adjoint
-problems, is planned in
-[viscoelastic_operator_plan.md](viscoelastic_operator_plan.md);
-`IceHistoryOperator` becomes its frozen-shoreline case with the other
-arguments fixed. Until it is built the drivers should be kept working and
-documented, but not grown into a public API that the operator would replace.
+`SeaLevelEvolutionOperator` is built, with its derivative and second
+derivative by the discrete and the continuous methods, as set out in
+[viscoelastic_operator_plan.md](viscoelastic_operator_plan.md); the kernel
+drivers (`adjoint_ice_history`, `continuous_adjoint_ice_history`,
+`IceKernels`, the decay-time functionals) are the computational layer under
+it. Two things remain. Under migrating shorelines the second derivative is
+that of the map with the ocean functions held, which omits the line
+distributions on the shorelines of Yu et al. (2025, eqs 112, 116 and 117);
+evaluating them needs the shoreline located on the grid, with the normal
+derivatives of the sea level and the thickness across it. And the 3D
+viscosity kernels about a radial model, the time integral of the pointwise
+contraction of the adjoint internal variables with the forward strain, which
+needs the forward and adjoint fields at every radius multiplied across
+degrees; they are kernels only, no forward map leaving the radial models.
 
 ## Glacial-cycle spin-up
 

@@ -38,7 +38,14 @@ from .operator import (
 )
 from .rheology import Rheology
 from .viscosity import LogViscositySpace
-from .weights import backward_euler_weight, exponential_trapezoid_weights
+from .weights import (
+    backward_euler_weight,
+    backward_euler_weight_derivative,
+    backward_euler_weight_second_derivative,
+    exponential_trapezoid_weight_derivatives,
+    exponential_trapezoid_weight_second_derivatives,
+    exponential_trapezoid_weights,
+)
 
 __all__ = [
     "DecayTimeFit",
@@ -61,6 +68,10 @@ __all__ = [
     "ViscoelasticState",
     "ViscoelasticStep",
     "backward_euler_weight",
+    "exponential_trapezoid_weight_second_derivatives",
+    "exponential_trapezoid_weight_derivatives",
+    "backward_euler_weight_second_derivative",
+    "backward_euler_weight_derivative",
     "exponential_trapezoid_weights",
     "maxwell_mantle",
     "prem_maxwell",

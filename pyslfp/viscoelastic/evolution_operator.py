@@ -10,9 +10,12 @@ a forward run; its derivative's forward action is the tangent-linear run and
 its adjoint the adjoint sweep, by the discrete or the continuous method, one
 run each and all three kernels from one sweep. Under frozen shorelines the
 initial sea level contributes nothing to a change, and the map is linear in
-the ice history; `fixing` holds arguments fixed by composition with an affine
-inclusion, and with the shorelines frozen and the other two fixed returns the
-linear `IceHistoryOperator`.
+the ice history; `fixing` holds
+arguments fixed by composition with an affine inclusion, and with the
+shorelines frozen and the other two fixed returns the linear
+`IceHistoryOperator`. The second derivative, the second-order tangent-linear
+run forwards and the second-order adjoint sweep backwards, gives pygeoinf the
+exact Hessian of any objective on the operator.
 
 The derivative holds the forward trajectory's ocean functions, which is exact
 in the continuum and, on the grid, the derivative of the affine piece the
@@ -174,6 +177,7 @@ class SeaLevelEvolutionOperator(Operator):
         self._rotational_feedbacks = rotational_feedbacks
         self._rtol = rtol
         self._basis = history_space.basis_matrix(dates)
+        self._cache: Optional[tuple] = None
         domain = DirectSum(
             [history_space, sea_level_space, viscosity_space], labels=ARGUMENTS
         )
@@ -256,6 +260,17 @@ class SeaLevelEvolutionOperator(Operator):
         return SeaLevelEvolution(operator, state, scheme=self._evolution.scheme)
 
     def _run(self, x) -> tuple[SeaLevelEvolution, list[SeaLevelSnapshot]]:
+        """The recorded run at a point, kept for the point last run at, so
+        that a linearisation and the second derivative at the same point
+        share one run."""
+        key = (id(x), hash(np.asarray(self.domain.to_components(x)).tobytes()))
+        if self._cache is not None and self._cache[0] == key:
+            return self._cache[1]
+        run = self._run_afresh(x)
+        self._cache = (key, run)
+        return run
+
+    def _run_afresh(self, x) -> tuple[SeaLevelEvolution, list[SeaLevelSnapshot]]:
         history, sea_level, chi = x
         thickness = self.thickness_at_dates(history)
         evolution = self._evolution_at(self._state(thickness[0], sea_level), chi)
@@ -356,6 +371,106 @@ class SeaLevelEvolutionOperator(Operator):
 
         return LinearOperator.from_callables(
             domain, self.codomain, forward, adjoint=adjoint
+        )
+
+    def _tangent(self, evolution, snapshots, v, rheology) -> tuple:
+        """A direction's tangent-linear run about a recorded run, recorded,
+        and its perturbation of the inverse relaxation times."""
+        delta_history, delta_sea_level, delta_chi = v
+        nodal = self.viscosity_space.nodal(delta_chi)
+        ditau = [-itau * values for itau, values in zip(rheology.itau, nodal)]
+        tangent, _ = evolution.tangent_linear_ice_history(
+            self._dates,
+            snapshots,
+            ice_thickness=self.thickness_at_dates(delta_history),
+            initial_sea_level=delta_sea_level,
+            itau=ditau,
+            method=self._method,
+            space=self._response_space,
+            rotational_feedbacks=self._rotational_feedbacks,
+            rtol=self._rtol,
+            record=True,
+        )
+        return tangent, nodal, ditau
+
+    def _second_derivative(self, x, v) -> LinearOperator:
+        """F''(x)[v, .]: forwards the second-order tangent-linear run with
+        v's and u's tangent-linear runs, backwards the second-order adjoint
+        sweep along v, both about the recorded run at x. The log
+        parameterisation of the viscosity contributes its own second
+        variation, itau delta_u chi delta_v chi, and the derivative of
+        the chain rule from the inverse relaxation times."""
+        evolution, snapshots = self._run(x)
+        rheology = evolution.operator.rheology
+        tangent_v, nodal_v, ditau_v = self._tangent(evolution, snapshots, v, rheology)
+        history_space = self.history_space
+        sea_level_space = self.sea_level_space
+        viscosity_space = self.viscosity_space
+        ocean_functions = (
+            [snap.ocean_function for snap in snapshots]
+            if self._shorelines == "migrating"
+            else None
+        )
+
+        def forward(u) -> tuple:
+            tangent_u, nodal_u, ditau_u = self._tangent(
+                evolution, snapshots, u, rheology
+            )
+            second, _ = evolution.second_order_tangent_linear_ice_history(
+                self._dates,
+                snapshots,
+                tangent_u,
+                tangent_v,
+                itau_u=ditau_u,
+                itau_v=ditau_v,
+                itau_uv=[
+                    itau * a * b for itau, a, b in zip(rheology.itau, nodal_u, nodal_v)
+                ],
+                method=self._method,
+                space=self._response_space,
+                rotational_feedbacks=self._rotational_feedbacks,
+                rtol=self._rtol,
+            )
+            return self._responses(second)
+
+        def adjoint(duals: Sequence[GRDResponse]) -> tuple:
+            kernels, derivatives = evolution.second_order_adjoint_ice_history(
+                self._dates,
+                dict(zip(self._observation_dates, duals)),
+                tangent_v,
+                itau=ditau_v,
+                ocean_functions=ocean_functions,
+                internal_states=snapshots,
+                rotational_feedbacks=self._rotational_feedbacks,
+                rtol=self._rtol,
+                method=self._method,
+            )
+            field_space = history_space.field_space
+            thickness = np.stack(
+                [field_space.to_components(d) for d in derivatives.thickness]
+            )
+            history = history_space.from_components(
+                history_space.solve_gram((self._basis.T @ thickness).reshape(-1))
+            )
+            sea_level = sea_level_space.from_components(
+                sea_level_space.solve_gram(
+                    sea_level_space.to_components(derivatives.initial_sea_level)
+                )
+            )
+            # the gradient in chi is -itau K; along v, itau moves by
+            # -itau delta_v chi and K by its derivative
+            chi = viscosity_space.gradient(
+                [
+                    itau * a * k - itau * dk
+                    for itau, a, k, dk in zip(
+                        rheology.itau, nodal_v, kernels.itau, derivatives.itau
+                    )
+                ]
+            )
+            return (history, sea_level, chi)
+
+        return LinearOperator.from_callables(
+            self.domain, self.codomain, forward, adjoint=adjoint
         )
 
     # -- fixing arguments --------------------------------------------------

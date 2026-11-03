@@ -4757,4 +4757,4 @@ interactive = ["pyqt6"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12"
-content-hash = "26efcb4775ec73e50e3d0a874a1fbc857e289d54d3e3ad7c2ea0cfbef3f7521d"
+content-hash = "f0fd81806c7a6f33f83b70d694de261d2fffde278f74324c224ab2c847bf98a5"

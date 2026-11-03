@@ -174,9 +174,10 @@ the derivative together. The derivative is a `LinearOperator` on the domain:
   level kernel onto X_S, and the log-viscosity kernels onto X_chi through the
   transpose of nodal evaluation.
 
-With `method="continuous"` the ice kernel's representer comes from the
-distributional view, the density integrated against the time basis and each
-delta evaluating it, rather than from the per-node duals.
+With either method the ice kernel's representer is built from the per-node
+duals, which for the continuous adjoint are the density under the date
+quadrature plus the lumps: integrating the density against the time basis
+by the same quadrature is the same sum.
 
 The discrete pair are exact transposes, and the derivative is exact for the
 computed map. The continuous pair are each a discretisation of the continuum
@@ -188,11 +189,11 @@ resolution diagnostic that the two adjoints already provide.
 Fixing arguments: `operator.fixing(initial_sea_level=..., log_viscosity=...)`,
 or any subset, returns the operator on the remaining arguments, built by
 composition with the affine inclusion, so its derivatives follow by the chain
-rule. Under frozen shorelines with chi fixed the result is a genuine
-`LinearOperator` on X_I, not an operator whose derivative is constant, so
-that pygeoinf's linear machinery applies; this is `IceHistoryOperator`, which
-becomes this special case. It is new in 4.0 and unreleased, so it changes
-without a deprecation.
+rule. Under frozen shorelines with S_0 and chi fixed and the discrete method
+the result is a genuine `LinearOperator` on X_I, `IceHistoryOperator`, whose
+adjoint is exact, so that pygeoinf's linear machinery applies; with the
+continuous method, whose adjoint is a transpose only to the order of the
+scheme, the general form is kept.
 
 ## Second derivatives
 
@@ -330,12 +331,11 @@ multiplied across degrees.
 
 ## Open questions
 
-- The class's name. `SeaLevelEvolutionOperator`, after the driver it wraps,
-  as `FingerPrintOperator` wraps the fingerprint, is the proposal.
-- The default method. pygeoinf's factorisations of an assembled normal
-  operator assume an exact adjoint, which only the discrete pair gives; the
-  continuous pair's normal operator is symmetric only to the order of the
-  stepping. The proposal is `"discrete"` by default, with `"continuous"` the
-  choice for a resolved run.
-- How the frozen ocean function is given: a prescribed C_0, or a reference
-  `EarthState` whose ocean function is taken.
+Settled: the class is `SeaLevelEvolutionOperator`, after the driver it
+wraps, as `FingerPrintOperator` wraps the fingerprint; the default method is
+`"discrete"`, since pygeoinf's factorisations of an assembled normal operator
+assume an exact adjoint, which only the discrete pair gives, with
+`"continuous"` the choice for a resolved run; and the frozen ocean function
+is the evolution's background state's, the state also supplying the `land`
+mask, with the initial sea level and the thickness at the first date taken
+from the arguments.

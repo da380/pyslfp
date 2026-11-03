@@ -151,13 +151,19 @@ responses along perturbations of the ice history, the initial sea level and
 the inverse relaxation times, about a recorded forward run, frozen or
 migrating, by the forward mode of the time-stepped map (`method="discrete"`,
 the transpose of `adjoint_ice_history`) or by the continuous tangent-linear
-problem (`method="continuous"`).
+problem (`method="continuous"`). `SeaLevelEvolutionOperator`
+(`pyslfp.viscoelastic`): the evolution as a pygeoinf `Operator` from the ice
+history, the initial sea level and the log viscosity to the responses at
+observation dates, under frozen or migrating shorelines, with its derivative
+by either method, one run forwards and one sweep backwards; `fixing` holds
+arguments fixed by composition, and gives `IceHistoryOperator`, the linear
+case, under frozen shorelines with the other two fixed.
 
 ## Planned work still to land
 
-- The rest of the scope set with the port: the viscoelastic operators beyond
-  `IceHistoryOperator` (the migrating-shoreline map, which is nonlinear, and
-  the viscosity kernels), planetmodel 1.4's plots, the priors layer, and
+- The rest of the scope set with the port: the second derivative of
+  `SeaLevelEvolutionOperator` (the second-order tangent-linear and adjoint
+  problems), planetmodel 1.4's plots, the priors layer, and
   time-dependent model spaces for the set-ups' components, on
   `FieldHistorySpace`, which moves onto pygeoinf's tensor products of
   coordinate spaces when they land.

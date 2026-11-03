@@ -3,7 +3,9 @@ The ice history as the argument of a linear operator, and its Sobolev kernels.
 
 `IceHistoryOperator` maps an ice thickness history, a vector of a
 `FieldHistorySpace`, to the responses at a set of observation dates, under
-frozen shorelines, where the map is linear. The forward reads the history at
+frozen shorelines, where the map is linear: it is `SeaLevelEvolutionOperator`
+with the initial sea level and the viscosity fixed, as a `LinearOperator`
+whose adjoint is exact. The forward reads the history at
 the run's dates and runs `SeaLevelEvolution.run_ice_history`. The adjoint
 passes the duals of the responses, as measurements, to the discrete adjoint
 `SeaLevelEvolution.adjoint_ice_history`, whose thickness duals d_n satisfy

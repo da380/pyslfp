@@ -28,6 +28,7 @@ from .evolution import (
     SeaLevelSnapshot,
     calibrate_initial_sea_level,
 )
+from .evolution_operator import SeaLevelEvolutionOperator
 from .ice_history import IceHistoryOperator
 from .operator import (
     SCHEMES,
@@ -49,6 +50,7 @@ __all__ = [
     "Rheology",
     "LogViscositySpace",
     "IceHistoryOperator",
+    "SeaLevelEvolutionOperator",
     "IceKernels",
     "InitialSeaLevelCalibration",
     "Measurement",

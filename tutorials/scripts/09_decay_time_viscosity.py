@@ -166,7 +166,10 @@ ax.set_title("Post-melt emergence at the cap's centre")
 #
 # $$\delta\tau_d = \int k(r)\, \delta(\ln\eta)(r)\, dr,$$
 #
-# sampled at the GLL nodes and plotted against depth. Its integrals over
+# drawn against radius with `plot_profile`, which takes a nodal array on the
+# material's mesh and draws it layer by layer, as planetmodel draws the
+# model's own fields, with a line across each discontinuity. Beside it the
+# viscosity profile itself, `plot_viscosity`. The kernel's integrals over
 # the two mantle regions, quoted below, are the responses to uniform
 # fractional viscosity changes there.
 
@@ -178,17 +181,20 @@ measure = mesh.jac[:, None] * mesh.w[None, :]
 km = parameters.length_scale / 1e3
 density_r = log_eta_nodal / measure / km  # kyr per d(ln eta) per km
 
-node_depth = (mesh.r.max() - mesh.r) * km
-depth_km = node_depth.ravel()
-order = np.argsort(depth_km)
+relaxing = rheology.itau[0] > 0.0
+mantle = [int(i) for i in np.unique(mesh.layer) if relaxing[mesh.layer == i].all()]
 
-fig, ax = plt.subplots(figsize=(10, 6))
-mantle = depth_km[order] < 2900.0
-ax.plot(depth_km[order][mantle], density_r.ravel()[order][mantle])
-ax.axhline(0.0, color="black", linewidth=0.5)
-ax.set_xlabel("Depth (km)")
-ax.set_ylabel("d(decay time) / d(ln eta) (kyr per km)")
-ax.set_title("Viscosity sensitivity of the decay time")
+fig, (ax_eta, ax_k) = plt.subplots(1, 2, figsize=(10, 6), sharey=True)
+sl.plot_viscosity(ax_eta, rheology, scale=km)
+ax_eta.set_xlabel("Viscosity (Pa s)")
+ax_eta.set_ylabel("Radius (km)")
+sl.plot_profile(ax_k, rheology.material, density_r, layers=mantle, scale=km)
+ax_k.axvline(0.0, color="black", linewidth=0.5)
+ax_k.set_xlabel("d(decay time) / d(ln eta) (kyr per km)")
+ax_k.set_ylim(mesh.r[relaxing].min() * km, mesh.r.max() * km)
+fig.suptitle("Viscosity sensitivity of the decay time")
+
+node_depth = (mesh.r.max() - mesh.r) * km
 
 upper = float(np.sum(log_eta_nodal[(node_depth > 77.0) & (node_depth < 670.0)]))
 lower = float(np.sum(log_eta_nodal[(node_depth >= 670.0) & (node_depth < 2900.0)]))

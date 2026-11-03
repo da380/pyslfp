@@ -2,14 +2,14 @@
 
 One release carries the port to pygeoinf 2 and all the planned work below.
 pyslfp's own interface breaks, so the major number changes. This file keeps
-the list of breaking changes current; it becomes the "Changes in 4.0" page of
-the documentation, each entry giving the old form and the new.
+the list of breaking changes current; docs/source/changes.rst is the
+"Changes in 4.0" page built from it, each entry giving the old form and the new.
 
 ## Breaking changes so far
 
 - **pygeoinf 2.** The spaces, operators and measures pyslfp returns are
-  pygeoinf 2 objects; the minimum versions are `pygeoinf>=2.1.2` and
-  `planetmodel>=1.4.1`. The name map is in
+  pygeoinf 2 objects; the minimum versions are `pygeoinf>=2.2.0` and
+  `planetmodel>=1.5.0`. The name map is in
   [pygeoinf_v2_port.md](pygeoinf_v2_port.md).
 - **The fingerprint operator's response.** `FingerPrintOperator` maps a load
   to a `GRDResponse` of a `GRDSpace` (`pyslfp.core.response`), not to the
@@ -172,7 +172,12 @@ height, under which the ocean function is differentiable, with
 `effective_ocean_function` and `flotation_curvature` the fields the first and
 second derivatives of the loads see; the derivatives and the Hessian of a
 migrating run are then complete, the shorelines' terms included, where the
-sharp rule holds the ocean functions. The package exposes `__version__`.
+sharp rule holds the ocean functions. The package exposes `__version__`. Radial profiles on a material's mesh
+(`pyslfp.plotting.profiles`): `plot_profile` draws a nodal array, a kernel
+say, through planetmodel 1.5's profile plots, one segment per layer with the
+joiners and boundary guides of the model's own fields; `plot_viscosity` a
+rheology's viscosity in pascal seconds on a logarithmic axis, and
+`plot_log_viscosity` a vector of a `LogViscositySpace`.
 
 ## Planned work still to land
 
@@ -180,6 +185,5 @@ The operators of the release's modules carry typed generics
 (`LinearOperator[SHGrid, GRDResponse]`, `Operator[tuple, tuple]`), with
 `Any` where a space is the caller's.
 
-- The rest of the scope set with the port: planetmodel 1.5's plots and the
-  priors layer.
+- The priors layer, after the release.
 

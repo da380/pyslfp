@@ -32,6 +32,8 @@ from .plotting import (
     plot,
     plot_displacement,
     plot_points,
+    plot_profile,
+    plot_viscosity,
     create_map_figure,
     plot_coastline,
     subplots,
@@ -76,6 +78,8 @@ __all__ = [
     # Visualization
     "plot",
     "plot_displacement",
+    "plot_profile",
+    "plot_viscosity",
     "plot_points",
     "create_map_figure",
     "plot_coastline",

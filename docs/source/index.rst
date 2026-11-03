@@ -23,7 +23,8 @@ and GNSS, for Bayesian inversions built on pygeoinf_; and ice histories,
 regional masks and plotting.
 
 :doc:`theory` summarises the physics and methods, :doc:`numerics` their
-discretisation and cost, and :doc:`units` the non-dimensionalisation. The
+discretisation and cost, :doc:`units` the non-dimensionalisation and
+:doc:`changes` what changed in 4.0. The
 source is on GitHub_, and the package is on PyPI_.
 
 .. _planetmodel: https://github.com/da380/planetmodel
@@ -213,6 +214,7 @@ recorded on the `Zenodo record <https://zenodo.org/records/19494463>`_.
    theory
    numerics
    units
+   changes
 
 .. toctree::
    :maxdepth: 2

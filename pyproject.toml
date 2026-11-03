@@ -23,7 +23,7 @@ dependencies = [
     # section of the README.
     "ducc0>=0.35",
     "threadpoolctl>=3.0",
-    "planetmodel[netcdf] (>=1.4.1,<2.0.0)",
+    "planetmodel[netcdf] (>=1.5.0,<2.0.0)",
 ]
 
 [project.optional-dependencies]

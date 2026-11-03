@@ -167,10 +167,8 @@ a direction, and the scheme weights gain their second derivatives.
 ## Planned work still to land
 
 - The rest of the scope set with the port: planetmodel 1.4's plots, the
-  priors layer, and
-  time-dependent model spaces for the set-ups' components, on
-  `FieldHistorySpace`, which moves onto pygeoinf's tensor products of
-  coordinate spaces when they land.
+  priors layer, and time-dependent model spaces for the set-ups' components,
+  on `FieldHistorySpace`.
 - Typed generics (`DiagonalMetricSpace[GRDResponse]`,
   `LinearOperator[SHGrid, GRDResponse]`) in code written or touched for the
   release.

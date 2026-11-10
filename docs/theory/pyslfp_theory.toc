@@ -1,0 +1,50 @@
+\contentsline {section}{\numberline {1}Overview}{2}{section.1}%
+\contentsline {section}{\numberline {2}Conventions and non-dimensionalisation}{3}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Spherical harmonics}{3}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}Signs}{3}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}Scales}{4}{subsection.2.3}%
+\contentsline {section}{\numberline {3}Generalised Love numbers}{4}{section.3}%
+\contentsline {subsection}{\numberline {3.1}Load channels}{4}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}Reciprocity}{5}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}Conventional numbers}{5}{subsection.3.3}%
+\contentsline {subsection}{\numberline {3.4}Degrees zero and one}{6}{subsection.3.4}%
+\contentsline {subsection}{\numberline {3.5}Axial numbers}{6}{subsection.3.5}%
+\contentsline {subsection}{\numberline {3.6}The table}{7}{subsection.3.6}%
+\contentsline {section}{\numberline {4}The radial problem at degree $\ell $}{7}{section.4}%
+\contentsline {subsection}{\numberline {4.1}The bilinear form}{7}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}Forcings}{8}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}Degrees zero and one}{8}{subsection.4.3}%
+\contentsline {subsection}{\numberline {4.4}Discretisation}{8}{subsection.4.4}%
+\contentsline {subsection}{\numberline {4.5}Sub-mesh and graded mesh}{9}{subsection.4.5}%
+\contentsline {section}{\numberline {5}The sea level equation}{9}{section.5}%
+\contentsline {subsection}{\numberline {5.1}The linear equation}{9}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.2}Fixed-point structure}{9}{subsection.5.2}%
+\contentsline {subsection}{\numberline {5.3}Anderson acceleration}{10}{subsection.5.3}%
+\contentsline {subsection}{\numberline {5.4}The generalised equation and the adjoint}{10}{subsection.5.4}%
+\contentsline {subsection}{\numberline {5.5}The nonlinear equation with migrating shorelines}{11}{subsection.5.5}%
+\contentsline {section}{\numberline {6}Rotational feedback}{11}{section.6}%
+\contentsline {subsection}{\numberline {6.1}Centrifugal potential}{11}{subsection.6.1}%
+\contentsline {subsection}{\numberline {6.2}Liouville equation and MacCullagh's formula}{12}{subsection.6.2}%
+\contentsline {subsection}{\numberline {6.3}The trace}{12}{subsection.6.3}%
+\contentsline {subsection}{\numberline {6.4}Closed-form fixed points}{12}{subsection.6.4}%
+\contentsline {subsection}{\numberline {6.5}Rotational stability and the choice of moments}{13}{subsection.6.5}%
+\contentsline {section}{\numberline {7}Viscoelastic loading}{13}{section.7}%
+\contentsline {subsection}{\numberline {7.1}Rheology and internal variables}{13}{subsection.7.1}%
+\contentsline {subsection}{\numberline {7.2}The degree-basis scalars}{14}{subsection.7.2}%
+\contentsline {subsection}{\numberline {7.3}Quasi-static equilibrium and the memory force}{14}{subsection.7.3}%
+\contentsline {subsection}{\numberline {7.4}Time stepping}{14}{subsection.7.4}%
+\contentsline {subsection}{\numberline {7.5}Coupling to the sea level equation}{15}{subsection.7.5}%
+\contentsline {subsection}{\numberline {7.6}Ice histories and shorelines}{15}{subsection.7.6}%
+\contentsline {section}{\numberline {8}Sensitivity kernels}{15}{section.8}%
+\contentsline {subsection}{\numberline {8.1}Objective functionals and the adjoint problem}{15}{subsection.8.1}%
+\contentsline {subsection}{\numberline {8.2}The discrete adjoint of a step}{16}{subsection.8.2}%
+\contentsline {subsection}{\numberline {8.3}The continuous adjoint}{16}{subsection.8.3}%
+\contentsline {subsection}{\numberline {8.4}The ice kernel and its views}{17}{subsection.8.4}%
+\contentsline {subsection}{\numberline {8.5}The initial sea level}{17}{subsection.8.5}%
+\contentsline {subsection}{\numberline {8.6}Relaxation times and viscosity}{17}{subsection.8.6}%
+\contentsline {subsection}{\numberline {8.7}The tangent-linear problem}{18}{subsection.8.7}%
+\contentsline {subsection}{\numberline {8.8}Second derivatives}{20}{subsection.8.8}%
+\contentsline {paragraph}{What holding the shorelines omits.}{20}{section*.2}%
+\contentsline {paragraph}{The smoothed flotation rule.}{21}{section*.3}%
+\contentsline {subsection}{\numberline {8.9}Decay times}{21}{subsection.8.9}%
+\contentsline {section}{\numberline {9}The initial sea level}{22}{section.9}%

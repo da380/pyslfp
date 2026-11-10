@@ -137,7 +137,7 @@ def pairing(kernels, u):
     if u["sea_level"] is not None:
         total += pair(kernels.initial_sea_level, u["sea_level"])
     if u["itau"] is not None:
-        total += float(np.sum(kernels.itau[0] * u["itau"][0]))
+        total += material.volume_pairing(kernels.itau[0], u["itau"][0])
     return total
 
 

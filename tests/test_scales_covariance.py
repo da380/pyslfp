@@ -153,9 +153,14 @@ def _si_outputs(body, scheme):
         out[f"{name} load duals"] = (
             np.stack([k.data for k in kernels.load_duals]) * load_si
         )
-        # J is dimensionless by construction; the kernel pairs with
-        # d(itau) in the scheme's inverse time
-        out[f"{name} itau"] = kernels.itau[0] * scales.factor(units.TIME)
+        # J is dimensionless by construction; the kernel is a density
+        # per unit of d(itau) in the scheme's inverse time and per unit
+        # of the scheme's volume
+        out[f"{name} itau"] = (
+            kernels.itau[0]
+            * scales.factor(units.TIME)
+            / scales.factor(units.LENGTH) ** 3
+        )
     return out
 
 

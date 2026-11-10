@@ -7,9 +7,12 @@ The formulation follows Al-Attar & Tromp (2014), internal variables
 in the degree basis; the time-stepping algebra is shared with the
 AdGIA library so the two can benchmark one another.  The kernel
 drivers are a computational layer: they return kernels as plain grids
-and nodal arrays.  `IceHistoryOperator` is the inversion-facing form
-of the frozen-shoreline map, a pygeoinf operator on a space of ice
-histories, whose adjoint gives the kernels as Riesz representers.
+on the surface and, for the relaxation times, as densities per unit
+volume sampled at the radial mesh's nodes, which pair with a
+perturbation through `Material.volume_pairing`.  `IceHistoryOperator`
+is the inversion-facing form of the frozen-shoreline map, a pygeoinf
+operator on a space of ice histories, whose adjoint gives the kernels
+as Riesz representers.
 """
 
 from .earth_models import maxwell_mantle, prem_maxwell, viscoelastic_earth

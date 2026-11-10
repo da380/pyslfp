@@ -14,7 +14,10 @@ density and its radial derivative, gravity, the fluid flag of every
 element and the moduli, all in the model's units with the model's G.
 It refuses a mesh that does not span the whole model and a model whose
 surface is fluid, since the loaded surface must be solid and the mass
-below it must be the model's.
+below it must be the model's.  It also carries the volume measure of
+its mesh, the weights through which a sensitivity kernel, a density per
+unit volume sampled at the nodes, pairs with a perturbation of a radial
+parameter (`volume_weights`, `volume_pairing`, `kernel_samples`).
 """
 
 from __future__ import annotations
@@ -212,6 +215,105 @@ class Material:
     def scales(self) -> Scales:
         """The model's scales, carried to the Love numbers."""
         return self.model.scales
+
+    # -- the volume measure --------------------------------------------------
+
+    @property
+    def volume_weights(self) -> np.ndarray:
+        """The volume weight W of every node, shape (nspec, ngll):
+
+            W = 4 pi r^2 w jac,
+
+        with w the node's Gauss-Lobatto-Legendre weight on the reference
+        element and jac the element's Jacobian, so that sum W f(r) is
+        the quadrature of the volume integral 4 pi int f(r) r^2 dr of a
+        function of radius.  A node shared by two elements carries a
+        weight in each; a node at the centre has weight zero.  In the
+        material's units of volume."""
+        mesh = self.mesh
+        return 4.0 * np.pi * mesh.r**2 * mesh.w[None, :] * mesh.jac[:, None]
+
+    def volume_pairing(self, kernel: ArrayLike, direction: ArrayLike) -> float:
+        """The change of an objective under a perturbation of a radial
+        parameter, from the parameter's sensitivity kernel.
+
+        A kernel with respect to a parameter of the Earth, such as
+        `IceKernels.itau` of the viscoelastic adjoints, is a density per
+        unit volume held as its samples K(r) at the nodes: with
+        delta(r) the perturbation of the parameter,
+
+            dJ = int K delta dV = 4 pi int K(r) delta(r) r^2 dr
+               ~ sum W K delta,
+
+        W the `volume_weights`.  Neither the r^2 nor the 4 pi is in the
+        kernel: both belong to the volume measure.  For a kernel of a
+        discrete adjoint and a perturbation given by its nodal values,
+        the sum is the exact derivative of the discrete model; for a
+        smooth perturbation it is the quadrature of the integral.
+
+        Args:
+            kernel: The kernel's samples, shape (nspec, ngll).
+            direction: The perturbation's nodal values, of that shape or
+                broadcastable to it (a constant gives the kernel's
+                volume integral).
+
+        Returns:
+            sum W K delta, in the objective's units.
+
+        Raises:
+            ValueError: If the kernel is not of the mesh's nodal shape,
+                or the direction does not broadcast to it.
+        """
+        weights = self.volume_weights
+        kernel = np.asarray(kernel)
+        if kernel.shape != weights.shape:
+            raise ValueError(
+                f"the kernel has shape {kernel.shape}, the mesh's nodes "
+                f"{weights.shape}"
+            )
+        direction = np.broadcast_to(np.asarray(direction), weights.shape)
+        return float(np.sum(weights * kernel * direction))
+
+    def kernel_samples(self, gradient: ArrayLike) -> np.ndarray:
+        """A kernel's samples from the gradient with respect to the nodal
+        values of a parameter.
+
+        The gradient entry of a node, the derivative of the objective
+        with respect to the parameter's value there, is the kernel times
+        the node's volume weight, G = W K (`volume_pairing`), and the
+        kernel is G / W.  A node without volume, at the centre, has a
+        zero gradient entry and no sample of its own: its entry is not
+        read, and its sample is the value there of the polynomial
+        through the element's other nodes.
+
+        Args:
+            gradient: The gradient entries, shape (nspec, ngll).
+
+        Returns:
+            The kernel's samples, a new array of that shape.
+
+        Raises:
+            ValueError: If the gradient is not of the mesh's nodal shape.
+        """
+        weights = self.volume_weights
+        gradient = np.asarray(gradient, dtype=float)
+        if gradient.shape != weights.shape:
+            raise ValueError(
+                f"the gradient has shape {gradient.shape}, the mesh's nodes "
+                f"{weights.shape}"
+            )
+        live = weights > 0.0
+        out = np.where(live, gradient / np.where(live, weights, 1.0), 0.0)
+        # the Lagrange basis of the element's live nodes, at the dead one
+        xi = self.mesh.xi
+        for e, i in zip(*np.nonzero(~live)):
+            nodes = np.flatnonzero(live[e])
+            basis = [
+                np.prod([(xi[i] - xi[q]) / (xi[p] - xi[q]) for q in nodes if q != p])
+                for p in nodes
+            ]
+            out[e, i] = np.dot(basis, out[e, nodes])
+        return out
 
     def __repr__(self) -> str:
         kind = "complex" if self.is_complex else "real"

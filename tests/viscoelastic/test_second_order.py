@@ -40,8 +40,10 @@ def _direction(earth, rng, dates, *, sea_level=True, viscosity=True):
 earth_mesh_shape = None  # set by the fixture-using helpers below
 
 
-def _pairing(earth, kernels, direction):
-    """A kernel object paired with a direction, in every argument."""
+def _pairing(material, earth, kernels, direction):
+    """A kernel object paired with a direction, in every argument: the
+    surface fields by int . dS, the relaxation-time kernel by the volume
+    pairing."""
     total = sum(
         _pair(earth, kernels.thickness[n], direction["ice"][n])
         for n in range(len(direction["ice"]))
@@ -49,7 +51,7 @@ def _pairing(earth, kernels, direction):
     if direction["sea_level"] is not None:
         total += _pair(earth, kernels.initial_sea_level, direction["sea_level"])
     if direction["itau"] is not None:
-        total += float(np.sum(kernels.itau[0] * direction["itau"][0]))
+        total += material.volume_pairing(kernels.itau[0], direction["itau"][0])
     return total
 
 
@@ -157,7 +159,7 @@ def test_the_derivatives_match_differences_of_the_gradient(setting):
         _, derivatives = evolution.second_order_adjoint_ice_history(
             DATES, measurement, tangent, itau=v["itau"], internal_states=snapshots
         )
-        predicted = _pairing(earth, derivatives, u)
+        predicted = _pairing(material, earth, derivatives, u)
 
         def gradient_at(eps):
             moved = SeaLevelEvolution(
@@ -169,7 +171,7 @@ def test_the_derivatives_match_differences_of_the_gradient(setting):
             kernels = moved.adjoint_ice_history(
                 DATES, measurement, internal_states=snaps
             )
-            return _pairing(earth, kernels, u)
+            return _pairing(material, earth, kernels, u)
 
         fd = {
             eps: (gradient_at(eps) - gradient_at(-eps)) / (2.0 * eps)
@@ -209,8 +211,8 @@ def test_the_hessian_is_symmetric_and_adjoint_to_the_second_order_run(
             rtol=1e-12,
         )
         results[name] = derivatives
-    hu_w = _pairing(earth, results["u"], w)
-    hw_u = _pairing(earth, results["w"], u)
+    hu_w = _pairing(material, earth, results["u"], w)
+    hw_u = _pairing(material, earth, results["w"], u)
     assert abs(hu_w - hw_u) < 1e-9 * abs(hu_w)
     # the second-order run along (u, w) paired with the measurement
     second, _ = evolution.second_order_tangent_linear_ice_history(
@@ -339,7 +341,7 @@ def test_the_continuous_second_order_adjoint_converges(setting):
                     _pair(earth, derivatives.thickness[n], u["ice"][n])
                     for n in range(npts)
                 ),
-                float(np.sum(derivatives.itau[0] * u["itau"][0])),
+                material.volume_pairing(derivatives.itau[0], u["itau"][0]),
                 _pair(earth, g, _sea_level(second[-1])),
             )
         discrete, continuous = results["discrete"], results["continuous"]

@@ -189,6 +189,15 @@ resolution of the forward run (:doc:`theory`). At half-kiloyear steps on a
 two-layer Maxwell PREM it is under one per cent for the ice kernels of tutorial
 8 and a few per cent for the viscosity kernel of tutorial 9.
 
+The viscosity kernels are densities per unit volume sampled at the nodes of the
+radial mesh (:doc:`theory`), so they converge as functions of radius as the
+mesh is refined. On the homogeneous test body the relaxation-time kernel on 20
+elements of five nodes and on 10 elements of seven differs from that on 50
+elements of five by :math:`2.5\times10^{-7}` and :math:`6.4\times10^{-9}` of
+its size in the volume-weighted :math:`L^2` norm, while the gradient entries
+with respect to the nodal values, which carry each mesh's quadrature weights,
+differ at order one.
+
 Kernels have the regularity of the measurements that drive them. A measurement
 patch with a sharp edge rings through every relaxation mode at a finite
 truncation, so patches should be tapered in degree, as the tutorials do.
@@ -362,7 +371,9 @@ than to stored outputs:
   shorelines;
 * dot-product tests of every adjoint, gradient identities for the kernels at
   machine precision, and central finite differences converging at second order
-  about migrating-shoreline trajectories;
+  about migrating-shoreline trajectories; the viscosity kernels paired with a
+  perturbation through the volume weights, and compared as functions of radius
+  across radial meshes of different resolution and order;
 * the GNSS frame: the Helmert design against the transformation computed in
   three dimensions, the translation and scale against their fields sampled at
   the stations, and the frame-invariant posterior against the nuisance

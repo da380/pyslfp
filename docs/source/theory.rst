@@ -546,6 +546,47 @@ continuous one integrates the adjoint internal variables against the forward
 scalars. ``IceKernels.viscosity`` maps them to viscosity through
 :math:`\partial\tau^{-1}/\partial\eta = -\tau^{-2}/\mu`.
 
+The kernels' convention
+^^^^^^^^^^^^^^^^^^^^^^^
+
+The kernels with respect to a parameter in the Earth, the inverse relaxation
+times and the viscosity, and their derivatives from the second-order sweeps,
+are densities per unit volume, held as their samples :math:`K(r)` at the nodes
+of the material's radial mesh, one array of shape ``(nspec, ngll)`` per
+branch. For a spherically symmetric perturbation :math:`\delta(r)` of the
+parameter
+
+.. math::
+
+   \delta J = \int K\,\delta\,dV = 4\pi\int K(r)\,\delta(r)\,r^2\,dr
+   \approx \sum_p W_p\,K(r_p)\,\delta(r_p),
+   \qquad W_p = 4\pi r_p^2\,w_p,
+
+with :math:`w_p` the radial quadrature weight of node :math:`p`, its
+Gauss-Lobatto-Legendre weight times the element's Jacobian
+(``Material.volume_weights``; the sum is ``Material.volume_pairing``). Neither
+the :math:`r^2` nor the :math:`4\pi` is in the kernel: both belong to the
+volume measure. The sweeps accumulate the gradient with respect to the nodal
+values, :math:`W_p K(r_p)`, and divide the weights out on return
+(``Material.kernel_samples``), so that for the discrete adjoint the sum is the
+exact derivative of the discrete model under a perturbation given by its
+nodal values. A node at the centre has no volume: its gradient entry is zero,
+and its sample is the value there of the element's polynomial through its
+other nodes. The kernel is the :math:`L^2` representative of the derivative
+under the volume measure, the measure of the radial spaces of ``pygeoinf``
+and so of ``LogViscositySpace``, which forms the derivative's components
+with the same weights; and it converges as a function of radius under
+refinement of the radial mesh, where the gradient entries, which carry each
+mesh's quadrature weights, do not.
+
+The values are in the material's units: the objective's unit per unit of the
+parameter per unit of volume. Converted to SI through the material's
+``scales`` they are the objective's unit per parameter unit per cubic metre,
+for the inverse relaxation time the objective's unit per
+:math:`\mathrm{s}^{-1}` per :math:`\mathrm{m}^3`. The kernels with respect to
+the ice history and the initial sea level are fields on the surface grid and
+pair by :math:`\int\cdot\,dS`.
+
 The tangent-linear problem and second derivatives
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

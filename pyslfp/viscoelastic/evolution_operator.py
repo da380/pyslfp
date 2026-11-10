@@ -330,6 +330,7 @@ class SeaLevelEvolutionOperator(Operator[tuple, tuple]):
         sea_level_space = self.sea_level_space
         viscosity_space = self.viscosity_space
         rheology = evolution.operator.rheology
+        weights = rheology.material.volume_weights
         ocean_functions = (
             _effective_ocean_functions(snapshots)
             if self._shorelines == "migrating"
@@ -378,8 +379,10 @@ class SeaLevelEvolutionOperator(Operator[tuple, tuple]):
                     sea_level_space.to_components(kernels.initial_sea_level)
                 )
             )
+            # the kernel in chi, -itau K, is a density per unit volume:
+            # the volume weights make it a gradient in the nodal values
             chi = viscosity_space.gradient(
-                [-itau * k for itau, k in zip(rheology.itau, kernels.itau)]
+                [-weights * itau * k for itau, k in zip(rheology.itau, kernels.itau)]
             )
             return (history, sea_level, chi)
 
@@ -426,6 +429,7 @@ class SeaLevelEvolutionOperator(Operator[tuple, tuple]):
         history_space = self.history_space
         sea_level_space = self.sea_level_space
         viscosity_space = self.viscosity_space
+        weights = rheology.material.volume_weights
         ocean_functions = (
             _effective_ocean_functions(snapshots)
             if self._shorelines == "migrating"
@@ -484,11 +488,12 @@ class SeaLevelEvolutionOperator(Operator[tuple, tuple]):
                     sea_level_space.to_components(derivatives.initial_sea_level)
                 )
             )
-            # the gradient in chi is -itau K; along v, itau moves by
-            # -itau delta_v chi and K by its derivative
+            # the kernel in chi is -itau K; along v, itau moves by
+            # -itau delta_v chi and K by its derivative, and the volume
+            # weights make the result a gradient in the nodal values
             chi = viscosity_space.gradient(
                 [
-                    itau * a * k - itau * dk
+                    weights * (itau * a * k - itau * dk)
                     for itau, a, k, dk in zip(
                         rheology.itau, nodal_v, kernels.itau, derivatives.itau
                     )

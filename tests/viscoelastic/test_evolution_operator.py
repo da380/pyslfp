@@ -510,3 +510,115 @@ def test_the_continuous_second_derivative(setting):
         rhs = operator.domain.inner_product(u, second.adjoint(g))
         gaps.append(abs(lhs - rhs) / abs(lhs))
     assert gaps[0] < 0.1 and gaps[0] / gaps[1] > 3.0
+
+
+# ==================================================================== #
+#                    A nonlinear objective on the operator              #
+# ==================================================================== #
+
+
+def test_the_hessian_of_a_decay_time_matches_differences_of_its_gradient(setting):
+    """The decay time of a site's emergence curve after the melting has
+    stopped, as an objective on the ice history and the log viscosity:
+    tau o S o F, with S the site's series at the fit dates. The
+    composition's Hessian carries the decay time's own, the operator's
+    second derivative weighted by the fit's weights, and the two first
+    derivatives; central differences of the gradient converge to it at
+    second order and land on it after extrapolation."""
+    from pygeoinf import EuclideanSpace, LinearFunctional
+    from pyslfp.ice import BaseIceModel
+    from pyslfp.viscoelastic import DecayTimeFunctional
+
+    material, earth, _, _, _ = setting
+    analytic_model, state = _history_state(material, earth)
+
+    class _SteppedMelt(BaseIceModel):
+        """The analytical ice losing a quarter between 10 and 9 ka and
+        holding after: the site's curve then decays freely."""
+
+        def get_ice_thickness(
+            self, date, lmax, /, *, grid="DH", sampling=1, extend=True
+        ):
+            full = analytic_model.get_ice_thickness(
+                10.0, lmax, grid=grid, sampling=sampling, extend=extend
+            )
+            fraction = 1.0 - 0.25 * np.clip(10.0 - date, 0.0, 1.0)
+            return SHGrid.from_array(
+                fraction * full.data, grid=self.resolve_grid(grid, sampling)[0]
+            )
+
+    ice_model = _SteppedMelt(length_scale=earth.parameters.length_scale)
+    rheology = Rheology.from_relaxation_time(material, TAU)
+    evolution = SeaLevelEvolution(ViscoelasticOperator(rheology, LMAX), state)
+    dates = np.linspace(10.0, 0.0, 21)
+    window = dates[4::2]  # strictly after the melt
+    # more time modes than dates, so the history holds the ice model's
+    # values at the dates exactly and the curve is the direct run's
+    operator = SeaLevelEvolutionOperator(
+        evolution, dates, *_spaces(earth, rheology, modes=24), list(window)
+    )
+
+    # the site: a disc average under the centre of the melted sheet
+    cap = SHGrid.from_cap(
+        15.0,
+        45.0,
+        90.0,
+        lmax=LMAX,
+        grid=earth.grid_name,
+        sampling=earth.sampling,
+        extend=earth.extend,
+    )
+    dual = SHGrid.from_array(cap.data / earth.integrate(cap), grid=earth.grid)
+    field = operator.response_space.field_operator("relative_sea_level_change")
+    site = LinearFunctional.from_representer(field.codomain, dual) @ field
+    series_of = LinearOperator.from_callables(
+        operator.codomain,
+        EuclideanSpace(window.size),
+        lambda responses: np.array([site(response) for response in responses]),
+        adjoint=lambda values: tuple(site.adjoint(float(v)) for v in values),
+    )
+
+    x = _point(operator, ice_model, state, earth)
+    series = series_of(operator(x))
+    decay_time = DecayTimeFunctional(
+        window[0] - window,
+        time_uncertainty=0.05,
+        value_uncertainty=0.01 * np.ptp(series),
+    )
+    assert 0.0 < decay_time(series) < window[0] - window[-1]
+
+    objective = decay_time @ series_of @ operator
+    assert objective.has_hessian
+    domain = operator.domain
+    u = _direction(operator, np.random.default_rng(3), earth, chi=0.05)
+    hessian_u = objective.hessian(x)(u)
+
+    # the Hessian is the decay time's own through the first derivatives,
+    # plus the operator's curvature weighted by the fit's weights
+    linearization = operator.at(x)
+    jacobian = series_of @ linearization.derivative
+    gauss_newton = jacobian.adjoint(decay_time.hessian(series)(jacobian(u)))
+    curvature = operator.second_derivative(x, u).adjoint(
+        series_of.adjoint(decay_time.gradient(series))
+    )
+    assert domain.norm(
+        domain.subtract(hessian_u, domain.add(gauss_newton, curvature))
+    ) < 1e-10 * domain.norm(hessian_u)
+    assert domain.norm(curvature) > 1e-3 * domain.norm(hessian_u)
+
+    differences = {}
+    for eps in (0.32, 0.16):
+        plus = objective.gradient(domain.axpy(eps, u, domain.copy(x)))
+        minus = objective.gradient(domain.axpy(-eps, u, domain.copy(x)))
+        differences[eps] = domain.scale(1.0 / (2.0 * eps), domain.subtract(plus, minus))
+    residuals = {
+        eps: domain.norm(domain.subtract(d, hessian_u))
+        for eps, d in differences.items()
+    }
+    assert 3.0 < residuals[0.32] / residuals[0.16] < 5.0
+    richardson = domain.axpy(
+        -1.0 / 3.0, differences[0.32], domain.scale(4.0 / 3.0, differences[0.16])
+    )
+    assert domain.norm(domain.subtract(richardson, hessian_u)) < 1e-5 * domain.norm(
+        hessian_u
+    )

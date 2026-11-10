@@ -30,10 +30,11 @@
 #
 # Third, the kernels: the fit's weights become a multi-date measurement,
 # one reversed sweep returns the exact derivative of the decay time with
-# respect to the inverse relaxation times at every node of the radial
-# mesh, and the chain rule turns that into a viscosity kernel. The
-# figure shows the sensitivity of the decay time to a uniform fractional
-# change of viscosity in each element of the mesh. For a cap of
+# respect to the inverse relaxation times as a kernel, a density per
+# unit volume sampled at the nodes of the radial mesh, and the chain
+# rule turns that into a viscosity kernel. The figure shows the
+# sensitivity of the decay time to a fractional change of viscosity,
+# per unit radius, at every depth. For a cap of
 # Laurentide scale the kernel reaches deep -- the load's low harmonics
 # feel the lower mantle -- and the two regions pull with opposite signs,
 # the trade-off that viscosity inversions from such data must resolve.
@@ -160,26 +161,30 @@ ax.set_title("Post-melt emergence at the cap's centre")
 # The fit's weights turn the decay time into a multi-date measurement,
 # and the reversed sweep -- pairing its duals with the recorded forward
 # trajectory -- returns the exact derivative with respect to the inverse
-# relaxation time at every node. The nodal values carry the mesh's
-# quadrature, so dividing it out leaves the kernel as a continuous
-# function of radius: the density $k(r)$ with
+# relaxation time as a kernel: a density per unit volume, held as its
+# values at the nodes of the radial mesh. Through
+# $\delta\tau^{-1} = -\tau^{-1}\,\delta(\ln\eta)$ it gives the kernel
+# $K(r)$ of the decay time in log viscosity,
 #
-# $$\delta\tau_d = \int k(r)\, \delta(\ln\eta)(r)\, dr,$$
+# $$\delta\tau_d = \int K\, \delta(\ln\eta)\, dV
+#   = \int k(r)\, \delta(\ln\eta)(r)\, dr, \qquad k = 4\pi r^2 K,$$
 #
-# drawn against radius with `plot_profile`, which takes a nodal array on the
-# material's mesh and draws it layer by layer, as planetmodel draws the
-# model's own fields, with a line across each discontinuity. Beside it the
-# viscosity profile itself, `plot_viscosity`. The kernel's integrals over
-# the two mantle regions, quoted below, are the responses to uniform
-# fractional viscosity changes there.
+# and $k$, the sensitivity per unit radius, is drawn against radius with
+# `plot_profile`, which takes a nodal array on the material's mesh and
+# draws it layer by layer, as planetmodel draws the model's own fields,
+# with a line across each discontinuity. Beside it the viscosity profile
+# itself, `plot_viscosity`. The kernel's integrals over the two mantle
+# regions, quoted below, are the responses to uniform fractional
+# viscosity changes there: the volume pairing of the kernel with the
+# indicator of each region, `Material.volume_pairing`.
 
 # %%
 kernels = evolution.adjoint_ice_history(dates, measurement, internal_states=snapshots)
 
-log_eta_nodal = -rheology.itau[0] * kernels.itau[0]
-measure = mesh.jac[:, None] * mesh.w[None, :]
+material = rheology.material
+log_eta_kernel = -rheology.itau[0] * kernels.itau[0]  # per unit volume
 km = parameters.length_scale / 1e3
-density_r = log_eta_nodal / measure / km  # kyr per d(ln eta) per km
+density_r = 4.0 * np.pi * mesh.r**2 * log_eta_kernel / km  # kyr per d(ln eta) per km
 
 relaxing = rheology.itau[0] > 0.0
 mantle = [int(i) for i in np.unique(mesh.layer) if relaxing[mesh.layer == i].all()]
@@ -188,7 +193,7 @@ fig, (ax_eta, ax_k) = plt.subplots(1, 2, figsize=(10, 6), sharey=True)
 sl.plot_viscosity(ax_eta, rheology, scale=km)
 ax_eta.set_xlabel("Viscosity (Pa s)")
 ax_eta.set_ylabel("Radius (km)")
-sl.plot_profile(ax_k, rheology.material, density_r, layers=mantle, scale=km)
+sl.plot_profile(ax_k, material, density_r, layers=mantle, scale=km)
 ax_k.axvline(0.0, color="black", linewidth=0.5)
 ax_k.set_xlabel("d(decay time) / d(ln eta) (kyr per km)")
 ax_k.set_ylim(mesh.r[relaxing].min() * km, mesh.r.max() * km)
@@ -196,8 +201,12 @@ fig.suptitle("Viscosity sensitivity of the decay time")
 
 node_depth = (mesh.r.max() - mesh.r) * km
 
-upper = float(np.sum(log_eta_nodal[(node_depth > 77.0) & (node_depth < 670.0)]))
-lower = float(np.sum(log_eta_nodal[(node_depth >= 670.0) & (node_depth < 2900.0)]))
+upper = material.volume_pairing(
+    log_eta_kernel, (node_depth > 77.0) & (node_depth < 670.0)
+)
+lower = material.volume_pairing(
+    log_eta_kernel, (node_depth >= 670.0) & (node_depth < 2900.0)
+)
 print(f"a 1% rise of upper-mantle viscosity changes it by {0.01 * upper * 1e3:+.2f} yr")
 print(f"the same in the lower mantle changes it by {0.01 * lower * 1e3:+.2f} yr")
 
@@ -206,13 +215,20 @@ print(f"the same in the lower mantle changes it by {0.01 * lower * 1e3:+.2f} yr"
 #
 # As for the ice kernels: the continuous adjoint's viscosity kernel
 # differs from the exact discrete one by the commute error of the time
-# discretisation.
+# discretisation, measured here in the L2 norm of a function under the
+# volume measure.
 
 # %%
 continuous = evolution.continuous_adjoint_ice_history(
     dates, measurement, internal_states=snapshots
 )
-disagreement = np.linalg.norm(continuous.itau[0] - kernels.itau[0]) / np.linalg.norm(
+
+
+def volume_norm(kernel):
+    return np.sqrt(material.volume_pairing(kernel, kernel))
+
+
+disagreement = volume_norm(continuous.itau[0] - kernels.itau[0]) / volume_norm(
     kernels.itau[0]
 )
 print(f"continuous vs discrete viscosity kernel: {100.0 * disagreement:.2f}%")

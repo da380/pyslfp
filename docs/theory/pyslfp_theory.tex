@@ -1244,6 +1244,34 @@ $\mathbf{d}-\mathbf{m}$. The viscosity kernels follow from
 $\partial\tau^{-1}/\partial\eta = -\tau^{-2}/\mu$, so an elastic branch has no
 viscosity sensitivity in this parameterisation.
 
+These kernels, and their derivatives from the second-order sweeps of
+Section~\ref{sec:second}, are densities per unit volume, held as their samples
+$K(r)$ at the nodes of the material's radial mesh. For a spherically
+symmetric perturbation $\delta(r)$ of the parameter,
+\begin{equation}
+\delta J = \int K\,\delta\,\dd V = 4\pi\int K(r)\,\delta(r)\,r^{2}\,\dd r
+ \approx \sum_{p} W_{p}\,K(r_{p})\,\delta(r_{p}),\qquad
+ W_{p} = 4\pi r_{p}^{2}\,w_{p},
+\label{eq:volumepairing}
+\end{equation}
+with $w_{p}$ the radial quadrature weight of node $p$, its
+Gauss--Lobatto--Legendre weight times the element's Jacobian
+(\code{Material.volume\_weights}; the sum is
+\code{Material.volume\_pairing}). Neither the $r^{2}$ nor the $4\pi$ is in the
+kernel: both belong to the volume measure. The sweeps accumulate the gradient
+with respect to the nodal values, $W_{p}K(r_{p})$, and divide the weights out
+on return, so that for the discrete adjoint the sum in
+\eqref{eq:volumepairing} is the exact derivative of the discrete model under a
+perturbation given by its nodal values. A node at the centre has no volume:
+its gradient entry is zero, and its sample is the value there of the
+element's polynomial through its other nodes. The kernel is then the $L^{2}$
+representative of the derivative under the volume measure, which is the
+measure of the radial spaces of the log viscosity, and it converges as a
+function of radius under refinement of the radial mesh, where the gradient
+entries, which carry each mesh's quadrature weights, do not. Its values are in
+the material's units, the objective's unit per unit of the parameter per unit
+of volume; in SI, the objective's unit per parameter unit per cubic metre.
+
 Recording the trajectory at every date is expensive at high degree, so it may
 be checkpointed and reconstructed backwards between stored states. The inverse
 of a trapezoid step is the same update with the step negated and the start and

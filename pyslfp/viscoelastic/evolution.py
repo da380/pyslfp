@@ -202,7 +202,29 @@ class IceKernels:
     thickness shift loads nothing), which the calculation satisfies by
     construction.  The Sobolev kernel, the derivative's Riesz
     representer in a space of ice histories, is the adjoint of
-    `IceHistoryOperator`, built from the per-node duals."""
+    `IceHistoryOperator`, built from the per-node duals.
+
+    The kernels with respect to the ice history and the initial sea
+    level are fields on the surface grid and pair by int . dS.  The
+    kernels with respect to the inverse relaxation times, `itau`, are
+    fields in the Earth: each is a DENSITY PER UNIT VOLUME, held as its
+    samples K(r) at the nodes of the material's mesh, (nspec, ngll) per
+    branch, so that for a perturbation delta(r) of the branch's inverse
+    relaxation time
+
+        dJ = int K delta dV = 4 pi int K(r) delta(r) r^2 dr
+           ~ sum W K delta,
+
+    W the nodes' volume weights (`Material.volume_weights`, and the sum
+    is `Material.volume_pairing`).  Neither the r^2 nor the 4 pi is in
+    the kernel: both belong to the volume measure.  The sweeps
+    accumulate the gradient with respect to the nodal values, W K, and
+    divide the weights out on return (`Material.kernel_samples`); a
+    node at the centre has no volume, and its sample is the element's
+    polynomial through the other nodes.  The values are in the
+    material's units, the objective's unit per unit of inverse time per
+    unit of volume; converted through the material's `scales`, the
+    objective's unit per s^-1 per m^3."""
 
     dates: np.ndarray
     load_duals: list[SHGrid] = field(repr=False)
@@ -258,16 +280,20 @@ class IceKernels:
     density: list[SHGrid] = field(repr=False)
     rate: list[SHGrid] = field(repr=False)
     #: The inverse-relaxation-time kernels dJ / d itau(r) per branch,
-    #: nodal (nspec, ngll) arrays over the material's mesh in its
-    #: units, when the adjoint was given the forward trajectory
-    #: (`internal_states`); None otherwise.
+    #: densities per unit volume sampled at the nodes of the material's
+    #: mesh, (nspec, ngll) arrays in its units (see above), when the
+    #: adjoint was given the forward trajectory (`internal_states`);
+    #: None otherwise.
     itau: Optional[list[np.ndarray]] = field(default=None, repr=False)
 
     def viscosity(self, rheology: Rheology) -> list[np.ndarray]:
-        """The viscosity kernels dJ / d eta(r), nodal per branch, from
-        the inverse-relaxation-time kernels: itau = mu / eta gives
+        """The viscosity kernels dJ / d eta(r) per branch from the
+        inverse-relaxation-time kernels, densities per unit volume
+        sampled at the nodes as `itau` is: itau = mu / eta gives
         d itau / d eta = -itau^2 / mu, so an elastic branch (itau = 0)
-        has no viscosity sensitivity in this parameterisation."""
+        has no viscosity sensitivity in this parameterisation.  They
+        pair with a viscosity perturbation through
+        `Material.volume_pairing`."""
         if self.itau is None:
             raise ValueError("no itau kernels: run the adjoint with internal_states")
         out = []
@@ -284,7 +310,9 @@ class KernelDerivatives:
     of the Hessian's action on that perturbation.  `thickness` and
     `initial_sea_level` are the derivatives of the discrete node duals of
     `IceKernels`, in the same pairing, and `itau` that of the
-    inverse-relaxation-time kernels."""
+    inverse-relaxation-time kernels, likewise a density per unit volume
+    sampled at the nodes, which pairs with a perturbation of the inverse
+    relaxation times through `Material.volume_pairing`."""
 
     dates: np.ndarray
     thickness: list[SHGrid] = field(repr=False)
@@ -651,6 +679,16 @@ class SeaLevelEvolution:
                 self.operator.effective_love_numbers(self.scheme, dt_material)
             )
         return self._sle[key]
+
+    def _kernel_samples(
+        self, gradients: Optional[list[np.ndarray]]
+    ) -> Optional[list[np.ndarray]]:
+        """The kernels per unit volume, per branch, from the gradients
+        with respect to the nodal values the sweeps accumulate."""
+        if gradients is None:
+            return None
+        material = self.operator.material
+        return [material.kernel_samples(g) for g in gradients]
 
     def _sle_elastic(self) -> SeaLevelEquation:
         """The solver of the unrelaxed numbers, for the instantaneous
@@ -1631,9 +1669,10 @@ class SeaLevelEvolution:
             initial_sea_level: The perturbation of the initial sea level,
                 a grid; None for none.
             itau: The perturbation of each branch's inverse relaxation
-                times, nodal (nspec, ngll) arrays over the material's
-                mesh in its units, as `IceKernels.itau` is laid out;
-                None for none.
+                times, its values at the nodes of the material's mesh,
+                (nspec, ngll) arrays in its units, as `IceKernels.itau`
+                is laid out, with which it pairs through
+                `Material.volume_pairing`; None for none.
             method: "discrete" or "continuous".
             space, rotational_feedbacks, rtol: As for `run_ice_history`,
                 and as the forward run was made.
@@ -2733,13 +2772,13 @@ class SeaLevelEvolution:
             instantaneous,
             [SHGrid.from_array(d, grid=model.grid) for d in density],
             [SHGrid.from_array(r, grid=model.grid) for r in rate],
-            itau_kernel,
+            self._kernel_samples(itau_kernel),
         )
         derivatives = KernelDerivatives(
             dates,
             [SHGrid.from_array(th, grid=model.grid) for th in dthickness],
             SHGrid.from_array(dinitial_sea_level, grid=model.grid),
-            d_itau_kernel,
+            self._kernel_samples(d_itau_kernel),
         )
         return kernels, derivatives
 
@@ -3194,13 +3233,13 @@ class SeaLevelEvolution:
                 for n in range(dates.size)
             ],
             [SHGrid.from_array(r, grid=model.grid) for r in rate],
-            itau_kernel,
+            self._kernel_samples(itau_kernel),
         )
         derivatives = KernelDerivatives(
             dates,
             [SHGrid.from_array(t, grid=model.grid) for t in dthickness],
             SHGrid.from_array(dinitial_sea_level, grid=model.grid),
-            d_itau_kernel,
+            self._kernel_samples(d_itau_kernel),
         )
         return kernels, derivatives
 
@@ -3252,14 +3291,18 @@ class SeaLevelEvolution:
         the multiplier of the internal-variable dynamics is the
         branch-weighted adjoint state over itau, scaled by the ratio of
         the material's load pairing to the model's sea-level pairing
-        (see `pairing` below), so
+        (see `pairing` below), so that the gradient with respect to the
+        nodal values of itau is
 
-            dJ / d itau(r) = int W_k m-dagger / itau (d - m) dt,
+            int W_k m-dagger / itau (d - m) dt,
 
+        W_k the branch's nodal weights of the memory pairing,
         accumulated over the reversed nodes with the density's split
         trapezoid (the adjoint state jumps at observations; the forward
-        integrand is continuous).  As with the ice kernels, the result
-        converges to the discrete one as the run resolves its rheology.
+        integrand is continuous), and returned as the kernel
+        dJ / d itau(r), a density per unit volume (`IceKernels`).  As
+        with the ice kernels, the result converges to the discrete one
+        as the run resolves its rheology.
         """
         dates = np.asarray(dates, dtype=float)
         if dates.ndim != 1 or dates.size < 2 or np.any(np.diff(dates) >= 0.0):
@@ -3593,7 +3636,7 @@ class SeaLevelEvolution:
                 for n in range(dates.size)
             ],
             [SHGrid.from_array(r, grid=model.grid) for r in rate],
-            itau_kernel,
+            self._kernel_samples(itau_kernel),
         )
 
     def adjoint_ice_history(
@@ -3648,8 +3691,11 @@ class SeaLevelEvolution:
         weights in h = dt itau pairs the reverse sweep's duals with the
         forward internal variables and strains, and the effective
         moduli's dependence pairs the transposed and forward solutions
-        through the branch bilinear.  `viscosity` maps the result to
-        dJ / d eta(r).
+        through the branch bilinear.  The result is a density per unit
+        volume sampled at the nodes (`IceKernels`), whose volume pairing
+        with a nodal perturbation of itau (`Material.volume_pairing`)
+        is the exact derivative of the discrete model.  `viscosity` maps
+        it to dJ / d eta(r).
         """
         dates = np.asarray(dates, dtype=float)
         if dates.ndim != 1 or dates.size < 2 or np.any(np.diff(dates) >= 0.0):
@@ -3939,7 +3985,7 @@ class SeaLevelEvolution:
             instantaneous,
             [SHGrid.from_array(d, grid=model.grid) for d in density],
             [SHGrid.from_array(r, grid=model.grid) for r in rate],
-            itau_kernel,
+            self._kernel_samples(itau_kernel),
         )
 
 

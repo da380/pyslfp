@@ -29,6 +29,12 @@ def _maxwell_operator(material):
     return ViscoelasticOperator(Rheology.from_relaxation_time(material, TAU), LMAX)
 
 
+def _volume_norm(material, kernel):
+    """A kernel's norm as a function of radius, in L2 under the volume
+    measure: the square root of its volume pairing with itself."""
+    return np.sqrt(material.volume_pairing(kernel, kernel))
+
+
 def _elastic_rheology(material):
     return Rheology(
         material,
@@ -1711,7 +1717,7 @@ def test_viscosity_kernels(setting):
             measurement,
             internal_states=[snap.internal_state for snap in snapshots],
         )
-        predicted = float(np.sum(kernels.itau[0] * ditau))
+        predicted = material.volume_pairing(kernels.itau[0], ditau)
 
         def functional(eps):
             rheology = Rheology(
@@ -1777,7 +1783,9 @@ def test_continuous_viscosity_kernels(setting):
         continuous = evo.continuous_adjoint_ice_history(
             dates, measurement, internal_states=states
         ).itau[0]
-        return np.linalg.norm(continuous - discrete) / np.linalg.norm(discrete)
+        return _volume_norm(material, continuous - discrete) / _volume_norm(
+            material, discrete
+        )
 
     slow = ViscoelasticOperator(
         Rheology.from_relaxation_time(material, 10.0 * TAU), LMAX
@@ -1822,6 +1830,7 @@ def test_continuous_viscosity_kernels_unit_covariance():
         # ingestion: the authored model enters the library's frame
         model = model.converted(units.Scales.geophysical(L))
         tf = units.Scales.geophysical(L).factor(units.TIME)
+        frame_length = units.Scales.geophysical(L).factor(units.LENGTH)
         mesh = RadialMesh(model, ngll=5, lmax=LMAX)
         material = Material(mesh, model)
         base = EarthModel.from_planet_model(model, LMAX, mesh=mesh)
@@ -1857,18 +1866,25 @@ def test_continuous_viscosity_kernels_unit_covariance():
         continuous = evo.continuous_adjoint_ice_history(
             dates, {0.0: g}, internal_states=states
         ).itau[0]
-        # the common pairing: the kernel pairs with d(itau) in the
-        # material's inverse time, so scaling by the time factor makes
-        # runs in different unit systems comparable node by node
-        return discrete * tf, continuous * tf
+        # the common pairing: the kernel is per unit of d(itau) in the
+        # material's inverse time and per unit of its volume, so scaling
+        # by the time factor over the cube of the length factor makes
+        # runs in different unit systems comparable node by node, in SI
+        # (the volume weights in SI to match)
+        scale = tf / frame_length**3
+        weights = material.volume_weights * frame_length**3
+        return discrete * scale, continuous * scale, weights
 
-    si_d, si_c = kernel(units.Scales.SI)
-    nd_d, nd_c = kernel(units.Scales.geophysical(L))
+    def norm(weights, kernel):
+        return np.sqrt(np.sum(weights * kernel**2))
+
+    si_d, si_c, weights = kernel(units.Scales.SI)
+    nd_d, nd_c, _ = kernel(units.Scales.geophysical(L))
     # each method is unit-covariant on its own
-    assert np.linalg.norm(si_d - nd_d) < 1e-9 * np.linalg.norm(nd_d)
-    assert np.linalg.norm(si_c - nd_c) < 1e-9 * np.linalg.norm(nd_c)
+    assert norm(weights, si_d - nd_d) < 1e-9 * norm(weights, nd_d)
+    assert norm(weights, si_c - nd_c) < 1e-9 * norm(weights, nd_c)
     # and the continuous kernel sits on the discrete one when resolved
-    assert np.linalg.norm(si_c - si_d) < 0.05 * np.linalg.norm(si_d)
+    assert norm(weights, si_c - si_d) < 0.05 * norm(weights, si_d)
 
 
 def test_mixed_frame_refused(setting):
@@ -1918,7 +1934,7 @@ def test_migrating_viscosity_kernels(setting):
     kernels = evo.adjoint_ice_history(
         dates, measurement, ocean_functions=oceans, internal_states=states
     )
-    predicted = float(np.sum(kernels.itau[0] * ditau))
+    predicted = material.volume_pairing(kernels.itau[0], ditau)
 
     def functional(eps):
         rheology = Rheology(
@@ -1960,7 +1976,9 @@ def test_migrating_viscosity_kernels(setting):
         continuous = evolution.continuous_adjoint_ice_history(
             grid_dates, measurement, ocean_functions=oc, internal_states=st
         ).itau[0]
-        return np.linalg.norm(continuous - discrete) / np.linalg.norm(discrete)
+        return _volume_norm(material, continuous - discrete) / _volume_norm(
+            material, discrete
+        )
 
     coarse = disagreement(11)
     fine = disagreement(21)
@@ -2000,8 +2018,8 @@ def test_checkpointed_viscosity_kernels(setting):
         for adjoint in (evo.adjoint_ice_history, evo.continuous_adjoint_ice_history):
             reference = adjoint(dates, measurement, internal_states=full).itau[0]
             kernels = adjoint(dates, measurement, internal_states=sparse).itau[0]
-            assert np.linalg.norm(kernels - reference) < tol * np.linalg.norm(
-                reference
+            assert _volume_norm(material, kernels - reference) < tol * _volume_norm(
+                material, reference
             ), (tau_factor, adjoint.__name__)
 
     # a migrating trajectory reconstructs the same way
@@ -2024,7 +2042,9 @@ def test_checkpointed_viscosity_kernels(setting):
     kernels = evo.adjoint_ice_history(
         marine_dates, measurement, ocean_functions=oceans, internal_states=sparse
     ).itau[0]
-    assert np.linalg.norm(kernels - reference) < 1e-10 * np.linalg.norm(reference)
+    assert _volume_norm(material, kernels - reference) < 1e-10 * _volume_norm(
+        material, reference
+    )
 
     # a bare state list with gaps carries no loads to reconstruct from
     with pytest.raises(ValueError, match="checkpointed trajectory"):
@@ -2077,6 +2097,52 @@ def test_decay_time_fit_and_weights():
 
     with pytest.raises(ValueError, match="decay"):
         fit_decay_time(t, clean[::-1], time_uncertainty=0.0, value_uncertainty=0.02)
+
+
+def test_decay_time_functional():
+    """The decay time as a functional of the series: its value is the
+    fit's, its gradient the fit's weights and its Hessian their exact
+    data derivative, with the model times pinned and with them free."""
+    from pygeoinf.testing import check_gradient, check_hessian
+
+    from pyslfp.viscoelastic import DecayTimeFunctional, fit_decay_time
+
+    rng = np.random.default_rng(5)
+    t = np.linspace(0.0, 6.0, 9)
+    series = 2.5 * np.exp(-t / 1.8) - 0.7 + 0.01 * rng.normal(size=t.size)
+
+    for sig_t in (0.0, 0.15):
+        functional = DecayTimeFunctional(
+            t, time_uncertainty=sig_t, value_uncertainty=0.02
+        )
+        fit = fit_decay_time(t, series, time_uncertainty=sig_t, value_uncertainty=0.02)
+        assert functional.domain.dim == t.size
+        assert functional(series) == fit.decay_time
+        np.testing.assert_array_equal(functional.gradient(series), fit.weights)
+        np.testing.assert_array_equal(fit.hessian, fit.hessian.T)
+        check_gradient(functional, series, rng=np.random.default_rng(6))
+        check_hessian(functional, series, rng=np.random.default_rng(7))
+
+        # central differences of the weights fall onto the Hessian's
+        # action at second order
+        dy = rng.normal(size=t.size)
+        predicted = fit.hessian @ dy
+        differences = {}
+        for eps in (4e-3, 2e-3):
+            plus = functional.gradient(series + eps * dy)
+            minus = functional.gradient(series - eps * dy)
+            differences[eps] = (plus - minus) / (2.0 * eps)
+        residuals = {
+            eps: np.linalg.norm(d - predicted) for eps, d in differences.items()
+        }
+        assert 3.0 < residuals[4e-3] / residuals[2e-3] < 5.0
+        richardson = (4.0 * differences[2e-3] - differences[4e-3]) / 3.0
+        assert np.linalg.norm(richardson - predicted) < 1e-6 * np.linalg.norm(predicted)
+
+    with pytest.raises(ValueError, match="one-dimensional"):
+        DecayTimeFunctional(
+            t.reshape(3, 3), time_uncertainty=0.0, value_uncertainty=0.02
+        )
 
 
 def test_decay_time_viscosity_kernels(setting):
@@ -2148,7 +2214,7 @@ def test_decay_time_viscosity_kernels(setting):
     snapshots, _ = evo.run_ice_history(dates, ice_model, record=4)
     kernels = evo.adjoint_ice_history(dates, measurement, internal_states=snapshots)
     ditau = (0.3 + 0.7 * (mesh.r / mesh.r.max()) ** 2) / TAU
-    predicted = float(np.sum(kernels.itau[0] * ditau))
+    predicted = material.volume_pairing(kernels.itau[0], ditau)
 
     def functional(eps):
         rheology = Rheology(

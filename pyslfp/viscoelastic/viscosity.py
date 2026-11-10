@@ -16,12 +16,17 @@ tau_k^{-1} = mu_k exp(-chi_k) / eta_0.
 `LogViscositySpace` is the Hilbert space of these functions: for each branch
 a pygeoinf layered radial space (`pygeoinf.interval.radial.Layered`), one
 Sobolev space of radial profiles per relaxing layer under the volume measure
-r^2 dr, and the direct sum over the branches. A vector is a tuple over the
+4 pi r^2 dr, and the direct sum over the branches. A vector is a tuple over the
 branches of tuples over the layers of layer fields. The space evaluates a
 vector at the mesh's nodes, which is how a rheology is built from it, and
-transposes that evaluation, which is how a nodal derivative, such as the
-kernel for the inverse relaxation times, becomes a functional on the space
-and, through the metric, its Riesz representer.
+transposes that evaluation, which is how a gradient with respect to the
+nodal values becomes a functional on the space and, through the metric, its
+Riesz representer. A kernel, such as the kernel for the inverse relaxation
+times, is a density per unit volume sampled at the nodes; its gradient with
+respect to the nodal values is the kernel times the material's volume
+weights (`Material.volume_weights`), so the functional it defines is
+chi -> int K chi dV, in the measure the space's own inner product
+integrates against.
 """
 
 from __future__ import annotations
@@ -206,8 +211,12 @@ class LogViscositySpace(CoordinateDirectSum):
         it belongs to.
 
         Args:
-            nodal: One (nspec, ngll) array per branch; entries outside the
-                branch's layers are ignored.
+            nodal: One (nspec, ngll) array per branch, the gradient with
+                respect to the nodal values; for a kernel K, a density per
+                unit volume, that is W K with W the material's
+                `volume_weights`, and the functional is then
+                chi -> sum_k int K_k chi_k dV. Entries outside the branch's
+                layers are ignored.
         """
         parts = []
         for k, records in enumerate(self._records):
@@ -237,10 +246,13 @@ class LogViscositySpace(CoordinateDirectSum):
         """
         The derivative in log viscosity of an objective whose kernels in the
         inverse relaxation times are given: d tau^{-1} = -tau^{-1} d chi, so
-        the nodal derivative in chi_k is -tau_k^{-1} dJ / d tau_k^{-1}.
+        the kernel in chi_k is -tau_k^{-1} dJ / d tau_k^{-1}, and the
+        functional is chi -> sum_k int -tau_k^{-1} K_k chi_k dV, formed with
+        the material's volume weights.
 
         Args:
-            kernels: The nodal kernels dJ / d tau_k^{-1}, one per branch, as
+            kernels: The kernels dJ / d tau_k^{-1}, one per branch,
+                densities per unit volume sampled at the nodes, as
                 `IceKernels.itau` holds them.
             rheology: The rheology the kernels were computed at.
         """
@@ -248,8 +260,9 @@ class LogViscositySpace(CoordinateDirectSum):
             raise ValueError(
                 f"expected {self.num_branches} kernels, got {len(kernels)}"
             )
+        weights = rheology.material.volume_weights
         nodal = [
-            -itau * np.asarray(k, dtype=float)
+            -weights * itau * np.asarray(k, dtype=float)
             for itau, k in zip(rheology.itau, kernels)
         ]
         return self.derivative(nodal)

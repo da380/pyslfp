@@ -209,7 +209,7 @@ def _check_transposes(earth, evolution, dates, ice_model, shorelines, rng):
     adjoint = (
         sum(_pair(earth, kernels.thickness[n], deltas[n]) for n in range(dates.size))
         + _pair(earth, kernels.initial_sea_level, delta_sea)
-        + float(np.sum(kernels.itau[0] * ditau[0]))
+        + evolution.operator.material.volume_pairing(kernels.itau[0], ditau[0])
     )
     assert abs(forward - adjoint) < 1e-9 * abs(forward)
     return kernels

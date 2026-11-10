@@ -39,3 +39,14 @@ docs/source/pyslfp*.rst
 # The dataset cache, when PYSLFP_DATA points inside the repository. CI does
 # exactly this so that the cache path is the same string on every platform.
 .pyslfp_data/
+
+# LaTeX build files of the theory notes: the source, the bibliography (.bib,
+# .bbl) and the PDF are tracked, what a build writes beside them is not.
+docs/theory/*.aux
+docs/theory/*.log
+docs/theory/*.out
+docs/theory/*.toc
+docs/theory/*.blg
+docs/theory/*.synctex.gz
+docs/theory/*.fls
+docs/theory/*.fdb_latexmk

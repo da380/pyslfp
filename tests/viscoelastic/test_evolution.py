@@ -2079,6 +2079,52 @@ def test_decay_time_fit_and_weights():
         fit_decay_time(t, clean[::-1], time_uncertainty=0.0, value_uncertainty=0.02)
 
 
+def test_decay_time_functional():
+    """The decay time as a functional of the series: its value is the
+    fit's, its gradient the fit's weights and its Hessian their exact
+    data derivative, with the model times pinned and with them free."""
+    from pygeoinf.testing import check_gradient, check_hessian
+
+    from pyslfp.viscoelastic import DecayTimeFunctional, fit_decay_time
+
+    rng = np.random.default_rng(5)
+    t = np.linspace(0.0, 6.0, 9)
+    series = 2.5 * np.exp(-t / 1.8) - 0.7 + 0.01 * rng.normal(size=t.size)
+
+    for sig_t in (0.0, 0.15):
+        functional = DecayTimeFunctional(
+            t, time_uncertainty=sig_t, value_uncertainty=0.02
+        )
+        fit = fit_decay_time(t, series, time_uncertainty=sig_t, value_uncertainty=0.02)
+        assert functional.domain.dim == t.size
+        assert functional(series) == fit.decay_time
+        np.testing.assert_array_equal(functional.gradient(series), fit.weights)
+        np.testing.assert_array_equal(fit.hessian, fit.hessian.T)
+        check_gradient(functional, series, rng=np.random.default_rng(6))
+        check_hessian(functional, series, rng=np.random.default_rng(7))
+
+        # central differences of the weights fall onto the Hessian's
+        # action at second order
+        dy = rng.normal(size=t.size)
+        predicted = fit.hessian @ dy
+        differences = {}
+        for eps in (4e-3, 2e-3):
+            plus = functional.gradient(series + eps * dy)
+            minus = functional.gradient(series - eps * dy)
+            differences[eps] = (plus - minus) / (2.0 * eps)
+        residuals = {
+            eps: np.linalg.norm(d - predicted) for eps, d in differences.items()
+        }
+        assert 3.0 < residuals[4e-3] / residuals[2e-3] < 5.0
+        richardson = (4.0 * differences[2e-3] - differences[4e-3]) / 3.0
+        assert np.linalg.norm(richardson - predicted) < 1e-6 * np.linalg.norm(predicted)
+
+    with pytest.raises(ValueError, match="one-dimensional"):
+        DecayTimeFunctional(
+            t.reshape(3, 3), time_uncertainty=0.0, value_uncertainty=0.02
+        )
+
+
 def test_decay_time_viscosity_kernels(setting):
     """The decay time of a near-field site's post-melt emergence curve
     as an objective: the fit's implicit derivative becomes multi-date

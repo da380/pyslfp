@@ -15,6 +15,7 @@ histories, whose adjoint gives the kernels as Riesz representers.
 from .earth_models import maxwell_mantle, prem_maxwell, viscoelastic_earth
 from .functionals import (
     DecayTimeFit,
+    DecayTimeFunctional,
     decay_time_measurement,
     fit_decay_time,
 )
@@ -49,6 +50,7 @@ from .weights import (
 
 __all__ = [
     "DecayTimeFit",
+    "DecayTimeFunctional",
     "decay_time_measurement",
     "fit_decay_time",
     "FinalSeaLevelMisfit",

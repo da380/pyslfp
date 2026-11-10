@@ -631,6 +631,16 @@ uncertainty of sea level index points (``fit_decay_time``,
 sheet and after the melting has stopped, where rebound curves are close to
 exponential.
 
+Differentiating the stationarity conditions once more gives the second
+derivative of the decay time with respect to the series. ``DecayTimeFunctional``
+is the decay time as a functional on the series' values, with those weights as
+its gradient and that second derivative as its Hessian. Composed with an
+operator :math:`S` that samples a response at the fit dates and with the
+evolution operator :math:`F`, it is a nonlinear objective
+:math:`\tau \circ S \circ F` whose Hessian follows by the chain rule: the
+decay time's own Hessian carried through the first derivatives, plus the
+second derivative of :math:`F` weighted by the fit's weights.
+
 
 The initial sea level
 ---------------------

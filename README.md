@@ -192,6 +192,7 @@ in Google Colab. They read the real datasets, so the first run downloads them.
 | `08_gia_kernels` | Ice-history sensitivity kernels by the discrete and continuous adjoints. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/08_gia_kernels.ipynb) |
 | `09_decay_time_viscosity` | The decay time of postglacial emergence and its viscosity kernel. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/09_decay_time_viscosity.ipynb) |
 | `10_initial_sea_level` | Calibrating the initial sea level of a thickness-only history against the present day, by the classical update and the adjoint gradient. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/10_initial_sea_level.ipynb) |
+| `11_anelastic_softening` | Fingerprints on an anelastic Earth: Love numbers of PREM softened to periods of months to decades, and the bias in mass recovered from GRACE with elastic numbers. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/11_anelastic_softening.ipynb) |
 
 ## Data
 

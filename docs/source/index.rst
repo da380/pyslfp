@@ -187,6 +187,8 @@ The notebooks can be run locally or in Google Colab:
   <https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/09_decay_time_viscosity.ipynb>`_
 * `10 — Calibrating the initial sea level
   <https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/10_initial_sea_level.ipynb>`_
+* `11 — Anelastic softening and sea level fingerprints
+  <https://colab.research.google.com/github/da380/pyslfp/blob/main/tutorials/notebooks/11_anelastic_softening.ipynb>`_
 
 
 Citation

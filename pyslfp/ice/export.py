@@ -173,7 +173,7 @@ def export_ice_history(
             support="node",
             time_interpolation="linear",
             dimensions=LENGTH,
-            meaning=f"{version} topography (bedrock where ice-covered)",
+            meaning=f"{version} topography (the ice surface under grounded ice, the sea floor under floating ice)",
         ),
     }
     return surfacefile.write_surface(

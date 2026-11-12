@@ -14,6 +14,7 @@ from pyshtools import SHGrid
 
 from pyslfp.data import DATADIR, ensure_data
 from pyslfp.core.water_bodies import landlocked_mask
+from pyslfp.core.model import ICE_DENSITY, WATER_DENSITY
 from .ice_models import BaseIceSeaLevelModel
 
 
@@ -71,7 +72,13 @@ class IceNG(BaseIceSeaLevelModel):
     """
 
     def __init__(
-        self, /, *, version: IceNGVersion = "ICE7G", length_scale: float = 1.0
+        self,
+        /,
+        *,
+        version: IceNGVersion = "ICE7G",
+        length_scale: float = 1.0,
+        ice_density: float = ICE_DENSITY,
+        water_density: float = WATER_DENSITY,
     ) -> None:
         """
         Initialises the ICE-NG data loader.
@@ -80,15 +87,35 @@ class IceNG(BaseIceSeaLevelModel):
             version (IceNGVersion): The ice model version to use. Defaults to "ICE7G".
             length_scale (float): The scaling factor that non-dimensionalises
                 the spatial outputs. Defaults to 1.0 (returns raw meters).
+            ice_density (float): The density of ice. Only its ratio to
+                `water_density` is used, so any common unit will do.
+            water_density (float): The density of water. The two set the
+                fraction of a floating ice shelf's thickness that lies below
+                the sea surface, by which the sea level is built from the
+                topography. They must be the densities of the Earth model
+                the sea level is used with, whose ocean function tests
+                flotation with the same ratio; the defaults are the default
+                model's (`pyslfp.core.model.ICE_DENSITY`, `WATER_DENSITY`).
+
+        Raises:
+            ValueError: If either density is not positive.
         """
         super().__init__(length_scale=length_scale)
         self._version: IceNGVersion = version
 
+        if not (ice_density > 0 and water_density > 0):
+            raise ValueError("ice_density and water_density must be positive")
+
         ensure_data(self._version)
 
-        # Internal densities used exclusively for ice shelf flotation logic
-        self._ice_density = 917.0
-        self._water_density = 1028.0
+        self._ice_density = float(ice_density)
+        self._water_density = float(water_density)
+
+    @property
+    def flotation_ratio(self) -> float:
+        """The ratio of the ice density to the water density with which
+        the sea level is built under floating ice."""
+        return self._ice_density / self._water_density
 
     @property
     def version(self) -> IceNGVersion:
@@ -247,7 +274,6 @@ class IceNG(BaseIceSeaLevelModel):
             grid=grid,
         )
 
-        flotation_ratio = self._ice_density / self._water_density
-        sea_level = sea_level + (ice_shelf_thickness * flotation_ratio)
+        sea_level = sea_level + (ice_shelf_thickness * self.flotation_ratio)
 
         return ice_thickness, sea_level

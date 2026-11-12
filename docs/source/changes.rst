@@ -1,3 +1,126 @@
+Changes in 4.2
+==============
+
+One change of results: the sea level that :class:`~pyslfp.ice.IceNG`
+builds under floating ice now uses the Earth model's densities. No
+signature changes; ``IceNG`` gains two optional arguments.
+
+
+Changed results
+---------------
+
+**ICE-NG sea levels under floating ice.** :class:`~pyslfp.ice.IceNG`
+built its sea level from the topography with a flotation ratio of
+917/1028, while the Earth model's ocean function tests flotation with
+its own densities, 917/1000 by default: a shelf was built to float in
+water of one density and tested in water of another. ``IceNG`` now takes
+``ice_density`` and ``water_density``, which default to the default
+model's (``pyslfp.core.model.ICE_DENSITY``, ``WATER_DENSITY``), and
+exposes ``flotation_ratio``. ``EarthState.from_defaults`` passes its
+model's densities.
+
+The sea level returned by ``get_ice_thickness_and_sea_level`` changes
+wherever there is ice over the sea floor, by the ice thickness times
+(917/1000 - 917/1028), about 2.5 % of it; the ice thickness and the
+topography are unchanged, as are files written by
+``export_ice_history``, which hold the topography. With an Earth model
+of other densities, pass them:
+
+.. code-block:: python
+
+   parameters = earth_model.parameters
+   ice_model = IceNG(
+       length_scale=parameters.length_scale,
+       ice_density=parameters.ice_density,
+       water_density=parameters.water_density,
+   )
+
+The old sea level is ``IceNG(water_density=1028.0)``.
+
+
+Additions
+---------
+
+- ``IceNG(ice_density=..., water_density=...)`` and
+  ``IceNG.flotation_ratio``.
+
+
+Fixes
+-----
+
+- ``export_ice_history`` described the exported topography as "bedrock
+  where ice-covered". It is the ICE-NG topography as stored: the ice
+  surface under grounded ice and the sea floor under floating ice, which
+  is what the sea level's construction assumes. The values written are
+  unchanged; only the variable's ``meaning`` text is corrected.
+
+
+Changes in 4.1
+==============
+
+Two changes to the viscoelastic derivatives: the sensitivity kernels are
+now functions per unit volume, and the decay-time measurement carries its
+Hessian. The first changes the meaning of existing arrays without
+changing any signature.
+
+
+Changed meaning
+---------------
+
+**Kernels are densities per unit volume.**
+:attr:`IceKernels.itau`, :meth:`IceKernels.viscosity` and
+:attr:`KernelDerivatives.itau` hold samples of a function ``K(r)`` at the
+nodes of the radial mesh, with
+
+.. math::
+
+   \delta J = \int K\,\delta\,\mathrm{d}V
+            = 4\pi \int K(r)\,\delta(r)\,r^2\,\mathrm{d}r .
+
+Neither the :math:`r^2` nor the :math:`4\pi` is in the kernel. In 4.0 each
+entry was the kernel multiplied by its node's volume weight, and paired
+with a perturbation by a plain sum.
+
+.. code-block:: python
+
+   # old
+   dJ = np.sum(kernels.itau[k] * d_itau)
+   # new
+   dJ = material.volume_pairing(kernels.itau[k], d_itau)
+
+``LogViscositySpace.from_itau_kernels`` expects the new kernels and
+applies the weights itself, so derivatives and gradients on the
+log-viscosity space are unchanged. Code that paired, integrated or
+plotted the raw arrays must use the pairing or multiply by
+``Material.volume_weights``.
+
+Kernels computed on different radial meshes now agree as functions; the
+old entries depended on the mesh.
+
+
+Additions
+---------
+
+- ``Material.volume_weights``, ``Material.volume_pairing`` and
+  ``Material.kernel_samples``: the nodal volume weights
+  :math:`4\pi r^2 w`, the pairing :math:`\sum W K \delta`, and the map
+  from a nodal gradient to the kernel's samples.
+- ``DecayTimeFunctional``: the decay time of a relative sea level series
+  as a functional on the series, with its gradient and exact Hessian, for
+  use in Newton-type inversions. ``DecayTimeFit`` gains ``hessian``, and
+  ``fit_decay_time`` finishes with a Newton step.
+- Theory documentation: the kernels' convention, and the second
+  derivative of the decay-time fit.
+
+
+Other
+-----
+
+- Tutorial 9 (decay time and viscosity) plots and integrates the kernels
+  under the new convention; its results are unchanged.
+- The planning notes are no longer kept in the repository.
+
+
 Changes in 4.0
 ==============
 

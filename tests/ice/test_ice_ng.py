@@ -10,6 +10,7 @@ import xarray as xr
 from pyshtools import SHGrid
 
 from pyslfp.ice.ice_ng import IceNG
+from pyslfp.core.model import ICE_DENSITY, WATER_DENSITY
 from pyslfp.data import DATADIR
 
 
@@ -140,10 +141,20 @@ def test_sea_level_and_ice_shelf_logic(mock_open, mock_ensure, mock_xr_dataset):
 
     # topo is -500 (ocean bed), ice is 1000.
     # Sea level = -topo = 500.
-    # Flotation displacement = (917/1028) * 1000.
-    expected_sl = 500.0 + (917.0 / 1028.0) * 1000.0
+    # Flotation displacement = (ice density / water density) * 1000, with
+    # the default Earth model's densities.
+    assert loader.flotation_ratio == ICE_DENSITY / WATER_DENSITY
+    expected_sl = 500.0 + (ICE_DENSITY / WATER_DENSITY) * 1000.0
 
     assert np.allclose(sl.data, expected_sl)
+
+    # The densities are the caller's to set; only their ratio matters.
+    dense = IceNG(version="ICE7G", ice_density=0.917, water_density=1.028)
+    _, sl = dense.get_ice_thickness_and_sea_level(0.0, 16)
+    assert np.allclose(sl.data, 500.0 + (917.0 / 1028.0) * 1000.0)
+
+    with pytest.raises(ValueError):
+        IceNG(version="ICE7G", water_density=0.0)
 
 
 # ==================================================================== #

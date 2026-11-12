@@ -196,7 +196,12 @@ class EarthState(Regions):
         """
 
         earth_model = EarthModel(lmax)
-        ice_model = IceNG(length_scale=earth_model.parameters.length_scale)
+        parameters = earth_model.parameters
+        ice_model = IceNG(
+            length_scale=parameters.length_scale,
+            ice_density=parameters.ice_density,
+            water_density=parameters.water_density,
+        )
         return EarthState.from_ice_model(ice_model, 0.0, earth_model)
 
     @staticmethod

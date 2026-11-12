@@ -73,6 +73,12 @@ def test_exports_fake_ice7g_slices(mock_ensure, tmp_path, monkeypatch):
     )
     assert np.allclose(history.values("ice_thickness", date=-0.5), base[::-1] + 50.0)
     assert history.support("ice_thickness") == "node"
+    # the land field has no time axis and holds zeros and ones
+    assert history.support("land") == "static"
+    assert set(np.unique(history.values("land"))) <= {0.0, 1.0}
+
+    bare = export_ice_history(tmp_path / "bare.nc", dates=[0.0, 1.0], land=False)
+    assert "land" not in surfacefile.read_surface(bare).file.variables
 
 
 @patch("pyslfp.ice.export.ensure_data")
@@ -123,6 +129,19 @@ def test_exports_real_ice7g_slices(tmp_path):
     assert (file.grid.ntheta, file.grid.nphi) == (180, 360)
     assert np.array_equal(file.time, [-26.0, 0.0])
     assert len(file.citation) >= 1
+    # the Caspian is held as land, the open ocean and the continents not
+    grid = file.grid
+    lat = 90.0 - np.rad2deg(grid.colatitudes)
+    lon = np.rad2deg(grid.longitudes)
+    held = history.values("land")
+
+    def at(latitude, longitude):
+        return held[np.argmin(abs(lat - latitude)), np.argmin(abs(lon - longitude))]
+
+    assert at(42.0, 51.0) == 1.0  # the Caspian
+    assert at(0.0, 200.0) == 0.0  # the Pacific
+    assert at(50.0, 100.0) == 0.0  # Asia
+    assert 0 < held.sum() < 0.01 * held.size
     raw = xr.open_dataset(DATADIR / "ice7g" / "I7G_NA.VM7_1deg.0.nc")
     assert np.array_equal(
         history.values("ice_thickness", date=0.0),

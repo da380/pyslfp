@@ -32,15 +32,21 @@ def _state(model: EarthModel) -> EarthState:
 
 
 def _adjoint_mismatch(model: EarthModel, *, seed: int = 0) -> float:
+    """The worst failure of <A x, y> = <x, A* y> over three seeded random
+    pairs, relative to |A x| |y|: the size the pairing can have, so that a
+    pair that happens to be nearly orthogonal does not inflate the measure."""
     op = FingerPrintOperator(_state(model), rotational_feedbacks=True, rtol=1e-12)
     mu_x = op.load_measure_for_testing()
     mu_y = op.response_measure_for_testing()
+    rng = np.random.default_rng(seed)
     worst = 0.0
     for _ in range(3):
-        x, y = mu_x.sample(), mu_y.sample()
-        lhs = op.codomain.inner_product(op(x), y)
+        x, y = mu_x.sample(rng=rng), mu_y.sample(rng=rng)
+        image = op(x)
+        lhs = op.codomain.inner_product(image, y)
         rhs = op.domain.inner_product(x, op.adjoint(y))
-        worst = max(worst, abs(lhs - rhs) / abs(lhs))
+        scale = op.codomain.norm(image) * op.codomain.norm(y)
+        worst = max(worst, abs(lhs - rhs) / scale)
     return worst
 
 

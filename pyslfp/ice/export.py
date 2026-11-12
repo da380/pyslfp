@@ -5,7 +5,10 @@ The exporter reads a model's stored time slices from the pyslfp data
 directory and writes one `planetmodel.surface/1` file holding the
 `ice_thickness` and `topography` histories on the dataset's own grid, in
 metres, at the stored dates alone — nothing is interpolated or
-regridded.  Time is stored in kiloyears relative to the present,
+regridded.  With them goes `land`, a field without a time axis that is
+one where the surface is held as land whatever the flotation and zero
+elsewhere: the present-day landlocked depressions, as `IceNG.get_land`
+gives them on a model grid.  Time is stored in kiloyears relative to the present,
 negative in the past, so that the axis increases toward the present;
 the dates in kyr before present are the negatives of the stored times.
 The file carries the dataset's own citation attributes, and consumers
@@ -24,6 +27,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
+from pyslfp.core.water_bodies import landlocked_mask
 from pyslfp.data import ensure_data
 
 from .ice_ng import IceNGVersion, slice_file, standard_dates
@@ -88,6 +92,7 @@ def export_ice_history(
     *,
     version: IceNGVersion = "ICE7G",
     dates: np.ndarray | None = None,
+    land: bool = True,
 ) -> Path:
     """
     Writes an ICE-NG model's stored slices as a planetmodel surface file.
@@ -98,6 +103,13 @@ def export_ice_history(
         dates (np.ndarray | None): The dates to export, in kyr before
             present, each one of the model's stored slices
             (`standard_dates(version)`); all of them by default.
+        land (bool): Whether to write the `land` field: one at the nodes
+            whose cells the present-day landlocked depressions
+            (`pyslfp.core.water_bodies`) cover by more than half, zero
+            elsewhere, the same at every date. A consumer holds those
+            nodes as land, where flotation alone would make the Caspian
+            and the other basins below sea level part of the ocean.
+            Defaults to True.
 
     Returns:
         Path: The file written.
@@ -176,6 +188,19 @@ def export_ice_history(
             meaning=f"{version} topography (the ice surface under grounded ice, the sea floor under floating ice)",
         ),
     }
+    if land:
+        ordered = lat[::-1] if flip else lat
+        held = landlocked_mask(
+            ordered, np.roll(np.mod(lon, 360.0), -roll), extend=False
+        )
+        fields["land"] = surfacefile.SurfaceVariable(
+            held.astype(float),
+            support="static",
+            meaning=(
+                "held as land whatever the flotation (1) or not (0): the "
+                "present-day landlocked depressions"
+            ),
+        )
     return surfacefile.write_surface(
         Path(path),
         grid,

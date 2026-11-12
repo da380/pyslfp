@@ -3,7 +3,9 @@ Changes in 4.2
 
 One change of results: the sea level that :class:`~pyslfp.ice.IceNG`
 builds under floating ice now uses the Earth model's densities. No
-signature changes; ``IceNG`` gains two optional arguments.
+signature changes; ``IceNG`` gains two optional arguments, and
+``export_ice_history`` writes the landlocked depressions with the
+histories.
 
 
 Changed results
@@ -43,6 +45,13 @@ Additions
 
 - ``IceNG(ice_density=..., water_density=...)`` and
   ``IceNG.flotation_ratio``.
+- ``export_ice_history`` writes a third field, ``land``: one at the
+  nodes of the dataset's grid held as land whatever the flotation (the
+  present-day landlocked depressions, as ``IceNG.get_land`` gives them
+  on a model grid) and zero elsewhere, with no time axis. A consumer of
+  the file can then hold the Caspian and the other basins below sea
+  level as land, as an ``EarthState`` built from ICE-NG does.
+  ``land=False`` leaves it out.
 
 
 Fixes

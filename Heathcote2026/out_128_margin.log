@@ -1,0 +1,82 @@
+Building the physics (lmax=128)...
+Reading the loads of the ESA Earth System Model...
+  training on the changes to 1996, 1997, 1998, 1999, 2000, 2001; holding out 2002, 2003, 2004, 2005, 2006
+Prior fitted to the training loads
+------------------------------------------------------------------------
+field            order  scale (km)    std on support   rms of mean   (mm EWT)
+ice_sheets        1.05         204              71.0           0.0
+land_water        1.05         605              65.2           0.0
+ocean             1.05        2417               8.3           0.0
+ice sheets: std grows as 1 + 22.39 p towards the margin
+
+Building the true loads and making the data...
+  2002: rms of the total load 40.3 mm EWT
+  2003: rms of the total load 35.5 mm EWT
+  2004: rms of the total load 36.8 mm EWT
+  2005: rms of the total load 44.0 mm EWT
+  2006: rms of the total load 34.4 mm EWT
+Assembling the estimators...
+/home/david/.cache/pypoetry/virtualenvs/pyslfp-si9MxX7m-py3.12/lib/python3.12/site-packages/joblib/externals/loky/process_executor.py:782: UserWarning: A worker stopped while some jobs were given to the executor. This can be caused by a too short worker timeout or by a memory leak.
+  warnings.warn(
+Held-out test: loads of the ESA Earth System Model
+Held-out changes: 2002, 2003, 2004, 2005, 2006
+All values in mm EWT. 'stated std' is the standard deviation the estimator reports: the posterior's, or WMB's propagated noise.
+
+Prior fitted to the training loads
+------------------------------------------------------------------------
+field            order  scale (km)    std on support   rms of mean   (mm EWT)
+ice_sheets        1.05         204              71.0           0.0
+land_water        1.05         605              65.2           0.0
+ocean             1.05        2417               8.3           0.0
+ice sheets: std grows as 1 + 22.39 p towards the margin
+
+Prior std of the quantities: GRL (S Basin) 12.08, WAIS 5.13, Gulf of Mexico 9.24, GBM basin 17.50, (1,0) 6.55, (1,1) 6.39, (1,-1) 6.40
+
+Bayesian estimates
+==================================================================================================================
+                 GRL (S Basin)          WAISGulf of Mexico     GBM basin         (1,0)         (1,1)        (1,-1)
+------------------------------------------------------------------------------------------------------------------
+truth 2002             -23.547       -10.442        16.825       -14.823        -1.976        -5.567       -11.930
+error 2002               4.200        -7.278        -0.889         5.813         8.525         5.662         8.198
+truth 2003             -13.409        -2.721         9.458        26.026        -1.394         4.471         9.975
+error 2003               4.457        -4.140         3.683        -0.869         5.003        -3.255        -3.770
+truth 2004             -31.954       -18.994        -0.986       -21.277         6.518         1.798        -7.196
+error 2004               2.953         1.811        -4.203         2.490        -2.339         1.262         2.873
+truth 2005             -27.279       -11.068         0.134       -33.431        -0.712       -11.564        -6.807
+error 2005              -2.182         0.408        -0.182         0.685        -0.393         3.799         4.160
+truth 2006             -33.739       -12.109       -11.725       -29.660        -1.676         6.584         5.868
+error 2006               2.231        -1.357         3.148        -6.570        -0.148        -5.320        -9.570
+------------------------------------------------------------------------------------------------------------------
+truth rms               26.973        12.218        10.109        25.873         3.214         6.801         8.653
+error rms                3.346         3.883         2.897         4.108         4.546         4.171         6.302
+  without noise          2.615         3.192         2.092         3.101         4.228         3.833         5.715
+stated std               2.464         2.115         2.630         2.731         3.748         4.829         4.817
+rms error/std            1.358         1.836         1.102         1.504         1.213         0.864         1.308
+
+
+WMB estimates (regional averages only)
+========================================================================
+                 GRL (S Basin)          WAISGulf of Mexico     GBM basin
+------------------------------------------------------------------------
+truth 2002             -23.547       -10.442        16.825       -14.823
+error 2002              -1.857        -3.709        -4.669         7.368
+truth 2003             -13.409        -2.721         9.458        26.026
+error 2003               3.748        -0.022         7.028        -5.324
+truth 2004             -31.954       -18.994        -0.986       -21.277
+error 2004              -0.660         2.502        -7.132         3.307
+truth 2005             -27.279       -11.068         0.134       -33.431
+error 2005              -1.737        -1.971        -1.290         1.406
+truth 2006             -33.739       -12.109       -11.725       -29.660
+error 2006               1.217        -1.551         3.349        -6.960
+------------------------------------------------------------------------
+truth rms               26.973        12.218        10.109        25.873
+error rms                2.118         2.294         5.195         5.366
+  without noise          2.156         1.444         4.805         4.640
+stated std               1.759         1.577         1.630         1.562
+rms error/std            1.204         1.455         3.187         3.437
+
+saved output_plots_grace_heldout/heldout_metrics.txt
+Maps for the held-out change to 2006...
+saved output_plots_grace_heldout/heldout_errors.png
+saved output_plots_grace_heldout/heldout_maps.png
+saved output_plots_grace_heldout/heldout_fields.png

@@ -102,7 +102,9 @@ def download(component: str, year: int, /, *, limit_rate: Optional[str] = None) 
     if target.exists():
         return target
     partial = target.with_suffix(target.suffix + ".part")
+    # The server drops a connection now and then; curl retries and resumes.
     command = ["curl", "-sS", "-L", "--fail", "-C", "-", "-o", str(partial)]
+    command += ["--retry", "8", "--retry-delay", "15", "--retry-all-errors"]
     if limit_rate:
         command += ["--limit-rate", limit_rate]
     command.append(f"{URL}/{archive_name(component, year)}")
@@ -267,6 +269,33 @@ def interval_changes(values: np.ndarray, /, *, months: int = 12, step: int = 12)
     return starts, changes
 
 
+def _on_model_grid(model, coefficients, lat_mesh, lon_mesh):
+    """A field given by coefficients to degree 180, at its full degree on
+    the model's grid.
+
+    A model of degree 180 or more synthesises it directly. For one of lower
+    degree on an equally spaced grid, the field is synthesised on a finer
+    grid of the same kind whose points include the model's, and those are
+    kept; on any other grid it is evaluated point by point, which is slow.
+    """
+    if model.lmax >= DEGREE:
+        return model.expand_coefficient(coefficients.pad(model.lmax))
+    field = model.zero_grid()
+    if model.grid == "DH":
+        # A grid of degree L has 2 (L + 1) latitudes from the north pole, so
+        # one of degree m (L + 1) - 1 holds every point of it, m apart.
+        ratio = -(-(DEGREE + 1) // (model.lmax + 1))
+        fine = coefficients.pad(ratio * (model.lmax + 1) - 1).expand(
+            grid="DH2" if model.sampling == 2 else "DH", extend=model.extend
+        )
+        field.data[:] = fine.data[::ratio, ::ratio]
+    else:
+        field.data[:] = coefficients.expand(
+            lat=lat_mesh.ravel(), lon=lon_mesh.ravel()
+        ).reshape(field.data.shape)
+    return field
+
+
 def load_changes(
     model,
     component: str,
@@ -282,9 +311,13 @@ def load_changes(
     the model's units of load.
 
     The coefficients are converted to equivalent water thickness with the
-    model's own load Love numbers, truncated or padded to the model's
-    degree, and synthesised on its grid. Nothing is removed: a component's
-    mass need not be conserved, and its degrees 0 and 1 are kept.
+    model's own load Love numbers and evaluated on the model's grid at their
+    full degree of 180, whatever the model's own degree. A model of lower
+    degree then holds samples of the full field and not a truncation of it,
+    which would ring about the sharp edges of the ice and the land beyond
+    what the Earth System Model's own truncation at degree 180 already does.
+    Nothing is removed: a component's mass need not be conserved, and its
+    degrees 0 and 1 are kept.
 
     Args:
         model: The pyslfp EarthModel.
@@ -308,12 +341,13 @@ def load_changes(
     p = model.parameters
     to_load = p.water_density / p.length_scale
     fields = []
+    template = model.zero_grid()
+    lat_mesh, lon_mesh = np.meshgrid(template.lats(), template.lons(), indexing="ij")
     for cosine, sine in zip(hc, hs):
         coefficients = SHCoeffs.from_array(
             np.stack([cosine, sine]), normalization="4pi", csphase=1
         ).convert(normalization=model.normalization, csphase=model.csphase)
-        coefficients = coefficients.pad(model.lmax)
-        fields.append(model.expand_coefficient(coefficients) * to_load)
+        fields.append(_on_model_grid(model, coefficients, lat_mesh, lon_mesh) * to_load)
     labels = [f"{dates[k][0]}-{dates[k][1]:02d}" for k in starts]
     return labels, fields
 

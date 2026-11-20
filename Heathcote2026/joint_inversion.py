@@ -135,6 +135,7 @@ def parse_arguments() -> argparse.Namespace:
     common.add_ocean_arguments(parser, surrogate=True)
     common.add_altimetry_noise_arguments(parser, prefix="alt-")
     common.add_joint_grace_noise_arguments(parser)
+    common.add_gia_arguments(parser)
     common.add_qoi_arguments(parser)
     common.add_parallel_arguments(parser)
     args = parser.parse_args()
@@ -519,6 +520,7 @@ def main():
         args.alt_noise_corr_std_factor,
         args.alt_noise_corr_scale_factor,
         calib=calib,
+        **common.altimetry_noise_options(args, "alt_"),
     )
     grace_noise, grace_info = common.joint_grace_noise(
         physics, stds["ice_std"], args.prior_order, args
@@ -531,15 +533,23 @@ def main():
     altimetry = physics.altimetry
     grace = physics.grace(args)
     joint = inf.ColumnLinearOperator([altimetry, grace])
+    # The error of the GIA correction is one model's error in both data
+    # sets, so in the joint problem it is correlated between them. The
+    # preconditioners do not see it.
+    joint_noise = inf.GaussianMeasure.from_product(
+        [alt_noise, grace_noise], domain=joint.codomain
+    )
+    grace_total = grace_noise
+    if args.gia_years > 0.0:
+        alt_noise = alt_noise + common.ocean_gia_error(physics, args)
+        grace_total = grace_noise + common.ocean_gia_error(
+            physics, args, altimetry=False, grace=True
+        )
+        joint_noise = joint_noise + common.ocean_gia_error(physics, args, grace=True)
     problems = {
         "altimetry": inf.LinearForwardProblem(altimetry, error=alt_noise),
-        "grace": inf.LinearForwardProblem(grace, error=grace_noise),
-        "joint": inf.LinearForwardProblem(
-            joint,
-            error=inf.GaussianMeasure.from_product(
-                [alt_noise, grace_noise], domain=joint.codomain
-            ),
-        ),
+        "grace": inf.LinearForwardProblem(grace, error=grace_total),
+        "joint": inf.LinearForwardProblem(joint, error=joint_noise),
     }
 
     print("\nDrawing the synthetic truth and data...")

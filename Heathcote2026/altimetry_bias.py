@@ -77,6 +77,7 @@ def parse_arguments() -> argparse.Namespace:
     )
     common.add_ocean_arguments(parser)
     common.add_altimetry_noise_arguments(parser)
+    common.add_gia_arguments(parser)
     common.add_parallel_arguments(parser)
     return parser.parse_args()
 
@@ -142,7 +143,11 @@ def main():
         args.noise_corr_std_factor,
         args.noise_corr_scale_factor,
         calib=calib,
+        **common.altimetry_noise_options(args),
     )
+    gia_error = common.ocean_gia_error(physics, args)
+    if gia_error is not None:
+        noise = noise + gia_error
     common.print_calibration_report(calib, physics)
 
     # The error acts on the pair (model, noise): the estimator applied to the

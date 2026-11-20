@@ -16,7 +16,7 @@ from matplotlib.patches import Ellipse
 import pygeoinf as inf
 import pyslfp as sl
 
-from common import ETA, ICE, RHO
+from common import ETA, ICE, LAND, RHO
 
 # The fonts of the inversion scripts' figures; see `set_inversion_style`.
 INVERSION_STYLE = {
@@ -32,14 +32,22 @@ GRIDLINES = {"xlabel_style": {"size": 12}, "ylabel_style": {"size": 12}}
 COLORBAR = {"orientation": "horizontal", "shrink": 0.8, "pad": 0.05}
 
 # The fields of the ocean experiments, in the rows of their map grids: the
-# row title and the display unit (see `common.OceanPhysics.display`).
-FIELDS = (ICE, ETA, RHO)
+# row title and the display unit (see `common.OceanPhysics.display`). A map
+# grid has a row for each of these that the model holds.
+FIELDS = (ICE, LAND, ETA, RHO)
 ROW_TITLES = {
     ICE: "Ice Thickness Change",
+    LAND: "Land Water Change",
     ETA: "Sterodynamic SL Change",
     RHO: "Averaged Density Change",
 }
-UNIT_LABELS = {ICE: "mm", ETA: "mm", RHO: r"g m$^{-3}$"}
+UNIT_LABELS = {ICE: "mm", LAND: "mm", ETA: "mm", RHO: r"g m$^{-3}$"}
+
+
+def rows(fields: dict) -> list:
+    """The fields a map grid shows, in order: those of `FIELDS` that
+    `fields` holds."""
+    return [name for name in FIELDS if name in fields]
 
 
 def set_inversion_style() -> None:
@@ -55,7 +63,7 @@ def field_label(name: str) -> str:
 def covariance_label(row: str, perturbed: str) -> str:
     """The colour bar label of the covariance of field `row` with field
     `perturbed`, in the product of their units."""
-    heights = {ICE, ETA}
+    heights = {ICE, LAND, ETA}
     if row in heights and perturbed in heights:
         return "Covariance (mm²)"
     if row not in heights and perturbed not in heights:
@@ -242,8 +250,9 @@ def state_maps(
 ):
     """
     The true state and a posterior expectation, field by field, and the
-    posterior's pointwise standard deviation if `std` is given: three rows
-    and two or three columns. Each argument maps the field names to fields
+    posterior's pointwise standard deviation if `std` is given: a row per
+    field and two or three columns; `figsize` is that of three rows, and
+    the height grows with their number. Each argument maps the field names to fields
     on their supports in display units (`common.OceanPhysics.display`).
     `limits` holds each row's symmetric colour limit and `std_limits` that of
     the standard deviations, autoscaled if omitted. With `row_titles` the
@@ -251,8 +260,12 @@ def state_maps(
     drawn on every map.
     """
     ncols = 2 if std is None else 3
-    fig, axes = sl.subplots(3, ncols, figsize=figsize, gridspec_kw={"hspace": 0.15})
-    for row, name in enumerate(FIELDS):
+    names = rows(true)
+    figsize = (figsize[0], figsize[1] * len(names) / 3.0)
+    fig, axes = sl.subplots(
+        len(names), ncols, figsize=figsize, gridspec_kw={"hspace": 0.15}
+    )
+    for row, name in enumerate(names):
         for col, field in enumerate((true[name], mean[name])):
             sl.plot(
                 field,
@@ -281,7 +294,7 @@ def state_maps(
     draw_boundaries(state, axes, boundaries)
     label_columns(axes, ["True State", mean_title, "Pointwise Std. Deviation"][:ncols])
     if row_titles:
-        label_rows(axes, [ROW_TITLES[name] for name in FIELDS])
+        label_rows(axes, [ROW_TITLES[name] for name in names])
     return fig
 
 
@@ -310,8 +323,14 @@ def covariance_maps(
     gridspec = {"hspace": 0.15}
     if wspace is not None:
         gridspec["wspace"] = wspace
-    fig, axes = sl.subplots(3, ncols, figsize=(8 * ncols, 16), gridspec_kw=gridspec)
-    for row, name in enumerate(FIELDS):
+    names = rows(columns[0][1])
+    fig, axes = sl.subplots(
+        len(names),
+        ncols,
+        figsize=(8 * ncols, 16 * len(names) / 3.0),
+        gridspec_kw=gridspec,
+    )
+    for row, name in enumerate(names):
         fields = [fields[name] for _, fields in columns]
         limits = [peak(field) for field in fields]
         fallback = max(limits) if max(limits) > 0 else 1.0
@@ -348,7 +367,7 @@ def covariance_maps(
                     gridlines=False,
                 )
     label_columns(axes, [title for title, _ in columns])
-    label_rows(axes, [ROW_TITLES[name] for name in FIELDS])
+    label_rows(axes, [ROW_TITLES[name] for name in names])
     draw_boundaries(state, axes, boundaries)
     return fig
 

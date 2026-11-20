@@ -1250,6 +1250,63 @@ def budget_prior(
     return prior, invariant, info
 
 
+# The three-field prior as stated numbers: each field's pointwise std as a
+# load, in mm EWT, and its scale in km. They are representative of the
+# year-on-year changes of the ESA Earth System Model resolved to degree 180
+# (`esm_loads.py`), at the order `BUDGET_PRIOR_ORDER`.
+BUDGET_PRIOR = {ICE: (80.0, 180.0), LAND: (65.0, 340.0), OCEAN: (8.0, 940.0)}
+BUDGET_PRIOR_ORDER = 1.5
+
+
+def stated_budget_prior(
+    physics: BudgetPhysics,
+    /,
+    *,
+    values: Optional[dict] = None,
+    order: float = BUDGET_PRIOR_ORDER,
+    reference_degree: int = 180,
+):
+    """
+    A prior for the three-field GRACE model from stated numbers.
+
+    Each field is an invariant Sobolev field of the given `order`, with the
+    pointwise std (as a load, mm EWT) and the scale (km) that `values`
+    gives it by name, `BUDGET_PRIOR` if omitted. The stds are those of
+    loads resolved to `reference_degree`; the spectrum continues past that
+    degree by its own law, so that the prior does not depend on the
+    truncation of the model. The fields are independent, and the ocean is
+    conditioned exactly on having no net mass.
+
+    Returns (prior, fields, info) as `budget_prior` does.
+    """
+    values = BUDGET_PRIOR if values is None else values
+    setup, space = physics.setup, physics.load_space
+    p = physics.state.model.parameters
+    densities = physics.densities
+    invariant, info = [], {}
+    for name in setup.names:
+        std_mm, scale_km = values[name]
+        scale = scale_km * 1000.0 / p.length_scale
+        continued = np.sqrt(
+            _band_power(order, scale, space.radius, space.lmax)
+            / _band_power(order, scale, space.radius, reference_degree)
+        )
+        std = continued * std_mm / physics.scale_mm / densities[name]
+        invariant.append(space.sobolev_measure(order, scale, pointwise_std=std))
+        info[name] = {
+            "order": order,
+            "scale_km": scale_km,
+            "load_std_mm": std_mm,
+            "thickness_std": std,
+            "mean_rms_mm": 0.0,
+            "margin_growth": None,
+        }
+    product = inf.GaussianMeasure.from_product(invariant, domain=setup.space)
+    constraint = setup.constraints[OCEAN_MASS]
+    prior = product.condition(constraint, np.zeros(constraint.codomain.dim))
+    return prior, invariant, info
+
+
 def invariant_load_measure(physics: BudgetPhysics, fields, /):
     """
     An invariant measure on the load space that stands in for the three-field
@@ -1376,17 +1433,26 @@ class OceanPhysics:
 
     def grace(self, args: argparse.Namespace) -> inf.LinearOperator:
         """GRACE's coefficients of the potential change, from the model, at
-        --obs-degree and in the convention --grace-convention."""
-        return (
+        --obs-degree and in the convention --grace-convention. A surrogate
+        truncated below --obs-degree gives the coefficients up to its own
+        degree and zeros above, in the same data space: the coefficients
+        are ordered by degree, so the zeros follow the rest."""
+        degree = min(args.obs_degree, self.fingerprint.codomain.field_space.lmax)
+        operator = (
             grace_coefficients(
                 self.fingerprint.codomain,
                 self.state.model,
-                args.obs_degree,
+                degree,
                 args.grace_convention,
             )
             @ self.fingerprint
             @ self._loads
         )
+        if degree < args.obs_degree:
+            data_space = inf.EuclideanSpace((args.obs_degree + 1) ** 2 - 4)
+            read = data_space.coordinate_selection(np.arange(operator.codomain.dim))
+            operator = read.adjoint @ operator
+        return operator
 
     @property
     def _loads(self):
@@ -1411,12 +1477,17 @@ def ocean_physics(
     *,
     points: Optional[Sequence[tuple[float, float]]] = None,
     surrogate: bool = False,
+    surrogate_loads: str = "sources",
+    surrogate_iterations: Optional[int] = 1,
 ) -> OceanPhysics:
     """The physics of the ocean experiments at --lmax, or, for the surrogate
     of the preconditioners, at --surrogate-degree. The altimetry points are
     the regular grid at --spacing over the ice-free ocean within 66 degrees
     of the equator, unless given; the surrogate takes those of the exact
-    physics, so that the two share the data space."""
+    physics, so that the two share the data space. The surrogate keeps the
+    loads of the mass sources alone (`surrogate_loads="sources"`) or all of
+    them ("all"), and makes `surrogate_iterations` passes of the sea level
+    equation, or solves it if that is None."""
     lmax = args.surrogate_degree if surrogate else args.lmax
     state = EarthState.from_defaults(lmax=lmax)
     if points is None:
@@ -1427,7 +1498,7 @@ def ocean_physics(
         state,
         load_parameters=(args.load_order, scale),
         response_parameters=(args.load_order + 1.0, scale),
-        max_iterations=1 if surrogate else None,
+        max_iterations=surrogate_iterations if surrogate else None,
     )
     field_space = sobolev_load_space(state.model, args.field_order, scale)
     load_space = fingerprint.domain
@@ -1460,7 +1531,9 @@ def ocean_physics(
     ]
     setup = ModelSetup(state, components)
     loads = setup.load_operator
-    if surrogate:
+    if surrogate and surrogate_loads not in ("sources", "all"):
+        raise ValueError("surrogate_loads is 'sources' or 'all'.")
+    if surrogate and surrogate_loads == "sources":
         sources = None
         for name in (ICE, LAND):
             if name in setup.names:
@@ -1568,18 +1641,38 @@ def _stds_by_name(stds: dict) -> dict:
     return by_name
 
 
-def product_prior(physics: OceanPhysics, args: argparse.Namespace, stds: dict):
+def product_prior(
+    physics: OceanPhysics,
+    args: argparse.Namespace,
+    stds: dict,
+    /,
+    *,
+    reference: Optional[OceanPhysics] = None,
+):
     """The uncorrelated, unconditioned product of the fields' priors at the
     pointwise stds `stds` (keyed as calib["derived_stds"]): the prior of the
-    preconditioners' surrogate."""
+    preconditioners' surrogate.
+
+    A field's pointwise std is the sum of its variances over the degrees
+    its space holds, so a field built with that std on a space truncated at
+    a lower degree has too much variance at every degree it keeps: all the
+    variance of the higher degrees is pushed onto them. With `reference`,
+    the physics the surrogate stands in for, each field takes instead the
+    variances of the reference's field at the degrees it shares with it, so
+    that the surrogate's prior is the reference's, truncated."""
     by_name = _stds_by_name(stds)
-    return inf.GaussianMeasure.from_product(
-        [
-            _field_measure(physics, args, name, by_name[name])
-            for name in physics.setup.names
-        ],
-        domain=physics.setup.space,
-    )
+    measures = []
+    for name in physics.setup.names:
+        if reference is None:
+            measures.append(_field_measure(physics, args, name, by_name[name]))
+            continue
+        space = physics.setup.component(name).space
+        spectrum = _field_measure(
+            reference, args, name, by_name[name]
+        ).covariance.eigenvalues
+        # The components are ordered by degree, so the shared ones lead.
+        measures.append(space.invariant_measure(spectrum[: space.dim]))
+    return inf.GaussianMeasure.from_product(measures, domain=physics.setup.space)
 
 
 def ocean_prior(physics: OceanPhysics, args: argparse.Namespace, rng):
@@ -1850,6 +1943,7 @@ def altimetry_noise(
     std_variable: str = "uncertainty",
     global_std_mm: float = 0.0,
     frame_std_mm: float = 0.0,
+    parts: Optional[dict] = None,
 ):
     """
     The altimetry noise, a sum of parts:
@@ -1873,7 +1967,9 @@ def altimetry_noise(
     `calib["noise"]`. The last two have rank four between them.
 
     Returns (noise, local): the noise and its local part, which is all the
-    preconditioners' surrogate sees.
+    preconditioners' surrogate sees. If `parts` is given, the measures of
+    the other parts are put in it by name ("correlated", "modes"), for a
+    preconditioner that corrects for them (`low_rank_correction`).
     """
     data_space = inf.EuclideanSpace(len(physics.points))
     points = np.asarray(physics.points, dtype=float).reshape(-1, 2)
@@ -1898,7 +1994,10 @@ def altimetry_noise(
         if calib is not None:
             mean = ocean_average_operator(physics.state, field_space)
             calib.setdefault("noise", {})["alt_corr_gmsl_floor"] = _std(field, mean)
-        noise = noise + field.affine_map(physics.field_point_evaluation)
+        correlated = field.affine_map(physics.field_point_evaluation)
+        if parts is not None:
+            parts["correlated"] = correlated
+        noise = noise + correlated
     modes = []
     if global_std_mm > 0.0:
         modes.append((global_std_mm / physics.scale_mm) * np.ones(len(points)))
@@ -1915,9 +2014,12 @@ def altimetry_noise(
         spread = inf.LinearOperator.from_matrix(
             amplitudes, data_space, np.column_stack(modes), form="components"
         )
-        noise = noise + inf.GaussianMeasure.from_standard_deviation(
+        common_modes = inf.GaussianMeasure.from_standard_deviation(
             amplitudes, 1.0
         ).affine_map(spread)
+        if parts is not None:
+            parts["modes"] = common_modes
+        noise = noise + common_modes
     return noise, local
 
 
@@ -2158,6 +2260,141 @@ def surrogate_preconditioner(
         noise_inverse=noise.precision,
     )(normal_operator)
     return (1.0 - alpha) * woodbury + alpha * noise.precision
+
+
+def unresolved_altimetry_variance(
+    physics: OceanPhysics, args: argparse.Namespace, dyn_std: float, degree: int
+) -> float:
+    """
+    The variance of eta at a point carried by the degrees above `degree`,
+    under its own prior with pointwise std `dyn_std`.
+
+    A surrogate truncated at `degree` cannot produce that part of the
+    signal. In the altimetry data it varies over a scale not much greater
+    than the spacing of the points, so in the surrogate problem it can be
+    treated as further independent noise at each point, which tells the
+    preconditioner how far those data can be fitted.
+    """
+    space = physics.field_space
+    spectrum = _field_measure(physics, args, ETA, dyn_std).covariance.eigenvalues
+    return float(space.pointwise_variance(spectrum * (space.degrees > degree)))
+
+
+def unresolved_grace_variance(
+    physics: OceanPhysics, args: argparse.Namespace, stds: dict, degree: int
+) -> np.ndarray:
+    """
+    The variance of each of GRACE's coefficients above `degree` under the
+    prior, as WMB would have it: the loads of the fields (the mass sources
+    and eta) as invariant fields, each weighted by the fraction of the
+    sphere its support covers, taken to the coefficients degree by degree.
+    Zero at and below `degree`. `stds` are the fields' pointwise stds, keyed
+    as calib["derived_stds"].
+
+    A surrogate truncated at `degree` gives no signal in those
+    coefficients; this is its stand-in for the signal's variance there, to
+    be added to their noise in the surrogate problem.
+    """
+    state = physics.state
+    model = state.model
+    p = model.parameters
+    load_space = physics.load_space
+    sphere = model.integrate(model.constant_grid(1.0))
+    ocean = state.ocean_projection(value=0.0)
+    weights = {
+        ICE: (
+            p.ice_density,
+            state.ice_sheet_projection(value=0.0) * state.one_minus_ocean_function,
+        ),
+        LAND: (p.water_density, _land_without_ice_sheets(state)),
+        ETA: (p.water_density, ocean),
+    }
+    by_name = _stds_by_name(stds)
+    eigenvalues = 0.0
+    for name in physics.setup.names:
+        if name not in weights:
+            continue
+        density, support = weights[name]
+        space = physics.setup.component(name).space
+        measure = _field_measure(physics, args, name, by_name[name])
+        # A coefficient's variance is the eigenvalue over the space's metric;
+        # the load space's metric takes it back to an eigenvalue there.
+        coefficient = measure.covariance.eigenvalues / space.metric_values
+        fraction = model.integrate(support) / sphere
+        eigenvalues = eigenvalues + (
+            fraction * density**2 * coefficient * load_space.metric_values
+        )
+    stand_in = inf.GaussianMeasure(
+        load_space, covariance=inf.DiagonalLinearOperator(load_space, eigenvalues)
+    )
+    variance = (
+        wmb_method(state, args)
+        .load_measure_to_observation_measure(stand_in)
+        .covariance.diagonals()[0]
+    )
+    degrees = load_space.degrees
+    observed = degrees[(degrees >= 2) & (degrees <= args.obs_degree)]
+    return np.where(observed > degree, variance, 0.0)
+
+
+def with_added_variance(noise, variance):
+    """A measure with a diagonal covariance: that of `noise`, itself
+    diagonal, plus `variance` on the diagonal."""
+    diagonal = noise.covariance.diagonals()[0] + variance
+    return inf.GaussianMeasure.from_standard_deviations(noise.domain, np.sqrt(diagonal))
+
+
+def low_rank_correction(preconditioner, factors: Sequence, /):
+    """
+    A preconditioner corrected for terms of low rank in the operator.
+
+    `preconditioner` is M, an approximate inverse of an operator N on the
+    data space, and each of `factors` an operator U_i into that space from
+    a Euclidean space of low dimension. With U the factors side by side,
+    the result is the Woodbury inverse of N + U U* with M standing for the
+    inverse of N,
+
+        M - M U (1 + U* M U)^-1 U* M,
+
+    at the cost of one application of M per column of U, made once. It is
+    for the parts of the noise that the surrogate problem leaves out and
+    that have low rank: the error of the GIA correction, the common modes
+    of the altimetry, and a truncation of a large-scale correlated field
+    (`GaussianMeasure.low_rank_approximation`).
+    """
+    space = preconditioner.domain
+    columns = []
+    for factor in factors:
+        source = factor.domain
+        columns += [
+            space.to_components(factor(source.from_components(e)))
+            for e in np.eye(source.dim)
+        ]
+    count = len(columns)
+    coefficients = inf.EuclideanSpace(count)
+    spread = inf.LinearOperator.from_matrix(
+        coefficients, space, np.column_stack(columns), form="components"
+    )
+    # M U, column by column, and the small matrix 1 + U* M U.
+    applied = inf.LinearOperator.from_matrix(
+        coefficients,
+        space,
+        np.column_stack(
+            [
+                space.to_components(preconditioner(space.from_components(column)))
+                for column in columns
+            ]
+        ),
+        form="components",
+    )
+    inner = np.eye(count) + np.column_stack(
+        [spread.adjoint(applied(e)) for e in np.eye(count)]
+    )
+    solve = inf.LinearOperator.from_matrix(
+        coefficients, coefficients, np.linalg.inv(inner), form="components"
+    )
+    # M is self-adjoint, so U* M is the adjoint of M U.
+    return preconditioner - applied @ solve @ applied.adjoint
 
 
 def solve_posterior(inversion, data, preconditioner, /, *, rtol, qoi_rtol):

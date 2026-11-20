@@ -529,7 +529,7 @@ def main():
     )
 
     altimetry = physics.altimetry
-    grace = physics.grace(args.obs_degree)
+    grace = physics.grace(args)
     joint = inf.ColumnLinearOperator([altimetry, grace])
     problems = {
         "altimetry": inf.LinearForwardProblem(altimetry, error=alt_noise),
@@ -549,7 +549,7 @@ def main():
     # ------------------ The surrogate of the preconditioners ------------------
     surrogate, surrogate_prior = common.ocean_surrogate(args, physics, calib)
     surrogate_altimetry = surrogate.altimetry
-    surrogate_grace = surrogate.grace(args.obs_degree)
+    surrogate_grace = surrogate.grace(args)
     surrogates = {
         "altimetry": (surrogate_altimetry, alt_local_noise),
         "grace": (surrogate_grace, grace_noise),

@@ -71,7 +71,6 @@ import numpy as np
 
 import pygeoinf as inf
 import pyslfp as sl
-from pyslfp.observations import WMBMethod
 
 import common
 import figures
@@ -260,9 +259,8 @@ def estimator_kernels(
     degree,
     components,
     resolution,
-    forward,
+    wmb_error,
     total_average,
-    wmb_average,
     coefficients,
 ):
     """
@@ -278,7 +276,6 @@ def estimator_kernels(
     """
     load_space = resolution.domain
     bayes_error = total_average @ resolution
-    wmb_error = wmb_average @ forward - total_average
 
     lines = [
         "\n\n" + "=" * 115 + "\n",
@@ -454,9 +451,9 @@ def main():
     )
     names, average = common.regional_averaging(physics, args)
 
-    forward = common.grace_forward_operator(physics, args.obs_degree)
+    forward = common.grace_forward_operator(physics, args)
     total_load = common.total_load_operator(physics)
-    wmb = WMBMethod(state.model, args.obs_degree)
+    wmb = common.wmb_method(state, args)
     wmb_load = wmb.potential_coefficient_to_load_operator(load_space)
     noise = wmb.load_measure_to_observation_measure(noise_load)
 
@@ -531,9 +528,8 @@ def main():
             degree,
             components,
             resolution,
-            forward,
+            common.wmb_error_operator(physics, scale_mm * average, wmb_average, args),
             total_average,
-            wmb_average,
             coefficients,
         )
         metrics.append(table)

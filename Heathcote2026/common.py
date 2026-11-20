@@ -42,6 +42,7 @@ from pyslfp.observations import (
     WMBMethod,
     grace_observation_operator,
     ocean_altimetry_points,
+    stokes_coefficient_operator,
 )
 from pyslfp.core import geocentric_sea_level_operator
 from pyslfp.models import sea_level_change_to_load_operator
@@ -119,6 +120,14 @@ def add_grace_arguments(parser: argparse.ArgumentParser) -> None:
     """The resolution, prior and noise of the GRACE experiments."""
     parser.add_argument("--lmax", type=int, default=256)
     parser.add_argument("--obs-degree", type=int, default=100)
+    parser.add_argument(
+        "--grace-convention",
+        choices=("stokes", "orthonormal"),
+        default="stokes",
+        help="GRACE's data: the dimensionless Stokes coefficients of Level-2 "
+        "products, or the potential's coefficients in pyslfp's own convention. "
+        "The two differ by a factor per degree, so no result depends on it.",
+    )
     parser.add_argument("--load-order", type=float, default=2.0)
     parser.add_argument("--load-scale-km", type=float, default=500.0)
     parser.add_argument(
@@ -185,6 +194,14 @@ def add_altimetry_noise_arguments(
 
 def add_joint_grace_noise_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--obs-degree", type=int, default=100)
+    parser.add_argument(
+        "--grace-convention",
+        choices=("stokes", "orthonormal"),
+        default="stokes",
+        help="GRACE's data: the dimensionless Stokes coefficients of Level-2 "
+        "products, or the potential's coefficients in pyslfp's own convention. "
+        "The two differ by a factor per degree, so no result depends on it.",
+    )
     parser.add_argument("--grace-noise-scale-km", type=float, default=250.0)
     parser.add_argument("--grace-snr-low-degree", type=float, default=10.0)
     parser.add_argument("--grace-snr-reference-degree", type=float, default=2.0)
@@ -242,12 +259,35 @@ def grace_physics(lmax: int, load_order: float, load_scale_km: float) -> GracePh
     )
 
 
-def grace_forward_operator(physics: GracePhysics, obs_degree: int):
+def grace_coefficients(
+    response_space, model, obs_degree: int, convention: str = "orthonormal", /
+):
+    """GRACE's data read from a response: the coefficients of its potential
+    change for degrees 2 to `obs_degree`, in pyslfp's convention
+    ("orthonormal") or as the Stokes coefficients of Level-2 products
+    ("stokes"), which are those times a factor per degree."""
+    coefficients = grace_observation_operator(response_space, obs_degree)
+    if convention == "stokes":
+        return stokes_coefficient_operator(model, obs_degree) @ coefficients
+    return coefficients
+
+
+def wmb_method(state: EarthState, args: argparse.Namespace) -> WMBMethod:
+    """The WMB method at --obs-degree in the data's convention."""
+    return WMBMethod(state.model, args.obs_degree, convention=args.grace_convention)
+
+
+def grace_forward_operator(physics: GracePhysics, args: argparse.Namespace):
     """GRACE's coefficients of the potential change of the response to the
     direct load. The fingerprint operator's response already includes the
     ocean load the direct load induces."""
     return (
-        grace_observation_operator(physics.response_space, obs_degree)
+        grace_coefficients(
+            physics.response_space,
+            physics.state.model,
+            args.obs_degree,
+            args.grace_convention,
+        )
         @ physics.fingerprint
     )
 
@@ -261,6 +301,154 @@ def total_load_operator(physics: GracePhysics):
     return inf.LinearOperator.identity(physics.load_space) + (
         to_load @ sea_level @ physics.fingerprint
     )
+
+
+def wmb_error_operator(
+    physics: GracePhysics, average, wmb_average, args: argparse.Namespace, /
+):
+    """
+    WMB's estimate of the regional averages less their true values, as a
+    function of the direct load alone: C A - B, with A the forward operator,
+    B = `average` of the total load and C = `wmb_average`, WMB's averaging
+    of the data.
+
+    Written as it stands, C A - B solves the sea level equation twice per
+    action, once for the data and once for the induced ocean load. Here the
+    load is first paired with its response, and the data and the induced
+    load are both read from that one response, so that an action costs one
+    solve and an adjoint action one adjoint solve.
+    """
+    load_space, response_space = physics.load_space, physics.response_space
+    sea_level = response_space.field_operator("relative_sea_level_change")
+    to_load = sea_level_change_to_load_operator(
+        physics.state, sea_level.codomain, load_space
+    )
+    observe = grace_coefficients(
+        response_space, physics.state.model, args.obs_degree, args.grace_convention
+    )
+    paired = inf.ColumnLinearOperator(
+        [inf.LinearOperator.identity(load_space), physics.fingerprint]
+    )
+    read = inf.RowLinearOperator(
+        [-1.0 * average, wmb_average @ observe - average @ to_load @ sea_level]
+    )
+    return read @ paired
+
+
+# The factor taking a field in each unit to metres of equivalent water
+# thickness, a mass per unit area being divided by 1000 kg m^-3.
+_WATER_THICKNESS_UNITS = {
+    "m": 1.0,
+    "cm": 1.0e-2,
+    "mm": 1.0e-3,
+    "kg m-2": 1.0e-3,
+    "kg/m2": 1.0e-3,
+    "kg/m^2": 1.0e-3,
+}
+
+
+def read_load_fields(
+    physics: GracePhysics, path: str, /, *, variable: str = "lwe_thickness"
+):
+    """
+    Loads read from a netCDF file, as fields of the load space.
+
+    The file holds `variable` on a regular latitude-longitude grid, either
+    one field with dimensions (lat, lon) or several with one leading
+    dimension, such as a year. Its units attribute must be a length of
+    equivalent water thickness (m, cm or mm) or a mass per unit area
+    (kg m-2). Each field is interpolated bilinearly to the model's grid,
+    truncated at the model's degree, and has its degree 0 removed, so that
+    it conserves mass as a total load must; a field that does not vanish
+    on average is reported.
+
+    Returns (labels, fields): a label for each field, the leading
+    coordinate's value, and the fields in the model's units of load.
+    """
+    import xarray as xr
+    from scipy.interpolate import RegularGridInterpolator
+
+    model = physics.state.model
+    p = model.parameters
+    with xr.open_dataset(path) as dataset:
+        data = dataset[variable]
+        units_name = str(data.attrs.get("units", "")).strip()
+        if units_name not in _WATER_THICKNESS_UNITS:
+            raise ValueError(
+                f"'{variable}' has units '{units_name}'; expected one of "
+                f"{sorted(_WATER_THICKNESS_UNITS)}."
+            )
+        lead = [d for d in data.dims if d not in ("lat", "lon")]
+        if len(lead) > 1:
+            raise ValueError("The fields may have one leading dimension at most.")
+        data = data.transpose(*lead, "lat", "lon").sortby("lat").sortby("lon")
+        lats = data["lat"].values.astype(float)
+        lons = data["lon"].values.astype(float) % 360.0
+        values = np.nan_to_num(data.values.astype(float))
+        labels = (
+            [str(v) for v in np.atleast_1d(data[lead[0]].values)] if lead else ["field"]
+        )
+    if not lead:
+        values = values[np.newaxis]
+    order = np.argsort(lons)
+    lons, values = lons[order], values[..., order]
+
+    # Pad a column at each end in longitude, which is periodic, and a row
+    # at each pole, so that every point of the model's grid lies inside.
+    lons_p = np.concatenate([[lons[-1] - 360.0], lons, [lons[0] + 360.0]])
+    lats_p = np.concatenate([[-90.0], lats, [90.0]])
+    grid = model.zero_grid()
+    lat_mesh, lon_mesh = np.meshgrid(grid.lats(), grid.lons() % 360.0, indexing="ij")
+    points = np.column_stack([lat_mesh.ravel(), lon_mesh.ravel()])
+    to_load = _WATER_THICKNESS_UNITS[units_name] * p.water_density / p.length_scale
+
+    fields = []
+    for label, field in zip(labels, values):
+        padded = np.concatenate([field[:, -1:], field, field[:, :1]], axis=1)
+        padded = np.concatenate([padded[:1], padded, padded[-1:]], axis=0)
+        interpolator = RegularGridInterpolator((lats_p, lons_p), padded)
+        sampled = model.zero_grid()
+        sampled.data[:] = to_load * interpolator(points).reshape(sampled.data.shape)
+        coefficients = model.expand_field(sampled)
+        coefficients.coeffs[0, 0, 0] = 0.0
+        load = model.expand_coefficient(coefficients)
+        rms = np.sqrt(model.integrate(load * load) / model.integrate(1.0 + 0.0 * load))
+        mean_mm = model.integrate(sampled) / model.integrate(1.0 + 0.0 * load)
+        print(
+            f"  {label}: rms {rms * physics.scale_mm:.1f} mm EWT, largest "
+            f"{np.max(np.abs(load.data)) * physics.scale_mm:.0f} mm; a mean of "
+            f"{mean_mm * physics.scale_mm:+.2f} mm was removed"
+        )
+        fields.append(load)
+    return labels, fields
+
+
+def direct_load_of_total(total_load, sigma, /, *, rtol=1.0e-10, max_iterations=200):
+    """
+    A direct load whose total load, itself plus the ocean load it induces
+    through the sea level equation, is `sigma`.
+
+    The total load operator is the identity plus the induced load, which is
+    small beside it, so the iteration zeta <- zeta + (sigma - T zeta) from
+    zeta = sigma converges. The operator has a one-dimensional kernel, a
+    uniform layer over the ocean, which the sea level equation cancels
+    exactly; that component of the direct load is left as the iteration
+    finds it, and nothing computed from the response depends on it. `sigma`
+    must conserve mass, as every total load does.
+
+    Returns (zeta, residual): the direct load and the largest absolute
+    residual of its total load relative to that of `sigma`.
+    """
+    scale = float(np.max(np.abs(sigma.data)))
+    zeta = sigma.copy()
+    residual = np.inf
+    for _ in range(max_iterations):
+        misfit = sigma - total_load(zeta)
+        residual = float(np.max(np.abs(misfit.data))) / scale
+        if residual < rtol:
+            break
+        zeta = zeta + misfit
+    return zeta, residual
 
 
 def regional_averaging(physics: GracePhysics, args: argparse.Namespace):
@@ -544,10 +732,16 @@ class OceanPhysics:
         combined = inf.ColumnLinearOperator(list(parts)) * self.scale_mm
         return combined.codomain.coordinate_projection() @ combined
 
-    def grace(self, obs_degree: int) -> inf.LinearOperator:
-        """GRACE's coefficients of the potential change, from the model."""
+    def grace(self, args: argparse.Namespace) -> inf.LinearOperator:
+        """GRACE's coefficients of the potential change, from the model, at
+        --obs-degree and in the convention --grace-convention."""
         return (
-            grace_observation_operator(self.fingerprint.codomain, obs_degree)
+            grace_coefficients(
+                self.fingerprint.codomain,
+                self.state.model,
+                args.obs_degree,
+                args.grace_convention,
+            )
             @ self.fingerprint
             @ self._loads
         )
@@ -897,8 +1091,7 @@ def joint_grace_noise(
         std_to_mm=1000.0 * p.length_scale / p.water_density,
         label="GRACE spatial noise",
     )
-    wmb = WMBMethod(state.model, args.obs_degree)
-    noise = wmb.load_measure_to_observation_measure(
+    noise = wmb_method(state, args).load_measure_to_observation_measure(
         spatial_noise_measure(field_space, info, noise_scale)
     )
     return noise, info

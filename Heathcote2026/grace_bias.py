@@ -42,7 +42,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import pygeoinf as inf
-from pyslfp.observations import WMBMethod
 
 import common
 from figures import error_density, field_map
@@ -109,10 +108,9 @@ def main():
     _, prior, noise_load, _ = common.grace_measures(physics, args, rng)
     names, average = common.regional_averaging(physics, args)
 
-    wmb = WMBMethod(state.model, args.obs_degree)
+    wmb = common.wmb_method(state, args)
     noise = wmb.load_measure_to_observation_measure(noise_load)
     total_load = common.total_load_operator(physics)
-    forward = common.grace_forward_operator(physics, args.obs_degree)
     true_average = average @ total_load
     wmb_average = average @ wmb.potential_coefficient_to_load_operator(load_space)
 
@@ -135,8 +133,14 @@ def main():
 
     # WMB's error as a function of (zeta, e): WMB applied to the data,
     # GRACE's coefficients of the response plus the noise, less the true
-    # average.
-    error = inf.RowLinearOperator([wmb_average @ forward - true_average, wmb_average])
+    # average. The part acting on zeta reads the data and the induced load
+    # from one solution of the sea level equation.
+    error = inf.RowLinearOperator(
+        [
+            common.wmb_error_operator(physics, average, wmb_average, args),
+            wmb_average,
+        ]
+    )
     joint = inf.GaussianMeasure.from_product([prior, noise])
 
     print("Computing the error distributions...")

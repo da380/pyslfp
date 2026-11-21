@@ -394,7 +394,7 @@ def main():
         inversion,
         data,
         preconditioner,
-        rtol=0.01 * min(1.0, args.noise_std_mm / args.ocean_dyn_std_mm),
+        rtol=0.01 * min(1.0, args.noise_std_mm / common.sea_level_std_mm(args)),
         qoi_rtol=args.qoi_rtol,
     )
 

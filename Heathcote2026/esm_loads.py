@@ -8,9 +8,12 @@ simulation studies of gravity missions and independent of any inversion of
 GRACE data. It gives the Stokes coefficients of its components separately,
 to degree 180 every six hours from 1995 to 2006: the atmosphere (A), the
 ocean (O), terrestrially stored water (H), land ice (I) and the solid Earth
-(S). The experiments use the H, I and O components as loads whose values
-are known exactly: some to build a prior from, the rest held out to test
-the estimators on.
+(S). Version 3.0 of the model continues it from 2007 to 2020, in the same
+format and on the same server, as a model of its own: the two are not one
+series. The experiments use the H, I and O components as loads whose values
+are known exactly: the stated priors take their amplitudes and scales from
+the first version, and the estimators are tested on the loads of the
+second, which no prior has seen.
 
 This module fetches the yearly archives, reduces each to the monthly means
 of its coefficients, and reads those back as loads on a model's grid. The
@@ -19,7 +22,7 @@ means small, so an archive is deleted once it has been reduced unless
 --keep-raw is given. Everything is kept under ~/.pyslfp_data/esaesm, beside
 the data pyslfp itself downloads.
 
-    python esm_loads.py fetch                     H, I and O, 1995 to 2006
+    python esm_loads.py fetch                     H, I and O, 1995 to 2020
     python esm_loads.py fetch --components H --years 1995 1996
     python esm_loads.py list                      what has been reduced
 
@@ -64,13 +67,20 @@ from typing import Optional, Sequence
 
 import numpy as np
 
-URL = "https://isdc-data.gfz.de/future_missions/esaesm/ESAESM2/mtmshc"
+SERVER = "https://isdc-data.gfz.de/future_missions/esaesm"
+# The updated model (Dobslaw et al., 2015) covers 1995 to 2006 and its
+# successor, version 3.0, 2007 to 2020, in the same format and file names.
+FIRST_YEAR_OF_VERSION_3 = 2007
 DATA_DIR = Path.home() / ".pyslfp_data" / "esaesm"
 RAW_DIR = DATA_DIR / "raw"
 MONTHLY_DIR = DATA_DIR / "monthly"
 
-COMPONENTS = ("A", "O", "H", "I", "S", "AOHIS")
-YEARS = tuple(range(1995, 2007))
+COMPONENTS = ("A", "O", "H", "I", "S", "AOHIS", "AOe07")
+# Components kept in a folder of their own, for every year: AOe07 is a
+# realisation of the error of the atmosphere and ocean models that are
+# removed from GRACE's data before a gravity field is solved for.
+OWN_FOLDER = ("AOe07",)
+YEARS = tuple(range(1995, 2021))
 DEGREE = 180
 
 # The constants of the Earth System Model's files, in SI.
@@ -82,6 +92,13 @@ WATER_DENSITY = 1000.0
 
 def archive_name(component: str, year: int) -> str:
     return f"mtm_{year}_{component}.tar.gz"
+
+
+def archive_url(component: str, year: int) -> str:
+    if component in OWN_FOLDER:
+        return f"{SERVER}/{component}/{archive_name(component, year)}"
+    version = 3 if year >= FIRST_YEAR_OF_VERSION_3 else 2
+    return f"{SERVER}/ESAESM{version}/mtmshc/{archive_name(component, year)}"
 
 
 def monthly_file(component: str, year: int) -> Path:
@@ -107,7 +124,7 @@ def download(component: str, year: int, /, *, limit_rate: Optional[str] = None) 
     command += ["--retry", "8", "--retry-delay", "15", "--retry-all-errors"]
     if limit_rate:
         command += ["--limit-rate", limit_rate]
-    command.append(f"{URL}/{archive_name(component, year)}")
+    command.append(archive_url(component, year))
     subprocess.run(command, check=True)
     partial.rename(target)
     return target
@@ -184,9 +201,20 @@ def fetch(
     print("done", flush=True)
 
 
-def available(component: str) -> list[int]:
-    """The years of a component that have been reduced."""
-    return [year for year in YEARS if monthly_file(component, year).exists()]
+def version_years(version: int) -> tuple[int, ...]:
+    """The years of a version of the model, 2 or 3."""
+    if version not in (2, 3):
+        raise ValueError(f"the versions are 2 and 3, not {version}.")
+    return tuple(
+        year for year in YEARS if (year >= FIRST_YEAR_OF_VERSION_3) == (version == 3)
+    )
+
+
+def available(component: str, version: Optional[int] = None) -> list[int]:
+    """The years of a component that have been reduced: of one version of
+    the model, or of both if none is given."""
+    years = YEARS if version is None else version_years(version)
+    return [year for year in years if monthly_file(component, year).exists()]
 
 
 # ================================================================ #
@@ -194,16 +222,25 @@ def available(component: str) -> list[int]:
 # ================================================================ #
 
 
-def monthly_coefficients(component: str, years: Optional[Sequence[int]] = None):
-    """The monthly mean Stokes coefficients of a component over `years`
-    (all those reduced, if omitted), in order of time.
+def monthly_coefficients(
+    component: str, years: Optional[Sequence[int]] = None, /, *, version: int = 2
+):
+    """The monthly mean Stokes coefficients of a component over `years`, in
+    order of time; if `years` is omitted, over all the years of `version`
+    that have been reduced. The years must be of one version: the two are
+    different models, and a change from 2006 to 2007 is a change of neither.
 
     Returns (months, C, S): the months as (year, month) pairs and the
     coefficients as arrays of shape (n_months, 181, 181)."""
-    years = available(component) if years is None else list(years)
+    years = available(component, version) if years is None else list(years)
     if not years:
         raise FileNotFoundError(
             f"No reduced data for component {component}; run `esm_loads.py fetch`."
+        )
+    if len({year >= FIRST_YEAR_OF_VERSION_3 for year in years}) > 1:
+        raise ValueError(
+            f"the years {years[0]} to {years[-1]} span the two versions of the "
+            "model, which are not one series."
         )
     months, c, s = [], [], []
     for year in years:
@@ -302,6 +339,7 @@ def load_changes(
     /,
     *,
     years: Optional[Sequence[int]] = None,
+    version: int = 2,
     months: int = 12,
     step: int = 12,
 ):
@@ -322,7 +360,9 @@ def load_changes(
     Args:
         model: The pyslfp EarthModel.
         component: "H", "I", "O" or another component that has been reduced.
-        years: The years to use; all those reduced if omitted.
+        years: The years to use, all of one version of the model; if
+            omitted, all those of `version` that have been reduced.
+        version: 2 (1995 to 2006) or 3 (2007 to 2020).
         months, step: As for `interval_changes`.
 
     Returns:
@@ -331,7 +371,7 @@ def load_changes(
     """
     from pyshtools import SHCoeffs
 
-    dates, c, s = monthly_coefficients(component, years)
+    dates, c, s = monthly_coefficients(component, years, version=version)
     starts, dc = interval_changes(c, months=months, step=step)
     _, ds = interval_changes(s, months=months, step=step)
     k = model.love_numbers.conventional()["k"]

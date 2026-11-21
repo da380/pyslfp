@@ -16,7 +16,7 @@ from matplotlib.patches import Ellipse
 import pygeoinf as inf
 import pyslfp as sl
 
-from common import ETA, ICE, LAND, RHO
+from common import ETA, ICE, LAND, RHO, STERIC
 
 # The fonts of the inversion scripts' figures; see `set_inversion_style`.
 INVERSION_STYLE = {
@@ -34,14 +34,21 @@ COLORBAR = {"orientation": "horizontal", "shrink": 0.8, "pad": 0.05}
 # The fields of the ocean experiments, in the rows of their map grids: the
 # row title and the display unit (see `common.OceanPhysics.display`). A map
 # grid has a row for each of these that the model holds.
-FIELDS = (ICE, LAND, ETA, RHO)
+FIELDS = (ICE, LAND, ETA, RHO, STERIC)
 ROW_TITLES = {
     ICE: "Ice Thickness Change",
     LAND: "Land Water Change",
     ETA: "Sterodynamic SL Change",
     RHO: "Averaged Density Change",
+    STERIC: "Steric Height Change",
 }
-UNIT_LABELS = {ICE: "mm", LAND: "mm", ETA: "mm", RHO: r"g m$^{-3}$"}
+UNIT_LABELS = {
+    ICE: "mm",
+    LAND: "mm",
+    ETA: "mm",
+    RHO: r"g m$^{-3}$",
+    STERIC: "mm",
+}
 
 
 def rows(fields: dict) -> list:
@@ -63,7 +70,7 @@ def field_label(name: str) -> str:
 def covariance_label(row: str, perturbed: str) -> str:
     """The colour bar label of the covariance of field `row` with field
     `perturbed`, in the product of their units."""
-    heights = {ICE, LAND, ETA}
+    heights = {ICE, LAND, ETA, STERIC}
     if row in heights and perturbed in heights:
         return "Covariance (mm²)"
     if row not in heights and perturbed not in heights:

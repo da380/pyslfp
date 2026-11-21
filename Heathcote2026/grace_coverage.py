@@ -1,31 +1,60 @@
 """
-The errors of the GRACE estimators against the errors they state, over many
-regions and loads (Heathcote et al., 2026).
+The errors of the GRACE estimators against the errors they state, on loads
+that are not drawn from the prior (Heathcote et al., 2026).
 
 Each estimator of a regional average of the total load comes with a
 standard deviation: WMB's is the noise it propagates, and the Bayesian
 one's is the posterior's. This script asks how the errors actually made
-compare with those statements, as distributions.
+compare with those statements, as distributions, when the true load is not
+a sample of the prior.
 
-The truths are the year-on-year changes of the ESA Earth System Model
-(`esm_loads.py`), each built into a gravitationally self-consistent load as
-in `grace_heldout.py`. The prior is the three-field prior from stated
-numbers (`common.stated_budget_prior`): it is not fitted to the truths
-here, though its amplitudes and scales are representative of them, and no
-truth is a sample of it. The noise is that of `common.grace_noise_model`.
+The experiment is that of `grace_inversion.py` with --load-prior model: one
+unknown, the direct load, whose prior is that which the fields of the ocean
+experiments give it, and data with the error covariance of the
+ITSG-Grace2018 coefficients. The prior's amplitudes and scales are stated
+numbers, taken from the first version of the ESA Earth System Model (1995
+to 2006). The truths are the year-on-year changes of its version 3.0
+(`esm_loads.py`, 2007 to 2020, --truth-years), which no prior has seen:
+the water and the ice on the land, and the ocean less its mean over the
+ocean, summed into a direct load, the sea level equation supplying the
+ocean's total. The ocean's part is what is left once a model of the ocean
+has been removed from the data, as is done before a GRACE gravity field is
+solved for, and the prior's ocean term describes that residual, which the
+inversion marginalises over. How much is left over a year is not known, so
+--ocean-case brackets it (`common.OCEAN_CASES`): next to none, the error
+series of the same Earth System Model; a quarter of the ocean's load; or
+all of it, nothing being removed.
 
 The regions are those of --region-groups, the named regions of
 `EarthState.list_all_regions`: by default the drainage basins of Greenland
-and of Antarctica and the IPCC's climate regions, land and ocean. Their
-masks are smoothed over --smoothing-scale-km.
+and of Antarctica and the IPCC's climate regions, land and ocean. The
+quantity both estimators are asked for is the average of the total load
+over each region itself, its mask unsmoothed (--smoothing-scale-km smooths
+it, for both).
+
+WMB's estimate is made as it is in practice. The coefficients are cut off
+at --wmb-degree and filtered, and the result is averaged over the region.
+The filter (--wmb-filter) is the Gaussian one of Wahr et al. (1998), of
+half-width --wmb-radius-km, on the coefficients to degree 60; or the
+decorrelating filter DDK of Kusche et al. (2009) at the strength
+--wmb-ddk-level (`ddk_filter.py`), on all the coefficients. With --wmb-rescale the average is then
+multiplied by the factor that returns the right answer for a load uniform
+over the region and absent elsewhere, the scaling of Velicogna and Wahr
+(2006). The filter and the factor are part of the estimator, so what they
+cost in leakage counts as its error. Degree 1, which the data do not hold,
+is left out of WMB's estimate, with no outside estimate put in its place.
+The Bayesian estimate uses every coefficient with the weight the noise
+covariance gives it, and has no such choices.
 
 Both estimators are linear in the data, so each is assembled once as a
-matrix from the data to the regional averages. An error is then the
-estimator's error on the load, which the truth fixes, plus the estimator
-applied to the noise; the second is drawn --noise-draws times for each
-truth, at no cost in solves. Each error is divided by the standard
-deviation its estimator states. Were the statements right, and the errors
-Gaussian, the ratios would be standard normal.
+matrix from the data to the regional averages; with the normal matrix
+factorised (`common.exact_preconditioner`) a row of the Bayesian one costs
+a single solve. An error is then the estimator's error on the load, which
+the truth fixes, plus the estimator applied to the noise; the second is
+drawn --noise-draws times for each truth, at no cost in solves. Each error
+is divided by the standard deviation its estimator states. Were the
+statements right, and the errors Gaussian, the ratios would be standard
+normal.
 
 Outputs, in output_plots_grace_coverage/ at 200 dpi:
 
@@ -54,6 +83,7 @@ import pygeoinf as inf
 from pyslfp.core import averaging_operator
 
 import common
+import ddk_filter
 import esm_loads
 import figures
 
@@ -72,31 +102,101 @@ COLOURS = {"WMB": "tab:red", "Bayesian": "tab:blue"}
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="The GRACE estimators' errors against their stated "
-        "standard deviations, over many regions and loads."
+        "standard deviations, over many regions, on loads of the ESA Earth "
+        "System Model."
     )
-    parser.add_argument("--lmax", type=int, default=256)
-    parser.add_argument("--obs-degree", type=int, default=60)
+    common.add_grace_arguments(parser)
+    parser.set_defaults(
+        load_prior="model", coefficient_errors=[2007, 2008], smoothing_scale_km=0.0
+    )
     parser.add_argument(
-        "--grace-convention", choices=("stokes", "orthonormal"), default="stokes"
+        "--wmb-filter",
+        choices=("gaussian", "ddk"),
+        default="gaussian",
+        help="The filter of WMB's estimate.",
+    )
+    parser.add_argument(
+        "--wmb-degree",
+        type=int,
+        default=None,
+        help="The highest degree WMB's estimate uses, --obs-degree at most: "
+        "60 by default with the Gaussian filter, and every degree with DDK.",
+    )
+    parser.add_argument(
+        "--wmb-ddk-level",
+        type=int,
+        default=5,
+        help="With --wmb-filter ddk: the filter, 1 (the strongest) to 8.",
+    )
+    parser.add_argument(
+        "--wmb-radius-km",
+        type=float,
+        default=300.0,
+        help="Half-width of the Gaussian filter of WMB's estimate; zero for none.",
+    )
+    parser.add_argument(
+        "--wmb-rescale",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Scale WMB's estimate of each region to be right for a load "
+        "uniform over the region.",
     )
     parser.add_argument("--region-groups", nargs="+", default=DEFAULT_GROUPS)
     parser.add_argument(
-        "--smoothing-scale-km",
-        type=float,
-        default=300.0,
-        help="Smoothing of the region masks; zero leaves them sharp.",
+        "--truth-years",
+        nargs="+",
+        type=int,
+        default=None,
+        help="The years of version 3.0 of the Earth System Model whose "
+        "successive annual means give the true loads; all those fetched if "
+        "omitted.",
     )
-    parser.add_argument("--prior-order", type=float, default=common.BUDGET_PRIOR_ORDER)
     parser.add_argument(
         "--noise-draws",
         type=int,
         default=50,
         help="Draws of the noise for each true load.",
     )
-    common.add_grace_noise_model_arguments(parser)
     common.add_qoi_arguments(parser)
     common.add_parallel_arguments(parser)
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.load_prior != "model" or args.coefficient_errors is None:
+        parser.error("the truths are loads of the model: --load-prior model.")
+    return args
+
+
+def true_loads(state, years, ocean="O", share=1.0):
+    """The direct loads of the year-on-year changes of the Earth System
+    Model: the water and the ice on the land, and the ocean less its mean
+    over the ocean, which moves mass about the ocean without changing its
+    total. The ocean's part is the share `share` of the component `ocean`:
+    O, the ocean's load, or AOe07, the error of the atmosphere and ocean
+    models that are removed from GRACE's data, over the ocean. Returns
+    (labels, loads)."""
+    model = state.model
+    sea = state.ocean_function
+    land = model.constant_grid(1.0) - sea
+    components = {}
+    for name in ("H", "I", ocean):
+        labels, components[name] = esm_loads.load_changes(
+            model, name, years=years, version=3
+        )
+    loads = []
+    for water, ice, wet in zip(*(components[name] for name in ("H", "I", ocean))):
+        ocean_mean = model.integrate(sea * wet) / model.integrate(sea)
+        loads.append(
+            land * (water + ice)
+            + share * sea * (wet - ocean_mean * model.constant_grid(1.0))
+        )
+    return labels, loads
+
+
+def gaussian_weights(degrees, radius: float, earth_radius: float):
+    """The weights by degree of the Gaussian filter of half-width `radius`
+    (Wahr et al., 1998, after Jekeli, 1981), in the closed form that is
+    accurate where the weights are not negligible: exp(-(l r / a)^2 / (4 ln
+    2))."""
+    return np.exp(-((degrees * radius / earth_radius) ** 2) / (4.0 * np.log(2.0)))
 
 
 def regions_of(state, groups) -> tuple[list, list, list]:
@@ -224,85 +324,88 @@ def main():
     common.start_run(OUTPUT_DIR, args, metrics_file=METRICS_FILE)
     figures.set_inversion_style()
 
-    print(f"Building the physics (lmax={args.lmax})...")
-    physics = common.budget_physics(args.lmax)
+    print(f"Building the physics, prior and noise (lmax={args.lmax})...")
+    physics, _, prior, noise, noise_matrix, _ = common.grace_experiment(args, rng)
     state, model = physics.state, physics.state.model
     load_space, scale_mm = physics.load_space, physics.scale_mm
     km = 1000.0 / model.parameters.length_scale
-
-    prior, fields, info = common.stated_budget_prior(physics, order=args.prior_order)
-    for name, values in info.items():
-        print(
-            f"  prior of {name}: std {values['load_std_mm']:.0f} mm EWT, scale "
-            f"{values['scale_km']:.0f} km, order {values['order']:.2f}"
-        )
-
+    forward = common.grace_forward_operator(physics, args)
+    total_load = common.total_load_operator(physics)
     wmb = common.wmb_method(state, args)
-    noise, invariant_noise, _ = common.grace_noise_model(
-        state, load_space, physics.response_space, args
-    )
     wmb_load = wmb.potential_coefficient_to_load_operator(load_space)
-    observe = common.grace_coefficients(
-        physics.response_space, model, args.obs_degree, args.grace_convention
-    )
 
-    print("Reading the loads of the ESA Earth System Model...")
-    components = {}
-    for key, name in [("water", "H"), ("ice", "I"), ("ocean", "O")]:
-        labels, components[key] = esm_loads.load_changes(model, name)
-    totals, clean_data = [], []
-    for k in range(len(labels)):
-        water, ice, ocean = (components[key][k] for key in ("water", "ice", "ocean"))
-        zeta = sum(common.field_loads(physics, water, ice, ocean).values())
-        totals.append(physics.load_to_total_load(zeta))
-        clean_data.append(observe(physics.fingerprint(zeta)))
+    print("Reading the loads of the ESA Earth System Model, version 3.0...")
+    _, _, ocean, share = common.OCEAN_CASES[args.ocean_case]
+    years = args.truth_years or sorted(
+        set.intersection(*(set(esm_loads.available(c, 3)) for c in ("H", "I", ocean)))
+    )
+    labels, loads = true_loads(state, years, ocean, share)
+    totals = [total_load(zeta) for zeta in loads]
+    clean_data = [forward(zeta) for zeta in loads]
 
     names, masks, classes = regions_of(state, args.region_groups)
     classes = np.array(classes)
     print(
-        f"  {len(labels)} loads and {len(names)} regions: "
-        + ", ".join(f"{np.sum(classes == c)} {c}" for c in CLASSES)
+        f"  {len(labels)} loads ({labels[0]} to {labels[-1]}) and {len(names)} "
+        "regions: " + ", ".join(f"{np.sum(classes == c)} {c}" for c in CLASSES)
     )
+    sharp_masks = masks
     if args.smoothing_scale_km > 0.0:
         smoother = load_space.heat_measure(args.smoothing_scale_km * km).covariance
         masks = [smoother(mask) for mask in masks]
     average = scale_mm * averaging_operator(state, load_space, masks)
 
-    print("Assembling the estimators...")
-    forward = physics.forward(args)
-    if args.coefficient_errors is None:
-        preconditioner = wmb.bayesian_normal_operator_preconditioner(
-            common.invariant_load_measure(physics, fields), invariant_noise
+    # WMB's estimator: the data cut off and filtered, taken to a load by the
+    # load Love numbers, averaged over each region, and rescaled.
+    degrees, _ = wmb._observed_labels()
+    ddk = args.wmb_filter == "ddk"
+    wmb_degree = args.wmb_degree or (args.obs_degree if ddk else 60)
+    wmb_degree = min(wmb_degree, args.obs_degree)
+    weights = (degrees <= wmb_degree).astype(float)
+    if not ddk and args.wmb_radius_km > 0.0:
+        weights *= gaussian_weights(degrees, args.wmb_radius_km * km, load_space.radius)
+    wmb_matrix = (average @ wmb_load).matrix(form="components", by="rows") * weights
+    if ddk:
+        decorrelate = ddk_filter.filter_matrix(args.wmb_ddk_level, args.obs_degree)
+        wmb_matrix = (decorrelate.T @ wmb_matrix.T).T
+    if args.wmb_rescale:
+        to_data = wmb.load_to_potential_coefficient_operator(load_space)
+        uniform = np.array(
+            [row @ to_data(mask) for row, mask in zip(wmb_matrix, sharp_masks)]
         )
-    else:
-        print(f"  the normal matrix of {forward.codomain.dim} data...")
-        preconditioner = common.exact_preconditioner(
-            forward, prior, noise, n_jobs=common.jobs(args)
-        )
+        wmb_matrix *= (scale_mm / uniform)[:, None]
+
+    print(f"Assembling the normal matrix of {forward.codomain.dim} data...")
+    preconditioner = common.exact_preconditioner(
+        forward, prior, noise, noise_matrix=noise_matrix, n_jobs=common.jobs(args)
+    )
     inversion = inf.LinearGaussianInversion(
         inf.LinearForwardProblem(forward, error=noise), prior
     ).with_solver(inf.CGSolver(rtol=args.qoi_rtol, preconditioner=preconditioner))
-    target = average @ physics.total_load
-    workers = common.jobs(args, len(names))
+    # Each row is one solve with the factorised normal matrix; worker
+    # processes would each be sent that matrix, for nothing.
+    print("Assembling the estimators...")
+    target = average @ total_load
     matrices = {
         "Bayesian": (target @ inversion.kalman_operator).matrix(
-            form="components", by="rows", n_jobs=workers
+            form="components", by="rows"
         ),
-        "WMB": (average @ wmb_load).matrix(form="components", by="rows"),
+        "WMB": wmb_matrix,
     }
     posterior = inf.GaussianMeasure(prior.domain, covariance=inversion.covariance)
     stds = {
-        "Bayesian": common.standard_deviations(
-            common.dense(posterior, target, n_jobs=workers)
+        "Bayesian": common.standard_deviations(common.dense(posterior, target)),
+        "WMB": np.sqrt(
+            np.einsum("ij,jk,ik->i", matrices["WMB"], noise_matrix, matrices["WMB"])
         ),
-        "WMB": common.standard_deviations(common.dense(noise, average @ wmb_load)),
     }
 
     # The errors: on each load, without noise, and with each of the draws.
     truth = np.array([average(sigma) for sigma in totals])
     clean = np.array(clean_data)
-    draws = np.array(
-        [noise.sample(rng=rng) for _ in range(len(labels) * args.noise_draws)]
+    factor = np.linalg.cholesky(noise_matrix)
+    draws = (
+        rng.standard_normal((len(labels) * args.noise_draws, len(factor))) @ factor.T
     ).reshape(len(labels), args.noise_draws, -1)
     errors, ratios, load_errors = {}, {}, {}
     for estimator, matrix in matrices.items():
@@ -315,8 +418,27 @@ def main():
     width = 24 + 12 * len(columns)
     text = (
         "The GRACE estimators' errors against their stated standard deviations\n"
-        f"{len(labels)} loads, {args.noise_draws} draws of the noise for each, "
-        f"{len(names)} regions smoothed over {args.smoothing_scale_km:.0f} km.\n"
+        f"{len(labels)} loads of the ESA Earth System Model, version 3.0 "
+        f"({labels[0]} to {labels[-1]}; the ocean's part "
+        + {"removed": "removed", "partly": "a quarter left", "full": "in full"}[
+            args.ocean_case
+        ]
+        + f"), {args.noise_draws} draws of the noise "
+        f"for each, data to degree {args.obs_degree},\n"
+        f"{len(names)} regions, their masks "
+        + (
+            f"smoothed over {args.smoothing_scale_km:.0f} km.\n"
+            if args.smoothing_scale_km > 0.0
+            else "unsmoothed.\n"
+        )
+        + f"WMB: degrees to {wmb_degree}, "
+        + (
+            f"filter DDK{args.wmb_ddk_level}, "
+            if ddk
+            else f"Gaussian filter of {args.wmb_radius_km:.0f} km, "
+        )
+        + ("rescaled" if args.wmb_rescale else "not rescaled")
+        + ".\n"
         "A ratio is an error over the standard deviation its estimator states; "
         "for a standard normal the\nroot mean square is 1 and the fractions "
         "within 1 and 2 are 0.683 and 0.954. Stds and errors in mm EWT.\n\n"

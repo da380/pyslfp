@@ -28,8 +28,8 @@ Outputs, in output_plots_altimetry_bias/ at 600 dpi:
   secondary axis in units of the true GMSL change's standard deviation, and
   a histogram of Monte Carlo errors with --samples.
 - With --plot-maps, from one prior sample: bias_sterodynamic.png (a),
-  bias_density.png (b), bias_ice_thickness.png (c), each shown on its
-  component's support; bias_geocentric_sl_map.png, the geocentric sea level
+  bias_density.png or, with --ocean-prior steric, bias_steric_height.png
+  (b), bias_ice_thickness.png (c), each shown on its component's support; bias_geocentric_sl_map.png, the geocentric sea level
   change over the ocean; and bias_altimetry_data.png (d), the synthetic data
   at the track points, on the same colour scale.
 
@@ -52,7 +52,7 @@ import pyslfp as sl
 from pyslfp.observations import altimetry_averaging_operator
 
 import common
-from common import ETA, ICE, RHO
+from common import ETA, ICE, RHO, STERIC
 from figures import error_density, field_label, field_map, panel_label, style_map
 
 OUTPUT_DIR = "output_plots_altimetry_bias"
@@ -172,10 +172,15 @@ def main():
         print("Drawing a sample to show the fields...")
         model = prior.sample(rng=rng)
         shown = physics.display(model)
+        second = (
+            ("bias_steric_height.png", STERIC)
+            if STERIC in shown
+            else ("bias_density.png", RHO)
+        )
         for file, name, panel in [
             ("bias_ice_thickness.png", ICE, "(c)"),
             ("bias_sterodynamic.png", ETA, "(a)"),
-            ("bias_density.png", RHO, "(b)"),
+            (*second, "(b)"),
         ]:
             figures[file] = field_map(shown[name], field_label(name), panel)
         data_mm = mm * (physics.altimetry(model) + noise.sample(rng=rng))

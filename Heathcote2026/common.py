@@ -59,6 +59,7 @@ from pyslfp.core import averaging_operator
 from pyslfp.models import (
     GEOCENTRIC_SEA_LEVEL,
     OCEAN_MASS,
+    STERIC_SEA_LEVEL,
     ModelSetup,
     barystatic_gmsl_operator,
     ice_sheets,
@@ -68,6 +69,35 @@ from pyslfp.models import (
 from pyslfp.models import LoadComponent, Role
 
 ICE, ETA, RHO = "ice_sheets", "sterodynamic_sea_level", "ocean_density"
+# With --ocean-prior steric the ocean's second field is the steric height
+# itself, in place of the density.
+STERIC = "steric_height"
+
+# What a GRACE experiment takes the ocean's load in its data to be
+# (--ocean-case). A model of the ocean is removed from GRACE's data before a
+# gravity field is solved for, so the ocean term of the load is what that
+# removal leaves, and how much it leaves at the scale of a year is not
+# known: the published error series cover periods under a month alone. The
+# cases bracket it. Each gives the std (mm of water) and the scale (km) of
+# the prior's ocean term, the manometric sea level, and what the true loads
+# of `grace_coverage.py` take for the ocean: a component of the ESA Earth
+# System Model and the share of it that is left.
+#
+# - removed: the removal is taken as the error series has it (AOe07, which
+#   holds no slow error): 0.2 mm at 200 km, as that series' own year-on-year
+#   changes.
+# - partly: a quarter of the ocean's load is left: 2 mm, about the unforced
+#   variability of the ocean's mass from year to year (Carret et al., 2021),
+#   which no model forced by the weather can follow; the scale is the
+#   ocean load's own.
+# - full: nothing is removed, as in the altimetry and joint experiments;
+#   the prior's ocean term is as given (--manometric-std-mm and
+#   --manometric-scale-km).
+OCEAN_CASES = {
+    "removed": (0.2, 200.0, "AOe07", 1.0),
+    "partly": (2.0, 330.0, "O", 0.25),
+    "full": (None, None, "O", 1.0),
+}
 
 # The fields of the three-field GRACE model beside the ice sheets: the water
 # stored on the land that carries no ice sheet, and the ocean's own load, both
@@ -206,11 +236,24 @@ def add_grace_arguments(parser: argparse.ArgumentParser) -> None:
         "divided into its causes. The second needs --coefficient-errors.",
     )
     parser.add_argument(
+        "--ocean-case",
+        choices=tuple(OCEAN_CASES),
+        default="partly",
+        help="With --load-prior model: how much of the ocean's load is in the "
+        "data, a model of it being removed before a GRACE gravity field is "
+        "solved for. removed: next to none, the removal as the published "
+        "error series has it. partly: a quarter, about 2 mm. full: all of "
+        "it, nothing being removed. The first two set the prior's ocean term "
+        "(--manometric-std-mm, --manometric-scale-km); see "
+        "`common.OCEAN_CASES`.",
+    )
+    parser.add_argument(
         "--obs-degree",
         type=int,
         default=None,
-        help="The highest degree of GRACE's data: 100 by default, or 60 with "
-        "--coefficient-errors, which allows at most 96.",
+        help="The highest degree of GRACE's data: 100 by default, or 96, the "
+        "degree of the ITSG-Grace2018 solutions, with --coefficient-errors, "
+        "which allows no more.",
     )
     add_coefficient_error_arguments(parser)
     parser.add_argument(
@@ -250,8 +293,10 @@ def add_ocean_arguments(
     parser.add_argument(
         "--field-order",
         type=float,
-        default=2.0,
-        help="Sobolev order of the model fields (and of every random field).",
+        default=None,
+        help="Sobolev order of the ocean's fields, above one for the point "
+        "values of altimetry: 2 by default, or 1.25, that of the response, "
+        "with --ocean-prior steric.",
     )
     parser.add_argument(
         "--load-order",
@@ -315,6 +360,68 @@ def add_ocean_arguments(
     parser.add_argument("--ocean-corr-scale-factor", type=float, default=0.4)
     parser.add_argument("--prior-order", type=float, default=3.0)
     parser.add_argument("--prior-shift", type=float, default=0.0)
+    parser.add_argument(
+        "--ocean-prior",
+        choices=("coupled", "steric"),
+        default="coupled",
+        help="The prior of the two ocean fields. coupled: the sterodynamic "
+        "sea level and the density each with a Sobolev prior of its own, "
+        "anti-correlated at long wavelengths (the options above). steric: "
+        "two independent fields with stated sizes and scales, a steric "
+        "height and a manometric sea level (the ocean's load as a height of "
+        "water); the sterodynamic sea level is their sum, and the ocean's "
+        "second field is the steric height itself, in place of the density.",
+    )
+    parser.add_argument(
+        "--steric-std-mm",
+        type=float,
+        default=46.0,
+        help="With --ocean-prior steric: the pointwise std of the steric "
+        "height, mm (EN4: year-on-year changes, 1996 to 2006).",
+    )
+    parser.add_argument("--steric-scale-km", type=float, default=280.0)
+    parser.add_argument(
+        "--steric-order",
+        type=float,
+        default=3.0,
+        help="With --ocean-prior steric: the order of the Sobolev spectrum, on "
+        "the Lebesgue space, of the steric height; that of EN4's changes.",
+    )
+    parser.add_argument(
+        "--steric-depth-scale-m",
+        type=float,
+        default=0.0,
+        help="With --ocean-prior steric, optionally: the steric height of a "
+        "column of depth D is 1 - exp(-D / this) of that of deep water, most "
+        "of the change being in the upper ocean (about 500 m in EN4). Where it "
+        "falls away over a shelf the sea level stays smooth, so the load takes "
+        "up the difference. Zero, the default, leaves the steric height "
+        "independent of the depth.",
+    )
+    parser.add_argument(
+        "--manometric-std-mm",
+        type=float,
+        default=8.0,
+        help="With --ocean-prior steric: the pointwise std of the manometric "
+        "sea level, mm of water (the ocean component of the ESA Earth System "
+        "Model, 1995 to 2006).",
+    )
+    parser.add_argument(
+        "--manometric-scale-km",
+        type=float,
+        default=330.0,
+        help="Its scale, km: that fitted to the same loads at " "--manometric-order.",
+    )
+    parser.add_argument(
+        "--manometric-order",
+        type=float,
+        default=2.5,
+        help="With --ocean-prior steric: the order of the Sobolev spectrum, on "
+        "the Lebesgue space, of the manometric sea level. The ocean's load "
+        "has a redder spectrum than any order the fields' space allows, so "
+        "this is the lowest that does: it must exceed --field-order by more "
+        "than one.",
+    )
 
 
 def add_altimetry_noise_arguments(
@@ -447,8 +554,8 @@ def add_joint_grace_noise_arguments(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=None,
         help="The highest degree of GRACE's data. With "
-        "--grace-coefficient-errors the default is 60, and 96, the degree of "
-        "the ITSG-Grace2018 solutions, is the most it can be; otherwise the "
+        "--grace-coefficient-errors the default is 96, the degree of the "
+        "ITSG-Grace2018 solutions, and the most it can be; otherwise the "
         "default is 100.",
     )
     parser.add_argument(
@@ -510,12 +617,22 @@ def configure(args: argparse.Namespace) -> np.random.Generator:
             continue
         errors = getattr(args, name) is not None
         if args.obs_degree is None:
-            args.obs_degree = 60 if errors else 100
+            # No more than the model resolves, for runs at low degree.
+            args.obs_degree = min(grace_covariance.DEGREE, args.lmax) if errors else 100
         if errors and args.obs_degree > grace_covariance.DEGREE:
             raise SystemExit(
                 f"--obs-degree {args.obs_degree}: the coefficient errors of "
                 f"ITSG-Grace2018 stop at degree {grace_covariance.DEGREE}."
             )
+    if hasattr(args, "field_order") and args.field_order is None:
+        args.field_order = 1.25 if _steric_prior(args) else 2.0
+    if getattr(args, "load_prior", None) == "model":
+        if not _steric_prior(args):
+            # The cases are stated on the prior's manometric sea level.
+            args.ocean_case = "full"
+        std_mm, scale_km, _, _ = OCEAN_CASES[args.ocean_case]
+        if std_mm is not None:
+            args.manometric_std_mm, args.manometric_scale_km = std_mm, scale_km
     if hasattr(args, "load_prior") and args.load_order is None:
         # The masked loads of the fields are rough; a Sobolev load is not.
         args.load_order = 0.25 if args.load_prior == "model" else 2.0
@@ -1635,7 +1752,7 @@ class OceanPhysics:
         thickness change, the land water and eta, g m^-3 for delta rho."""
         density = 1.0e3 * self.state.model.parameters.density_scale
         scales = {ICE: self.scale_mm, LAND: self.scale_mm, ETA: self.scale_mm}
-        return scales | {RHO: density}
+        return scales | {RHO: density, STERIC: self.scale_mm}
 
     def display(self, model) -> dict:
         """The fields of a model vector on their supports and in display
@@ -1772,7 +1889,11 @@ def ocean_physics(
             space=field_space,
             observable_space=fingerprint.field_space,
         ),
-        ocean_density(state, load_space, space=field_space),
+        (
+            steric_height(state, load_space, space=field_space)
+            if _steric_prior(args)
+            else ocean_density(state, load_space, space=field_space)
+        ),
     ]
     setup = ModelSetup(state, components)
     loads = setup.load_operator
@@ -1839,6 +1960,104 @@ def _source_std(physics: OceanPhysics, args: argparse.Namespace, name) -> float:
     return continued * std / physics.scale_mm
 
 
+def _steric_prior(args: argparse.Namespace) -> bool:
+    return getattr(args, "ocean_prior", "coupled") == "steric"
+
+
+def sea_level_std_mm(args: argparse.Namespace) -> float:
+    """The pointwise std of the sterodynamic sea level under its prior, mm:
+    what the altimetry noise is set against in the tolerance of a solve."""
+    if _steric_prior(args):
+        return float(np.hypot(args.steric_std_mm, args.manometric_std_mm))
+    return args.ocean_dyn_std_mm
+
+
+def _steric_measures(physics: OceanPhysics, args: argparse.Namespace):
+    """With --ocean-prior steric: the priors of the steric height of deep
+    water and of the manometric sea level, as heights in the model's units.
+    Each has the spectrum of a Sobolev measure on the Lebesgue space, (1 +
+    s^2 k)^-t, of order t = --ocean-prior-order and its own scale s and
+    pointwise std; the space's own weight is put back, as for the mass
+    sources in `_field_measure`."""
+    space = physics.field_space
+    km = 1000.0 / physics.state.model.parameters.length_scale
+
+    def measure(scale_km, std_mm, order):
+        if order - space.order <= 1.0:
+            raise ValueError(
+                "--steric-order and --manometric-order must exceed "
+                "--field-order by more than one."
+            )
+        scale = scale_km * km
+
+        def spectrum(k):
+            return (1.0 + scale**2 * k) ** (-order) * (
+                1.0 + space.length_scale**2 * k
+            ) ** (space.order)
+
+        return space.invariant_measure(
+            spectrum, pointwise_std=std_mm / physics.scale_mm
+        )
+
+    return (
+        measure(args.steric_scale_km, args.steric_std_mm, args.steric_order),
+        measure(
+            args.manometric_scale_km, args.manometric_std_mm, args.manometric_order
+        ),
+    )
+
+
+def steric_height(state: EarthState, load_space, /, *, space) -> LoadComponent:
+    """
+    A steric height change s over the oceans, as a field of its own: the
+    expansion of the water column, which raises the sea surface and moves
+    no mass. It stands where pyslfp's `ocean_density` does, with the height
+    in place of the density that gives it, so that the depth of the water
+    does not enter. With a sterodynamic sea level eta the two load the
+    ocean by rho_w C (eta - s), the part of the sea level change that the
+    expansion does not explain, so the load here is -rho_w C s; the steric
+    sea level is C s. The support is the ocean.
+    """
+    to_water = sea_level_change_to_load_operator(state, space, load_space)
+    mask = space.multiplication_operator(state.ocean_projection(value=0.0))
+    return LoadComponent(
+        name=STERIC,
+        space=space,
+        to_load=-1.0 * to_water,
+        support=mask.with_traits(mask.traits | inf.Traits.IDEMPOTENT),
+        role=Role.OCEAN_INTERNAL,
+        observables={
+            STERIC_SEA_LEVEL: (1.0 / state.model.parameters.water_density) * to_water
+        },
+    )
+
+
+def steric_depth_share(physics: OceanPhysics, args: argparse.Namespace):
+    """With --ocean-prior steric: the share of deep water's steric height
+    that a column of depth D has, w(D) = 1 - exp(-D / D_0), as an operator
+    on the fields' space; the identity if --steric-depth-scale-m is zero.
+    The product with w is truncated to the degrees of the space, as every
+    field is."""
+    space = physics.field_space
+    if args.steric_depth_scale_m <= 0.0:
+        return inf.LinearOperator.identity(space)
+    state = physics.state
+    depth = (state.sea_level * state.ocean_function).data
+    scale = args.steric_depth_scale_m / state.model.parameters.length_scale
+    share = state.ocean_function.copy()
+    share.data[:] = -np.expm1(-np.maximum(depth, 0.0) / scale)
+    flat = underlying_space(space)
+
+    def mapping(u):
+        return flat.from_components(flat.to_components(share * u))
+
+    return inf.LinearOperator.from_formal_adjoint(
+        space,
+        space,
+        inf.LinearOperator.from_callables(flat, flat, mapping, adjoint=mapping),
+    )
+
+
 def _field_measure(physics: OceanPhysics, args: argparse.Namespace, name, std):
     """The prior of one field alone, with pointwise std `std`.
 
@@ -1866,6 +2085,15 @@ def _field_measure(physics: OceanPhysics, args: argparse.Namespace, name, std):
             ) ** (space.order)
 
         return space.invariant_measure(spectrum, pointwise_std=std)
+    if name in (ETA, STERIC) and _steric_prior(args):
+        # The fields' own invariant parts, for the preconditioners: eta is
+        # the sum of the two heights; `std` is not used.
+        steric, manometric = _steric_measures(physics, args)
+        if name == STERIC:
+            return steric
+        return physics.field_space.invariant_measure(
+            steric.covariance.eigenvalues + manometric.covariance.eigenvalues
+        )
     length = physics.field_space.length_scale
     factors = {
         ICE: args.ice_scale_factor,
@@ -1881,6 +2109,8 @@ def _field_measure(physics: OceanPhysics, args: argparse.Namespace, name, std):
 def _stds_by_name(stds: dict) -> dict:
     """The pointwise stds of `calib["derived_stds"]` by field name."""
     by_name = {ICE: stds["ice_std"], ETA: stds["dyn_std"], RHO: stds["rho_std"]}
+    # The steric height's prior does not take its std from here.
+    by_name[STERIC] = None
     if "land_std" in stds:
         by_name[LAND] = stds["land_std"]
     return by_name
@@ -1970,6 +2200,32 @@ def ocean_prior(physics: OceanPhysics, args: argparse.Namespace, rng):
     corr_scale = field_space.length_scale * args.ocean_corr_scale_factor
 
     def correlated(stds):
+        if _steric_prior(args):
+            # Independent fields: the mass sources, the steric height of
+            # deep water in eta's place and the manometric sea level in the
+            # steric height's. Eta is then the two heights' sum, and the
+            # steric height that of deep water times the share a column of
+            # its depth has.
+            if not rough:
+                raise ValueError("--ocean-prior steric needs --source-order.")
+            steric, manometric = _steric_measures(physics, args)
+            measures = {
+                n: _field_measure(physics, args, n, stds[n])
+                for n in names
+                if n not in (ETA, STERIC)
+            } | {ETA: steric, STERIC: manometric}
+            independent = inf.GaussianMeasure.from_product(
+                [measures[n] for n in names], domain=setup.space
+            )
+            share = steric_depth_share(physics, args)
+            eta_in, eta_out = setup.space.projection(ETA), setup.space.inclusion(ETA)
+            s_in, s_out = setup.space.projection(STERIC), setup.space.inclusion(STERIC)
+            mixing = (
+                inf.LinearOperator.identity(setup.space)
+                + (eta_out - s_out) @ s_in
+                + s_out @ share @ eta_in
+            )
+            return independent.affine_map(mixing)
         measures = {n: _field_measure(physics, args, n, stds[n]) for n in names}
         if args.ocean_corr == 0.0:
             return inf.GaussianMeasure.from_product(
@@ -2010,10 +2266,17 @@ def ocean_prior(physics: OceanPhysics, args: argparse.Namespace, rng):
             constraint, np.zeros(constraint.codomain.dim), definite=rough
         )
 
-    dyn_std = args.ocean_dyn_std_mm / physics.scale_mm
     effective_steric_scale = state.mean_ocean_depth / p.water_density
-    rho_std = args.steric_dyn_std_ratio * dyn_std / effective_steric_scale
-    stds = {ETA: dyn_std, RHO: rho_std}
+    if _steric_prior(args):
+        # For the record alone: eta's std is that of the two heights' sum,
+        # and the density's that of the steric height over the mean depth.
+        dyn_std = np.hypot(args.steric_std_mm, args.manometric_std_mm)
+        dyn_std /= physics.scale_mm
+        rho_std = args.steric_std_mm / physics.scale_mm / effective_steric_scale
+    else:
+        dyn_std = args.ocean_dyn_std_mm / physics.scale_mm
+        rho_std = args.steric_dyn_std_ratio * dyn_std / effective_steric_scale
+    stds = {ETA: dyn_std, RHO: rho_std, STERIC: None}
     if LAND in names:
         stds[LAND] = (
             _source_std(physics, args, LAND)
@@ -2069,6 +2332,63 @@ def ocean_prior(physics: OceanPhysics, args: argparse.Namespace, rng):
         "derived_stds": derived,
     }
     return shifted(prior, args.prior_shift, rng), calib
+
+
+def model_truth(physics: OceanPhysics, args: argparse.Namespace, years, /):
+    """
+    A true model that is not a sample of any prior: the change between the
+    annual means of the two `years`, from models and analyses that the
+    priors have not seen.
+
+    - The ice thickness and the land water are the land ice and the
+      terrestrial water of the ESA Earth System Model, version 3.0
+      (`esm_loads`), as global fields: the load operator confines the ice
+      to the ice sheets, and the water with the rest of the ice to the
+      other land.
+    - The steric height is that of the EN4 analyses (`en4_steric`).
+    - The sterodynamic sea level is the steric height plus the manometric
+      sea level, the ocean component of the Earth System Model, less its
+      mean over the ocean, as a height of water. The ocean's load is then
+      that component, with no net mass.
+
+    Each field is truncated to the degrees of its space. With the density
+    as the ocean's second field there is no such truth, since the depth of
+    the water would divide the steric height: --ocean-prior steric.
+    """
+    import en4_steric
+    import esm_loads
+
+    if not _steric_prior(args):
+        raise SystemExit("A truth from the models needs --ocean-prior steric.")
+    if len(years) != 2 or years[1] != years[0] + 1:
+        raise SystemExit("The truth is the change between two successive years.")
+    setup, state = physics.setup, physics.state
+    model = state.model
+    p = model.parameters
+    loads = {
+        name: esm_loads.load_changes(model, name, years=years, version=3)[1][0]
+        for name in ("H", "I", "O")
+    }
+    sea = state.ocean_function
+    ocean_mean = model.integrate(sea * loads["O"]) / model.integrate(sea)
+    manometric = (loads["O"] - ocean_mean * model.constant_grid(1.0)) * (
+        1.0 / p.water_density
+    )
+    template = model.zero_grid()
+    lats, lons = np.meshgrid(template.lats(), template.lons(), indexing="ij")
+    steric = template.copy()
+    steric.data[:] = en4_steric.changes_at(lats, lons, years)[1][0] / p.length_scale
+    fields = {
+        ICE: loads["I"] * (1.0 / p.ice_density),
+        LAND: (loads["H"] + loads["I"]) * (1.0 / p.water_density),
+        ETA: steric + manometric,
+        STERIC: steric,
+    }
+    truth = []
+    for name in setup.names:
+        space = setup.component(name).space
+        truth.append(space.from_components(space.to_components(fields[name])))
+    return truth
 
 
 def ocean_surrogate(args: argparse.Namespace, physics: OceanPhysics, calib: dict):
@@ -2705,6 +3025,7 @@ def exact_preconditioner(
     """
     space = forward.codomain
     signal = forward @ prior.covariance @ forward.adjoint
+
     def columns(indices):
         return np.array(
             [

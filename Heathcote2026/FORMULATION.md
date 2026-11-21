@@ -257,17 +257,19 @@ prior of the submitted paper. The covariance maps, which need the load's
 value at a point, use its average over a cap of radius 2 degrees, since
 point values are not defined on $H^{1/4}$.
 
-**GRACE data and noise.** The data are the coefficients of degrees 2 to 60
-(at most 96). Their noise is the formal error covariance of the
+**GRACE data and noise.** The data are the coefficients of degrees 2 to 96,
+every degree of the solutions the noise is taken from. Their noise is the formal error covariance of the
 ITSG-Grace2018 solutions for a difference of two annual means,
 
 $$R = \frac{1}{144} \sum_{i=1}^{24} N_i^{-1} ,$$
 
 with $N_i$ the normal matrix of the unconstrained solution to degree 96 of
 month $i$ of 2007 and 2008, the months taken as independent
-(`grace_covariance.py`). $R$ for degrees 2 to 60 is the block of that
+(`grace_covariance.py`). For data cut off at a lower degree $R$ is the block of that
 matrix: the covariance of those coefficients within the solution to degree
-96. It is a full matrix, with the dependence on order and the correlations
+96. A lower cut-off is not used: at degree 60 the best-determined
+coefficients still have noise about equal to the prior's signal, and
+discarding the degrees above makes the posterior covariance ring. It is a full matrix, with the dependence on order and the correlations
 of a single pair of satellites, and it is not rotationally invariant.
 `--coefficient-errors` selects it in the GRACE experiments and
 `--grace-coefficient-errors` in the joint experiment.

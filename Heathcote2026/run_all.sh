@@ -21,6 +21,12 @@
 #   CPU_BUDGET=6 ./run_all.sh                 use at most six cores
 #   MAX_JOBS=4 N_THREADS=2 ./run_all.sh       4 workers x 2 threads each
 #   PYTHON=python3.12 ./run_all.sh            choose the interpreter
+#   OCEAN_CASE=removed ./run_all.sh grace_inversion grace_coverage
+#                                             the GRACE experiments with the
+#                                             ocean removed (or: partly, full)
+#   PROBE=1 ./run_all.sh grace_inversion joint_inversion
+#                                             the posterior expectations alone,
+#                                             for iteration counts and timings
 
 set -euo pipefail
 cd "$(dirname "$0")" # the .py scripts are assumed to sit next to this file
@@ -32,7 +38,7 @@ cd "$(dirname "$0")" # the .py scripts are assumed to sit next to this file
 # joint script covers the single-sensor comparison); include it by naming
 # it explicitly or with "all".
 DEFAULT_SCRIPTS=(grace_bias altimetry_bias grace_inversion joint_inversion)
-ALL_SCRIPTS=(grace_bias altimetry_bias grace_inversion altimetry_inversion joint_inversion)
+ALL_SCRIPTS=(grace_bias altimetry_bias grace_inversion grace_coverage altimetry_inversion joint_inversion)
 
 if [ $# -eq 0 ]; then
     SCRIPTS=("${DEFAULT_SCRIPTS[@]}")
@@ -127,8 +133,9 @@ if [ "$FAST" -ne 0 ]; then
     echo "Resolution: FAST/TEST mode (lmax=$LMAX, obs_degree=$OBS_DEGREE_VAL, spacing=$SPACING)."
 else
     LMAX="${LMAX:-256}"
-    # The coefficient errors below stop at degree 96; 60 is the default.
-    OBS_DEGREE_VAL="${OBS_DEGREE_VAL:-60}"
+    # Every degree the coefficient errors below cover: cutting the data off
+    # lower, where some coefficients still inform, makes the posterior ring.
+    OBS_DEGREE_VAL="${OBS_DEGREE_VAL:-96}"
     SPACING="${SPACING:-1.0}"
 fi
 
@@ -161,15 +168,31 @@ SURROGATE=(--surrogate-degree 32 --preconditioner blocks)
 QOI=(--qoi-rtol 1e-6)
 
 # Ocean model and prior: altimetry_bias, altimetry_inversion,
-# joint_inversion (identical names and defaults in all three). The fields
-# lie in H^2; the loads, discontinuous at the supports' edges, in H^(1/4).
+# joint_inversion, and the GRACE scripts, whose load takes its prior from
+# these fields (identical names and defaults in all). The loads,
+# discontinuous at the supports' edges, lie in H^(1/4).
+#
 # The ice and the water stored on the other land are fields of H^(1/4) with
 # priors of order 1.5 on L^2, their amplitudes and scales stated in mm EWT
-# and km (from the year-on-year changes of the ESA Earth System Model). The
-# submitted paper had the ice alone, in H^2 with the other fields: drop
-# --land-water, --source-order and the five options after them for that.
+# and km (from the year-on-year changes of the ESA Earth System Model,
+# 1995 to 2006).
+#
+# The ocean's fields are the sterodynamic sea level and the steric height,
+# in H^(5/4), the space of the response. Their prior is stated on two
+# independent fields: the steric height (EN4's year-on-year changes: 46 mm,
+# 280 km, order 3) and the manometric sea level, the ocean's load as a
+# height of water (the Earth System Model's ocean component: 8 mm, at the
+# lowest order the space allows, 2.5, and the scale fitted at that order,
+# 330 km). The sterodynamic sea level is their sum. Optional:
+# --steric-depth-scale-m 500 makes the steric height fall away over shelves.
+#
+# The submitted paper had the ice alone, in H^2 with the other fields, and
+# the density as the ocean's second field, coupled to the sea level: for
+# that, drop --land-water, --source-order and the five options after them,
+# and replace the ocean options by --field-order 2.0 --ocean-dyn-std-mm 4.0
+# --ocean-dyn-scale-factor 0.2 --steric-dyn-std-ratio 0.75 --ocean-corr 0.9
+# --ocean-corr-scale-factor 0.4 --gmsl-bary-steric-ratio 1.7.
 OCEAN_PRIOR=(
-    --field-order 2.0
     --load-order 0.25
     --spacing "$SPACING"
     --land-water
@@ -179,14 +202,14 @@ OCEAN_PRIOR=(
     --ice-scale-km 180.0
     --land-water-std-mm 65.0
     --land-water-scale-km 340.0
-    --ice-scale-factor 1.0
-    --gmsl-bary-steric-ratio 1.7
-    --ocean-dyn-scale-factor 0.2
-    --ocean-dyn-std-mm 4.0
-    --ocean-rho-scale-factor 1.0
-    --steric-dyn-std-ratio 0.75
-    --ocean-corr 0.9
-    --ocean-corr-scale-factor 0.4
+    --ocean-prior steric
+    --field-order 1.25
+    --steric-std-mm 46.0
+    --steric-scale-km 280.0
+    --steric-order 3.0
+    --manometric-std-mm 8.0
+    --manometric-scale-km 330.0
+    --manometric-order 2.5
 )
 
 # Altimetry noise: the same numbers, but joint_inversion prefixes the flags
@@ -244,9 +267,17 @@ JOINT_GRACE_NOISE=(--grace-coefficient-errors 2007 2008)
 # --load-prior sobolev --load-order 2.0 --direct-scale-km 250
 # --direct-std-m 0.01 and drop OCEAN_PRIOR from the two calls below.
 # Optional: --smoothing-scale-km <km> [defaults to --load-scale-km].
+#
+# The ocean's load in GRACE's data is what is left once a model of the
+# ocean has been removed, and how much that is over a year is not known.
+# OCEAN_CASE brackets it: removed (next to none), partly (a quarter, about
+# 2 mm; the default) or full (nothing removed, as in the altimetry and
+# joint experiments, which are not affected). See common.OCEAN_CASES.
+OCEAN_CASE="${OCEAN_CASE:-partly}"
 GRACE_PRIOR=(
     --load-prior model
     --spacing 8.0
+    --ocean-case "$OCEAN_CASE"
 )
 
 # Per-script extras (plot selections, MC sample counts) -- edit to taste.
@@ -257,6 +288,17 @@ GRACE_BIAS_EXTRA=(--plot-maps)      # e.g. --samples 1000
 ALTIMETRY_INV_EXTRA=(--all)         # e.g. --std-samples 100
 GRACE_INV_EXTRA=(--all --std-samples 100) # e.g. --prior-sensitivity
 JOINT_INV_EXTRA=(--all --std-samples 100) # e.g. --map-all-cases
+
+# PROBE=1: no figures, covariances or samples, only the solves for the
+# posterior expectations, which print their iteration counts.
+if [ "${PROBE:-0}" -ne 0 ]; then
+    ALTIMETRY_INV_EXTRA=(--std-samples 0)
+    GRACE_INV_EXTRA=(--std-samples 0)
+    JOINT_INV_EXTRA=(--std-samples 0)
+fi
+# The errors of the estimators on loads of the ESA Earth System Model,
+# version 3.0 (esm_loads.py fetch): e.g. --wmb-filter ddk, --noise-draws 50.
+GRACE_COVERAGE_EXTRA=()
 
 # ---------------------------------------------------------------------------
 # 5. Run
@@ -290,6 +332,12 @@ for s in "${SCRIPTS[@]}"; do
             "${GRACE_NOISE[@]}" "${QOI[@]}" \
             ${PAR_ARGS[@]+"${PAR_ARGS[@]}"} \
             ${GRACE_INV_EXTRA[@]+"${GRACE_INV_EXTRA[@]}"}
+        ;;
+    grace_coverage)
+        run "$s" "${COMMON[@]}" "${OBS_DEGREE[@]}" "${OCEAN_PRIOR[@]}" "${GRACE_PRIOR[@]}" \
+            "${GRACE_NOISE[@]}" "${QOI[@]}" \
+            ${PAR_ARGS[@]+"${PAR_ARGS[@]}"} \
+            ${GRACE_COVERAGE_EXTRA[@]+"${GRACE_COVERAGE_EXTRA[@]}"}
         ;;
     altimetry_inversion)
         run "$s" "${COMMON[@]}" "${SURROGATE[@]}" "${OCEAN_PRIOR[@]}" "${ALT_NOISE[@]}" "${GIA[@]}" "${QOI[@]}" \

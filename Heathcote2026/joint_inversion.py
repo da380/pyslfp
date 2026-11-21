@@ -132,6 +132,16 @@ def parse_arguments() -> argparse.Namespace:
         default=0,
         help="Samples for the pointwise standard deviation of each mapped posterior.",
     )
+    parser.add_argument(
+        "--truth-years",
+        nargs=2,
+        type=int,
+        default=None,
+        help="Take the true model from the change between these two years "
+        "of the ESA Earth System Model and the EN4 analyses "
+        "(`common.model_truth`), not from the prior. Needs --ocean-prior "
+        "steric.",
+    )
     common.add_ocean_arguments(parser, surrogate=True)
     common.add_altimetry_noise_arguments(parser, prefix="alt-")
     common.add_joint_grace_noise_arguments(parser)
@@ -555,8 +565,18 @@ def main():
         "joint": inf.LinearForwardProblem(joint, error=joint_noise),
     }
 
-    print("\nDrawing the synthetic truth and data...")
-    true_model, joint_data = problems["joint"].synthetic_model_and_data(prior, rng=rng)
+    if args.truth_years is None:
+        print("\nDrawing the synthetic truth and data...")
+        true_model, joint_data = problems["joint"].synthetic_model_and_data(
+            prior, rng=rng
+        )
+    else:
+        print(
+            f"\nThe truth is the change from {args.truth_years[0]} to "
+            f"{args.truth_years[1]} of the models; drawing the noise..."
+        )
+        true_model = common.model_truth(physics, args, args.truth_years)
+        joint_data = joint.codomain.add(joint(true_model), joint_noise.sample(rng=rng))
     data = {"altimetry": joint_data[0], "grace": joint_data[1], "joint": joint_data}
 
     # ------------------ The preconditioners ------------------
@@ -579,7 +599,9 @@ def main():
     # ------------------ Posteriors ------------------
     print("\nSolving for Posteriors...")
     rtol = 0.01 * min(
-        1.0, args.alt_noise_std_mm / args.ocean_dyn_std_mm, grace_info["std_factor"]
+        1.0,
+        args.alt_noise_std_mm / common.sea_level_std_mm(args),
+        grace_info["std_factor"],
     )
     posteriors, qoi_posteriors = {}, {}
     for case, (name, _, _) in CASES.items():

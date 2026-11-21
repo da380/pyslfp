@@ -455,17 +455,30 @@ def main():
     total_load = common.total_load_operator(physics)
     wmb = common.wmb_method(state, args)
     wmb_load = wmb.potential_coefficient_to_load_operator(load_space)
-    noise = wmb.load_measure_to_observation_measure(noise_load)
+    noise, noise_matrix = common.grace_data_noise(physics, args, noise_load, noise_info)
 
     print("Drawing a synthetic load and dataset...")
     problem = inf.LinearForwardProblem(forward, error=noise)
     model, data = problem.synthetic_model_and_data(prior, rng=rng)
 
+    # WMB's diagonal approximation of the normal operator needs a noise
+    # that is diagonal too; with the coefficients' full error covariance the
+    # normal matrix itself is assembled and factorised.
+    if noise_matrix is None:
+        preconditioner = wmb.bayesian_normal_operator_preconditioner(
+            initial_prior, noise
+        )
+    else:
+        print(f"Assembling the normal matrix of {forward.codomain.dim} data...")
+        preconditioner = common.exact_preconditioner(
+            forward, prior, noise, noise_matrix=noise_matrix, n_jobs=common.jobs(args)
+        )
+
     print("Solving for the posterior...")
     posterior, qoi_posterior, qoi_inversion = common.solve_posterior(
         inf.LinearGaussianInversion(problem, prior),
         data,
-        wmb.bayesian_normal_operator_preconditioner(initial_prior, noise),
+        preconditioner,
         rtol=0.01 * noise_info["std_factor"],
         qoi_rtol=args.qoi_rtol,
     )

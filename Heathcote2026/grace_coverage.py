@@ -270,9 +270,15 @@ def main():
 
     print("Assembling the estimators...")
     forward = physics.forward(args)
-    preconditioner = wmb.bayesian_normal_operator_preconditioner(
-        common.invariant_load_measure(physics, fields), invariant_noise
-    )
+    if args.coefficient_errors is None:
+        preconditioner = wmb.bayesian_normal_operator_preconditioner(
+            common.invariant_load_measure(physics, fields), invariant_noise
+        )
+    else:
+        print(f"  the normal matrix of {forward.codomain.dim} data...")
+        preconditioner = common.exact_preconditioner(
+            forward, prior, noise, n_jobs=common.jobs(args)
+        )
     inversion = inf.LinearGaussianInversion(
         inf.LinearForwardProblem(forward, error=noise), prior
     ).with_solver(inf.CGSolver(rtol=args.qoi_rtol, preconditioner=preconditioner))

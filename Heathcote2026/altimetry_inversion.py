@@ -16,8 +16,8 @@ level equation, at --surrogate-degree, under the uncorrelated, unconditioned
 product prior and the local noise.
 
 The posterior expectation and the samples behind the pointwise standard
-deviations are solved at a relative residual of 0.01 times
---noise-std-factor. Everything computed from the posterior covariance (the
+deviations are solved at a relative residual of 0.01 times the ratio of
+--noise-std-mm to --ocean-dyn-std-mm, or 0.01 if that is less. Everything computed from the posterior covariance (the
 quantities of interest and the covariance maps) goes through solves at
 --qoi-rtol instead, with the same preconditioner: a posterior variance is the
 prior variance less a correction computed through the solves, so its relative
@@ -119,6 +119,7 @@ def parse_arguments() -> argparse.Namespace:
     common.add_ocean_arguments(parser, surrogate=True)
     common.add_altimetry_noise_arguments(parser)
     common.add_gia_arguments(parser)
+    common.add_preconditioner_arguments(parser)
     common.add_qoi_arguments(parser)
     common.add_parallel_arguments(parser)
     args = parser.parse_args()
@@ -347,44 +348,53 @@ def main():
     physics = common.ocean_physics(args)
     print(f"Generated {len(physics.points)} ocean altimetry observation points.")
     prior, calib = common.ocean_prior(physics, args, rng)
+    noise_parts = {}
     noise, local_noise = common.altimetry_noise(
         physics,
-        calib["derived_stds"]["dyn_std"],
         args.prior_order,
-        args.noise_std_factor,
-        args.noise_corr_std_factor,
-        args.noise_corr_scale_factor,
         calib=calib,
+        parts=noise_parts,
         **common.altimetry_noise_options(args),
     )
     gia_error = common.ocean_gia_error(physics, args)
     if gia_error is not None:
         noise = noise + gia_error
     common.print_calibration_report(calib, physics)
-    common.print_prior_settings(
-        args, args.noise_corr_std_factor, args.noise_corr_scale_factor
-    )
+    common.print_prior_settings(args, args.noise_corr_std_mm, args.noise_corr_scale_km)
 
     print("Setting up the Bayesian inversion...")
     forward_problem = inf.LinearForwardProblem(physics.altimetry, error=noise)
     model, data = forward_problem.synthetic_model_and_data(prior, rng=rng)
     inversion = inf.LinearGaussianInversion(forward_problem, prior)
 
-    surrogate, surrogate_prior = common.ocean_surrogate(args, physics, calib)
-    preconditioner = common.surrogate_preconditioner(
-        inversion.normal_operator,
-        surrogate.altimetry,
-        surrogate_prior,
-        local_noise,
-        max_jobs=common.jobs(args),
-    )
+    if args.preconditioner == "blocks":
+        preconditioner = common.block_preconditioner(
+            "altimetry",
+            physics,
+            args,
+            prior,
+            calib,
+            alt_local=local_noise,
+            alt_parts=noise_parts,
+            gia=gia_error,
+            rng=rng,
+        )
+    else:
+        surrogate, surrogate_prior = common.ocean_surrogate(args, physics, calib)
+        preconditioner = common.surrogate_preconditioner(
+            inversion.normal_operator,
+            surrogate.altimetry,
+            surrogate_prior,
+            local_noise,
+            max_jobs=common.jobs(args),
+        )
 
     print("\nSolving for the posterior expectation...")
     posterior, qoi_posterior, _ = common.solve_posterior(
         inversion,
         data,
         preconditioner,
-        rtol=0.01 * args.noise_std_factor,
+        rtol=0.01 * min(1.0, args.noise_std_mm / args.ocean_dyn_std_mm),
         qoi_rtol=args.qoi_rtol,
     )
 

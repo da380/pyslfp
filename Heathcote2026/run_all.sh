@@ -127,7 +127,8 @@ if [ "$FAST" -ne 0 ]; then
     echo "Resolution: FAST/TEST mode (lmax=$LMAX, obs_degree=$OBS_DEGREE_VAL, spacing=$SPACING)."
 else
     LMAX="${LMAX:-256}"
-    OBS_DEGREE_VAL="${OBS_DEGREE_VAL:-100}"
+    # The coefficient errors below stop at degree 96; 60 is the default.
+    OBS_DEGREE_VAL="${OBS_DEGREE_VAL:-60}"
     SPACING="${SPACING:-1.0}"
 fi
 
@@ -147,8 +148,11 @@ COMMON=(
 # GRACE observation truncation: grace_bias, grace_inversion, joint_inversion.
 OBS_DEGREE=(--obs-degree "$OBS_DEGREE_VAL")
 
-# Preconditioner truncation: altimetry_inversion, joint_inversion only.
-SURROGATE=(--surrogate-degree 32)
+# Preconditioner: altimetry_inversion, joint_inversion only. Blocks
+# assembled in the data space (common.block_preconditioner); the surrogate
+# problem at --surrogate-degree is the alternative, and what the submitted
+# paper used (--preconditioner surrogate).
+SURROGATE=(--surrogate-degree 32 --preconditioner blocks)
 
 # Tolerance of the solves that push the posterior covariance onto the
 # quantities of interest, the estimator kernels and the covariance maps:
@@ -159,10 +163,22 @@ QOI=(--qoi-rtol 1e-6)
 # Ocean model and prior: altimetry_bias, altimetry_inversion,
 # joint_inversion (identical names and defaults in all three). The fields
 # lie in H^2; the loads, discontinuous at the supports' edges, in H^(1/4).
+# The ice and the water stored on the other land are fields of H^(1/4) with
+# priors of order 1.5 on L^2, their amplitudes and scales stated in mm EWT
+# and km (from the year-on-year changes of the ESA Earth System Model). The
+# submitted paper had the ice alone, in H^2 with the other fields: drop
+# --land-water, --source-order and the five options after them for that.
 OCEAN_PRIOR=(
     --field-order 2.0
     --load-order 0.25
     --spacing "$SPACING"
+    --land-water
+    --source-order 0.25
+    --source-prior-order 1.5
+    --ice-std-mm 80.0
+    --ice-scale-km 180.0
+    --land-water-std-mm 65.0
+    --land-water-scale-km 340.0
     --ice-scale-factor 1.0
     --gmsl-bary-steric-ratio 1.7
     --ocean-dyn-scale-factor 0.2
@@ -175,43 +191,59 @@ OCEAN_PRIOR=(
 
 # Altimetry noise: the same numbers, but joint_inversion prefixes the flags
 # with "alt-".
-ALT_NOISE_STD=0.5
-ALT_NOISE_CORR_STD=0.01
-ALT_NOISE_CORR_SCALE=4.0
+# For a change over one year, in mm: a local error, a large-scale correlated
+# error and its scale in km, an error common to every point, and an error in
+# each component of the frame's origin (Ablain et al., 2019; Prandi et al.,
+# 2021). The submitted paper had 2, 0.04, 2000, 0 and 0.
+ALT_NOISE_STD_MM=6.0
+ALT_NOISE_CORR_STD_MM=0.7
+ALT_NOISE_CORR_SCALE_KM=2000.0
+ALT_NOISE_GLOBAL_STD_MM=1.0
+ALT_NOISE_FRAME_STD_MM=0.33
 
 ALT_NOISE=(
-    --noise-std-factor "$ALT_NOISE_STD"
-    --noise-corr-std-factor "$ALT_NOISE_CORR_STD"
-    --noise-corr-scale-factor "$ALT_NOISE_CORR_SCALE"
+    --noise-std-mm "$ALT_NOISE_STD_MM"
+    --noise-corr-std-mm "$ALT_NOISE_CORR_STD_MM"
+    --noise-corr-scale-km "$ALT_NOISE_CORR_SCALE_KM"
+    --noise-global-std-mm "$ALT_NOISE_GLOBAL_STD_MM"
+    --noise-frame-std-mm "$ALT_NOISE_FRAME_STD_MM"
 )
 JOINT_ALT_NOISE=(
-    --alt-noise-std-factor "$ALT_NOISE_STD"
-    --alt-noise-corr-std-factor "$ALT_NOISE_CORR_STD"
-    --alt-noise-corr-scale-factor "$ALT_NOISE_CORR_SCALE"
+    --alt-noise-std-mm "$ALT_NOISE_STD_MM"
+    --alt-noise-corr-std-mm "$ALT_NOISE_CORR_STD_MM"
+    --alt-noise-corr-scale-km "$ALT_NOISE_CORR_SCALE_KM"
+    --alt-noise-global-std-mm "$ALT_NOISE_GLOBAL_STD_MM"
+    --alt-noise-frame-std-mm "$ALT_NOISE_FRAME_STD_MM"
 )
 
-# GRACE prior and noise: grace_bias, grace_inversion. The model is the direct
-# load, in H^2. The noise order and amplitude are solved from the amplitude
-# SNR at degree 2 and the degree where the SNR crosses one, against the
-# direct-load prior; the solved order and the implied pointwise and
-# observation-band stds are printed.
+# The error of the GIA correction, in the altimetry and in GRACE's data of
+# the ocean experiments: the spread of the ensemble of gia_ensemble.py over
+# one year, scaled. Only the test ensemble exists so far.
+GIA=(
+    --gia-years 1.0
+    --gia-scale 0.4
+)
+
+# GRACE noise: the formal error covariance of the coefficients of
+# ITSG-Grace2018 for the difference of the annual means of two years
+# (grace_covariance.py build --years 2007 2008), a full matrix. The
+# submitted paper had a spatial noise field solved from two signal-to-noise
+# conditions: for that, drop these and pass --noise-scale-factor 0.5
+# --snr-low-degree 10.0 --snr-crossover-degree 64 to the GRACE scripts and
+# --grace-noise-scale-km 250.0 --grace-snr-low-degree 10.0
+# --grace-snr-crossover-degree 64 to joint_inversion, with OBS_DEGREE_VAL=100.
+GRACE_NOISE=(--coefficient-errors 2007 2008)
+JOINT_GRACE_NOISE=(--grace-coefficient-errors 2007 2008)
+
+# GRACE prior: grace_bias, grace_inversion. The model is the direct load, in
+# H^2, with one Sobolev prior over the globe: still that of the submitted
+# paper, not the three fields of grace_heldout.py and grace_coverage.py.
 # Optional: --smoothing-scale-km <km> [defaults to --load-scale-km],
 # --remove-degree-1.
 GRACE_PRIOR=(
     --load-order 2.0
     --direct-scale-km 250
     --direct-std-m 0.01
-    --noise-scale-factor 0.5
-    --snr-low-degree 10.0
-    --snr-crossover-degree 64
-)
-
-# joint_inversion's GRACE noise, solved by the same two conditions against
-# the ice load, rho_i times the ice thickness change.
-JOINT_GRACE_NOISE=(
-    --grace-noise-scale-km 250.0
-    --grace-snr-low-degree 10.0
-    --grace-snr-crossover-degree 64
 )
 
 # Per-script extras (plot selections, MC sample counts) -- edit to taste.
@@ -240,28 +272,28 @@ run() {
 for s in "${SCRIPTS[@]}"; do
     case "$s" in
     grace_bias)
-        run "$s" "${COMMON[@]}" "${OBS_DEGREE[@]}" "${GRACE_PRIOR[@]}" \
+        run "$s" "${COMMON[@]}" "${OBS_DEGREE[@]}" "${GRACE_PRIOR[@]}" "${GRACE_NOISE[@]}" \
             ${PAR_ARGS[@]+"${PAR_ARGS[@]}"} \
             ${GRACE_BIAS_EXTRA[@]+"${GRACE_BIAS_EXTRA[@]}"}
         ;;
     altimetry_bias)
-        run "$s" "${COMMON[@]}" "${OCEAN_PRIOR[@]}" "${ALT_NOISE[@]}" \
+        run "$s" "${COMMON[@]}" "${OCEAN_PRIOR[@]}" "${ALT_NOISE[@]}" "${GIA[@]}" \
             ${PAR_ARGS[@]+"${PAR_ARGS[@]}"} \
             ${ALTIMETRY_BIAS_EXTRA[@]+"${ALTIMETRY_BIAS_EXTRA[@]}"}
         ;;
     grace_inversion)
-        run "$s" "${COMMON[@]}" "${OBS_DEGREE[@]}" "${GRACE_PRIOR[@]}" "${QOI[@]}" \
+        run "$s" "${COMMON[@]}" "${OBS_DEGREE[@]}" "${GRACE_PRIOR[@]}" "${GRACE_NOISE[@]}" "${QOI[@]}" \
             ${PAR_ARGS[@]+"${PAR_ARGS[@]}"} \
             ${GRACE_INV_EXTRA[@]+"${GRACE_INV_EXTRA[@]}"}
         ;;
     altimetry_inversion)
-        run "$s" "${COMMON[@]}" "${SURROGATE[@]}" "${OCEAN_PRIOR[@]}" "${ALT_NOISE[@]}" "${QOI[@]}" \
+        run "$s" "${COMMON[@]}" "${SURROGATE[@]}" "${OCEAN_PRIOR[@]}" "${ALT_NOISE[@]}" "${GIA[@]}" "${QOI[@]}" \
             ${PAR_ARGS[@]+"${PAR_ARGS[@]}"} \
             ${ALTIMETRY_INV_EXTRA[@]+"${ALTIMETRY_INV_EXTRA[@]}"}
         ;;
     joint_inversion)
         run "$s" "${COMMON[@]}" "${SURROGATE[@]}" "${OBS_DEGREE[@]}" \
-            "${OCEAN_PRIOR[@]}" "${JOINT_ALT_NOISE[@]}" "${JOINT_GRACE_NOISE[@]}" "${QOI[@]}" \
+            "${OCEAN_PRIOR[@]}" "${JOINT_ALT_NOISE[@]}" "${JOINT_GRACE_NOISE[@]}" "${GIA[@]}" "${QOI[@]}" \
             ${PAR_ARGS[@]+"${PAR_ARGS[@]}"} \
             ${JOINT_INV_EXTRA[@]+"${JOINT_INV_EXTRA[@]}"}
         ;;

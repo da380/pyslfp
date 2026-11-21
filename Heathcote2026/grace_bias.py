@@ -105,11 +105,11 @@ def main():
 
     physics = common.grace_physics(args.lmax, args.load_order, args.load_scale_km)
     state, load_space, scale_mm = physics.state, physics.load_space, physics.scale_mm
-    _, prior, noise_load, _ = common.grace_measures(physics, args, rng)
+    _, prior, noise_load, noise_info = common.grace_measures(physics, args, rng)
     names, average = common.regional_averaging(physics, args)
 
     wmb = common.wmb_method(state, args)
-    noise = wmb.load_measure_to_observation_measure(noise_load)
+    noise, _ = common.grace_data_noise(physics, args, noise_load, noise_info)
     total_load = common.total_load_operator(physics)
     true_average = average @ total_load
     wmb_average = average @ wmb.potential_coefficient_to_load_operator(load_space)

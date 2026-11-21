@@ -137,11 +137,7 @@ def main():
     prior, calib = common.ocean_prior(physics, args, rng)
     noise, _ = common.altimetry_noise(
         physics,
-        calib["derived_stds"]["dyn_std"],
         args.prior_order,
-        args.noise_std_factor,
-        args.noise_corr_std_factor,
-        args.noise_corr_scale_factor,
         calib=calib,
         **common.altimetry_noise_options(args),
     )

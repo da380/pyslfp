@@ -17,6 +17,9 @@ observable space its field space (`FingerPrintOperator.field_space`).
   budget.
 - `ice_and_firn`: the ice sheets and their firn, observed together by
   ice-sheet altimetry but loading with different densities.
+- `ice_and_firn_air`: the ice sheets and their firn air content, the mass
+  that gravimetry and altimetry both see and the height that altimetry
+  alone sees.
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ from pyslfp.models.components import (
     Space,
     sterodynamic_sea_level,
     firn,
+    firn_air_content,
     glaciers,
     ice_sheets,
     land_water_storage,
@@ -35,7 +39,13 @@ from pyslfp.models.components import (
 )
 from pyslfp.models.setup import ModelSetup
 
-__all__ = ["ice_and_ocean", "ice_ocean_and_density", "sea_level_budget", "ice_and_firn"]
+__all__ = [
+    "ice_and_ocean",
+    "ice_ocean_and_density",
+    "sea_level_budget",
+    "ice_and_firn",
+    "ice_and_firn_air",
+]
 
 
 def ice_and_ocean(
@@ -142,6 +152,33 @@ def ice_and_firn(
                 density=firn_density,
                 space=space,
                 observable_space=observable_space,
+            ),
+        ],
+    )
+
+
+def ice_and_firn_air(
+    state: EarthState,
+    load_space: Space,
+    /,
+    *,
+    space: Optional[Space] = None,
+    observable_space: Optional[Space] = None,
+) -> ModelSetup:
+    """The ice sheets and their firn air content: the ice-equivalent
+    thickness change, which carries all the mass, and the change in the air
+    column of the firn, which carries none. Gravimetry sees the first alone
+    and ice-sheet altimetry the sum of the two over the displaced solid
+    surface (`ModelSetup.ice_surface_height`), so the two data sets together
+    separate them."""
+    return ModelSetup(
+        state,
+        [
+            ice_sheets(
+                state, load_space, space=space, observable_space=observable_space
+            ),
+            firn_air_content(
+                state, load_space, space=space, observable_space=observable_space
             ),
         ],
     )

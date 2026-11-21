@@ -57,6 +57,12 @@ The preconditioners, by name (--variants):
   beyond --cutoff-km (the taper of Gaspari and Cohn, which keeps it
   positive definite), is a sparse matrix, factorised once. GRACE's block
   is still dense: it has at most a few thousand coefficients.
+- exact, exact-low-rank: as local and local-low-rank, but GRACE's block is
+  that of the true operator, sea level equation included, assembled at the
+  cost of one application of the operator and its adjoint per coefficient.
+  For GRACE's data alone the preconditioner is then the inverse of the
+  normal matrix but for the low-rank parts of the noise; with the altimetry
+  it leaves out only the coupling of the two sets of data.
 - two-level, two-level-low-rank: the scalable form of both ideas. Each
   field's prior spectrum is split smoothly at about half of
   --surrogate-degree into a long-wavelength part and the rest. The
@@ -84,7 +90,6 @@ from typing import Optional
 
 import numpy as np
 from scipy import sparse
-from scipy.sparse.linalg import splu
 
 import pygeoinf as inf
 from pyslfp import set_num_threads
@@ -146,6 +151,14 @@ def parse_arguments() -> argparse.Namespace:
         "degree, so the signal-to-noise ratio does too and is one here.",
     )
     parser.add_argument(
+        "--preconditioner-floor-mm",
+        type=float,
+        default=0.0,
+        help="Add to GRACE's noise, in the preconditioners that assemble its "
+        "block and nowhere else, an error that is white as a load with this "
+        "pointwise std in mm EWT.",
+    )
+    parser.add_argument(
         "--cutoff-km",
         type=float,
         default=1500.0,
@@ -160,61 +173,11 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def gaspari_cohn(x: np.ndarray) -> np.ndarray:
-    """The compactly supported correlation function of Gaspari and Cohn
-    (1999), one at zero and zero from two onward. A covariance multiplied
-    by it entry by entry stays positive definite."""
-    x = np.abs(np.asarray(x, dtype=float))
-    out = np.zeros_like(x)
-    a, b = x <= 1.0, (x > 1.0) & (x < 2.0)
-    xa, xb = x[a], x[b]
-    out[a] = -0.25 * xa**5 + 0.5 * xa**4 + 0.625 * xa**3 - (5.0 / 3.0) * xa**2 + 1.0
-    out[b] = (
-        xb**5 / 12.0
-        - 0.5 * xb**4
-        + 0.625 * xb**3
-        + (5.0 / 3.0) * xb**2
-        - 5.0 * xb
-        + 4.0
-        - 2.0 / (3.0 * xb)
-    )
-    return out
-
-
-class SparseSolve:
-    """A sparse symmetric positive definite matrix and its solves. The
-    factorisation is made on first use and is not pickled, so that a worker
-    process makes its own."""
-
-    def __init__(self, matrix) -> None:
-        self.matrix = sparse.csc_matrix(matrix)
-        self._factor = None
-
-    def __getstate__(self) -> dict:
-        return {"matrix": self.matrix}
-
-    def __setstate__(self, state: dict) -> None:
-        self.matrix, self._factor = state["matrix"], None
-
-    def apply(self, x: np.ndarray) -> np.ndarray:
-        return self.matrix @ x
-
-    def solve(self, x: np.ndarray) -> np.ndarray:
-        if self._factor is None:
-            self._factor = splu(
-                self.matrix,
-                permc_spec="MMD_AT_PLUS_A",
-                diag_pivot_thresh=0.0,
-                options={"SymmetricMode": True},
-            )
-        return self._factor.solve(x)
-
-
-def definite(operator):
-    """The operator, claimed self-adjoint and positive definite."""
-    return operator.with_traits(
-        operator.traits | inf.Traits.SELF_ADJOINT | inf.Traits.POSITIVE_DEFINITE
-    )
+gaspari_cohn, SparseSolve, definite = (
+    common.gaspari_cohn,
+    common.SparseSolve,
+    common.definite,
+)
 
 
 def low_pass(space, degree: Optional[int]) -> np.ndarray:
@@ -278,17 +241,15 @@ class Problem:
         parts = {}
         alt_noise, self.alt_local = common.altimetry_noise(
             physics,
-            stds["dyn_std"],
             args.prior_order,
-            args.alt_noise_std_factor,
-            args.alt_noise_corr_std_factor,
-            args.alt_noise_corr_scale_factor,
             parts=parts,
             **common.altimetry_noise_options(args, "alt_"),
         )
-        self.grace_noise, _ = common.joint_grace_noise(
+        self.grace_noise, grace_info = common.joint_grace_noise(
             physics, stds["ice_std"], args.prior_order, args
         )
+        # GRACE's noise covariance as a matrix, if it is not diagonal.
+        self.grace_matrix = grace_info.get("covariance")
         if args.legacy_grace_noise:
             space = physics.field_space
             observed = (space.degrees >= 2) & (space.degrees <= args.obs_degree)
@@ -302,6 +263,7 @@ class Problem:
             self.grace_noise = white_load_noise(
                 physics, args, prior, grace, args.grace_white_crossover, rng
             )
+            self.grace_matrix = None
         use_alt, use_grace = case != "grace", case != "altimetry"
         if case == "joint":
             self.forward = inf.ColumnLinearOperator([altimetry, grace])
@@ -337,6 +299,32 @@ class Problem:
         _, self.data = problem.synthetic_model_and_data(prior, rng=rng)
         self.normal = inf.LinearGaussianInversion(problem, prior).normal_operator
 
+    def add_grace_noise(self, matrix: np.ndarray) -> None:
+        """Adds GRACE's noise covariance to a matrix on its data, in place."""
+        if self.grace_matrix is not None:
+            matrix += self.grace_matrix
+        else:
+            matrix[np.diag_indices_from(matrix)] += (
+                self.grace_noise.covariance.diagonals()[0]
+            )
+        if self.args.preconditioner_floor_mm > 0.0:
+            matrix[np.diag_indices_from(matrix)] += common.white_load_variance(
+                self.physics.state,
+                self.physics.load_space,
+                self.args,
+                self.args.preconditioner_floor_mm,
+            )
+
+    def grace_noise_with(self, variance: np.ndarray):
+        """GRACE's noise with a variance added to each coefficient."""
+        if self.grace_matrix is None:
+            return common.with_added_variance(self.grace_noise, variance)
+        return inf.GaussianMeasure.from_covariance_matrix(
+            self.grace_noise.domain,
+            self.grace_matrix + np.diag(variance),
+            form="galerkin",
+        )
+
     def cheap_inverse(self, n_jobs):
         """The inverse of the normal matrix of cheap physics, built once."""
         if self._cheap is None:
@@ -360,15 +348,22 @@ class Problem:
             signal = forward @ self.prior.covariance @ forward.adjoint
             matrix = signal.matrix(form="components", by="rows", n_jobs=n_jobs)
             matrix = 0.5 * (matrix + matrix.T)
-            matrix[np.diag_indices_from(matrix)] += (
-                self.local_noise().covariance.diagonals()[0]
-            )
+            # The altimetry data come first, with a diagonal local noise.
+            count = 0 if self.case == "grace" else self.alt_local.domain.dim
+            if count:
+                matrix[np.arange(count), np.arange(count)] += (
+                    self.alt_local.covariance.diagonals()[0]
+                )
+            if self.case != "altimetry":
+                self.add_grace_noise(matrix[count:, count:])
             self._cheap = inf.LinearOperator.from_matrix(
                 self.space, self.space, np.linalg.inv(matrix), form="components"
             )
         return self._cheap
 
-    def short_noise(self, split_degree, cutoff_km, n_jobs, grace_split=True):
+    def short_noise(
+        self, split_degree, cutoff_km, n_jobs, grace_split=True, exact_grace=False
+    ):
         """
         The local noise with the short-wavelength part of the signal added
         to it, as a measure given by its covariance and its inverse.
@@ -380,9 +375,11 @@ class Problem:
         `cutoff_km`: a sparse matrix. For GRACE it is the covariance of the
         coefficients under the short parts of the loads with WMB's physics:
         a dense matrix of the size of GRACE's data; without `grace_split`
-        it takes the whole of each spectrum.
+        it takes the whole of each spectrum. With `exact_grace` it is the
+        covariance of the coefficients under the whole prior with the true
+        physics.
         """
-        key = (split_degree, cutoff_km, grace_split)
+        key = (split_degree, cutoff_km, grace_split, exact_grace)
         if key in self._short:
             return self._short[key]
         physics, args = self.physics, self.args
@@ -456,13 +453,13 @@ class Problem:
                 domain=setup.space,
                 codomain=setup.space,
             )
-            matrix = (forward @ short @ forward.adjoint).matrix(
-                form="components", by="rows", n_jobs=n_jobs
-            )
+            signal = forward @ short @ forward.adjoint
+            if exact_grace:
+                grace = physics.grace(args)
+                signal = grace @ self.prior.covariance @ grace.adjoint
+            matrix = signal.matrix(form="components", by="rows", n_jobs=n_jobs)
             matrix = 0.5 * (matrix + matrix.T)
-            matrix[np.diag_indices_from(matrix)] += (
-                self.grace_noise.covariance.diagonals()[0]
-            )
+            self.add_grace_noise(matrix)
             domain = self.grace_noise.domain
             measures.append(
                 inf.GaussianMeasure(
@@ -518,9 +515,8 @@ class Problem:
                     physics, args, stds["dyn_std"], surrogate_degree
                 ),
             )
-            grace = common.with_added_variance(
-                grace,
-                common.unresolved_grace_variance(physics, args, stds, surrogate_degree),
+            grace = self.grace_noise_with(
+                common.unresolved_grace_variance(physics, args, stds, surrogate_degree)
             )
         if self.case == "joint":
             return inf.GaussianMeasure.from_product([alt, grace], domain=self.space)
@@ -603,6 +599,13 @@ def specification(name: str, args: argparse.Namespace) -> dict:
             "kind": "local",
             "low_rank": name != "local",
             "fingerprint": name == "local-fingerprint",
+        }
+    elif name in ("exact", "exact-low-rank", "exact-fingerprint"):
+        spec |= {
+            "kind": "local",
+            "exact": True,
+            "low_rank": name != "exact",
+            "fingerprint": name == "exact-fingerprint",
         }
     elif name in ("hybrid", "hybrid-low-rank"):
         spec |= {"kind": "hybrid", "low_rank": name != "hybrid", "alpha": 0.0}
@@ -698,7 +701,10 @@ def build(spec: dict, problem: Problem, surrogates: Surrogates, args, rng):
     if spec["kind"] in ("cheap", "local"):
         if spec["kind"] == "local":
             preconditioner = problem.short_noise(
-                None, args.cutoff_km, common.jobs(args)
+                None,
+                args.cutoff_km,
+                common.jobs(args),
+                exact_grace=spec.get("exact", False),
             ).precision
         else:
             preconditioner = problem.cheap_inverse(common.jobs(args))

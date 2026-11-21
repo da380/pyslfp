@@ -183,7 +183,7 @@ def main():
     total_load = common.total_load_operator(physics)
     wmb = common.wmb_method(state, args)
     wmb_load = wmb.potential_coefficient_to_load_operator(load_space)
-    noise = wmb.load_measure_to_observation_measure(noise_load)
+    noise, noise_matrix = common.grace_data_noise(physics, args, noise_load, noise_info)
 
     print(f"Reading the loads of {args.mascon_file}...")
     labels, totals = common.read_load_fields(
@@ -219,7 +219,14 @@ def main():
     # estimate has no constant term.
     print("Assembling the estimators...")
     problem = inf.LinearForwardProblem(forward, error=noise)
-    preconditioner = wmb.bayesian_normal_operator_preconditioner(initial_prior, noise)
+    if noise_matrix is None:
+        preconditioner = wmb.bayesian_normal_operator_preconditioner(
+            initial_prior, noise
+        )
+    else:
+        preconditioner = common.exact_preconditioner(
+            forward, prior, noise, noise_matrix=noise_matrix, n_jobs=common.jobs(args)
+        )
     inversion = inf.LinearGaussianInversion(problem, prior).with_solver(
         inf.CGSolver(rtol=args.qoi_rtol, preconditioner=preconditioner)
     )

@@ -1,6 +1,6 @@
 """
-Observations of the response to a load: tide gauges, satellite altimetry,
-GRACE and GNSS.
+Observations of the response to a load: tide gauges, satellite altimetry
+over the ocean and over the ice sheets, GRACE and GNSS.
 
 An observation model (`ObservationModel`) takes its observable as an operator
 from the model space, a set-up's or a viscoelastic operator's, and adds what
@@ -8,7 +8,8 @@ the measurement does: the sampling, the network's data and the noise. The
 physics, direct terms included, stays with whatever built the observable. Each
 module also samples a response directly, and handles its network's data: the
 GLOSS tide gauges, independent altimetry points over the ocean and the ice
-sheets, GRACE's Stokes coefficients, and the frame of a GNSS solution.
+sheets, the grounded ice that ice altimetry is confined to, GRACE's Stokes
+coefficients, and the frame of a GNSS solution.
 """
 
 from .altimetry import (
@@ -19,6 +20,12 @@ from .altimetry import (
     ocean_altimetry_points,
 )
 from .base import ObservationModel, noise_measure
+from .ice_altimetry import (
+    IceAltimetryObservationModel,
+    grounded_ice_altimetry_points,
+    ice_altimetry_point_operator,
+    on_grounded_ice,
+)
 from .gnss import (
     GNSS_DIRECTIONS,
     HELMERT_PARAMETERS,
@@ -47,6 +54,10 @@ __all__ = [
     "ice_altimetry_points",
     "altimetry_point_operator",
     "altimetry_averaging_operator",
+    "IceAltimetryObservationModel",
+    "on_grounded_ice",
+    "grounded_ice_altimetry_points",
+    "ice_altimetry_point_operator",
     "grace_observation_operator",
     "stokes_coefficient_operator",
     "GraceObservationModel",

@@ -34,9 +34,13 @@ from dataclasses import dataclass
 from typing import Optional, Sequence
 
 import numpy as np
+from scipy import sparse
+from scipy.linalg import cho_factor, cho_solve
+from scipy.sparse.linalg import splu
 
 import pygeoinf as inf
 import gia_ensemble
+import grace_covariance
 from pyslfp import EarthState, set_num_threads
 from pyslfp.elastic import FingerPrintOperator
 from pyslfp.observations import (
@@ -130,10 +134,66 @@ def add_qoi_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_coefficient_error_arguments(parser: argparse.ArgumentParser) -> None:
+    """The GRACE noise as the error covariance of the coefficients, for the
+    GRACE experiments; `add_joint_grace_noise_arguments` has the same
+    options with the prefix grace-."""
+    parser.add_argument(
+        "--coefficient-errors",
+        type=int,
+        nargs=2,
+        default=None,
+        metavar="YEAR",
+        help="Give GRACE's coefficients the formal error covariance of "
+        "ITSG-Grace2018 for the difference of the annual means of these two "
+        "years (`grace_covariance.py`), in place of a spatial noise field.",
+    )
+    parser.add_argument(
+        "--error-scale",
+        type=float,
+        default=1.0,
+        help="A factor on the standard deviations of --coefficient-errors.",
+    )
+
+
+def add_preconditioner_arguments(parser: argparse.ArgumentParser) -> None:
+    """The preconditioner of the ocean experiments' solves."""
+    parser.add_argument(
+        "--preconditioner",
+        choices=("surrogate", "blocks"),
+        default=None,
+        help="The surrogate problem at --surrogate-degree "
+        "(`surrogate_preconditioner`), or blocks assembled in the data space "
+        "(`block_preconditioner`). The default is blocks with "
+        "--grace-coefficient-errors and the surrogate otherwise.",
+    )
+    parser.add_argument(
+        "--cutoff-km",
+        type=float,
+        default=1500.0,
+        help="The distance beyond which the altimetry block takes two "
+        "points as uncorrelated.",
+    )
+    parser.add_argument(
+        "--low-rank",
+        type=int,
+        default=40,
+        help="Modes kept of the large-scale correlated altimetry noise in "
+        "the block preconditioner.",
+    )
+
+
 def add_grace_arguments(parser: argparse.ArgumentParser) -> None:
     """The resolution, prior and noise of the GRACE experiments."""
     parser.add_argument("--lmax", type=int, default=256)
-    parser.add_argument("--obs-degree", type=int, default=100)
+    parser.add_argument(
+        "--obs-degree",
+        type=int,
+        default=None,
+        help="The highest degree of GRACE's data: 100 by default, or 60 with "
+        "--coefficient-errors, which allows at most 96.",
+    )
+    add_coefficient_error_arguments(parser)
     parser.add_argument(
         "--grace-convention",
         choices=("stokes", "orthonormal"),
@@ -245,26 +305,45 @@ def add_ocean_arguments(
 def add_altimetry_noise_arguments(
     parser: argparse.ArgumentParser, *, prefix: str = ""
 ) -> None:
-    parser.add_argument(f"--{prefix}noise-std-factor", type=float, default=0.5)
-    parser.add_argument(f"--{prefix}noise-corr-std-factor", type=float, default=0.01)
-    parser.add_argument(f"--{prefix}noise-corr-scale-factor", type=float, default=4.0)
+    """The altimetry noise of `altimetry_noise`, for a change over one
+    year. The defaults are derived from the error budgets of Ablain et al.
+    (2019) and Prandi et al. (2021)."""
+    parser.add_argument(
+        f"--{prefix}noise-std-mm",
+        type=float,
+        default=6.0,
+        help="Std of the local error, independent at the points, mm.",
+    )
+    parser.add_argument(
+        f"--{prefix}noise-corr-std-mm",
+        type=float,
+        default=0.7,
+        help="Pointwise std of the large-scale correlated error, mm; zero "
+        "leaves it out.",
+    )
+    parser.add_argument(
+        f"--{prefix}noise-corr-scale-km",
+        type=float,
+        default=2000.0,
+        help="Scale of the large-scale correlated error, km.",
+    )
     parser.add_argument(
         f"--{prefix}noise-std-map",
         default=None,
         help="netCDF file whose field gives the pattern of the local noise's "
-        "std over the ocean; its amplitude is still set by the std factor.",
+        "std over the ocean; its amplitude is still set by the std in mm.",
     )
     parser.add_argument(f"--{prefix}noise-std-variable", default="uncertainty")
     parser.add_argument(
         f"--{prefix}noise-global-std-mm",
         type=float,
-        default=0.0,
+        default=1.0,
         help="Std of an error common to every point: a bias of the global mean.",
     )
     parser.add_argument(
         f"--{prefix}noise-frame-std-mm",
         type=float,
-        default=0.0,
+        default=0.33,
         help="Std of each component of an error in the origin of the "
         "reference frame, a degree-1 pattern in the geocentric height.",
     )
@@ -275,6 +354,9 @@ def altimetry_noise_options(args: argparse.Namespace, prefix: str = "") -> dict:
     `add_altimetry_noise_arguments` with the same prefix (with underscores,
     such as "alt_")."""
     return {
+        "std_mm": getattr(args, f"{prefix}noise_std_mm"),
+        "corr_std_mm": getattr(args, f"{prefix}noise_corr_std_mm"),
+        "corr_scale_km": getattr(args, f"{prefix}noise_corr_scale_km"),
         "std_map": getattr(args, f"{prefix}noise_std_map"),
         "std_variable": getattr(args, f"{prefix}noise_std_variable"),
         "global_std_mm": getattr(args, f"{prefix}noise_global_std_mm"),
@@ -340,11 +422,20 @@ def add_grace_noise_model_arguments(parser: argparse.ArgumentParser) -> None:
         help="Pointwise std of the error of the background corrections, mm EWT.",
     )
     parser.add_argument("--corrections-scale-km", type=float, default=2000.0)
+    add_coefficient_error_arguments(parser)
     add_gia_arguments(parser)
 
 
 def add_joint_grace_noise_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--obs-degree", type=int, default=100)
+    parser.add_argument(
+        "--obs-degree",
+        type=int,
+        default=None,
+        help="The highest degree of GRACE's data. With "
+        "--grace-coefficient-errors the default is 60, and 96, the degree of "
+        "the ITSG-Grace2018 solutions, is the most it can be; otherwise the "
+        "default is 100.",
+    )
     parser.add_argument(
         "--grace-convention",
         choices=("stokes", "orthonormal"),
@@ -363,13 +454,56 @@ def add_joint_grace_noise_arguments(parser: argparse.ArgumentParser) -> None:
         "the signal-to-noise options that follow.",
     )
     parser.add_argument("--grace-noise-order", type=float, default=2.0)
+    parser.add_argument(
+        "--grace-coefficient-errors",
+        type=int,
+        nargs=2,
+        default=None,
+        metavar="YEAR",
+        help="Give GRACE's coefficients the formal error covariance of "
+        "ITSG-Grace2018 for the difference of the annual means of these two "
+        "years (`grace_covariance.py`), in place of a spatial noise field: a "
+        "full covariance matrix, with the dependence on order and the "
+        "correlations of a single pair of satellites.",
+    )
+    parser.add_argument(
+        "--grace-error-scale",
+        type=float,
+        default=1.0,
+        help="A factor on the standard deviations of --grace-coefficient-errors.",
+    )
+    parser.add_argument(
+        "--grace-floor-std-mm",
+        type=float,
+        default=0.0,
+        help="With --grace-coefficient-errors, a further error that is white "
+        "as a load over the observed degrees, the same variance in every "
+        "coefficient of the load, taken to GRACE's coefficients by the load "
+        "Love numbers: its pointwise std, mm EWT. It stands for load at "
+        "scales the model does not represent.",
+    )
     parser.add_argument("--grace-snr-low-degree", type=float, default=10.0)
     parser.add_argument("--grace-snr-reference-degree", type=float, default=2.0)
     parser.add_argument("--grace-snr-crossover-degree", type=float, default=64.0)
 
 
 def configure(args: argparse.Namespace) -> np.random.Generator:
-    """Sets the thread count and returns the random generator of the run."""
+    """Sets the thread count, settles the options whose defaults depend on
+    others, and returns the random generator of the run."""
+    for name in ("grace_coefficient_errors", "coefficient_errors"):
+        if not hasattr(args, name):
+            continue
+        errors = getattr(args, name) is not None
+        if args.obs_degree is None:
+            args.obs_degree = 60 if errors else 100
+        if errors and args.obs_degree > grace_covariance.DEGREE:
+            raise SystemExit(
+                f"--obs-degree {args.obs_degree}: the coefficient errors of "
+                f"ITSG-Grace2018 stop at degree {grace_covariance.DEGREE}."
+            )
+    if hasattr(args, "preconditioner") and args.preconditioner is None:
+        errors = getattr(args, "grace_coefficient_errors", None) is not None
+        args.preconditioner = "blocks" if errors else "surrogate"
     if not args.parallel and args.serial_threads is not None:
         set_num_threads(args.serial_threads)
     return np.random.default_rng(args.seed)
@@ -797,7 +931,8 @@ def grace_measures(physics: GracePhysics, args: argparse.Namespace, rng):
     Returns (initial_prior, prior, noise_load_measure, noise_info): the
     unconditioned prior, the prior used (conditioned on a vanishing degree 1
     with --remove-degree-1, then shifted), the spatial noise field and its
-    solved spectrum."""
+    solved spectrum. With --coefficient-errors there is no noise field:
+    None is returned for it, and `grace_data_noise` builds the noise."""
     if args.prior_order <= 1.0:
         raise ValueError("--prior-order must exceed one.")
     p = physics.state.model.parameters
@@ -812,6 +947,8 @@ def grace_measures(physics: GracePhysics, args: argparse.Namespace, rng):
         )
         prior = prior.condition(constraint, np.zeros(constraint.codomain.dim))
     prior = shifted(prior, args.prior_shift, rng)
+    if args.coefficient_errors is not None:
+        return initial, prior, None, {"signal_std": std}
     noise_scale = args.noise_scale_factor * scale
     info = resolve_noise_amplitude(
         space,
@@ -827,6 +964,34 @@ def grace_measures(physics: GracePhysics, args: argparse.Namespace, rng):
         label="GRACE spatial noise",
     )
     return initial, prior, spatial_noise_measure(space, info, noise_scale), info
+
+
+def grace_data_noise(physics: GracePhysics, args: argparse.Namespace, noise_load, info):
+    """
+    The noise of the GRACE experiments' data, from what `grace_measures`
+    returned: the spatial noise field taken to the coefficients by WMB's
+    spectral map, or, with --coefficient-errors, the error covariance of
+    `grace_coefficient_noise`, a full matrix. `info["std_factor"]`, which
+    sets the tolerance of the solves, is then the best-determined
+    coefficient's error, as the pointwise std of a white load, over the
+    prior's.
+
+    Returns (noise, matrix), the matrix being the covariance if it is not
+    diagonal and None otherwise.
+    """
+    if args.coefficient_errors is None:
+        wmb = wmb_method(physics.state, args)
+        return wmb.load_measure_to_observation_measure(noise_load), None
+    noise, coefficient_info = grace_coefficient_noise(
+        physics.state,
+        physics.load_space,
+        args,
+        years=args.coefficient_errors,
+        scale=args.error_scale,
+    )
+    info["std_factor"] = coefficient_info["best_std"] / info["signal_std"]
+    info["noise_std"] = coefficient_info["noise_std"]
+    return noise, coefficient_info["covariance"]
 
 
 def shifted(measure, shift: float, rng):
@@ -1870,7 +2035,7 @@ def print_calibration_report(calib: dict, physics: OceanPhysics) -> None:
 
 
 def print_prior_settings(
-    args: argparse.Namespace, noise_corr_std_factor: float, noise_corr_scale_factor
+    args: argparse.Namespace, noise_corr_std_mm: float, noise_corr_scale_km: float
 ) -> None:
     """Prints the settings of the prior's correlation and of the correlated
     altimetry noise."""
@@ -1880,10 +2045,10 @@ def print_prior_settings(
             f"correlation scale factor = {args.ocean_corr_scale_factor:.2f}"
         )
     print(f"Sobolev priors: common order = {args.prior_order:.2f}")
-    if noise_corr_std_factor > 0.0:
+    if noise_corr_std_mm > 0.0:
         print(
-            f"Correlated altimetry error component: std factor = "
-            f"{noise_corr_std_factor:.3f}, scale factor = {noise_corr_scale_factor:.1f}"
+            f"Correlated altimetry error component: std = "
+            f"{noise_corr_std_mm:.2f} mm, scale = {noise_corr_scale_km:.0f} km"
         )
 
 
@@ -1931,13 +2096,12 @@ def std_pattern(
 
 def altimetry_noise(
     physics: OceanPhysics,
-    dyn_std: float,
     prior_order: float,
-    std_factor: float,
-    corr_std_factor: float,
-    corr_scale_factor: float,
     /,
     *,
+    std_mm: float,
+    corr_std_mm: float,
+    corr_scale_km: float,
     calib: Optional[dict] = None,
     std_map: Optional[str] = None,
     std_variable: str = "uncertainty",
@@ -1948,13 +2112,12 @@ def altimetry_noise(
     """
     The altimetry noise, a sum of parts:
 
-    - a local part, independent at the points with std `std_factor` x the
-      eta std, uniform or following the pattern of the field `std_variable`
-      of the file `std_map`, scaled to that root mean square over the points;
-    - if `corr_std_factor` is positive, a large-scale correlated part, a
-      Sobolev field of the prior's order on the fields' space at
-      `corr_scale_factor` x the load scale with std `corr_std_factor` x the
-      eta std, evaluated at the points;
+    - a local part, independent at the points with std `std_mm`, uniform or
+      following the pattern of the field `std_variable` of the file
+      `std_map`, scaled to that root mean square over the points;
+    - if `corr_std_mm` is positive, a large-scale correlated part, a
+      Sobolev field of the prior's order on the fields' space at the scale
+      `corr_scale_km` with that pointwise std, evaluated at the points;
     - if `global_std_mm` is positive, an error common to every point, such
       as a bias between missions or of the wet troposphere correction;
     - if `frame_std_mm` is positive, an error in the origin of the reference
@@ -1975,21 +2138,19 @@ def altimetry_noise(
     points = np.asarray(physics.points, dtype=float).reshape(-1, 2)
     points = np.column_stack([points[:, 0], points[:, 1] % 360.0])
     pattern = std_pattern(points, path=std_map, variable=std_variable)
+    std = std_mm / physics.scale_mm
     if pattern is None:
-        local = inf.GaussianMeasure.from_standard_deviation(
-            data_space, std_factor * dyn_std
-        )
+        local = inf.GaussianMeasure.from_standard_deviation(data_space, std)
     else:
-        local = inf.GaussianMeasure.from_standard_deviations(
-            data_space, std_factor * dyn_std * pattern
-        )
+        local = inf.GaussianMeasure.from_standard_deviations(data_space, std * pattern)
     noise = local
-    if corr_std_factor > 0.0:
+    if corr_std_mm > 0.0:
         field_space = physics.field_space
+        length_scale = physics.state.model.parameters.length_scale
         field = field_space.sobolev_measure(
             prior_order,
-            field_space.length_scale * corr_scale_factor,
-            pointwise_std=corr_std_factor * dyn_std,
+            corr_scale_km * 1000.0 / length_scale,
+            pointwise_std=corr_std_mm / physics.scale_mm,
         )
         if calib is not None:
             mean = ocean_average_operator(physics.state, field_space)
@@ -2040,11 +2201,28 @@ def joint_grace_noise(
     pointwise std, and `info["std_factor"]` is its ratio to the std of the
     ice load.
 
+    With --grace-coefficient-errors the noise is that of
+    `grace_coefficient_noise`, a full covariance on the coefficients, and
+    `info["covariance"]` is its matrix.
+
     Returns (data_noise, info).
     """
     state = physics.state
     p = state.model.parameters
     field_space = physics.field_space
+    if getattr(args, "grace_coefficient_errors", None) is not None:
+        noise, info = grace_coefficient_noise(
+            state,
+            physics.load_space,
+            args,
+            years=args.grace_coefficient_errors,
+            scale=args.grace_error_scale,
+            floor_std_mm=args.grace_floor_std_mm,
+        )
+        # For the tolerance of the solves: the best-determined coefficient's
+        # error, as the pointwise std of a white load, over the ice load's.
+        info["std_factor"] = info["best_std"] / (p.ice_density * ice_std)
+        return noise, info
     ice_scale = field_space.length_scale * args.ice_scale_factor
     noise_scale = args.grace_noise_scale_km * 1000.0 / p.length_scale
     if args.grace_noise_std_mm is not None:
@@ -2079,6 +2257,91 @@ def joint_grace_noise(
     return noise, info
 
 
+def white_load_variance(
+    state: EarthState, load_space, args: argparse.Namespace, std_mm: float = 1.0
+) -> np.ndarray:
+    """
+    The variance of each of GRACE's coefficients under an error that is
+    white as a load over the observed degrees: the same variance in every
+    coefficient of the load, taken to GRACE's by the load Love numbers,
+    with the pointwise std `std_mm` in mm EWT.
+    """
+    p = state.model.parameters
+    # A unit variance in every coefficient of the load (orthonormal on the
+    # unit sphere): the eigenvalues carry the metric of the space.
+    unit = inf.GaussianMeasure(
+        load_space,
+        covariance=inf.DiagonalLinearOperator(load_space, load_space.metric_values),
+    )
+    shape = (
+        wmb_method(state, args)
+        .load_measure_to_observation_measure(unit)
+        .covariance.diagonals()[0]
+    )
+    # Pointwise variance = the sum of the coefficients' variances / 4 pi.
+    std = std_mm * p.water_density / 1000.0 / p.length_scale
+    return shape * 4.0 * np.pi * std**2 / len(shape)
+
+
+def grace_coefficient_noise(
+    state: EarthState,
+    load_space,
+    args: argparse.Namespace,
+    /,
+    *,
+    years: Sequence[int],
+    scale: float = 1.0,
+    floor_std_mm: float = 0.0,
+):
+    """
+    The GRACE noise of --coefficient-errors and --grace-coefficient-errors:
+    the formal error covariance of ITSG-Grace2018's coefficients for the
+    difference of the annual means of `years`
+    (`grace_covariance.coefficient_covariance`), its standard deviations
+    multiplied by `scale`, in the data's convention; plus, if
+    `floor_std_mm` is positive, an error that is white as a load over the
+    observed degrees with that pointwise std, taken to the coefficients by
+    the load Love numbers.
+
+    The covariance is a full matrix on the data, of a few thousand
+    coefficients. Returns (noise, info), with the matrix as
+    `info["covariance"]` for the preconditioners that assemble GRACE's
+    block.
+    """
+    p = state.model.parameters
+    wmb = wmb_method(state, args)
+    covariance = grace_covariance.coefficient_covariance(args.obs_degree, tuple(years))
+    covariance *= scale**2
+    if args.grace_convention != "stokes":
+        factor = stokes_coefficient_operator(state.model, args.obs_degree).diagonals()[
+            0
+        ]
+        covariance /= factor[:, None] * factor[None, :]
+    # The pointwise std of the formal errors as a load: against a white load
+    # of 1 mm, the mean over the coefficients of the ratio of variances.
+    white = white_load_variance(state, load_space, args)
+    relative = np.diag(covariance) / white
+    formal_std, best_std = np.sqrt(np.mean(relative)), np.sqrt(np.min(relative))
+    if floor_std_mm > 0.0:
+        covariance[np.diag_indices_from(covariance)] += white * floor_std_mm**2
+    domain = wmb.load_to_potential_coefficient_operator(load_space).codomain
+    noise = inf.GaussianMeasure.from_covariance_matrix(
+        domain, covariance, form="galerkin"
+    )
+    print(
+        "GRACE coefficient errors: ITSG-Grace2018, annual means of "
+        f"{years[0]} and {years[1]}, std x {scale:.2f}: pointwise "
+        f"{formal_std:.1f} mm EWT to degree {args.obs_degree}, unfiltered; "
+        f"white load floor {floor_std_mm:.2f} mm"
+    )
+    load_per_mm = p.water_density / 1000.0 / p.length_scale
+    return noise, {
+        "covariance": covariance,
+        "noise_std": formal_std * load_per_mm,
+        "best_std": best_std * load_per_mm,
+    }
+
+
 def grace_noise_model(
     state: EarthState, load_space, response_space, args: argparse.Namespace
 ):
@@ -2100,31 +2363,50 @@ def grace_noise_model(
     - with --gia-years, the error of the GIA correction, from the ensemble
       of `gia_ensemble.py`.
 
+    With --coefficient-errors the measurement error is instead that of
+    `grace_coefficient_noise`, the error covariance of the coefficients
+    themselves, a full matrix; the options of the spatial field are then
+    not used.
+
     Returns (noise, invariant, parts): the noise; a stand-in for it with a
     diagonal covariance, for the preconditioner (the measurement error with
-    a uniform standard deviation, and the corrections); and the parts by
-    name.
+    a uniform standard deviation, or the diagonal of the coefficients'
+    covariance, and the corrections); and the parts by name.
     """
     p = state.model.parameters
     km = 1000.0 / p.length_scale
     load_per_mm = p.water_density / 1000.0 / p.length_scale
     wmb = wmb_method(state, args)
-    field = load_space.sobolev_measure(
-        args.noise_order,
-        args.noise_scale_km * km,
-        pointwise_std=args.noise_std_mm * load_per_mm,
-    )
-    invariant = wmb.load_measure_to_observation_measure(field)
-    grid = state.model.zero_grid()
-    points = _grid_points(grid)
-    pattern = std_pattern(
-        points,
-        path=args.noise_std_map,
-        variable=args.noise_std_variable,
-        polar_ratio=args.noise_polar_ratio,
-        weights=np.cos(np.deg2rad(points[:, 0])),
-    )
-    parts = {"measurement": invariant}
+    pattern = None
+    if args.coefficient_errors is not None:
+        measurement, info = grace_coefficient_noise(
+            state,
+            load_space,
+            args,
+            years=args.coefficient_errors,
+            scale=args.error_scale,
+        )
+        invariant = inf.GaussianMeasure.from_standard_deviations(
+            measurement.domain, np.sqrt(np.diag(info["covariance"]))
+        )
+        parts = {"measurement": measurement}
+    else:
+        field = load_space.sobolev_measure(
+            args.noise_order,
+            args.noise_scale_km * km,
+            pointwise_std=args.noise_std_mm * load_per_mm,
+        )
+        invariant = wmb.load_measure_to_observation_measure(field)
+        grid = state.model.zero_grid()
+        points = _grid_points(grid)
+        pattern = std_pattern(
+            points,
+            path=args.noise_std_map,
+            variable=args.noise_std_variable,
+            polar_ratio=args.noise_polar_ratio,
+            weights=np.cos(np.deg2rad(points[:, 0])),
+        )
+        parts = {"measurement": invariant}
     if pattern is not None:
         grid.data[:] = pattern.reshape(grid.data.shape)
         to_data = wmb.load_to_potential_coefficient_operator(load_space)
@@ -2260,6 +2542,239 @@ def surrogate_preconditioner(
         noise_inverse=noise.precision,
     )(normal_operator)
     return (1.0 - alpha) * woodbury + alpha * noise.precision
+
+
+def gaspari_cohn(x: np.ndarray) -> np.ndarray:
+    """The taper of Gaspari and Cohn (1999, their equation 4.10): a
+    positive definite function of distance that falls smoothly from one at
+    x = 0 to zero at x = 2 and beyond."""
+    x = np.abs(np.asarray(x, dtype=float))
+    out = np.zeros_like(x)
+    near, far = x <= 1.0, (x > 1.0) & (x < 2.0)
+    a = x[near]
+    out[near] = -0.25 * a**5 + 0.5 * a**4 + 0.625 * a**3 - 5.0 / 3.0 * a**2 + 1.0
+    b = x[far]
+    out[far] = (
+        b**5 / 12.0
+        - 0.5 * b**4
+        + 0.625 * b**3
+        + 5.0 / 3.0 * b**2
+        - 5.0 * b
+        + 4.0
+        - 2.0 / (3.0 * b)
+    )
+    return out
+
+
+class SparseSolve:
+    """A sparse symmetric positive definite matrix and its inverse, by a
+    factorisation made on first use. It pickles as the matrix alone."""
+
+    def __init__(self, matrix):
+        self.matrix, self._factor = matrix, None
+
+    def __getstate__(self) -> dict:
+        return {"matrix": self.matrix}
+
+    def __setstate__(self, state: dict) -> None:
+        self.matrix, self._factor = state["matrix"], None
+
+    def apply(self, x: np.ndarray) -> np.ndarray:
+        return self.matrix @ x
+
+    def solve(self, x: np.ndarray) -> np.ndarray:
+        if self._factor is None:
+            self._factor = splu(
+                self.matrix,
+                permc_spec="MMD_AT_PLUS_A",
+                diag_pivot_thresh=0.0,
+                options={"SymmetricMode": True},
+            )
+        return self._factor.solve(x)
+
+
+def definite(operator):
+    """The operator, claimed self-adjoint and positive definite."""
+    return operator.with_traits(
+        operator.traits | inf.Traits.SELF_ADJOINT | inf.Traits.POSITIVE_DEFINITE
+    )
+
+
+def covariance_matrix_of(measure, matrix: Optional[np.ndarray] = None) -> np.ndarray:
+    """The covariance of a measure on a Euclidean space as a matrix: the
+    one given, the diagonal of a diagonal covariance, or the covariance
+    applied to each basis vector."""
+    if matrix is not None:
+        return matrix
+    covariance = measure.covariance
+    if isinstance(covariance, inf.DiagonalLinearOperator):
+        return np.diag(covariance.diagonals()[0])
+    return covariance.matrix(form="components")
+
+
+def exact_preconditioner(
+    forward, prior, noise, /, *, noise_matrix=None, n_jobs: Optional[int] = None
+):
+    """
+    The inverse of the data-space normal matrix A Q A* + R, assembled and
+    factorised: a direct solver, for data few enough that the matrix can be
+    held, as GRACE's coefficients are.
+
+    It costs one application of A Q A* per datum, each independent of the
+    others, and a dense factorisation. A conjugate-gradient solve
+    preconditioned by it converges in an iteration or two, so every further
+    solve (a quantity of interest, a row of an estimator kernel, a posterior
+    sample) costs one application of the operator and no more.
+
+    Returns the inverse as an operator on the data space.
+    """
+    space = forward.codomain
+    signal = forward @ prior.covariance @ forward.adjoint
+    matrix = signal.matrix(form="components", by="rows", n_jobs=n_jobs)
+    matrix = 0.5 * (matrix + matrix.T) + covariance_matrix_of(noise, noise_matrix)
+    inverse = cho_solve(cho_factor(matrix, lower=True), np.eye(len(matrix)))
+    return definite(
+        inf.LinearOperator.from_matrix(
+            space, space, 0.5 * (inverse + inverse.T), form="components"
+        )
+    )
+
+
+def altimetry_block(
+    physics: OceanPhysics,
+    args: argparse.Namespace,
+    calib: dict,
+    alt_local,
+    cutoff_km: float,
+):
+    """
+    The altimetry block of `block_preconditioner`, as an operator on the
+    altimetry data: the inverse of the covariance of eta between the
+    points under its prior, tapered to vanish beyond `cutoff_km` by the
+    taper of Gaspari and Cohn, which keeps it positive definite, plus the
+    local noise. The matrix is sparse and factorised once, so nothing dense
+    is formed on the altimetry data, whose number is not bounded.
+    """
+    space = physics.field_space
+    points = physics.points
+    spectrum = _field_measure(
+        physics, args, ETA, _stds_by_name(calib["derived_stds"])[ETA]
+    ).covariance.eigenvalues
+    cutoff = cutoff_km * 1000.0 / physics.state.model.parameters.length_scale
+    eta = space.invariant_measure(spectrum, unsafe=True)
+    rows, columns, distances = space.pairs_within_distance(
+        points, cutoff, with_distances=True
+    )
+    values = space.covariance_function(eta, distances) * gaspari_cohn(
+        distances / (0.5 * cutoff)
+    )
+    count = len(points)
+    matrix = sparse.csc_matrix((values, (rows, columns)), shape=(count, count))
+    matrix = matrix + sparse.diags(alt_local.covariance.diagonals()[0])
+    print(
+        f"  altimetry block: {matrix.nnz / count:.0f} entries per point within "
+        f"{cutoff_km:.0f} km",
+        flush=True,
+    )
+    solve = SparseSolve(matrix)
+    domain = alt_local.domain
+    return definite(
+        inf.LinearOperator.from_callables(
+            domain, domain, solve.solve, adjoint=solve.solve
+        )
+    )
+
+
+def block_preconditioner(
+    case: str,
+    physics: OceanPhysics,
+    args: argparse.Namespace,
+    prior,
+    calib: dict,
+    /,
+    *,
+    alt_local=None,
+    alt_parts: Optional[dict] = None,
+    grace_noise=None,
+    grace_matrix: Optional[np.ndarray] = None,
+    gia=None,
+    rng=None,
+    cache: Optional[dict] = None,
+):
+    """
+    A preconditioner for the data-space normal operator of the ocean
+    experiments, assembled in the data space in blocks; `case` is
+    "altimetry", "grace" or "joint".
+
+    - GRACE's block is that of `exact_preconditioner`: the normal matrix of
+      the true operator, sea level equation included, with GRACE's noise
+      (`grace_noise`, with its covariance `grace_matrix` if that is not
+      diagonal). GRACE's coefficients number a few thousand, so it can be
+      held.
+    - The altimetry's block is that of `altimetry_block`, sparse
+      (`alt_local`, the local noise; --cutoff-km).
+    - With both, the blocks are uncoupled: what the mass sources add to the
+      altimetry through the sea level equation, and the covariance between
+      the two sets of data, are left to the iteration.
+    - The parts of the noise of low rank are then corrected for exactly
+      (`low_rank_correction`): the common modes of the altimetry and the
+      leading --low-rank modes of its large-scale correlated error
+      (`alt_parts`, as `altimetry_noise` fills it), and the error of the GIA
+      correction (`gia`, a measure on this case's data).
+
+    The blocks are kept in `cache`, if one is given, so that the cases of
+    one experiment share them: GRACE's is the costly one.
+    """
+    use_alt, use_grace = case != "grace", case != "altimetry"
+    cache = {} if cache is None else cache
+    blocks = []
+    if use_alt:
+        if "altimetry" not in cache:
+            cache["altimetry"] = altimetry_block(
+                physics, args, calib, alt_local, args.cutoff_km
+            )
+        blocks.append(cache["altimetry"])
+    if use_grace:
+        if "grace" not in cache:
+            print(
+                f"  GRACE block: {grace_noise.domain.dim} applications of the "
+                "normal operator...",
+                flush=True,
+            )
+            cache["grace"] = exact_preconditioner(
+                physics.grace(args),
+                prior,
+                grace_noise,
+                noise_matrix=grace_matrix,
+                n_jobs=jobs(args),
+            )
+        blocks.append(cache["grace"])
+    if len(blocks) == 1:
+        preconditioner = blocks[0]
+        space = preconditioner.domain
+    else:
+        space = inf.ColumnLinearOperator(
+            [physics.altimetry, physics.grace(args)]
+        ).codomain
+        preconditioner = definite(
+            inf.BlockDiagonalLinearOperator(blocks, domain=space, codomain=space)
+        )
+    factors = []
+    if use_alt:
+        for name, measure in (alt_parts or {}).items():
+            if name == "correlated":
+                measure = measure.low_rank_approximation(
+                    rank=min(args.low_rank, measure.domain.dim - 1), rng=rng
+                )
+            factor = measure.covariance_factor
+            if case == "joint":
+                factor = space.inclusion(0) @ factor
+            factors.append(factor)
+    if gia is not None:
+        factors.append(gia.covariance_factor)
+    if factors:
+        preconditioner = low_rank_correction(preconditioner, factors)
+    return preconditioner
 
 
 def unresolved_altimetry_variance(

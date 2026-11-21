@@ -175,17 +175,23 @@ one dimensioned input:
    under the conditioned prior. The ice is uncorrelated with the ocean fields
    and absent from $D$, so the chain closes without iteration.
 
-**Altimetry noise.** The altimetry noise is the sum of two parts:
+**Altimetry noise.** The altimetry noise is for a change over one year and
+is the sum of four parts, with standard deviations derived from the error
+budgets of Ablain et al. (2019) and Prandi et al. (2021):
 
-- a local part, independent at each point, with standard deviation 0.5 times
-  that of $\eta_d$;
+- a local part, independent at each point, with standard deviation 6 mm;
 - a large-scale part, a field
   $N(0, \alpha_c (1 + \lambda_c^2 \Delta)^{-q})$ on $H^2$ evaluated at the
   points, with $\lambda_c = 2000$ km and a pointwise standard deviation of
-  0.01 times that of $\eta_d$.
+  0.7 mm;
+- an error common to every point, with standard deviation 1 mm;
+- an error in the origin of the reference frame, three degree-one patterns
+  with standard deviation 0.33 mm each.
 
-The large-scale part barely averages down, and so sets a floor on the error
-of the GMSL estimate. The scripts report that floor.
+All but the first barely average down, and so set a floor on the error of
+the GMSL estimate. The scripts report the floor of the large-scale part.
+The values of the submitted paper were 2 mm, 0.04 mm and no common or frame
+error.
 
 **GRACE noise in the joint experiment.** This is a noise load, as in the GRACE
 experiments, with $\lambda_n = 250$ km, solved by the same two conditions
@@ -210,7 +216,82 @@ surrogate Woodbury preconditioner. The surrogate is a cheaper problem:
 Its Woodbury inverse $W$ is applied as $0.9 W + 0.1 R_s^{-1}$. The
 preconditioner changes only the number of iterations, not the result.
 
+## Revised configuration (run_all.sh)
+
+The sections above state the configuration of the submitted paper. The
+options that `run_all.sh` now passes change the following.
+
+**Mass sources in the ocean experiments.** With `--land-water` the model is
+$m = (h, w, \eta_d, \delta\rho)$, where $w$ is the change in the water
+stored on the land outside the two ice sheets, a thickness of water with
+the load $\rho_w \chi_L w$. With `--source-order 0.25`, $h$ and $w$ lie in
+$H^{1/4}$, the space of the loads, and have priors of their own: the
+coefficients of a sample have the variances
+
+$$\mathrm{var}(u_{lm}) = \alpha_k \left(1 + \lambda_k^2 \frac{l(l+1)}{a^2}\right)^{-t} ,$$
+
+a spectrum stated on $L^2$, with $t = 1.5$, $\lambda_i = 180$ km and
+$\lambda_w = 340$ km. This is a measure on $H^{1/4}$ because $t$ exceeds
+$1/4$ by more than one. The pointwise standard deviations are stated for
+loads resolved to degree 180: 80 mm of equivalent water thickness for the
+ice load, so $h$ has that times $\rho_w / \rho_i$, and 65 mm for $w$. Past
+degree 180 the spectrum continues by the same law, so the prior does not
+depend on the truncation of the model. $\eta_d$ and $\delta\rho$ are as
+above.
+
+**GRACE data and noise.** The data are the coefficients of degrees 2 to 60
+(at most 96). Their noise is the formal error covariance of the
+ITSG-Grace2018 solutions for a difference of two annual means,
+
+$$R = \frac{1}{144} \sum_{i=1}^{24} N_i^{-1} ,$$
+
+with $N_i$ the normal matrix of the unconstrained solution to degree 96 of
+month $i$ of 2007 and 2008, the months taken as independent
+(`grace_covariance.py`). $R$ for degrees 2 to 60 is the block of that
+matrix: the covariance of those coefficients within the solution to degree
+96. It is a full matrix, with the dependence on order and the correlations
+of a single pair of satellites, and it is not rotationally invariant.
+`--coefficient-errors` selects it in the GRACE experiments and
+`--grace-coefficient-errors` in the joint experiment.
+
+**Error of the GIA correction.** With `--gia-years 1 --gia-scale 0.4`, the
+altimetry and GRACE data of the ocean experiments carry a further error of
+low rank: the spread, about their mean, of the present-day rates of an
+ensemble of GIA models (`gia_ensemble.py`), over one year and scaled by
+0.4. In the joint experiment it is one model's error in both sets of data,
+and so is correlated between them.
+
+**Altimetry noise.** As stated above.
+
+**Preconditioners.** GRACE's coefficients number a few thousand, so with
+the full $R$ the GRACE experiments assemble the normal matrix
+$A Q A^* + R$ of the true operator, at the cost of one application of
+$A Q A^*$ per coefficient, and factorise it
+(`common.exact_preconditioner`). The conjugate-gradient solves then
+converge in an iteration or two.
+
+The ocean experiments use blocks assembled in the data space
+(`common.block_preconditioner`, `--preconditioner blocks`):
+
+- GRACE's block is the normal matrix above, with the sea level equation;
+- the altimetry's block is the covariance of $\eta_d$ between the points
+  under its prior, tapered to vanish beyond 1500 km by the function of
+  Gaspari and Cohn (1999), plus the local noise: a sparse matrix,
+  factorised once;
+- the two blocks are uncoupled;
+- the parts of the noise of low rank are corrected for exactly by a
+  Woodbury step: the error common to every point and the frame errors, the
+  leading 40 modes of the large-scale part, and the error of the GIA
+  correction.
+
+The surrogate of the submitted paper remains as
+`--preconditioner surrogate`.
+
 ## References
+
+Gaspari, G. and Cohn, S. E. (1999). Construction of correlation functions in
+two and three dimensions. *Quarterly Journal of the Royal Meteorological
+Society* 125, 723–757.
 
 Gregory, J. M. et al. (2019). Concepts and terminology for sea level: mean,
 variability and change, both local and global. *Surveys in Geophysics* 40,

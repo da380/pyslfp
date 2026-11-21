@@ -136,6 +136,7 @@ def parse_arguments() -> argparse.Namespace:
     common.add_altimetry_noise_arguments(parser, prefix="alt-")
     common.add_joint_grace_noise_arguments(parser)
     common.add_gia_arguments(parser)
+    common.add_preconditioner_arguments(parser)
     common.add_qoi_arguments(parser)
     common.add_parallel_arguments(parser)
     args = parser.parse_args()
@@ -512,14 +513,12 @@ def main():
 
     # The altimetry noise is a local part and a large-scale correlated part;
     # the preconditioners see the local part alone.
+    alt_parts = {}
     alt_noise, alt_local_noise = common.altimetry_noise(
         physics,
-        stds["dyn_std"],
         args.prior_order,
-        args.alt_noise_std_factor,
-        args.alt_noise_corr_std_factor,
-        args.alt_noise_corr_scale_factor,
         calib=calib,
+        parts=alt_parts,
         **common.altimetry_noise_options(args, "alt_"),
     )
     grace_noise, grace_info = common.joint_grace_noise(
@@ -527,7 +526,7 @@ def main():
     )
     common.print_calibration_report(calib, physics)
     common.print_prior_settings(
-        args, args.alt_noise_corr_std_factor, args.alt_noise_corr_scale_factor
+        args, args.alt_noise_corr_std_mm, args.alt_noise_corr_scale_km
     )
 
     altimetry = physics.altimetry
@@ -535,17 +534,21 @@ def main():
     joint = inf.ColumnLinearOperator([altimetry, grace])
     # The error of the GIA correction is one model's error in both data
     # sets, so in the joint problem it is correlated between them. The
-    # preconditioners do not see it.
+    # surrogate preconditioner does not see it; the blocks correct for it.
     joint_noise = inf.GaussianMeasure.from_product(
         [alt_noise, grace_noise], domain=joint.codomain
     )
     grace_total = grace_noise
+    gia = {case: None for case in CASES}
     if args.gia_years > 0.0:
-        alt_noise = alt_noise + common.ocean_gia_error(physics, args)
-        grace_total = grace_noise + common.ocean_gia_error(
-            physics, args, altimetry=False, grace=True
-        )
-        joint_noise = joint_noise + common.ocean_gia_error(physics, args, grace=True)
+        gia = {
+            "altimetry": common.ocean_gia_error(physics, args),
+            "grace": common.ocean_gia_error(physics, args, altimetry=False, grace=True),
+            "joint": common.ocean_gia_error(physics, args, grace=True),
+        }
+        alt_noise = alt_noise + gia["altimetry"]
+        grace_total = grace_noise + gia["grace"]
+        joint_noise = joint_noise + gia["joint"]
     problems = {
         "altimetry": inf.LinearForwardProblem(altimetry, error=alt_noise),
         "grace": inf.LinearForwardProblem(grace, error=grace_total),
@@ -556,36 +559,56 @@ def main():
     true_model, joint_data = problems["joint"].synthetic_model_and_data(prior, rng=rng)
     data = {"altimetry": joint_data[0], "grace": joint_data[1], "joint": joint_data}
 
-    # ------------------ The surrogate of the preconditioners ------------------
-    surrogate, surrogate_prior = common.ocean_surrogate(args, physics, calib)
-    surrogate_altimetry = surrogate.altimetry
-    surrogate_grace = surrogate.grace(args)
-    surrogates = {
-        "altimetry": (surrogate_altimetry, alt_local_noise),
-        "grace": (surrogate_grace, grace_noise),
-        "joint": (
-            inf.ColumnLinearOperator([surrogate_altimetry, surrogate_grace]),
-            inf.GaussianMeasure.from_product(
-                [alt_local_noise, grace_noise], domain=joint.codomain
+    # ------------------ The preconditioners ------------------
+    surrogates, blocks = {}, {}
+    if args.preconditioner == "surrogate":
+        surrogate, surrogate_prior = common.ocean_surrogate(args, physics, calib)
+        surrogate_altimetry = surrogate.altimetry
+        surrogate_grace = surrogate.grace(args)
+        surrogates = {
+            "altimetry": (surrogate_altimetry, alt_local_noise),
+            "grace": (surrogate_grace, grace_noise),
+            "joint": (
+                inf.ColumnLinearOperator([surrogate_altimetry, surrogate_grace]),
+                inf.GaussianMeasure.from_product(
+                    [alt_local_noise, grace_noise], domain=joint.codomain
+                ),
             ),
-        ),
-    }
+        }
 
     # ------------------ Posteriors ------------------
     print("\nSolving for Posteriors...")
-    rtol = 0.01 * min(args.alt_noise_std_factor, grace_info["std_factor"])
+    rtol = 0.01 * min(
+        1.0, args.alt_noise_std_mm / args.ocean_dyn_std_mm, grace_info["std_factor"]
+    )
     posteriors, qoi_posteriors = {}, {}
     for case, (name, _, _) in CASES.items():
         print(f" -> Solving {name}...")
         inversion = inf.LinearGaussianInversion(problems[case], prior)
-        forward, noise = surrogates[case]
-        preconditioner = common.surrogate_preconditioner(
-            inversion.normal_operator,
-            forward,
-            surrogate_prior,
-            noise,
-            max_jobs=common.jobs(args),
-        )
+        if args.preconditioner == "blocks":
+            preconditioner = common.block_preconditioner(
+                case,
+                physics,
+                args,
+                prior,
+                calib,
+                alt_local=alt_local_noise,
+                alt_parts=alt_parts,
+                grace_noise=grace_noise,
+                grace_matrix=grace_info.get("covariance"),
+                gia=gia[case],
+                rng=rng,
+                cache=blocks,
+            )
+        else:
+            forward, noise = surrogates[case]
+            preconditioner = common.surrogate_preconditioner(
+                inversion.normal_operator,
+                forward,
+                surrogate_prior,
+                noise,
+                max_jobs=common.jobs(args),
+            )
         posteriors[case], qoi_posteriors[case], _ = common.solve_posterior(
             inversion, data[case], preconditioner, rtol=rtol, qoi_rtol=args.qoi_rtol
         )

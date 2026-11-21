@@ -172,25 +172,24 @@ def main():
     figures.set_inversion_style()
 
     print(f"Building the physics (lmax={args.lmax})...")
-    physics = common.grace_physics(args.lmax, args.load_order, args.load_scale_km)
-    state, load_space, scale_mm = physics.state, physics.load_space, physics.scale_mm
-    initial_prior, prior, noise_load, noise_info = common.grace_measures(
-        physics, args, rng
+    physics, initial_prior, prior, noise, noise_matrix, noise_info = (
+        common.grace_experiment(args, rng)
     )
+    state, load_space, scale_mm = physics.state, physics.load_space, physics.scale_mm
     names, average = common.regional_averaging(physics, args)
 
     forward = common.grace_forward_operator(physics, args)
     total_load = common.total_load_operator(physics)
     wmb = common.wmb_method(state, args)
     wmb_load = wmb.potential_coefficient_to_load_operator(load_space)
-    noise, noise_matrix = common.grace_data_noise(physics, args, noise_load, noise_info)
 
     print(f"Reading the loads of {args.mascon_file}...")
     labels, totals = common.read_load_fields(
         physics, args.mascon_file, variable=args.mascon_variable
     )
     print(
-        f"  the prior's pointwise std is {1000.0 * args.direct_std_m:.1f} mm EWT, "
+        f"  the prior's pointwise std is {noise_info['signal_std'] * scale_mm:.1f} "
+        "mm EWT, "
         f"the noise's {noise_info['noise_std'] * scale_mm:.2f} mm"
     )
 

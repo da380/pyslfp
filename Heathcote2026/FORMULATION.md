@@ -239,6 +239,24 @@ degree 180 the spectrum continues by the same law, so the prior does not
 depend on the truncation of the model. $\eta_d$ and $\delta\rho$ are as
 above.
 
+**The load of the GRACE experiments.** With `--load-prior model` the
+unknown of the GRACE experiments is still one field, the direct load
+$\zeta$, now in $H^{1/4}$, and it is not divided into its causes. Its prior
+is the image of the prior $N(0, Q)$ of the fields above under the load
+operator $L$ that takes them to their direct load,
+
+$$\zeta = L m \sim N(0, L Q L^*) ,$$
+
+and the true load is the load of a sample of the fields. GRACE's data
+depend on the fields through $\zeta$ alone, so the posterior of $\zeta$ is
+the image under $L$ of the posterior the fields would have, and every
+quantity that depends on the load (the regional averages of the total
+load, its coefficients) has the same posterior in both forms. The
+experiments therefore share one model. `--load-prior sobolev` keeps the
+prior of the submitted paper. The covariance maps, which need the load's
+value at a point, use its average over a cap of radius 2 degrees, since
+point values are not defined on $H^{1/4}$.
+
 **GRACE data and noise.** The data are the coefficients of degrees 2 to 60
 (at most 96). Their noise is the formal error covariance of the
 ITSG-Grace2018 solutions for a difference of two annual means,

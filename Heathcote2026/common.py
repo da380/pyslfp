@@ -30,6 +30,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
@@ -184,8 +185,26 @@ def add_preconditioner_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def add_grace_arguments(parser: argparse.ArgumentParser) -> None:
-    """The resolution, prior and noise of the GRACE experiments."""
-    parser.add_argument("--lmax", type=int, default=256)
+    """The resolution, prior and noise of the GRACE experiments. Their
+    unknown is one field, the direct load; its prior is either a Sobolev
+    measure of its own or that which the fields of the ocean experiments
+    give their load, so the options of those experiments are here too."""
+    add_ocean_arguments(parser)
+    # The load's order depends on its prior (`configure`), and the altimetry
+    # points of the ocean experiments are not used.
+    parser.set_defaults(load_order=None, spacing=8.0)
+    parser.add_argument(
+        "--load-prior",
+        choices=("sobolev", "model"),
+        default="sobolev",
+        help="The prior of the direct load: a Sobolev measure on H^2 "
+        "(--direct-scale-km, --direct-std-m), as in the submitted paper; or "
+        "the image, under the load operator, of the prior of the fields of "
+        "the ocean experiments (the ice, the land water, the sterodynamic "
+        "sea level and the ocean density), from which the true load is then "
+        "drawn. The inversion is for the load alone in both: it is not "
+        "divided into its causes. The second needs --coefficient-errors.",
+    )
     parser.add_argument(
         "--obs-degree",
         type=int,
@@ -202,8 +221,6 @@ def add_grace_arguments(parser: argparse.ArgumentParser) -> None:
         "products, or the potential's coefficients in pyslfp's own convention. "
         "The two differ by a factor per degree, so no result depends on it.",
     )
-    parser.add_argument("--load-order", type=float, default=2.0)
-    parser.add_argument("--load-scale-km", type=float, default=500.0)
     parser.add_argument(
         "--smoothing-scale-km",
         type=float,
@@ -212,8 +229,6 @@ def add_grace_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--direct-scale-km", type=float, default=250.0)
     parser.add_argument("--direct-std-m", type=float, default=0.01)
-    parser.add_argument("--prior-order", type=float, default=3.0)
-    parser.add_argument("--prior-shift", type=float, default=0.0)
     parser.add_argument(
         "--remove-degree-1",
         action="store_true",
@@ -501,6 +516,9 @@ def configure(args: argparse.Namespace) -> np.random.Generator:
                 f"--obs-degree {args.obs_degree}: the coefficient errors of "
                 f"ITSG-Grace2018 stop at degree {grace_covariance.DEGREE}."
             )
+    if hasattr(args, "load_prior") and args.load_order is None:
+        # The masked loads of the fields are rough; a Sobolev load is not.
+        args.load_order = 0.25 if args.load_prior == "model" else 2.0
     if hasattr(args, "preconditioner") and args.preconditioner is None:
         errors = getattr(args, "grace_coefficient_errors", None) is not None
         args.preconditioner = "blocks" if errors else "surrogate"
@@ -963,6 +981,7 @@ def grace_measures(physics: GracePhysics, args: argparse.Namespace, rng):
         std_to_mm=physics.scale_mm,
         label="GRACE spatial noise",
     )
+    info["signal_std"] = std
     return initial, prior, spatial_noise_measure(space, info, noise_scale), info
 
 
@@ -992,6 +1011,67 @@ def grace_data_noise(physics: GracePhysics, args: argparse.Namespace, noise_load
     info["std_factor"] = coefficient_info["best_std"] / info["signal_std"]
     info["noise_std"] = coefficient_info["noise_std"]
     return noise, coefficient_info["covariance"]
+
+
+def grace_experiment(args: argparse.Namespace, rng):
+    """
+    The physics, prior and noise of a GRACE experiment, whose unknown is
+    one field, the direct load.
+
+    With --load-prior sobolev the prior is that of `grace_measures` and the
+    noise that of `grace_data_noise`.
+
+    With --load-prior model the load is that of the fields of the ocean
+    experiments (`ocean_physics`): its prior is the image of theirs
+    (`ocean_prior`) under the load operator, a Gaussian measure on the load
+    space whose samples are the loads of samples of the fields. GRACE sees
+    the fields through their load alone, so the posterior of the load is
+    the image of the posterior the fields would have, and nothing is lost
+    for any quantity that depends on the load; what is not attempted is its
+    division into the fields. The noise is that of
+    `grace_coefficient_noise`, and `info["std_factor"]` the
+    best-determined coefficient's error, as the pointwise std of a white
+    load, over the std of the ice load.
+
+    Returns (physics, initial_prior, prior, noise, noise_matrix, info): a
+    `GracePhysics`; the unconditioned Sobolev prior, or None for the
+    model's; the prior; the noise and, if it is not diagonal, its
+    covariance matrix; and the noise's summary.
+    """
+    if args.load_prior == "sobolev":
+        physics = grace_physics(args.lmax, args.load_order, args.load_scale_km)
+        initial, prior, noise_load, info = grace_measures(physics, args, rng)
+        noise, matrix = grace_data_noise(physics, args, noise_load, info)
+        return physics, initial, prior, noise, matrix, info
+    if args.coefficient_errors is None:
+        raise SystemExit("--load-prior model needs --coefficient-errors.")
+    if args.remove_degree_1:
+        raise SystemExit("--remove-degree-1 is for --load-prior sobolev.")
+    ocean = ocean_physics(args)
+    fields_prior, calib = ocean_prior(ocean, args, rng)
+    print_calibration_report(calib, ocean)
+    p = ocean.state.model.parameters
+    physics = GracePhysics(
+        ocean.state,
+        ocean.load_space,
+        ocean.fingerprint,
+        1000.0 * p.length_scale / p.water_density,
+    )
+    prior = fields_prior.affine_map(ocean.setup.load_operator)
+    noise, coefficient_info = grace_coefficient_noise(
+        physics.state,
+        physics.load_space,
+        args,
+        years=args.coefficient_errors,
+        scale=args.error_scale,
+    )
+    signal_std = p.ice_density * calib["derived_stds"]["ice_std"]
+    info = {
+        "signal_std": signal_std,
+        "noise_std": coefficient_info["noise_std"],
+        "std_factor": coefficient_info["best_std"] / signal_std,
+    }
+    return physics, None, prior, noise, coefficient_info["covariance"], info
 
 
 def shifted(measure, shift: float, rng):
@@ -2267,17 +2347,12 @@ def white_load_variance(
     with the pointwise std `std_mm` in mm EWT.
     """
     p = state.model.parameters
-    # A unit variance in every coefficient of the load (orthonormal on the
-    # unit sphere): the eigenvalues carry the metric of the space.
-    unit = inf.GaussianMeasure(
-        load_space,
-        covariance=inf.DiagonalLinearOperator(load_space, load_space.metric_values),
-    )
-    shape = (
-        wmb_method(state, args)
-        .load_measure_to_observation_measure(unit)
-        .covariance.diagonals()[0]
-    )
+    # WMB's map multiplies each coefficient of the load, orthonormal on the
+    # unit sphere, by a factor of its degree: a unit variance in the load's
+    # coefficient is the square of that factor in GRACE's.
+    wmb = wmb_method(state, args)
+    to_load = wmb.potential_coefficient_to_load_coefficient_operator()
+    shape = 1.0 / to_load.diagonals()[0] ** 2
     # Pointwise variance = the sum of the coefficients' variances / 4 pi.
     std = std_mm * p.water_density / 1000.0 / p.length_scale
     return shape * 4.0 * np.pi * std**2 / len(shape)
@@ -2630,7 +2705,24 @@ def exact_preconditioner(
     """
     space = forward.codomain
     signal = forward @ prior.covariance @ forward.adjoint
-    matrix = signal.matrix(form="components", by="rows", n_jobs=n_jobs)
+    def columns(indices):
+        return np.array(
+            [
+                space.to_components(signal(space.basis_vector(int(index))))
+                for index in indices
+            ]
+        )
+
+    # Each worker is handed one share of the columns, so the operator is
+    # carried to it once: a task per column carries it every time, which
+    # costs far more than an application. Workers pay for themselves only
+    # when the whole assembly is slow.
+    start = time.perf_counter()
+    columns([0])
+    serial_seconds = (time.perf_counter() - start) * space.dim
+    workers = 1 if n_jobs is None or serial_seconds < 60.0 else n_jobs
+    shares = np.array_split(np.arange(space.dim), workers)
+    matrix = np.vstack(inf.parallel.parallel_map(columns, shares, n_jobs=workers))
     matrix = 0.5 * (matrix + matrix.T) + covariance_matrix_of(noise, noise_matrix)
     inverse = cho_solve(cho_factor(matrix, lower=True), np.eye(len(matrix)))
     return definite(
@@ -2936,8 +3028,18 @@ def solve_posterior(inversion, data, preconditioner, /, *, rtol, qoi_rtol):
     """
     callback = inf.ProgressCallback(report=print)
     solver = inf.CGSolver(callback=callback, rtol=rtol, preconditioner=preconditioner)
-    posterior = inversion.with_solver(solver)(data)
+    estimator = inversion.with_solver(solver)
+    posterior = estimator(data)
     print(f"Solution reached in {callback.iterations} iterations.")
+    # The data against what the prior and the noise predict for them: the
+    # squared misfit is chi-squared on the number of data when the two
+    # describe the data, so it tests the consistency of the experiment.
+    count = estimator.data_space.dim
+    misfit = float(estimator.mahalanobis(data))
+    print(
+        f"Squared misfit of the data to their prior prediction: {misfit:.0f} "
+        f"for {count} data (expected {count} +/- {np.sqrt(2.0 * count):.0f})."
+    )
     qoi_inversion = inversion.with_solver(
         inf.CGSolver(
             callback=inf.ProgressCallback(report=print),

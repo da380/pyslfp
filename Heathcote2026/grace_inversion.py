@@ -2,16 +2,31 @@
 A Bayesian inversion of synthetic GRACE data, compared with the WMB method
 (Heathcote et al., 2026).
 
-The model is the direct surface mass load zeta, a global field with a Sobolev
-prior. The data are GRACE's coefficients, degrees 2 to --obs-degree, of the
-potential change of the sea level equation's response to zeta, a response
-that includes the ocean load zeta induces. The noise is a spatial Sobolev
-field taken to the coefficients by WMB's spectral map, its spectrum solved so
-that the signal-to-noise ratio is --snr-low-degree at --snr-reference-degree
-and one at --snr-crossover-degree. One load and one dataset are drawn from
-the prior and the noise, and the posterior is solved by conjugate gradients
-in the data space, preconditioned by WMB's diagonal approximation of the
-normal operator.
+The model is one field, the direct surface mass load zeta, which is not
+divided into its causes. The data are GRACE's coefficients, degrees 2 to
+--obs-degree, of the potential change of the sea level equation's response
+to zeta, a response that includes the ocean load zeta induces. One load and
+one dataset are drawn from the prior and the noise, and the posterior is
+solved by conjugate gradients in the data space.
+
+The prior, noise and preconditioner come in two forms
+(`common.grace_experiment`):
+
+- --load-prior model with --coefficient-errors, which `run_all.sh` passes.
+  The prior of zeta is the image, under the load operator, of the prior of
+  the fields of the ocean experiments (the ice, the land water, the
+  sterodynamic sea level and the ocean density), and the true load is that
+  of a sample of those fields. The noise is the formal error covariance of
+  the coefficients of ITSG-Grace2018 for a difference of annual means, a
+  full matrix. The normal matrix is assembled and factorised
+  (`common.exact_preconditioner`), so each solve takes an iteration or two.
+- --load-prior sobolev, the submitted paper's. The prior is a Sobolev
+  measure on H^2. The noise is a spatial Sobolev field taken to the
+  coefficients by WMB's spectral map, its spectrum solved so that the
+  signal-to-noise ratio is --snr-low-degree at --snr-reference-degree and
+  one at --snr-crossover-degree; the preconditioner is WMB's diagonal
+  approximation of the normal operator. --coefficient-errors may replace
+  that noise here too.
 
 The solves for the posterior expectation stop at a relative residual of 0.01
 times the ratio of the noise's pointwise standard deviation to the signal's.
@@ -412,6 +427,18 @@ def posterior_maps(state, panels, std=None):
     return fig
 
 
+def point_covariance(measure, point):
+    """The covariance under `measure` of the load with its value at
+    `point`. A load space too rough for point values has no such thing, and
+    the load's average over a cap of `common.COVARIANCE_CAP_DEGREES` about
+    the point stands for the value there."""
+    space = measure.domain
+    if space.order > 1.0:
+        return measure.two_point_covariance(point)
+    cap = space.spherical_cap_average(point, common.COVARIANCE_CAP_DEGREES)
+    return measure.covariance(cap.representer)
+
+
 def covariance_maps(prior_total, posterior_total, scale_mm):
     """The prior (left) and posterior (right) covariance of the total load
     with each of COVARIANCE_POINTS, in mm² EWT."""
@@ -422,7 +449,7 @@ def covariance_maps(prior_total, posterior_total, scale_mm):
         ):
             ax = axes[row, col]
             _, image = sl.plot(
-                measure.two_point_covariance(point) * scale_mm**2,
+                point_covariance(measure, point) * scale_mm**2,
                 ax=ax,
                 colorbar=True,
                 cmap="seismic",
@@ -443,19 +470,17 @@ def main():
     common.start_run(OUTPUT_DIR, args, metrics_file=METRICS_FILE)
     figures.set_inversion_style()
 
-    print(f"Building the physics (lmax={args.lmax})...")
-    physics = common.grace_physics(args.lmax, args.load_order, args.load_scale_km)
-    state, load_space, scale_mm = physics.state, physics.load_space, physics.scale_mm
-    initial_prior, prior, noise_load, noise_info = common.grace_measures(
-        physics, args, rng
+    print(f"Building the physics, prior and noise (lmax={args.lmax})...")
+    physics, initial_prior, prior, noise, noise_matrix, noise_info = (
+        common.grace_experiment(args, rng)
     )
+    state, load_space, scale_mm = physics.state, physics.load_space, physics.scale_mm
     names, average = common.regional_averaging(physics, args)
 
     forward = common.grace_forward_operator(physics, args)
     total_load = common.total_load_operator(physics)
     wmb = common.wmb_method(state, args)
     wmb_load = wmb.potential_coefficient_to_load_operator(load_space)
-    noise, noise_matrix = common.grace_data_noise(physics, args, noise_load, noise_info)
 
     print("Drawing a synthetic load and dataset...")
     problem = inf.LinearForwardProblem(forward, error=noise)

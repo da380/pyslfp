@@ -22,11 +22,11 @@ the change in rotation drives. `pyslfp.core.geocentric_sea_level_operator`
 takes the same displacement, so the two altimetries share a frame.
 
 The observable holds on grounded ice alone. Floating ice is in hydrostatic
-equilibrium with the ocean, and its surface follows the sea surface and
-the freeboard of its thickness, which is other physics; the observation
-points are therefore confined to the grounded ice of the state's ice sheets,
-by the state's own ice and ocean masks (`on_grounded_ice`), and a model
-refuses points elsewhere. Corrections applied to the data before they are
+equilibrium with the ocean: its surface moves with the sea surface, and
+with the part of a change in its thickness that stands above the water,
+which is other physics. The observation points are therefore confined to
+the grounded ice of the state's ice sheets, by the state's own ice and
+ocean masks (`on_grounded_ice`), and a model refuses points elsewhere. Corrections applied to the data before they are
 compared with the model, for glacial isostatic adjustment or for the
 penetration of a radar into the snow, are not part of the operator; their
 errors belong in the noise.

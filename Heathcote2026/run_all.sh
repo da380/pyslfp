@@ -235,15 +235,18 @@ GIA=(
 GRACE_NOISE=(--coefficient-errors 2007 2008)
 JOINT_GRACE_NOISE=(--grace-coefficient-errors 2007 2008)
 
-# GRACE prior: grace_bias, grace_inversion. The model is the direct load, in
-# H^2, with one Sobolev prior over the globe: still that of the submitted
-# paper, not the three fields of grace_heldout.py and grace_coverage.py.
-# Optional: --smoothing-scale-km <km> [defaults to --load-scale-km],
-# --remove-degree-1.
+# GRACE prior: grace_bias, grace_inversion. The unknown is one field, the
+# direct load, and is not divided into its causes. Its prior, and the true
+# load, are those of the fields of the ocean experiments (OCEAN_PRIOR, which
+# these scripts are given too) carried to their load, so the paper has one
+# model. The altimetry points are not used, hence the coarse spacing. The
+# submitted paper had a Sobolev prior on H^2: for that, replace these by
+# --load-prior sobolev --load-order 2.0 --direct-scale-km 250
+# --direct-std-m 0.01 and drop OCEAN_PRIOR from the two calls below.
+# Optional: --smoothing-scale-km <km> [defaults to --load-scale-km].
 GRACE_PRIOR=(
-    --load-order 2.0
-    --direct-scale-km 250
-    --direct-std-m 0.01
+    --load-prior model
+    --spacing 8.0
 )
 
 # Per-script extras (plot selections, MC sample counts) -- edit to taste.
@@ -272,7 +275,8 @@ run() {
 for s in "${SCRIPTS[@]}"; do
     case "$s" in
     grace_bias)
-        run "$s" "${COMMON[@]}" "${OBS_DEGREE[@]}" "${GRACE_PRIOR[@]}" "${GRACE_NOISE[@]}" \
+        run "$s" "${COMMON[@]}" "${OBS_DEGREE[@]}" "${OCEAN_PRIOR[@]}" "${GRACE_PRIOR[@]}" \
+            "${GRACE_NOISE[@]}" \
             ${PAR_ARGS[@]+"${PAR_ARGS[@]}"} \
             ${GRACE_BIAS_EXTRA[@]+"${GRACE_BIAS_EXTRA[@]}"}
         ;;
@@ -282,7 +286,8 @@ for s in "${SCRIPTS[@]}"; do
             ${ALTIMETRY_BIAS_EXTRA[@]+"${ALTIMETRY_BIAS_EXTRA[@]}"}
         ;;
     grace_inversion)
-        run "$s" "${COMMON[@]}" "${OBS_DEGREE[@]}" "${GRACE_PRIOR[@]}" "${GRACE_NOISE[@]}" "${QOI[@]}" \
+        run "$s" "${COMMON[@]}" "${OBS_DEGREE[@]}" "${OCEAN_PRIOR[@]}" "${GRACE_PRIOR[@]}" \
+            "${GRACE_NOISE[@]}" "${QOI[@]}" \
             ${PAR_ARGS[@]+"${PAR_ARGS[@]}"} \
             ${GRACE_INV_EXTRA[@]+"${GRACE_INV_EXTRA[@]}"}
         ;;

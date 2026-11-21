@@ -1,8 +1,13 @@
 """
 The error of the WMB estimate of regional mass change (Heathcote et al., 2026).
 
-The model is the direct surface mass load zeta, a global field with a Sobolev
-prior. The quantities of interest are the averages over the GRACE regions
+The model is one field, the direct surface mass load zeta. Its prior and
+the noise are those of `grace_inversion.py` (`common.grace_experiment`):
+with --load-prior model, the image under the load operator of the prior of
+the fields of the ocean experiments, and with --coefficient-errors the
+formal error covariance of GRACE's coefficients; or the Sobolev prior and
+noise field of the submitted paper. The quantities of interest are the
+averages over the GRACE regions
 (`common.GRACE_REGIONS`) of the total load: zeta plus the ocean load
 rho_w C xi that it induces through the sea level equation. The WMB method
 (Wahr, Molenaar and Bryan, 1998) estimates them from GRACE's potential
@@ -103,13 +108,11 @@ def main():
     rng = common.configure(args)
     common.start_run(OUTPUT_DIR, args)
 
-    physics = common.grace_physics(args.lmax, args.load_order, args.load_scale_km)
+    physics, _, prior, noise, _, _ = common.grace_experiment(args, rng)
     state, load_space, scale_mm = physics.state, physics.load_space, physics.scale_mm
-    _, prior, noise_load, noise_info = common.grace_measures(physics, args, rng)
     names, average = common.regional_averaging(physics, args)
 
     wmb = common.wmb_method(state, args)
-    noise, _ = common.grace_data_noise(physics, args, noise_load, noise_info)
     total_load = common.total_load_operator(physics)
     true_average = average @ total_load
     wmb_average = average @ wmb.potential_coefficient_to_load_operator(load_space)

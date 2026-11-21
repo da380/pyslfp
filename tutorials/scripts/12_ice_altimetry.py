@@ -45,7 +45,7 @@ LOAD_ORDER, FIELD_ORDER = 0.25, 2.0  # loads carry indicators; fields are smooth
 # The data. Placeholders.
 ALTIMETRY_SPACING_DEG = 1.5  # about the grid's own spacing at this degree
 ALTIMETRY_NOISE_M = 0.05  # per point
-GRACE_MAX_DEGREE = 40
+GRACE_MAX_DEGREE = 30
 GRACE_NOISE_STOKES = 1.0e-12  # per Stokes coefficient, the same at every degree
 
 # The prior, as three independent processes: (pointwise std in metres,
@@ -56,7 +56,7 @@ SNOWFALL = (0.15, 400.0)  # ice-equivalent thickness of the snowfall anomaly
 COMPACTION = (0.2, 250.0)  # firn air content, no mass
 SNOW_DENSITY, ICE_DENSITY = 400.0, 917.0  # kg / m^3, for the air a snowfall holds
 
-POSTERIOR_DRAWS = 300  # for the pointwise standard deviations
+POSTERIOR_DRAWS = 200  # for the pointwise standard deviations, good to 5 %
 
 start = time.time()
 state = sl.EarthState.from_defaults(lmax=LMAX)
@@ -178,7 +178,9 @@ def bump(latitude, longitude, amplitude_m, width_km):
     )
     distance = params.mean_sea_floor_radius * np.arccos(np.clip(cosine, -1.0, 1.0))
     grid = state.model.zero_grid()
-    grid.data[:] = amplitude_m * metre * np.exp(-0.5 * (distance / (width_km * km)) ** 2)
+    grid.data[:] = (
+        amplitude_m * metre * np.exp(-0.5 * (distance / (width_km * km)) ** 2)
+    )
     return field_space.from_components(field_space.to_components(grid))
 
 
@@ -249,6 +251,15 @@ cases = {
 
 grounded = state.ice_sheet_projection(exclude_ice_shelves=True)
 on_ice = np.isfinite(grounded.data)
+area = np.cos(np.radians(state.lats()))[:, None] * np.ones_like(grounded.data)
+
+
+def rms(values):
+    """The root mean square over the grounded ice, weighted by area, in
+    metres."""
+    return np.sqrt(np.average(values[on_ice] ** 2, weights=area[on_ice])) / metre
+
+
 posterior_mean, posterior_std = {}, {}
 for case, (operator, noise, data) in cases.items():
     problem = inf.LinearForwardProblem(operator, error=noise)
@@ -265,10 +276,7 @@ for case, (operator, noise, data) in cases.items():
     posterior_std[case] = tuple(
         np.sqrt(
             np.mean(
-                [
-                    (draw[i].data - posterior.expectation[i].data) ** 2
-                    for draw in draws
-                ],
+                [(draw[i].data - posterior.expectation[i].data) ** 2 for draw in draws],
                 axis=0,
             )
         )
@@ -289,23 +297,19 @@ print(f"inversions done after {time.time() - start:.0f} s")
 print(f"\n{'Over the grounded ice (m)':<28}{'h':>8}{'a':>8}")
 print(
     f"{'prior std':<28}{prior_std[ICE]:>8.3f}{prior_std[FIRN]:>8.3f}\n"
-    f"{'rms of the truth':<28}"
-    + "".join(f"{np.sqrt(np.mean(f.data[on_ice] ** 2)) / metre:>8.3f}" for f in truth)
+    f"{'rms of the truth':<28}" + "".join(f"{rms(field.data):>8.3f}" for field in truth)
 )
 for case in cases:
-    errors = [
-        np.sqrt(np.mean((m.data[on_ice] - t.data[on_ice]) ** 2)) / metre
-        for m, t in zip(posterior_mean[case], truth)
-    ]
-    stds = [np.sqrt(np.mean(s[on_ice] ** 2)) / metre for s in posterior_std[case]]
+    errors = [rms(m.data - t.data) for m, t in zip(posterior_mean[case], truth)]
+    stds = [rms(std) for std in posterior_std[case]]
     print(
         f"{case + ': rms error':<28}{errors[0]:>8.3f}{errors[1]:>8.3f}\n"
         f"{case + ': rms std':<28}{stds[0]:>8.3f}{stds[1]:>8.3f}"
     )
 
 VIEWS = {
-    "Antarctica": (ccrs.SouthPolarStereo(), [-180, 180, -90, -63]),
-    "Greenland": (ccrs.Orthographic(-42, 72), [-75, -8, 58, 85]),
+    "Antarctica": (ccrs.SouthPolarStereo(), [-180, 180, -90, -63], (17, 7.5)),
+    "Greenland": (ccrs.Orthographic(-42, 72), [-75, -8, 58, 85], (17, 6.5)),
 }
 ROWS = {
     ICE: "Ice-equivalent thickness change $h$",
@@ -315,40 +319,43 @@ output = Path("12_ice_altimetry_figures")
 output.mkdir(exist_ok=True)
 
 
-def on_grounded_ice(values):
+def masked(values):
     """A field in metres, shown on the grounded ice alone."""
     grid = state.model.zero_grid()
     grid.data[:] = values / metre
     return grid * grounded
 
 
-for view, (projection, extent) in VIEWS.items():
-    fig, axes = sl.subplots(2, 5, projection, figsize=(17, 7.5))
+for view, (projection, extent, figsize) in VIEWS.items():
+    fig, axes = sl.subplots(2, 5, projection, figsize=figsize)
     for i, name in enumerate(ROWS):
         means = [truth[i]] + [posterior_mean[case][i] for case in cases]
         titles = ["Truth"] + [f"{case}: mean" for case in cases]
         limit = max(np.abs(mean.data[on_ice]).max() for mean in means) / metre
         for ax, mean, title in zip(axes[i, :3], means, titles):
             _, signed = sl.plot(
-                on_grounded_ice(mean.data),
+                masked(mean.data),
                 ax=ax,
                 map_extent=extent,
+                gridlines=False,
                 vmin=-limit,
                 vmax=limit,
                 colorbar=False,
             )
             ax.set_title(title)
         for ax, case in zip(axes[i, 3:], cases):
+            std = posterior_std[case][i]
             _, spread = sl.plot(
-                on_grounded_ice(posterior_std[case][i]),
+                masked(std),
                 ax=ax,
                 map_extent=extent,
+                gridlines=False,
                 cmap="Purples",
                 vmin=0.0,
                 vmax=prior_std[name],
                 colorbar=False,
             )
-            ax.set_title(f"{case}: std")
+            ax.set_title(f"{case}: std\n(rms {rms(std):.2f} m)")
         fig.colorbar(signed, ax=axes[i, :3], shrink=0.8, label=f"{ROWS[name]} (m)")
         fig.colorbar(
             spread,

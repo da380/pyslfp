@@ -36,11 +36,12 @@ from typing import Optional, Sequence
 
 import numpy as np
 from scipy import sparse
-from scipy.linalg import cho_factor, cho_solve
+from scipy.linalg import cho_factor, cho_solve, cholesky, solve_triangular
 from scipy.sparse.linalg import splu
 
 import pygeoinf as inf
 import gia_ensemble
+import gia_statistics
 import grace_covariance
 from pyslfp import EarthState, set_num_threads
 from pyslfp.elastic import FingerPrintOperator
@@ -208,12 +209,23 @@ def add_preconditioner_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--altimetry-neighbours",
         type=int,
+        default=40,
+        metavar="K",
+        help="The altimetry block is a sparse approximate inverse, each point "
+        "regressed on the K nearest of those before it in a coarse-to-fine "
+        "order (`vecchia.py`). With K zero it is the covariance tapered "
+        "beyond --cutoff-km, factorised.",
+    )
+    parser.add_argument(
+        "--grace-block-rank",
+        type=int,
         default=0,
         metavar="K",
-        help="With K above zero the altimetry block is not the tapered "
-        "covariance but a sparse approximate inverse, each point regressed "
-        "on the K nearest of those before it in a coarse-to-fine order "
-        "(`vecchia.py`); --cutoff-km is then not used. 20 to 40 is enough.",
+        help="GRACE's block from K applications of the normal operator, a "
+        "randomised sketch of its signal part in the metric of the noise, "
+        "in place of one application a coefficient. Zero, or K at least the "
+        "number of coefficients, for the exact block. The rank wanted is "
+        "the number of directions in which the signal exceeds the noise.",
     )
     parser.add_argument(
         "--low-rank",
@@ -266,6 +278,7 @@ def add_grace_arguments(parser: argparse.ArgumentParser) -> None:
         "which allows no more.",
     )
     add_coefficient_error_arguments(parser)
+    add_gia_arguments(parser)
     parser.add_argument(
         "--grace-convention",
         choices=("stokes", "orthonormal"),
@@ -297,7 +310,7 @@ def add_ocean_arguments(
     parser: argparse.ArgumentParser, *, surrogate: bool = False
 ) -> None:
     """The resolution and prior of the ocean experiments."""
-    parser.add_argument("--lmax", type=int, default=256)
+    parser.add_argument("--lmax", type=int, default=255)
     if surrogate:
         parser.add_argument("--surrogate-degree", type=int, default=32)
     parser.add_argument(
@@ -497,15 +510,32 @@ def altimetry_noise_options(args: argparse.Namespace, prefix: str = "") -> dict:
 
 
 def add_gia_arguments(parser: argparse.ArgumentParser) -> None:
-    """The error of the GIA correction, from the ensemble of
-    `gia_ensemble.py`."""
+    """The error of the GIA correction, from the published statistics of
+    `gia_statistics.py` or the ensemble of `gia_ensemble.py`."""
     parser.add_argument(
         "--gia-years",
         type=float,
-        default=0.0,
+        default=1.0,
         help="The interval the data span, in years: the error of the GIA "
-        "correction is the ensemble's spread of rates times this. Zero "
-        "leaves the error out.",
+        "correction is that of its rates times this. One, the interval "
+        "between the two annual means, by default; zero leaves the error "
+        "out.",
+    )
+    parser.add_argument(
+        "--gia-model",
+        choices=["caron", "ensemble"],
+        default="caron",
+        help="Where the error of the rates comes from: the covariance of "
+        "the Stokes coefficients' rates published by Caron et al. (2018), "
+        "`gia_statistics.py`, or the spread of the ensemble of "
+        "`gia_ensemble.py`.",
+    )
+    parser.add_argument(
+        "--gia-rank",
+        type=int,
+        default=50,
+        help="With --gia-model caron: the eigenvectors of the published "
+        "covariance kept. Fifty hold all but a part in 100,000 of its trace.",
     )
     parser.add_argument(
         "--gia-scale",
@@ -1156,7 +1186,8 @@ def grace_experiment(args: argparse.Namespace, rng):
     the image of the posterior the fields would have, and nothing is lost
     for any quantity that depends on the load; what is not attempted is its
     division into the fields. The noise is that of
-    `grace_coefficient_noise`, and `info["std_factor"]` the
+    `grace_coefficient_noise` and, with --gia-years, the error of the GIA
+    correction (`gia_correction_error`), and `info["std_factor"]` the
     best-determined coefficient's error, as the pointwise std of a white
     load, over the std of the ice load.
 
@@ -1192,6 +1223,29 @@ def grace_experiment(args: argparse.Namespace, rng):
         years=args.coefficient_errors,
         scale=args.error_scale,
     )
+    covariance = coefficient_info["covariance"]
+    if args.gia_years > 0.0:
+        # The correction's error is of low rank on the coefficients; it is
+        # added to their covariance, which is held as a matrix already.
+        observe = grace_coefficients(
+            physics.response_space,
+            physics.state.model,
+            args.obs_degree,
+            args.grace_convention,
+        )
+        factor = gia_correction_error(
+            physics.state.model, observe, args, grace=True
+        ).covariance_factor
+        columns = np.array(
+            [
+                factor(factor.domain.basis_vector(index))
+                for index in range(factor.domain.dim)
+            ]
+        ).T
+        covariance = covariance + columns @ columns.T
+        noise = inf.GaussianMeasure.from_covariance_matrix(
+            noise.domain, covariance, form="galerkin"
+        )
     signal_std = p.ice_density * calib["derived_stds"]["ice_std"]
     info = {
         "signal_std": signal_std,
@@ -1204,7 +1258,7 @@ def grace_experiment(args: argparse.Namespace, rng):
         info["independent"] = calib["independent"] | {
             "map": ocean.setup.load_operator @ calib["independent"]["map"]
         }
-    return physics, None, prior, noise, coefficient_info["covariance"], info
+    return physics, None, prior, noise, covariance, info
 
 
 def shifted(measure, shift: float, rng):
@@ -3024,8 +3078,8 @@ def grace_noise_model(
     - with --corrections-std-mm, the error of the background corrections
       made to the data, an invariant field of large scale, taken to the
       coefficients in the same way;
-    - with --gia-years, the error of the GIA correction, from the ensemble
-      of `gia_ensemble.py`.
+    - with --gia-years, the error of the GIA correction
+      (`gia_correction_error`).
 
     With --coefficient-errors the measurement error is instead that of
     `grace_coefficient_noise`, the error covariance of the coefficients
@@ -3091,14 +3145,60 @@ def grace_noise_model(
         observe = grace_coefficients(
             response_space, state.model, args.obs_degree, args.grace_convention
         )
-        parts["gia"], members = gia_ensemble.correction_error(
-            observe, years=args.gia_years, scale=args.gia_scale, lmax=args.gia_lmax
-        )
-        print(f"GIA correction error from {len(members)} models of the ensemble")
+        parts["gia"] = gia_correction_error(state.model, observe, args, grace=True)
     noise = None
     for part in parts.values():
         noise = part if noise is None else noise + part
     return noise, invariant, parts
+
+
+def gia_correction_error(
+    model,
+    observe,
+    args: argparse.Namespace,
+    /,
+    *,
+    grace: bool = False,
+    field_space=None,
+    points=None,
+):
+    """
+    The error of the GIA correction on the data `observe` reads from a
+    response, as a measure of low rank on its codomain: GRACE's
+    coefficients (`grace`), the geocentric sea level at `points` of
+    `field_space`, or both, on their direct sum in that order.
+
+    With --gia-model caron it is that of the published covariance of the
+    rates of the Stokes coefficients (`gia_statistics.py`): on GRACE's
+    coefficients directly, and on the altimetry through the geoid. With
+    --gia-model ensemble it is the spread of the ensemble of
+    `gia_ensemble.py` (--gia-lmax), observed. Either is over --gia-years
+    and has its std times --gia-scale.
+    """
+    if args.gia_model == "ensemble":
+        measure, members = gia_ensemble.correction_error(
+            observe, years=args.gia_years, scale=args.gia_scale, lmax=args.gia_lmax
+        )
+        print(f"GIA correction error from {len(members)} models of the ensemble")
+        return measure
+    altimetry_factor, grace_factor = gia_statistics.correction_error(
+        model,
+        obs_degree=args.obs_degree if grace else None,
+        convention=args.grace_convention,
+        field_space=field_space,
+        points=points,
+        years=args.gia_years,
+        rank=args.gia_rank,
+    )
+    factors = [
+        None if factor is None else args.gia_scale * factor
+        for factor in (altimetry_factor, grace_factor)
+    ]
+    print(
+        f"GIA correction error from {args.gia_rank} eigenvectors of the "
+        "covariance of Caron et al. (2018)"
+    )
+    return gia_statistics.measure(observe.codomain, *factors)
 
 
 def ocean_gia_error(
@@ -3110,8 +3210,8 @@ def ocean_gia_error(
     grace: bool = False,
 ):
     """
-    The error of the GIA correction of the ocean experiments' data, from the
-    ensemble of `gia_ensemble.py` (--gia-years, --gia-scale, --gia-lmax): a
+    The error of the GIA correction of the ocean experiments' data
+    (`gia_correction_error`; --gia-years, --gia-model, --gia-scale): a
     measure on the altimetry data, on GRACE's, or, with both, on their
     direct sum in that order, where it is correlated between the two as one
     model's error must be. None if --gia-years is zero.
@@ -3141,11 +3241,14 @@ def ocean_gia_error(
         if len(observations) == 1
         else inf.ColumnLinearOperator(observations)
     )
-    measure, members = gia_ensemble.correction_error(
-        observe, years=args.gia_years, scale=args.gia_scale, lmax=args.gia_lmax
+    return gia_correction_error(
+        physics.state.model,
+        observe,
+        args,
+        grace=grace,
+        field_space=physics.fingerprint.field_space if altimetry else None,
+        points=physics.points if altimetry else None,
     )
-    print(f"GIA correction error from {len(members)} models of the ensemble")
-    return measure
 
 
 def gmsl_checks(physics: OceanPhysics, model) -> list[str]:
@@ -3277,7 +3380,14 @@ def covariance_matrix_of(measure, matrix: Optional[np.ndarray] = None) -> np.nda
 
 
 def exact_preconditioner(
-    forward, prior, noise, /, *, noise_matrix=None, n_jobs: Optional[int] = None
+    forward,
+    prior,
+    noise,
+    /,
+    *,
+    noise_matrix=None,
+    n_jobs: Optional[int] = None,
+    rank: int = 0,
 ):
     """
     The inverse of the data-space normal matrix A Q A* + R, assembled and
@@ -3290,15 +3400,41 @@ def exact_preconditioner(
     solve (a quantity of interest, a row of an estimator, a posterior
     sample) costs one application of the operator and no more.
 
+    With `rank` above zero and below the number of data the signal A Q A*
+    is not assembled but sketched, from that many applications
+    (`sketched_signal`): the build costs in proportion, and the solves take
+    more iterations the further the rank falls below the number of
+    directions in which the signal exceeds the noise.
+
     Returns the inverse as an operator on the data space.
     """
     space = forward.codomain
     signal = forward @ prior.covariance @ forward.adjoint
+    covariance = covariance_matrix_of(noise, noise_matrix)
+    if 0 < rank < space.dim:
+        matrix = sketched_signal(signal, covariance, rank, n_jobs=n_jobs)
+    else:
+        matrix = _images(signal, np.eye(space.dim), n_jobs)
+    matrix = 0.5 * (matrix + matrix.T) + covariance
+    inverse = cho_solve(cho_factor(matrix, lower=True), np.eye(len(matrix)))
+    return definite(
+        inf.LinearOperator.from_matrix(
+            space, space, 0.5 * (inverse + inverse.T), form="components"
+        )
+    )
+
+
+def _images(operator, vectors: np.ndarray, n_jobs: Optional[int] = None) -> np.ndarray:
+    """The images of the columns of `vectors` under an operator on a
+    Euclidean data space, as columns: one application each."""
+    space = operator.domain
 
     def columns(indices):
         return np.array(
             [
-                space.to_components(signal(space.basis_vector(int(index))))
+                space.to_components(
+                    operator(space.from_components(vectors[:, int(index)]))
+                )
                 for index in indices
             ]
         )
@@ -3307,19 +3443,58 @@ def exact_preconditioner(
     # carried to it once: a task per column carries it every time, which
     # costs far more than an application. Workers pay for themselves only
     # when the whole assembly is slow.
+    count = vectors.shape[1]
     start = time.perf_counter()
     columns([0])
-    serial_seconds = (time.perf_counter() - start) * space.dim
+    serial_seconds = (time.perf_counter() - start) * count
     workers = 1 if n_jobs is None or serial_seconds < 60.0 else n_jobs
-    shares = np.array_split(np.arange(space.dim), workers)
-    matrix = np.vstack(inf.parallel.parallel_map(columns, shares, n_jobs=workers))
-    matrix = 0.5 * (matrix + matrix.T) + covariance_matrix_of(noise, noise_matrix)
-    inverse = cho_solve(cho_factor(matrix, lower=True), np.eye(len(matrix)))
-    return definite(
-        inf.LinearOperator.from_matrix(
-            space, space, 0.5 * (inverse + inverse.T), form="components"
-        )
+    shares = np.array_split(np.arange(count), workers)
+    return np.vstack(inf.parallel.parallel_map(columns, shares, n_jobs=workers)).T
+
+
+def sketched_signal(
+    signal,
+    noise_covariance: np.ndarray,
+    rank: int,
+    /,
+    *,
+    n_jobs: Optional[int] = None,
+    seed: int = 0,
+) -> np.ndarray:
+    """
+    The matrix of a signal covariance S = A Q A* on the data from `rank`
+    applications of it, in place of one a datum: the randomised Nystrom
+    approximation (Frangella, Tropp and Udell, 2023) in the metric of the
+    noise.
+
+    With R = L L^T the noise, the signal in the noise's metric is
+    M = L^-1 S L^-T, whose eigenvalues above one are the directions the
+    data resolve; those below it barely change the normal matrix M + 1.
+    The sketch is M G for G white, that is L^-1 S applied to the probes
+    L^-T G. From it comes M ~ U E U^T of that rank, and the signal
+    L U E U^T L^T. The probes are drawn from `seed`, so that a build is
+    repeatable.
+
+    Returned as a matrix on the data, the noise's covariance being one
+    already. Nothing needs it formed: the inverse of its sum with the noise
+    is L^-T (1 - U E (1 + E)^-1 U^T) L^-1.
+    """
+    dim = len(noise_covariance)
+    lower = cholesky(noise_covariance, lower=True)
+    white = np.random.default_rng(seed).standard_normal((dim, rank))
+    probes = solve_triangular(lower, white, lower=True, trans="T")
+    sketch = solve_triangular(lower, _images(signal, probes, n_jobs), lower=True)
+    # The stable form: a small shift makes the core definite to rounding,
+    # and is taken off the eigenvalues after.
+    shift = np.sqrt(dim) * np.finfo(float).eps * np.linalg.norm(sketch, 2)
+    sketch += shift * white
+    core = white.T @ sketch
+    factor = cholesky(0.5 * (core + core.T), lower=True)
+    basis, singular, _ = np.linalg.svd(
+        solve_triangular(factor, sketch.T, lower=True).T, full_matrices=False
     )
+    half = lower @ (basis * np.sqrt(np.maximum(singular**2 - shift, 0.0)))
+    return half @ half.T
 
 
 def altimetry_block(
@@ -3420,7 +3595,8 @@ def block_preconditioner(
       the true operator, sea level equation included, with GRACE's noise
       (`grace_noise`, with its covariance `grace_matrix` if that is not
       diagonal). GRACE's coefficients number a few thousand, so it can be
-      held.
+      held. With --grace-block-rank its signal part is sketched from that
+      many applications in place of one a coefficient.
     - The altimetry's block is that of `altimetry_block`, sparse
       (`alt_local`, the local noise; --cutoff-km, or --altimetry-neighbours).
     - With both, the blocks are uncoupled: what the mass sources add to the
@@ -3451,9 +3627,11 @@ def block_preconditioner(
         blocks.append(cache["altimetry"])
     if use_grace:
         if "grace" not in cache:
+            rank = getattr(args, "grace_block_rank", 0)
+            count = grace_noise.domain.dim
             print(
-                f"  GRACE block: {grace_noise.domain.dim} applications of the "
-                "normal operator...",
+                f"  GRACE block: {rank if 0 < rank < count else count} "
+                "applications of the normal operator...",
                 flush=True,
             )
             cache["grace"] = exact_preconditioner(
@@ -3462,6 +3640,7 @@ def block_preconditioner(
                 grace_noise,
                 noise_matrix=grace_matrix,
                 n_jobs=jobs(args),
+                rank=rank,
             )
         blocks.append(cache["grace"])
     if len(blocks) == 1:

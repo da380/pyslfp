@@ -30,8 +30,15 @@
 #   INV_EXTRA="--prior-sensitivity --std-samples 0" ./run_all.sh joint_inversion
 #                                             the inversion scripts with these
 #                                             extras and no others
-#   ALT_NEIGHBOURS=40 ./run_all.sh joint_inversion
-#                                             nearest-neighbour altimetry block
+#   GRACE_RANK=3000 ./run_all.sh joint_inversion
+#                                             GRACE's block sketched from 3000
+#                                             applications, not all 9405
+#   GIA_MODEL=ensemble ./run_all.sh           the GIA correction's error from
+#                                             the ensemble, not the published
+#                                             covariance; GIA_YEARS=0 for none
+#   ALT_NEIGHBOURS=0 ./run_all.sh joint_inversion
+#                                             the tapered altimetry block in
+#                                             place of the nearest-neighbour one
 #   PRIOR_TRUTHS=100 ./run_all.sh grace_coverage
 #                                             the reference case: truths drawn
 #                                             from the prior
@@ -140,7 +147,9 @@ if [ "$FAST" -ne 0 ]; then
     SPACING="${SPACING:-8.0}"
     echo "Resolution: FAST/TEST mode (lmax=$LMAX, obs_degree=$OBS_DEGREE_VAL, spacing=$SPACING)."
 else
-    LMAX="${LMAX:-256}"
+    # 255 and not 256: the grid has 2 (lmax + 1) rows, 512 against
+    # 514 = 2 x 257, and the transforms cost half as much on the former.
+    LMAX="${LMAX:-255}"
     # Every degree the coefficient errors below cover: cutting the data off
     # lower, where some coefficients still inform, makes the posterior ring.
     OBS_DEGREE_VAL="${OBS_DEGREE_VAL:-96}"
@@ -166,11 +175,15 @@ OBS_DEGREE=(--obs-degree "$OBS_DEGREE_VAL")
 # Preconditioner: altimetry_inversion, joint_inversion only. Blocks
 # assembled in the data space (common.block_preconditioner); the surrogate
 # problem at --surrogate-degree is the alternative, and what the submitted
-# paper used (--preconditioner surrogate). ALT_NEIGHBOURS=20 (or 40) makes
-# the altimetry block the nearest-neighbour sparse inverse of vecchia.py in
-# place of the tapered covariance; 0, the default, keeps the latter.
+# paper used (--preconditioner surrogate). The altimetry block is the
+# nearest-neighbour sparse inverse of vecchia.py, on ALT_NEIGHBOURS
+# neighbours (40); ALT_NEIGHBOURS=0 gives the tapered covariance in its
+# place. GRACE's block is exact, one application of the normal operator a
+# coefficient, or with GRACE_RANK=K a sketch of its signal part from K
+# applications (common.sketched_signal).
 SURROGATE=(--surrogate-degree 32 --preconditioner blocks
-    --altimetry-neighbours "${ALT_NEIGHBOURS:-0}")
+    --altimetry-neighbours "${ALT_NEIGHBOURS:-40}"
+    --grace-block-rank "${GRACE_RANK:-0}")
 
 # Tolerance of the solves that push the posterior covariance onto the
 # quantities of interest, the prior-sensitivity tables and the covariance maps:
@@ -251,12 +264,21 @@ JOINT_ALT_NOISE=(
 )
 
 # The error of the GIA correction, in the altimetry and in GRACE's data of
-# the ocean experiments: the spread of the ensemble of gia_ensemble.py over
-# one year, scaled. Only the test ensemble exists so far.
-GIA=(
-    --gia-years 1.0
-    --gia-scale 0.4
-)
+# every experiment, over one year: from the covariance of the rates of
+# the Stokes coefficients published by Caron et al. (2018)
+# (gia_statistics.py; `python gia_statistics.py build` fetches it). With
+# GIA_MODEL=ensemble it is the spread of the ensemble of gia_ensemble.py,
+# scaled by 0.4 to the uncertainty Prandi et al. (2021) use.
+GIA_MODEL="${GIA_MODEL:-caron}"
+if [ "$GIA_MODEL" = "ensemble" ]; then
+    GIA=(--gia-years 1.0 --gia-model ensemble --gia-scale 0.4)
+else
+    GIA=(--gia-years 1.0 --gia-model "$GIA_MODEL")
+fi
+# GIA_YEARS=0 leaves the error out.
+if [ -n "${GIA_YEARS:-}" ]; then
+    GIA[1]="$GIA_YEARS"
+fi
 
 # GRACE noise: the formal error covariance of the coefficients of
 # ITSG-Grace2018 for the difference of the annual means of two years
@@ -341,7 +363,7 @@ for s in "${SCRIPTS[@]}"; do
     case "$s" in
     grace_bias)
         run "$s" "${COMMON[@]}" "${OBS_DEGREE[@]}" "${OCEAN_PRIOR[@]}" "${GRACE_PRIOR[@]}" \
-            "${GRACE_NOISE[@]}" \
+            "${GRACE_NOISE[@]}" "${GIA[@]}" \
             ${PAR_ARGS[@]+"${PAR_ARGS[@]}"} \
             ${GRACE_BIAS_EXTRA[@]+"${GRACE_BIAS_EXTRA[@]}"}
         ;;
@@ -352,13 +374,13 @@ for s in "${SCRIPTS[@]}"; do
         ;;
     grace_inversion)
         run "$s" "${COMMON[@]}" "${OBS_DEGREE[@]}" "${OCEAN_PRIOR[@]}" "${GRACE_PRIOR[@]}" \
-            "${GRACE_NOISE[@]}" "${QOI[@]}" \
+            "${GRACE_NOISE[@]}" "${GIA[@]}" "${QOI[@]}" \
             ${PAR_ARGS[@]+"${PAR_ARGS[@]}"} \
             ${GRACE_INV_EXTRA[@]+"${GRACE_INV_EXTRA[@]}"}
         ;;
     grace_coverage)
         run "$s" "${COMMON[@]}" "${OBS_DEGREE[@]}" "${OCEAN_PRIOR[@]}" "${GRACE_PRIOR[@]}" \
-            "${GRACE_NOISE[@]}" "${QOI[@]}" \
+            "${GRACE_NOISE[@]}" "${GIA[@]}" "${QOI[@]}" \
             ${PAR_ARGS[@]+"${PAR_ARGS[@]}"} \
             ${GRACE_COVERAGE_EXTRA[@]+"${GRACE_COVERAGE_EXTRA[@]}"}
         ;;

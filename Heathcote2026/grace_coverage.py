@@ -3,11 +3,16 @@ The errors of the GRACE estimators against the errors they state, on loads
 that are not drawn from the prior (Heathcote et al., 2026).
 
 Each estimator of a regional average of the total load comes with a
-standard deviation: WMB's is the noise it propagates, and the Bayesian
-one's is the posterior's. This script asks how the errors actually made
-compare with those statements, as distributions, when the true load is not
-a sample of the prior. With --prior-truths it is one: the reference case,
-in which the Bayesian statements are right by construction.
+standard deviation. The Bayesian one's is the posterior's. WMB's is that of
+its whole error under the prior: the noise it propagates and what its
+filter, its truncation and its neglect of the sea level change do to a load
+drawn from the prior (`common.wmb_error_operator`). The two estimators are
+then given the same prior information, and both statements are right when
+the true load is a sample of the prior. This script asks how the errors
+actually made compare with those statements, as distributions, when it is
+not. With --prior-truths it is one: the reference case. WMB's errors are
+also set against the noise it propagates alone, the uncertainty usually
+stated for it.
 
 The experiment is that of `grace_inversion.py` with --load-prior model: one
 unknown, the direct load, whose prior is that which the fields of the ocean
@@ -168,9 +173,9 @@ def parse_arguments() -> argparse.Namespace:
         default=0,
         metavar="N",
         help="The reference case: N true loads drawn from the prior, in place "
-        "of those of the Earth System Model. The Bayesian estimate's ratios "
-        "are then standard normal by construction, and WMB's show what its "
-        "stated standard deviation leaves out under the prior.",
+        "of those of the Earth System Model. Both estimators' ratios are "
+        "then standard normal by construction, and WMB's against its noise "
+        "alone show what that leaves out under the prior.",
     )
     parser.add_argument(
         "--noise-draws",
@@ -431,12 +436,24 @@ def main():
         "WMB": wmb_matrix,
     }
     posterior = inf.GaussianMeasure(prior.domain, covariance=inversion.covariance)
+    # WMB's error is its estimate of the noise-free data less the truth, a
+    # linear function of the load, plus the noise it propagates.
+    wmb_noise = np.einsum("ij,jk,ik->i", wmb_matrix, noise_matrix, wmb_matrix)
+    wmb_average = inf.LinearOperator.from_matrix(
+        forward.codomain, average.codomain, wmb_matrix, form="components"
+    )
+    wmb_leakage = common.variances(
+        common.dense(
+            prior,
+            common.wmb_error_operator(physics, average, wmb_average, args),
+            n_jobs=common.jobs(args, len(names)),
+        )
+    )
     stds = {
         "Bayesian": common.standard_deviations(common.dense(posterior, target)),
-        "WMB": np.sqrt(
-            np.einsum("ij,jk,ik->i", matrices["WMB"], noise_matrix, matrices["WMB"])
-        ),
+        "WMB": np.sqrt(wmb_noise + wmb_leakage),
     }
+    noise_alone = np.sqrt(wmb_noise)
 
     # The errors: on each load, without noise, and with each of the draws.
     truth = np.array([average(sigma) for sigma in totals])
@@ -453,7 +470,7 @@ def main():
         ratios[estimator] = errors[estimator] / stds[estimator]
 
     columns = ["rms ratio", "within 1", "within 2", "median std", "median rms"]
-    width = 24 + 12 * len(columns)
+    width = 30 + 12 * len(columns)
     text = (
         "The GRACE estimators' errors against their stated standard deviations\n"
         + (
@@ -492,10 +509,13 @@ def main():
         + ".\n"
         "A ratio is an error over the standard deviation its estimator states; "
         "for a standard normal the\nroot mean square is 1 and the fractions "
-        "within 1 and 2 are 0.683 and 0.954. Stds and errors in mm EWT.\n\n"
+        "within 1 and 2 are 0.683 and 0.954. Stds and errors in mm EWT.\n"
+        "WMB's stated standard deviation is that of its whole error under the "
+        "prior, noise and leakage; the\nrows 'WMB, noise alone' set the same "
+        "errors against the noise it propagates.\n\n"
     )
     text += (
-        f"{'':<24}" + "".join(f"{c:>12}" for c in columns) + "\n" + "-" * width + "\n"
+        f"{'':<30}" + "".join(f"{c:>12}" for c in columns) + "\n" + "-" * width + "\n"
     )
     for label in CLASSES + ("all",):
         chosen = np.ones(len(names), bool) if label == "all" else classes == label
@@ -507,17 +527,27 @@ def main():
                 errors[estimator][:, chosen],
                 stds[estimator][chosen],
             )
-            text += f"{label + ', ' + estimator:<24}" + "".join(
+            text += f"{label + ', ' + estimator:<30}" + "".join(
                 f"{v:>12.3f}" for v in row
             )
             text += "\n"
+            if estimator == "WMB":
+                row = statistics(
+                    (errors["WMB"] / noise_alone)[:, chosen],
+                    errors["WMB"][:, chosen],
+                    noise_alone[chosen],
+                )
+                text += f"{label + ', WMB, noise alone':<30}" + "".join(
+                    f"{v:>12.3f}" for v in row
+                )
+                text += "\n"
     text += "\n\nRegion by region: stated std, rms error, and rms error without noise\n"
-    text += f"{'region':<26}{'class':<12}" + "".join(
+    text += f"{'region':<26}{'class':<12}{'WMB noise std':>16}" + "".join(
         f"{e + ' ' + c:>16}" for e in ESTIMATORS for c in ("std", "rms", "load")
     )
     text += "\n"
     for i, name in enumerate(names):
-        text += f"{name[:25]:<26}{classes[i]:<12}"
+        text += f"{name[:25]:<26}{classes[i]:<12}{noise_alone[i]:>16.3f}"
         for estimator in ESTIMATORS:
             values = (
                 stds[estimator][i],

@@ -274,12 +274,37 @@ of a single pair of satellites, and it is not rotationally invariant.
 `--coefficient-errors` selects it in the GRACE experiments and
 `--grace-coefficient-errors` in the joint experiment.
 
-**Error of the GIA correction.** With `--gia-years 1 --gia-scale 0.4`, the
-altimetry and GRACE data of the ocean experiments carry a further error of
-low rank: the spread, about their mean, of the present-day rates of an
-ensemble of GIA models (`gia_ensemble.py`), over one year and scaled by
-0.4. In the joint experiment it is one model's error in both sets of data,
-and so is correlated between them.
+**Error of the GIA correction.** With `--gia-years 1`, the default, the
+data of every experiment carry a further error of low rank, that of the
+correction for glacial isostatic adjustment over one year. It comes from
+the covariance of the present-day rates of the Stokes coefficients,
+degrees 2 to 89, that Caron et al. (2018) derive from more than 100,000
+forward models weighted by their fit to sea level records and uplift rates
+(`gia_statistics.py`, `--gia-model caron`). That covariance has low rank
+to rounding, and its leading 50 eigenvectors (`--gia-rank`), which hold
+all but a part in 100,000 of its trace, each times the root of its
+eigenvalue, are the columns of a factor $G$ with the error's covariance
+$G G^T$:
+
+- on GRACE's coefficients $G$ is those vectors, in the data's convention.
+  Over one year the error exceeds the formal noise at degrees 2 to 6 and
+  is below a quarter of it by degree 15;
+- on the altimetry it is their geoid at the points, minus the potential
+  change over $g$: 0.05 mm at the median point. The uniform change of the
+  sea surface that goes with the uplift of the sea floor is left out, its
+  covariance with the coefficients not being published; it is of the
+  order of 0.05 mm over a year, against the 1 mm of the altimetry's own
+  common error;
+- in the joint experiment the two parts share their columns, so the one
+  model's error is correlated between the two sets of data.
+
+In the GRACE experiments $G G^T$ is added to the coefficients' covariance,
+which is held as a matrix already. With `--gia-model ensemble` the error is
+instead the spread, about their mean, of the rates of an ensemble of GIA
+models (`gia_ensemble.py`), which `--gia-scale 0.4` brings to the
+uncertainty Prandi et al. (2021) use; so scaled it agrees with the
+published covariance on GRACE's coefficients to within a few per cent at
+degrees 4 to 8 and is a quarter to a third smaller at degrees 2 and 3.
 
 **Altimetry noise.** As stated above.
 
@@ -290,22 +315,39 @@ $A Q A^*$ per coefficient, and factorise it
 (`common.exact_preconditioner`). The conjugate-gradient solves then
 converge in an iteration or two.
 
+The signal part $S = A Q A^*$ need not be assembled in full. With
+$R = L L^T$, the signal in the metric of the noise is
+$M = L^{-1} S L^{-T}$, and the normal matrix is $L (M + 1) L^T$: only the
+eigenvalues of $M$ that are not small beside one matter, and their number
+is that of the directions in which the data resolve the signal above the
+noise, a property of the data and not of the model's resolution. With
+`--grace-block-rank` $k$ (`common.sketched_signal`) $M$ is sketched from
+$k$ applications of $S$, to the probes $L^{-T} g_i$ with $g_i$ white, and
+replaced by its randomised Nyström approximation of rank $k$ (Frangella et
+al., 2023), $U E U^T$; the block is $L (U E U^T + 1) L^T$, and the exact
+one is the case of $k$ the number of data. At degree 256 with data to
+degree 96, 1944 of the 9405 eigenvalues of $M$ exceed one and 2966 exceed
+0.1; a sketch of rank 2397 gives 8 iterations in place of one, and jointly
+with the altimetry 13 in place of 10, for a quarter of the applications.
+
 The ocean experiments use blocks assembled in the data space
 (`common.block_preconditioner`, `--preconditioner blocks`):
 
-- GRACE's block is the normal matrix above, with the sea level equation;
-- the altimetry's block is the covariance of $\eta_d$ between the points
-  under its prior, tapered to vanish beyond 1500 km by the function of
-  Gaspari and Cohn (1999), plus the local noise: a sparse matrix,
-  factorised once;
-- with `--altimetry-neighbours` $k$ the altimetry's block is instead a
-  sparse approximate inverse of that covariance, untapered, with the local
-  noise: the points are put in a coarse-to-fine order (each the farthest
-  from all before it) and each is regressed on the $k$ nearest of those
-  before it, which gives $T^{-1} \approx (1 - B)^T F^{-1} (1 - B)$ with $B$
-  sparse and strictly lower triangular and $F$ diagonal (Vecchia, 1988;
-  Schäfer et al., 2021; `vecchia.py`). It is positive definite by
-  construction and has no cut-off to choose;
+- GRACE's block is the normal matrix above, with the sea level equation,
+  exact or sketched;
+- the altimetry's block is a sparse approximate inverse of the covariance
+  of $\eta_d$ between the points under its prior, with the local noise:
+  the points are put in a coarse-to-fine order (each the farthest from all
+  before it) and each is regressed on the $k$ nearest of those before it
+  (`--altimetry-neighbours`, 40), which gives
+  $T^{-1} \approx (1 - B)^T F^{-1} (1 - B)$ with $B$ sparse and strictly
+  lower triangular and $F$ diagonal (Vecchia, 1988; Schäfer et al., 2021;
+  `vecchia.py`). It is positive definite by construction and has no
+  cut-off to choose. At degree 256 with 34,516 points it takes the
+  altimetry solve from 22 iterations to 8;
+- with `--altimetry-neighbours 0` the altimetry's block is instead that
+  covariance tapered to vanish beyond 1500 km by the function of Gaspari
+  and Cohn (1999), plus the local noise: a sparse matrix, factorised once;
 - the two blocks are uncoupled;
 - the parts of the noise of low rank are corrected for exactly by a
   Woodbury step: the error common to every point and the frame errors, the
@@ -378,6 +420,14 @@ covariance, its norm estimated with random probes.
 
 ## References
 
+Caron, L., Ivins, E. R., Larour, E., Adhikari, S., Nilsson, J. and Blewitt,
+G. (2018). GIA model statistics for GRACE hydrology, cryosphere, and ocean
+science. *Geophysical Research Letters* 45, 2203–2212.
+
+Frangella, Z., Tropp, J. A. and Udell, M. (2023). Randomized Nyström
+preconditioning. *SIAM Journal on Matrix Analysis and Applications* 44,
+718–752.
+
 Gaspari, G. and Cohn, S. E. (1999). Construction of correlation functions in
 two and three dimensions. *Quarterly Journal of the Royal Meteorological
 Society* 125, 723–757.
@@ -388,6 +438,9 @@ variability and change, both local and global. *Surveys in Geophysics* 40,
 
 Heathcote, D. A. et al. (2026). A scalable Bayesian framework for modern
 sea-level inference. *Geophysical Journal International*.
+
+Prandi, P. et al. (2021). Local sea level trends, accelerations and
+uncertainties over 1993–2019. *Scientific Data* 8, 1.
 
 Schäfer, F., Katzfuss, M. and Owhadi, H. (2021). Sparse Cholesky
 factorization by Kullback-Leibler minimization. *SIAM Journal on Scientific

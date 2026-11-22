@@ -298,6 +298,14 @@ The ocean experiments use blocks assembled in the data space
   under its prior, tapered to vanish beyond 1500 km by the function of
   Gaspari and Cohn (1999), plus the local noise: a sparse matrix,
   factorised once;
+- with `--altimetry-neighbours` $k$ the altimetry's block is instead a
+  sparse approximate inverse of that covariance, untapered, with the local
+  noise: the points are put in a coarse-to-fine order (each the farthest
+  from all before it) and each is regressed on the $k$ nearest of those
+  before it, which gives $T^{-1} \approx (1 - B)^T F^{-1} (1 - B)$ with $B$
+  sparse and strictly lower triangular and $F$ diagonal (Vecchia, 1988;
+  Schäfer et al., 2021; `vecchia.py`). It is positive definite by
+  construction and has no cut-off to choose;
 - the two blocks are uncoupled;
 - the parts of the noise of low rank are corrected for exactly by a
   Woodbury step: the error common to every point and the frame errors, the
@@ -306,6 +314,67 @@ The ocean experiments use blocks assembled in the data space
 
 The surrogate of the submitted paper remains as
 `--preconditioner surrogate`.
+
+The joint forward operator (`OceanPhysics.joint`) is the column of the
+altimetry over GRACE with the sea level equation solved once for the two:
+both sets of data are read from one response.
+
+The prior covariance is applied on the spherical harmonic coefficients
+(`common._steric_covariance`): the independent fields' spectra, their
+mixing and the rank-one projection for the conservation of mass are
+arithmetic there, between one analysis and one synthesis a field.
+
+**Sensitivity to the prior, field by field** (`common.sensitivity_table`;
+`--prior-sensitivity` in the inversion scripts, which produces these tables
+and nothing else). The prior of the model is
+the law of $T u$, where $u$ collects independent fields $u_f$ with
+rotationally invariant covariances $Q_f$: with `--ocean-prior steric` the
+ice, the land water, the steric height and the manometric sea level. $T = P
+M$ in the ocean experiments, with $M$ the mixing of the independent fields
+into the fields of the model (the sterodynamic sea level is the sum of the
+two heights) and $P = 1 - Q C^* (C Q C^*)^{-1} C$ the projection that
+conditioning on the conservation of the ocean's mass, $C m = 0$, amounts
+to, $Q$ being the covariance of $M u$. In the GRACE experiments $T = L P
+M$. So the prior covariance is $T (\oplus_f Q_f) T^*$ exactly.
+
+For one quantity with target kernel $t$, the posterior expectation is an
+estimator whose error on a model $m$ with noise $z$ is $(k - t, m) +
+(K^* t, z)$, $k - t = (K A - 1)^* t$. Write $\kappa_f$ for the part of
+$T^*(k - t)$ in field $f$, and $s^2$ for the posterior variance. Then
+
+$$s^2 = \sum_f (\kappa_f, Q_f \kappa_f) + (K^* t, R K^* t) ,$$
+
+and if the fields are in truth drawn with covariances $Q_f + \Delta Q_f$,
+mass being conserved through the same $P$, the variance of the error
+differs from $s^2$ by $\sum_f (\kappa_f, \Delta Q_f \kappa_f)$, with
+
+$$\frac{|(\kappa_f, \Delta Q_f \kappa_f)|}{s^2} \le
+\frac{\|\Delta Q_f\|}{\|Q_f\|} F_f , \qquad
+F_f = \frac{\|Q_f\| \, \|\kappa_f\|^2}{s^2} ,$$
+
+in the operator norm or, more weakly, the Hilbert-Schmidt norm. The tables
+give, for each quantity and field: the share $(\kappa_f, Q_f \kappa_f) /
+s^2$ of the posterior variance that the field's prior supplies, which is
+also the exact change per unit of a relative change of that prior's
+variance at every scale; $F_f$ in the two norms; the noise's share; and
+the sum of the shares less one, with $s^2$ computed separately as the
+prior variance less the data's reduction of it, which checks the solves.
+The norms of $Q_f$ are exact, from its spectrum; all norms and adjoints
+are those of each field's own space.
+
+Nothing in this is particular to the posterior expectation. Any linear
+estimate $C d$ of $B m$ has the error operator $E = C A - B$, kernel error
+$E^* e$ and noise part $(C^* e, R C^* e)$, and
+`common.prior_sensitivity(error, gain, ...)` makes the same table from $E$
+and $C$, the shares then being parts of whatever variance the estimate
+states; `common.posterior_sensitivity` is the case $C = B K$, at one solve
+of the normal equations per quantity. A second table
+(`common.prior_perturbation_sizes`) gives $\|\Delta Q_f\| / \|Q_f\|$ for
+a pointwise standard deviation 25 per cent larger, a scale 1.5 times
+longer or shorter, and an order higher by a half. `--paper-bound` in
+`grace_inversion.py` adds the factor of the bound stated on the load
+space, $\|Q\|_{HS} \|k - t\|^2 / s^2$ with $Q$ the load's prior
+covariance, its norm estimated with random probes.
 
 ## References
 
@@ -319,3 +388,11 @@ variability and change, both local and global. *Surveys in Geophysics* 40,
 
 Heathcote, D. A. et al. (2026). A scalable Bayesian framework for modern
 sea-level inference. *Geophysical Journal International*.
+
+Schäfer, F., Katzfuss, M. and Owhadi, H. (2021). Sparse Cholesky
+factorization by Kullback-Leibler minimization. *SIAM Journal on Scientific
+Computing* 43, A2019–A2046.
+
+Vecchia, A. V. (1988). Estimation and model identification for continuous
+spatial processes. *Journal of the Royal Statistical Society, Series B* 50,
+297–312.

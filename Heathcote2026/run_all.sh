@@ -27,6 +27,14 @@
 #   PROBE=1 ./run_all.sh grace_inversion joint_inversion
 #                                             the posterior expectations alone,
 #                                             for iteration counts and timings
+#   INV_EXTRA="--prior-sensitivity --std-samples 0" ./run_all.sh joint_inversion
+#                                             the inversion scripts with these
+#                                             extras and no others
+#   ALT_NEIGHBOURS=40 ./run_all.sh joint_inversion
+#                                             nearest-neighbour altimetry block
+#   PRIOR_TRUTHS=100 ./run_all.sh grace_coverage
+#                                             the reference case: truths drawn
+#                                             from the prior
 
 set -euo pipefail
 cd "$(dirname "$0")" # the .py scripts are assumed to sit next to this file
@@ -158,11 +166,14 @@ OBS_DEGREE=(--obs-degree "$OBS_DEGREE_VAL")
 # Preconditioner: altimetry_inversion, joint_inversion only. Blocks
 # assembled in the data space (common.block_preconditioner); the surrogate
 # problem at --surrogate-degree is the alternative, and what the submitted
-# paper used (--preconditioner surrogate).
-SURROGATE=(--surrogate-degree 32 --preconditioner blocks)
+# paper used (--preconditioner surrogate). ALT_NEIGHBOURS=20 (or 40) makes
+# the altimetry block the nearest-neighbour sparse inverse of vecchia.py in
+# place of the tapered covariance; 0, the default, keeps the latter.
+SURROGATE=(--surrogate-degree 32 --preconditioner blocks
+    --altimetry-neighbours "${ALT_NEIGHBOURS:-0}")
 
 # Tolerance of the solves that push the posterior covariance onto the
-# quantities of interest, the estimator kernels and the covariance maps:
+# quantities of interest, the prior-sensitivity tables and the covariance maps:
 # grace_inversion, altimetry_inversion, joint_inversion. The posterior
 # expectation and samples keep the scripts' own tolerance.
 QOI=(--qoi-rtol 1e-6)
@@ -286,7 +297,7 @@ GRACE_PRIOR=(
 ALTIMETRY_BIAS_EXTRA=(--plot-maps)  # e.g. --samples 1000
 GRACE_BIAS_EXTRA=(--plot-maps)      # e.g. --samples 1000
 ALTIMETRY_INV_EXTRA=(--all)         # e.g. --std-samples 100
-GRACE_INV_EXTRA=(--all --std-samples 100) # e.g. --prior-sensitivity
+GRACE_INV_EXTRA=(--all --paper-bound --std-samples 100) # e.g. --plot-maps
 JOINT_INV_EXTRA=(--all --std-samples 100) # e.g. --map-all-cases
 
 # PROBE=1: no figures, covariances or samples, only the solves for the
@@ -296,9 +307,21 @@ if [ "${PROBE:-0}" -ne 0 ]; then
     GRACE_INV_EXTRA=(--std-samples 0)
     JOINT_INV_EXTRA=(--std-samples 0)
 fi
+# INV_EXTRA="--prior-sensitivity --std-samples 0": these options, and no
+# others, as the extras of the three inversion scripts.
+if [ -n "${INV_EXTRA:-}" ]; then
+    read -r -a ALTIMETRY_INV_EXTRA <<<"$INV_EXTRA"
+    GRACE_INV_EXTRA=("${ALTIMETRY_INV_EXTRA[@]}")
+    JOINT_INV_EXTRA=("${ALTIMETRY_INV_EXTRA[@]}")
+fi
 # The errors of the estimators on loads of the ESA Earth System Model,
 # version 3.0 (esm_loads.py fetch): e.g. --wmb-filter ddk, --noise-draws 50.
-GRACE_COVERAGE_EXTRA=()
+# TRUTH_MEAN=ice-removed (or removed) takes the mean over the true loads from
+# each: the diagnostic of the zero-mean prior. PRIOR_TRUTHS=N draws N true
+# loads from the prior instead: the reference case.
+# WMB_FILTER=ddk filters WMB's estimate with DDK in place of the Gaussian.
+GRACE_COVERAGE_EXTRA=(--truth-mean "${TRUTH_MEAN:-kept}"
+    --prior-truths "${PRIOR_TRUTHS:-0}" --wmb-filter "${WMB_FILTER:-gaussian}")
 
 # ---------------------------------------------------------------------------
 # 5. Run

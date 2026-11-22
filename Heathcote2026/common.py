@@ -160,8 +160,8 @@ def add_qoi_arguments(parser: argparse.ArgumentParser) -> None:
         type=float,
         default=1.0e-6,
         help="Relative residual of the conjugate-gradient solves that push the "
-        "posterior covariance onto the quantities of interest, the estimator "
-        "kernels and the covariance maps.",
+        "posterior covariance onto the quantities of interest, the "
+        "prior-sensitivity tables and the covariance maps.",
     )
 
 
@@ -204,6 +204,16 @@ def add_preconditioner_arguments(parser: argparse.ArgumentParser) -> None:
         default=1500.0,
         help="The distance beyond which the altimetry block takes two "
         "points as uncorrelated.",
+    )
+    parser.add_argument(
+        "--altimetry-neighbours",
+        type=int,
+        default=0,
+        metavar="K",
+        help="With K above zero the altimetry block is not the tapered "
+        "covariance but a sparse approximate inverse, each point regressed "
+        "on the K nearest of those before it in a coarse-to-fine order "
+        "(`vecchia.py`); --cutoff-km is then not used. 20 to 40 is enough.",
     )
     parser.add_argument(
         "--low-rank",
@@ -1187,7 +1197,13 @@ def grace_experiment(args: argparse.Namespace, rng):
         "signal_std": signal_std,
         "noise_std": coefficient_info["noise_std"],
         "std_factor": coefficient_info["best_std"] / signal_std,
+        "independent": None,
     }
+    if calib["independent"] is not None:
+        # The load of the independent fields the prior is built from.
+        info["independent"] = calib["independent"] | {
+            "map": ocean.setup.load_operator @ calib["independent"]["map"]
+        }
     return physics, None, prior, noise, coefficient_info["covariance"], info
 
 
@@ -1799,22 +1815,56 @@ class OceanPhysics:
         truncated below --obs-degree gives the coefficients up to its own
         degree and zeros above, in the same data space: the coefficients
         are ordered by degree, so the zeros follow the rest."""
+        return self._grace_observation(args) @ self.fingerprint @ self._loads
+
+    def _grace_observation(self, args: argparse.Namespace) -> inf.LinearOperator:
+        """GRACE's coefficients from the response of the sea level equation,
+        padded as `grace` says."""
         degree = min(args.obs_degree, self.fingerprint.codomain.field_space.lmax)
-        operator = (
-            grace_coefficients(
-                self.fingerprint.codomain,
-                self.state.model,
-                degree,
-                args.grace_convention,
-            )
-            @ self.fingerprint
-            @ self._loads
+        operator = grace_coefficients(
+            self.fingerprint.codomain,
+            self.state.model,
+            degree,
+            args.grace_convention,
         )
         if degree < args.obs_degree:
             data_space = inf.EuclideanSpace((args.obs_degree + 1) ** 2 - 4)
             read = data_space.coordinate_selection(np.arange(operator.codomain.dim))
             operator = read.adjoint @ operator
         return operator
+
+    def joint(self, args: argparse.Namespace) -> inf.LinearOperator:
+        """The altimetry and GRACE's coefficients together: the same
+        operator as the column of `altimetry` over `grace`, on the same
+        spaces, with the sea level equation solved once for the two and not
+        once for each. Both sets of data are read from one response, so an
+        application costs one solve and its adjoint one adjoint solve, which
+        is most of what the column's second block costs."""
+        column = inf.ColumnLinearOperator([self.altimetry, self.grace(args)])
+        fingerprint = self.fingerprint
+        respond = fingerprint @ self._loads
+        geocentric = geocentric_sea_level_operator(self.state, fingerprint.codomain)
+        direct = self.setup.observables[GEOCENTRIC_SEA_LEVEL]
+        evaluate = fingerprint.field_space.point_evaluation_operator(self.points)
+        observe = self._grace_observation(args)
+        surface, response, model = (
+            geocentric.codomain,
+            fingerprint.codomain,
+            column.domain,
+        )
+
+        def mapping(m):
+            r = respond(m)
+            return (evaluate(surface.add(geocentric(r), direct(m))), observe(r))
+
+        def adjoint(d):
+            y = evaluate.adjoint(d[0])
+            s = response.add(geocentric.adjoint(y), observe.adjoint(d[1]))
+            return model.add(respond.adjoint(s), direct.adjoint(y))
+
+        return inf.LinearOperator.from_callables(
+            column.domain, column.codomain, mapping, adjoint=adjoint
+        )
 
     @property
     def _loads(self):
@@ -2150,7 +2200,14 @@ def product_prior(
     return inf.GaussianMeasure.from_product(measures, domain=physics.setup.space)
 
 
-def ocean_prior(physics: OceanPhysics, args: argparse.Namespace, rng):
+def ocean_prior(
+    physics: OceanPhysics,
+    args: argparse.Namespace,
+    rng,
+    /,
+    *,
+    reference: Optional[dict] = None,
+):
     """
     The prior of the ocean experiments: the fields' own priors
     (`_field_measure`), eta and delta rho anti-correlated at long
@@ -2174,8 +2231,20 @@ def ocean_prior(physics: OceanPhysics, args: argparse.Namespace, rng):
       of year-on-year changes, and the ratio of the barystatic to the
       steric GMSL std is what results.
 
+    With `reference`, the covariance eigenvalues by name of the
+    independent fields of the same prior on physics of a higher degree
+    (the `measures` of its calib["independent"]), each independent field
+    takes those at the degrees it holds and not its stated pointwise std:
+    the prior is then the reference's truncated, where the stated std on
+    a lower degree would push the variance of the lost degrees onto those
+    kept. For --ocean-prior steric alone.
+
     Returns (prior, calib): the prior and the calibration record.
     """
+    if reference is not None and not _steric_prior(args):
+        raise NotImplementedError(
+            "A reference prior is for --ocean-prior steric alone."
+        )
     if not 0.0 <= args.ocean_corr < 1.0:
         raise ValueError("--ocean-corr must lie in [0, 1).")
     if args.prior_order <= 1.0:
@@ -2198,8 +2267,13 @@ def ocean_prior(physics: OceanPhysics, args: argparse.Namespace, rng):
     p = state.model.parameters
     rough = physics.rough_sources
     corr_scale = field_space.length_scale * args.ocean_corr_scale_factor
+    km = 1000.0 / p.length_scale
+    # The independent fields the prior is built from, where it is built from
+    # such, for `sensitivity_table`: set by `correlated`.
+    parts = {}
 
     def correlated(stds):
+        parts.clear()
         if _steric_prior(args):
             # Independent fields: the mass sources, the steric height of
             # deep water in eta's place and the manometric sea level in the
@@ -2214,20 +2288,70 @@ def ocean_prior(physics: OceanPhysics, args: argparse.Namespace, rng):
                 for n in names
                 if n not in (ETA, STERIC)
             } | {ETA: steric, STERIC: manometric}
+            if reference is not None:
+                # The components are ordered by degree: the shared lead.
+                measures = {
+                    n: setup.component(n).space.invariant_measure(
+                        reference[n][: setup.component(n).space.dim]
+                    )
+                    for n in names
+                }
             independent = inf.GaussianMeasure.from_product(
                 [measures[n] for n in names], domain=setup.space
             )
             share = steric_depth_share(physics, args)
-            eta_in, eta_out = setup.space.projection(ETA), setup.space.inclusion(ETA)
-            s_in, s_out = setup.space.projection(STERIC), setup.space.inclusion(STERIC)
-            mixing = (
-                inf.LinearOperator.identity(setup.space)
-                + (eta_out - s_out) @ s_in
-                + s_out @ share @ eta_in
+            whole = args.steric_depth_scale_m <= 0.0
+            i_eta, i_steric = names.index(ETA), names.index(STERIC)
+
+            # The mixing, written on the fields themselves: composed from
+            # the inclusions and projections of the direct sum it is the
+            # same operator at many times the cost, and it is applied twice
+            # in every action of the prior covariance. The two fields lie in
+            # one space, so its adjoint is the transpose with the share's
+            # adjoint.
+            def mix(u):
+                m = list(u)
+                m[i_eta] = field_space.add(u[i_eta], u[i_steric])
+                m[i_steric] = u[i_eta] if whole else share(u[i_eta])
+                return tuple(m)
+
+            def mix_adjoint(y):
+                u = list(y)
+                shared = y[i_steric] if whole else share.adjoint(y[i_steric])
+                u[i_eta] = field_space.add(y[i_eta], shared)
+                u[i_steric] = y[i_eta]
+                return tuple(u)
+
+            mixing = inf.LinearOperator.from_callables(
+                setup.space, setup.space, mix, adjoint=mix_adjoint
+            )
+            parts.update(
+                measures=measures,
+                mixing=mixing,
+                product=independent,
+                spectral=whole,
+                labels={
+                    ICE: "ice",
+                    LAND: "land water",
+                    ETA: "steric height",
+                    STERIC: "manometric",
+                },
+                spectra={
+                    n: (_source_scale(physics, args, n), args.source_prior_order)
+                    for n in names
+                    if n in (ICE, LAND)
+                }
+                | {
+                    ETA: (args.steric_scale_km * km, args.steric_order),
+                    STERIC: (args.manometric_scale_km * km, args.manometric_order),
+                },
             )
             return independent.affine_map(mixing)
         measures = {n: _field_measure(physics, args, n, stds[n]) for n in names}
         if args.ocean_corr == 0.0:
+            parts.update(
+                measures=measures, mixing=inf.LinearOperator.identity(setup.space)
+            )
             return inf.GaussianMeasure.from_product(
                 [measures[n] for n in names], domain=setup.space
             )
@@ -2255,6 +2379,11 @@ def ocean_prior(physics: OceanPhysics, args: argparse.Namespace, rng):
         )
         independent = inf.GaussianMeasure.from_product(
             [measures[n] for n in names], domain=setup.space
+        )
+        parts.update(
+            measures=measures,
+            mixing=mixing,
+            labels={RHO: "density remainder"},
         )
         return independent.affine_map(mixing)
 
@@ -2307,7 +2436,26 @@ def ocean_prior(physics: OceanPhysics, args: argparse.Namespace, rng):
         ice_std = args.gmsl_bary_steric_ratio * sigma_s / q_ice
     stds[ICE] = ice_std
 
-    prior = conditioned(correlated(stds))
+    unconditioned = correlated(stds)
+    record = _independent_fields(setup, names, parts, unconditioned)
+    if record is not None and record["product"] is not None:
+        # The same law as the conditioned measure, as the image of the
+        # independent fields under the mixing and the projection: its
+        # covariance then costs a quarter of what the conditioning's does.
+        prior = record["product"].affine_map(record["map"])
+        covariance = (
+            _steric_covariance(setup, names, parts["measures"])
+            if parts.get("spectral")
+            else None
+        )
+        if covariance is not None:
+            prior = inf.GaussianMeasure(
+                setup.space,
+                covariance=covariance,
+                covariance_factor=prior.covariance_factor,
+            )
+    else:
+        prior = conditioned(unconditioned)
     barystatic = _std(prior, setup.barystatic_gmsl())
     derived = {"ice_std": ice_std, "dyn_std": dyn_std, "rho_std": rho_std}
     if LAND in names:
@@ -2330,8 +2478,129 @@ def ocean_prior(physics: OceanPhysics, args: argparse.Namespace, rng):
             "barystatic_std_check": barystatic,
         },
         "derived_stds": derived,
+        "independent": record,
     }
     return shifted(prior, args.prior_shift, rng), calib
+
+
+def _steric_covariance(setup, names, measures):
+    """The covariance of the steric prior with the whole column's share, P M
+    Q0 M* P* in the notation of `_independent_fields`, applied in
+    components; None where the constraint is not one number.
+
+    Q0 is diagonal in the harmonics, the mixing M adds and exchanges two
+    fields of one space, and the projection P is a change of rank one, so
+    between the analysis of the argument and the synthesis of the result
+    everything is arithmetic on the coefficients: one transform each way a
+    field. Composed from the operators the same covariance makes six times
+    as many, most of them in the two inner products of the projection, and
+    it is applied in every iteration of every solve."""
+    constraint = setup.constraints[OCEAN_MASS]
+    if constraint.codomain.dim != 1:
+        return None
+    space = setup.space
+    edges = np.concatenate(
+        [[0], np.cumsum([setup.component(n).space.dim for n in names])]
+    )
+    eta, steric = (
+        slice(edges[i], edges[i + 1]) for i in (names.index(ETA), names.index(STERIC))
+    )
+    spectrum = np.concatenate([measures[n].covariance.eigenvalues for n in names])
+
+    def unconditioned(y):
+        # M Q0 M*: the mixing and its adjoint are the same exchange.
+        u = y.copy()
+        u[eta] = y[eta] + y[steric]
+        u[steric] = y[eta]
+        u *= spectrum
+        m = u.copy()
+        m[eta] = u[eta] + u[steric]
+        m[steric] = u[eta]
+        return m
+
+    representer = space.to_components(
+        constraint.adjoint(constraint.codomain.basis_vector(0))
+    )
+    # Inner products with the representer and the gain, as dot products
+    # with their Gram images.
+    against_representer = space.apply_gram(representer)
+    gain = unconditioned(representer)
+    gain /= float(against_representer @ gain)
+    against_gain = space.apply_gram(gain)
+
+    def covariance(y):
+        c = space.to_components(y)
+        c = unconditioned(c - representer * float(against_gain @ c))
+        return space.from_components(c - gain * float(against_representer @ c))
+
+    operator = inf.LinearOperator.from_callables(
+        space, space, covariance, adjoint=covariance
+    )
+    return operator.with_traits(
+        operator.traits | inf.Traits.SELF_ADJOINT | inf.Traits.POSITIVE_SEMIDEFINITE
+    )
+
+
+def _independent_fields(setup, names, parts: dict, unconditioned) -> Optional[dict]:
+    """The independent fields a prior of `ocean_prior` is built from, for
+    `sensitivity_table`; None for a prior that is not built from such.
+
+    The prior is the law of P M u: u the independent fields, each with an
+    invariant measure of its own (`measures`, by name); M their mixing into
+    the fields of the model; and P the projection that the conditioning on
+    the conservation of the ocean's mass, C m = 0, amounts to, P = 1 - Q C*
+    (C Q C*)^-1 C with Q the covariance of M u. `map` is P M. The constraint
+    is one number, so P is a change of rank one, m - g (r, m) with r the
+    constraint's representer and g = Q r / (r, Q r), and is applied as such.
+    `product` is the product measure of the independent fields, where the
+    prior is to be built as its image under the map, or None. `spectra`
+    gives, where the measures are stated so, the scale and order of each
+    one's spectrum (1 + s^2 k)^-t on the Lebesgue space, and `labels` the
+    names of the independent fields, which need not be those of the slots
+    they fill."""
+    if not parts:
+        return None
+    constraint = setup.constraints[OCEAN_MASS]
+    covariance = unconditioned.covariance
+    space = setup.space
+    if constraint.codomain.dim == 1:
+        representer = constraint.adjoint(constraint.codomain.basis_vector(0))
+        image = covariance(representer)
+        gain = space.scale(1.0 / space.inner_product(representer, image), image)
+
+        def project(m):
+            return space.subtract(
+                m, space.scale(space.inner_product(representer, m), gain)
+            )
+
+        def project_adjoint(y):
+            return space.subtract(
+                y, space.scale(space.inner_product(gain, y), representer)
+            )
+
+        projection = inf.LinearOperator.from_callables(
+            space, space, project, adjoint=project_adjoint
+        )
+    else:
+        gram = (constraint @ covariance @ constraint.adjoint).matrix(form="components")
+        weights = inf.LinearOperator.from_matrix(
+            constraint.codomain,
+            constraint.codomain,
+            np.linalg.inv(np.atleast_2d(gram)),
+            form="components",
+        )
+        projection = inf.LinearOperator.identity(space) - (
+            covariance @ constraint.adjoint @ weights @ constraint
+        )
+    return {
+        "product": parts.get("product"),
+        "names": list(names),
+        "space": setup.space,
+        "measures": dict(parts["measures"]),
+        "labels": {n: n for n in names} | parts.get("labels", {}),
+        "spectra": parts.get("spectra"),
+        "map": projection @ parts["mixing"],
+    }
 
 
 def model_truth(physics: OceanPhysics, args: argparse.Namespace, years, /):
@@ -3018,7 +3287,7 @@ def exact_preconditioner(
     It costs one application of A Q A* per datum, each independent of the
     others, and a dense factorisation. A conjugate-gradient solve
     preconditioned by it converges in an iteration or two, so every further
-    solve (a quantity of interest, a row of an estimator kernel, a posterior
+    solve (a quantity of interest, a row of an estimator, a posterior
     sample) costs one application of the operator and no more.
 
     Returns the inverse as an operator on the data space.
@@ -3059,6 +3328,7 @@ def altimetry_block(
     calib: dict,
     alt_local,
     cutoff_km: float,
+    neighbours: int = 0,
 ):
     """
     The altimetry block of `block_preconditioner`, as an operator on the
@@ -3067,6 +3337,13 @@ def altimetry_block(
     taper of Gaspari and Cohn, which keeps it positive definite, plus the
     local noise. The matrix is sparse and factorised once, so nothing dense
     is formed on the altimetry data, whose number is not bounded.
+
+    With `neighbours` above zero the covariance is not tapered: its inverse
+    with the local noise is approximated by the sparse factor that regresses
+    each point on that many of the nearest points before it in a
+    coarse-to-fine order (`vecchia.VecchiaInverse`). There is then no
+    cut-off to choose, the result is positive definite by construction, and
+    it has fewer entries and gives fewer iterations than the tapered block.
     """
     space = physics.field_space
     points = physics.points
@@ -3075,6 +3352,26 @@ def altimetry_block(
     ).covariance.eigenvalues
     cutoff = cutoff_km * 1000.0 / physics.state.model.parameters.length_scale
     eta = space.invariant_measure(spectrum, unsafe=True)
+    if neighbours > 0:
+        from vecchia import VecchiaInverse, unit_vectors
+
+        approximate = VecchiaInverse(
+            unit_vectors(points),
+            lambda angle: space.covariance_function(eta, space.radius * angle),
+            alt_local.covariance.diagonals()[0],
+            neighbours=neighbours,
+        )
+        print(
+            f"  altimetry block: {approximate.entries_per_point:.0f} neighbours "
+            "per point, no cut-off",
+            flush=True,
+        )
+        domain = alt_local.domain
+        return definite(
+            inf.LinearOperator.from_callables(
+                domain, domain, approximate.inverse, adjoint=approximate.inverse
+            )
+        )
     rows, columns, distances = space.pairs_within_distance(
         points, cutoff, with_distances=True
     )
@@ -3125,7 +3422,7 @@ def block_preconditioner(
       diagonal). GRACE's coefficients number a few thousand, so it can be
       held.
     - The altimetry's block is that of `altimetry_block`, sparse
-      (`alt_local`, the local noise; --cutoff-km).
+      (`alt_local`, the local noise; --cutoff-km, or --altimetry-neighbours).
     - With both, the blocks are uncoupled: what the mass sources add to the
       altimetry through the sea level equation, and the covariance between
       the two sets of data, are left to the iteration.
@@ -3144,7 +3441,12 @@ def block_preconditioner(
     if use_alt:
         if "altimetry" not in cache:
             cache["altimetry"] = altimetry_block(
-                physics, args, calib, alt_local, args.cutoff_km
+                physics,
+                args,
+                calib,
+                alt_local,
+                args.cutoff_km,
+                neighbours=getattr(args, "altimetry_neighbours", 0),
             )
         blocks.append(cache["altimetry"])
     if use_grace:
@@ -3342,7 +3644,8 @@ def solve_posterior(inversion, data, preconditioner, /, *, rtol, qoi_rtol):
     by 10-20 per cent. `qoi_posterior` therefore has the same expectation but
     applies its covariance through solves at `qoi_rtol`, with the same
     preconditioner; every push-forward of the posterior covariance (onto the
-    quantities of interest, the estimator kernels and the covariance maps)
+    quantities of interest, the prior-sensitivity tables and the covariance
+    maps)
     goes through it, or through the Kalman operator of `qoi_inversion`.
 
     Returns (posterior, qoi_posterior, qoi_inversion).
@@ -3421,6 +3724,305 @@ def variances(measure) -> np.ndarray:
 
 def standard_deviations(measure) -> np.ndarray:
     return np.sqrt(variances(measure))
+
+
+def sensitivity_table(
+    kernels,
+    weights,
+    noise,
+    independent: dict,
+    labels,
+    /,
+    *,
+    title: str,
+    stated=None,
+    model_hs: Optional[float] = None,
+) -> str:
+    """
+    The sensitivity to the prior of the errors of linear estimates of some
+    quantities, field by field of the prior.
+
+    An estimate C d of the quantities B m, from data d = A m + z, has the
+    error E m + C z with E = C A - B. For quantity i, `kernels[i]` is E*
+    e_i, the kernel error k - t of the estimate, in the model space, and
+    `weights[i]` is C* e_i, in the data space. If the models are drawn with
+    covariance Q and the noise with R, the variance of the error is
+
+        v = ((k - t), Q (k - t)) + (C* e, R C* e) ,
+
+    a part the prior supplies and a part the noise does; and if the models
+    are in truth drawn with Q + dQ, it is larger by ((k - t), dQ (k - t)).
+
+    The prior is the law of T u, with u independent fields of covariances
+    Q_f (`independent`, from `ocean_prior` or `grace_experiment`: T is its
+    `map`). A change dQ_f of the covariance of field f, with kappa_f the
+    part of T* (k - t) in that field, changes the variance by (kappa_f, dQ_f
+    kappa_f), which is at most ||dQ_f|| ||kappa_f||^2 in the operator norm
+    of dQ_f, and so too in its Hilbert-Schmidt norm, which is larger. As a
+    fraction of the variance s^2 that the estimate states, and of the size
+    of Q_f in the same norm:
+
+        |change of variance| / s^2 <= (||dQ_f|| / ||Q_f||) F_f ,
+        F_f = ||Q_f|| ||kappa_f||^2 / s^2 .
+
+    The table gives, for each quantity: the stated std s, from the
+    variances `stated`, or the std of v if they are omitted; the shares of
+    s^2 that the prior and the noise supply, and their sum less one; then,
+    for each field, its share (kappa_f, Q_f kappa_f) / s^2, which is also
+    the exact change per unit of a relative change of that field's variance
+    at every scale, and F_f in the two norms. For a Bayesian estimate s^2 is
+    the posterior variance and equals v, so the sum less one checks the
+    solves; for an estimate that states the noise's part alone it is the
+    prior's share, the part of the error variance that is not stated.
+
+    The norms are exact, from the spectra of the invariant measures. With
+    `model_hs`, the Hilbert-Schmidt norm of the prior covariance on the
+    model space, the factor of the bound stated on the model space itself,
+    ||Q|| ||k - t||^2 / s^2, is given beside them.
+    """
+    names = independent["names"]
+    measures, fields = independent["measures"], independent["space"]
+    field_labels = [independent["labels"][n] for n in names]
+    model_space, data_space = independent["map"].codomain, noise.domain
+    hs = {n: measures[n].hilbert_schmidt_norm() for n in names}
+    top = {n: float(np.max(measures[n].covariance.eigenvalues)) for n in names}
+
+    rows = []
+    for i, (kernel, weight) in enumerate(zip(kernels, weights)):
+        noise_part = data_space.inner_product(noise.covariance(weight), weight)
+        pulled = independent["map"].adjoint(kernel)
+        norms, parts = [], []
+        for n in names:
+            space = measures[n].domain
+            kappa = fields.projection(n)(pulled)
+            norms.append(space.squared_norm(kappa))
+            parts.append(space.inner_product(measures[n].covariance(kappa), kappa))
+        variance = sum(parts) + noise_part if stated is None else stated[i]
+        rows.append(
+            (
+                variance,
+                noise_part / variance,
+                [
+                    (hs[n] * norm / variance, top[n] * norm / variance, part / variance)
+                    for n, norm, part in zip(names, norms, parts)
+                ],
+                None
+                if model_hs is None
+                else model_hs * model_space.squared_norm(kernel) / variance,
+            )
+        )
+
+    width = 16 + 38 + 12 * (model_hs is not None)
+    lines = [
+        "\n\n" + "=" * 110,
+        f"PRIOR SENSITIVITY: {title}",
+        "A share is a part of the stated variance. 'sum - 1' is the prior's "
+        "and the noise's shares together,\nless one: zero for an estimate "
+        "that states the whole of its error variance under the prior.",
+        "-" * width,
+        f"{'':<16}{'stated std':>12}{'prior':>8}{'noise':>8}{'sum - 1':>10}"
+        + ("" if model_hs is None else f"{'model HS':>12}"),
+        "-" * width,
+    ]
+    for label, (variance, noise_share, parts, written) in zip(labels, rows):
+        inherited = sum(part[2] for part in parts)
+        lines.append(
+            f"{label[:15]:<16}{np.sqrt(variance):>12.3f}{inherited:>8.3f}"
+            f"{noise_share:>8.3f}{inherited + noise_share - 1.0:>10.1e}"
+            + ("" if written is None else f"{written:>12.3e}")
+        )
+    for heading, index in (
+        ("Share of the stated variance from each field's prior", 2),
+        ("Bound factor F, operator norm", 1),
+        ("Bound factor F, Hilbert-Schmidt norm", 0),
+    ):
+        lines += [
+            "",
+            heading,
+            f"{'':<16}" + "".join(f"{name[:15]:>16}" for name in field_labels),
+        ]
+        for label, row in zip(labels, rows):
+            lines.append(
+                f"{label[:15]:<16}"
+                + "".join(f"{part[index]:>16.3e}" for part in row[2])
+            )
+    return "\n".join(lines) + "\n"
+
+
+def prior_sensitivity(
+    error,
+    gain,
+    noise,
+    independent: dict,
+    labels,
+    /,
+    *,
+    title: str,
+    stated=None,
+    model_hs: Optional[float] = None,
+) -> str:
+    """
+    The table of `sensitivity_table` for any linear estimate, from its
+    error operator `error`, E = C A - B on the model space, and its `gain`
+    C, which takes the data to the estimate: for WMB's regional averages,
+    `wmb_error_operator` and WMB's averaging of the data. `stated` are the
+    variances the estimate states, if it states any. Costs an adjoint
+    action of each operator for each quantity.
+    """
+    units = [error.codomain.basis_vector(i) for i in range(error.codomain.dim)]
+    return sensitivity_table(
+        [error.adjoint(unit) for unit in units],
+        [gain.adjoint(unit) for unit in units],
+        noise,
+        independent,
+        labels,
+        title=title,
+        stated=stated,
+        model_hs=model_hs,
+    )
+
+
+def posterior_sensitivity(
+    target,
+    inversion,
+    independent: dict,
+    labels,
+    /,
+    *,
+    title: str,
+    model_hs: Optional[float] = None,
+) -> str:
+    """
+    The table of `sensitivity_table` for the posterior expectation of the
+    quantities `target` (B) as their estimate: C = B K, with K the Kalman
+    operator of `inversion`, and E = B (K A - 1). The stated variances are
+    the posterior's, computed as the prior's less the data's reduction of
+    them. Costs one solve of the normal equations for each quantity, which
+    gives both K* B* e and the posterior variance.
+    """
+    problem = inversion.forward_problem
+    forward, prior = problem.forward_operator, inversion.prior
+    model_space, data_space = forward.domain, forward.codomain
+    gain = target @ inversion.kalman_operator
+    kernels, weights, stated = [], [], []
+    for i in range(target.codomain.dim):
+        unit = target.codomain.basis_vector(i)
+        representer = target.adjoint(unit)
+        weight = gain.adjoint(unit)
+        image = prior.covariance(representer)
+        kernels.append(model_space.subtract(forward.adjoint(weight), representer))
+        weights.append(weight)
+        stated.append(
+            model_space.inner_product(image, representer)
+            - data_space.inner_product(forward(image), weight)
+        )
+    return sensitivity_table(
+        kernels,
+        weights,
+        problem.error_measure,
+        independent,
+        labels,
+        title=title,
+        stated=stated,
+        model_hs=model_hs,
+    )
+
+
+def ocean_prior_sensitivity(
+    physics: OceanPhysics,
+    inversion,
+    calib: dict,
+    region: str,
+    /,
+    *,
+    case: str = "",
+    sizes: bool = True,
+) -> str:
+    """The tables of `posterior_sensitivity` for the quantities of the ocean
+    experiments: the GMSL change, its barystatic and steric parts, and the
+    three parts of the mean sea level change of `region`; and, with `sizes`,
+    the table of `prior_perturbation_sizes`. `case` heads the tables. Empty for a prior
+    that is not built from independent fields."""
+    independent = calib["independent"]
+    if independent is None:
+        return ""
+    mm = physics.scale_mm
+    head = f"{case}: " if case else ""
+    targets = (
+        ("GMSL change (mm)", mm * physics.setup.gmsl(physics.fingerprint), ["GMSLR"]),
+        (
+            "barystatic and steric GMSL change (mm)",
+            mm * physics.setup.gmsl_split,
+            ["Barystatic", "Steric"],
+        ),
+        (
+            f"parts of the {region} mean sea level change (mm)",
+            physics.regional_decomposition(region),
+            ["SSLC", "DMSLC", "BMSLC"],
+        ),
+    )
+    text = "".join(
+        posterior_sensitivity(
+            target, inversion, independent, labels, title=head + title
+        )
+        for title, target, labels in targets
+    )
+    return text + (prior_perturbation_sizes(independent) if sizes else "")
+
+
+def prior_perturbation_sizes(independent: dict) -> str:
+    """
+    The sizes ||dQ_f|| / ||Q_f||, in the operator and the Hilbert-Schmidt
+    norms, of some changes of one field's prior, to set against the factors
+    of `sensitivity_table`: the pointwise std 25 per cent larger, the scale
+    longer and shorter by a factor 1.5, and the order higher by a half, the
+    last three at the same pointwise std. Empty for a prior whose spectra
+    are not stated as (1 + s^2 k)^-t.
+    """
+    spectra = independent.get("spectra")
+    if not spectra:
+        return ""
+    cases = (
+        ("std x1.25", 1.0, 0.0, 1.25),
+        ("scale x1.5", 1.5, 0.0, 1.0),
+        ("scale /1.5", 1.0 / 1.5, 0.0, 1.0),
+        ("order +0.5", 1.0, 0.5, 1.0),
+    )
+    lines = [
+        "\n\n" + "=" * 110,
+        "PRIOR SENSITIVITY: the size ||dQ|| / ||Q|| of changes of one field's "
+        "prior (operator norm, Hilbert-Schmidt norm)",
+        "-" * (16 + 20 * len(cases)),
+        f"{'':<16}" + "".join(f"{name:>20}" for name, *_ in cases),
+        "-" * (16 + 20 * len(cases)),
+    ]
+    for n in independent["names"]:
+        measure = independent["measures"][n]
+        space = measure.domain
+        scale, order = spectra[n]
+        base = measure.covariance.eigenvalues
+        k = space.laplacian_eigenvalues
+        # A covariance's eigenvalues are relative to the space's own inner
+        # product; the pointwise variance sums them with its weight taken out.
+        weight = (1.0 + space.length_scale**2 * k) ** (-space.order)
+
+        def spectrum(scale_, order_, amplitude):
+            raw = (1.0 + scale_**2 * k) ** (-order_) / weight
+            return raw * amplitude**2 * np.sum(base * weight) / np.sum(raw * weight)
+
+        if not np.allclose(spectrum(scale, order, 1.0), base, rtol=1.0e-8):
+            raise ValueError(f"The stated spectrum of {n} is not its measure's.")
+        line = f"{independent['labels'][n][:15]:<16}"
+        for _, scale_factor, order_step, amplitude in cases:
+            change = (
+                spectrum(scale * scale_factor, order + order_step, amplitude) - base
+            )
+            line += (
+                f"{np.max(np.abs(change)) / np.max(base):>11.2f}"
+                f"{np.linalg.norm(change) / np.linalg.norm(base):>9.2f}"
+            )
+        lines.append(line)
+    return "\n".join(lines) + "\n"
 
 
 def correlation(covariance: np.ndarray) -> float:

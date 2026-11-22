@@ -56,8 +56,13 @@ Outputs, in output_plots_altimetry_inversion/ at 300 dpi:
   component's support.
 - regional_corner.png (--plot-regions): the Tasman Sea decomposition, whose
   boundary is then drawn on the maps.
+- --prior-sensitivity adds to the metrics the tables of
+  `common.ocean_prior_sensitivity`: for the GMSL change, its split and the
+  regional decomposition, the share of each posterior variance that the
+  prior of each independent field supplies, and the factors that bound its
+  change under a change of that prior.
 
---all selects every plot. The defaults are the paper's resolution;
+--all selects every plot and the tables. The defaults are the paper's resolution;
 `FAST=1 ./run_all.sh altimetry_inversion` runs at lmax 64 with the points 8
 degrees apart.
 """
@@ -111,6 +116,13 @@ def parse_arguments() -> argparse.Namespace:
         help="Split the GMSL change into barystatic and steric parts.",
     )
     parser.add_argument(
+        "--prior-sensitivity",
+        action="store_true",
+        help="The sensitivity of the posterior variances of the quantities "
+        "above to the prior of each field (`common.prior_sensitivity`); one "
+        "more solve for each quantity.",
+    )
+    parser.add_argument(
         "--std-samples",
         type=int,
         default=0,
@@ -125,7 +137,7 @@ def parse_arguments() -> argparse.Namespace:
     args = parser.parse_args()
     if args.all:
         args.plot_pdfs = args.plot_maps = args.plot_regions = True
-        args.plot_gmsl_split = True
+        args.plot_gmsl_split = args.prior_sensitivity = True
     return args
 
 
@@ -390,7 +402,7 @@ def main():
         )
 
     print("\nSolving for the posterior expectation...")
-    posterior, qoi_posterior, _ = common.solve_posterior(
+    posterior, qoi_posterior, qoi_inversion = common.solve_posterior(
         inversion,
         data,
         preconditioner,
@@ -427,6 +439,13 @@ def main():
     if args.plot_regions:
         output["regional_corner.png"] = regional_decomposition(
             physics, prior, qoi_posterior, model, common.jobs(args, 3), rng
+        )
+
+    if args.prior_sensitivity:
+        print("\nPrior sensitivity, field by field...")
+        common.write_metrics(
+            METRICS_FILE,
+            common.ocean_prior_sensitivity(physics, qoi_inversion, calib, OCEAN_REGION),
         )
 
     if output:

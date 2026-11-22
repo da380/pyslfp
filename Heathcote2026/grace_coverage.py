@@ -6,7 +6,8 @@ Each estimator of a regional average of the total load comes with a
 standard deviation: WMB's is the noise it propagates, and the Bayesian
 one's is the posterior's. This script asks how the errors actually made
 compare with those statements, as distributions, when the true load is not
-a sample of the prior.
+a sample of the prior. With --prior-truths it is one: the reference case,
+in which the Bayesian statements are right by construction.
 
 The experiment is that of `grace_inversion.py` with --load-prior model: one
 unknown, the direct load, whose prior is that which the fields of the ocean
@@ -152,6 +153,26 @@ def parse_arguments() -> argparse.Namespace:
         "omitted.",
     )
     parser.add_argument(
+        "--truth-mean",
+        choices=("kept", "ice-removed", "removed"),
+        default="kept",
+        help="A diagnostic of a prior of zero mean against loads that have "
+        "one: take from each true load the mean over the true loads of the "
+        "land ice (ice-removed) or of the whole load (removed). The errors "
+        "are then those of a prior whose mean is that of the truths, with "
+        "the stated standard deviations unchanged.",
+    )
+    parser.add_argument(
+        "--prior-truths",
+        type=int,
+        default=0,
+        metavar="N",
+        help="The reference case: N true loads drawn from the prior, in place "
+        "of those of the Earth System Model. The Bayesian estimate's ratios "
+        "are then standard normal by construction, and WMB's show what its "
+        "stated standard deviation leaves out under the prior.",
+    )
+    parser.add_argument(
         "--noise-draws",
         type=int,
         default=50,
@@ -165,14 +186,16 @@ def parse_arguments() -> argparse.Namespace:
     return args
 
 
-def true_loads(state, years, ocean="O", share=1.0):
+def true_loads(state, years, ocean="O", share=1.0, mean="kept"):
     """The direct loads of the year-on-year changes of the Earth System
     Model: the water and the ice on the land, and the ocean less its mean
     over the ocean, which moves mass about the ocean without changing its
     total. The ocean's part is the share `share` of the component `ocean`:
     O, the ocean's load, or AOe07, the error of the atmosphere and ocean
-    models that are removed from GRACE's data, over the ocean. Returns
-    (labels, loads)."""
+    models that are removed from GRACE's data, over the ocean. With `mean`
+    "ice-removed" the mean over the changes of the land ice is taken from
+    each, and with "removed" the mean of the whole load. Returns (labels,
+    loads)."""
     model = state.model
     sea = state.ocean_function
     land = model.constant_grid(1.0) - sea
@@ -181,6 +204,11 @@ def true_loads(state, years, ocean="O", share=1.0):
         labels, components[name] = esm_loads.load_changes(
             model, name, years=years, version=3
         )
+    if mean == "ice-removed":
+        ice_mean = sum(components["I"][1:], components["I"][0]) * (
+            1.0 / len(components["I"])
+        )
+        components["I"] = [ice - ice_mean for ice in components["I"]]
     loads = []
     for water, ice, wet in zip(*(components[name] for name in ("H", "I", ocean))):
         ocean_mean = model.integrate(sea * wet) / model.integrate(sea)
@@ -188,6 +216,9 @@ def true_loads(state, years, ocean="O", share=1.0):
             land * (water + ice)
             + share * sea * (wet - ocean_mean * model.constant_grid(1.0))
         )
+    if mean == "removed":
+        load_mean = sum(loads[1:], loads[0]) * (1.0 / len(loads))
+        loads = [load - load_mean for load in loads]
     return labels, loads
 
 
@@ -334,12 +365,19 @@ def main():
     wmb = common.wmb_method(state, args)
     wmb_load = wmb.potential_coefficient_to_load_operator(load_space)
 
-    print("Reading the loads of the ESA Earth System Model, version 3.0...")
-    _, _, ocean, share = common.OCEAN_CASES[args.ocean_case]
-    years = args.truth_years or sorted(
-        set.intersection(*(set(esm_loads.available(c, 3)) for c in ("H", "I", ocean)))
-    )
-    labels, loads = true_loads(state, years, ocean, share)
+    if args.prior_truths > 0:
+        print(f"Drawing {args.prior_truths} loads from the prior...")
+        labels = [f"draw {i + 1}" for i in range(args.prior_truths)]
+        loads = [prior.sample(rng=rng) for _ in labels]
+    else:
+        print("Reading the loads of the ESA Earth System Model, version 3.0...")
+        _, _, ocean, share = common.OCEAN_CASES[args.ocean_case]
+        years = args.truth_years or sorted(
+            set.intersection(
+                *(set(esm_loads.available(c, 3)) for c in ("H", "I", ocean))
+            )
+        )
+        labels, loads = true_loads(state, years, ocean, share, args.truth_mean)
     totals = [total_load(zeta) for zeta in loads]
     clean_data = [forward(zeta) for zeta in loads]
 
@@ -418,11 +456,24 @@ def main():
     width = 24 + 12 * len(columns)
     text = (
         "The GRACE estimators' errors against their stated standard deviations\n"
-        f"{len(labels)} loads of the ESA Earth System Model, version 3.0 "
-        f"({labels[0]} to {labels[-1]}; the ocean's part "
+        + (
+            f"{len(labels)} loads drawn from the prior (the ocean's part "
+            if args.prior_truths > 0
+            else f"{len(labels)} loads of the ESA Earth System Model, version 3.0 "
+            f"({labels[0]} to {labels[-1]}; the ocean's part "
+        )
         + {"removed": "removed", "partly": "a quarter left", "full": "in full"}[
             args.ocean_case
         ]
+        + (
+            ""
+            if args.prior_truths > 0
+            else {
+                "kept": "",
+                "ice-removed": "; less the mean of the land ice over the loads",
+                "removed": "; less the mean over the loads",
+            }[args.truth_mean]
+        )
         + f"), {args.noise_draws} draws of the noise "
         f"for each, data to degree {args.obs_degree},\n"
         f"{len(names)} regions, their masks "

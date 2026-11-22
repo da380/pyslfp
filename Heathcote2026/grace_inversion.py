@@ -31,8 +31,8 @@ The prior, noise and preconditioner come in two forms
 The solves for the posterior expectation stop at a relative residual of 0.01
 times the ratio of the noise's pointwise standard deviation to the signal's.
 Everything computed from the posterior covariance (the densities and tables
-of the quantities of interest, the estimator kernels and the covariance
-maps) goes through solves at --qoi-rtol instead, with the same
+of the quantities of interest, the prior-sensitivity tables and the
+covariance maps) goes through solves at --qoi-rtol instead, with the same
 preconditioner: a posterior variance is the prior variance less a correction
 computed through the solves, so its relative error is about the tolerance
 divided by the ratio of the posterior variance to the prior, and the data
@@ -55,13 +55,15 @@ option):
 - --plot-target-degree: grace_degree_{l}_corner.png, the posterior of the
   degree-l coefficients; a table of their KL divergence, total and
   generalised variances and the variance reduction per coefficient.
-- --prior-sensitivity: the estimator kernels, the representers of each
-  estimate as a functional of the true load in the absence of noise, against
-  the target kernels. estimator_kernels_regions_all.png shows them per
-  region for both methods, estimator_kernels_deg{l}_all.png per degree-l
-  coefficient for the Bayesian estimate, and estimator_kernel_ratios.png the
-  relative kernel errors ||k - t|| / ||t|| in the load space's norm; two
-  tables of the norms.
+- --prior-sensitivity, with --load-prior model: the tables of
+  `common.posterior_sensitivity` for the regional averages and the degree-l
+  coefficients. The prior is built from independent fields; for each
+  quantity and field the tables give the share of the posterior variance
+  that the field's prior supplies, and the factors, in the operator and the
+  Hilbert-Schmidt norms, that bound the change of the variance of the
+  estimate's error under a change of that prior, beside the noise's share.
+  Then the table of `common.prior_perturbation_sizes`. --paper-bound adds
+  the factor of the bound stated on the load space.
 - --plot-maps: grace_posterior_maps.png, the true total load, WMB's
   estimate, the posterior mean and, with --std-samples, the pointwise
   posterior standard deviation of the total load, estimated from that many
@@ -124,7 +126,18 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--prior-sensitivity",
         action="store_true",
-        help="Estimator kernels of the regional averages and the target degree.",
+        help="With --load-prior model: the sensitivity of the posterior "
+        "variances of the regional averages and the target degree's "
+        "coefficients to the prior of each field "
+        "(`common.posterior_sensitivity`).",
+    )
+    parser.add_argument(
+        "--paper-bound",
+        action="store_true",
+        help="With --prior-sensitivity and --load-prior model: beside the "
+        "factors of each field, that of the bound stated on the load space "
+        "itself, with the Hilbert-Schmidt norm of the load's prior covariance; "
+        "the norm is estimated with random probes to 2 per cent.",
     )
     parser.add_argument(
         "--plot-maps", action="store_true", help="Load and covariance maps."
@@ -224,157 +237,6 @@ def degree_coefficients(
         labels=[label for _, label in components],
     )
     return table, fig
-
-
-# ================================================================ #
-#                         Estimator kernels                        #
-# ================================================================ #
-
-
-def kernel_grid(state, rows, titles):
-    """Kernel maps, one row per quantity and one column per kernel. `rows`
-    holds (row label, panels), each panel a (field, colour limit, colour bar
-    label)."""
-    fig, axes = sl.subplots(
-        len(rows),
-        len(titles),
-        figsize=(24, 5.5 * len(rows)),
-        gridspec_kw={"hspace": 0.15, "wspace": 0.1},
-        squeeze=False,
-    )
-    for i, (_, panels) in enumerate(rows):
-        for j, (field, limit, label) in enumerate(panels):
-            _, image = sl.plot(
-                field,
-                ax=axes[i, j],
-                cmap="seismic",
-                colorbar=True,
-                symmetric=True,
-                vmin=-limit,
-                vmax=limit,
-                colorbar_kwargs=COLORBAR,
-                gridlines_kwargs=GRIDLINES,
-            )
-            image.colorbar.set_label(label, fontsize=14)
-            draw_region_boundaries(state, axes[i, j], common.GRACE_REGIONS)
-    figures.label_rows(axes, [row_label for row_label, _ in rows])
-    figures.label_columns(axes, titles)
-    return fig
-
-
-def representers(index, *operators):
-    """The representers in the load space of one component of each operator."""
-    unit = operators[0].codomain.basis_vector(index)
-    return [operator.adjoint(unit) for operator in operators]
-
-
-def estimator_kernels(
-    state,
-    names,
-    degree,
-    components,
-    resolution,
-    wmb_error,
-    total_average,
-    coefficients,
-):
-    """
-    The estimator kernels: an estimate without noise is a functional of the
-    true load, with representer k, to set against the representer t of the
-    quantity it estimates. For the Bayesian estimate of B zeta, k - t is the
-    representer of B (K A - I), K the Kalman operator and A the forward
-    operator; for WMB's, of C A - B, C WMB's averaging of the data. The
-    representers and norms are those of the load space; the maps are scaled
-    by the target's largest absolute value.
-
-    Returns the two tables, the two kernel figures and the ratio figure.
-    """
-    load_space = resolution.domain
-    bayes_error = total_average @ resolution
-
-    lines = [
-        "\n\n" + "=" * 115 + "\n",
-        "REGIONAL ESTIMATOR KERNEL METRICS (PRIOR-FREE COMPARISON)\n",
-        "-" * 115 + "\n",
-        f"{'Region':<16} | {'Target Norm':<15} | {'Bayes Err Norm':<15} | "
-        f"{'Bayes Ratio':<15} | {'WMB Err Norm':<15} | {'WMB Ratio':<15}\n",
-        "-" * 115 + "\n",
-    ]
-    region_ratios, region_maps = [], []
-    for i, name in enumerate(names):
-        target, bayes, wmb = representers(i, total_average, bayes_error, wmb_error)
-        target_norm, bayes_norm, wmb_norm = (
-            load_space.norm(x) for x in (target, bayes, wmb)
-        )
-        bayes_ratio, wmb_ratio = bayes_norm / target_norm, wmb_norm / target_norm
-        lines.append(
-            f"{name:<16} | {target_norm:<15.4e} | {bayes_norm:<15.4e} | "
-            f"{bayes_ratio:<15.4f} | {wmb_norm:<15.4e} | {wmb_ratio:<15.4f}\n"
-        )
-        region_ratios.append((name, bayes_ratio, wmb_ratio))
-        scale = peak(target)
-        bayes_pct, wmb_pct = bayes * (100.0 / scale), wmb * (100.0 / scale)
-        limit = max(peak(bayes_pct), peak(wmb_pct))
-        region_maps.append(
-            (
-                name,
-                [
-                    (target / scale, 1.0, "Relative Amplitude"),
-                    (bayes_pct, limit, "Relative Error (%)"),
-                    (wmb_pct, limit, "Relative Error (%)"),
-                ],
-            )
-        )
-
-    degree_error = coefficients @ resolution
-    lines += [
-        "\n\n" + "=" * 80 + "\n",
-        f"DEGREE-{degree} ESTIMATOR KERNEL METRICS (BAYESIAN ONLY)\n",
-        "-" * 80 + "\n",
-        f"{'Component':<16} | {'Target Norm':<15} | {'Bayes Err Norm':<15} | "
-        f"{'Bayes Ratio':<15}\n",
-        "-" * 80 + "\n",
-    ]
-    degree_ratios, degree_maps = [], []
-    for i, (name, _) in enumerate(components):
-        target, bayes = representers(i, coefficients, degree_error)
-        target_norm, bayes_norm = load_space.norm(target), load_space.norm(bayes)
-        lines.append(
-            f"{name:<16} | {target_norm:<15.4e} | {bayes_norm:<15.4e} | "
-            f"{bayes_norm / target_norm:<15.4f}\n"
-        )
-        degree_ratios.append((name, bayes_norm / target_norm))
-        scale = peak(target)
-        bayes_pct = bayes * (100.0 / scale)
-        degree_maps.append(
-            (
-                f"Component {name}",
-                [
-                    (target / scale, 1.0, "Relative Amplitude"),
-                    ((target + bayes) / scale, 1.0, "Relative Amplitude"),
-                    (bayes_pct, peak(bayes_pct), "Relative Error (%)"),
-                ],
-            )
-        )
-
-    kernel_figures = {
-        "estimator_kernels_regions_all.png": kernel_grid(
-            state,
-            region_maps,
-            ["Target Kernel", "Bayesian Kernel Error", "WMB Kernel Error"],
-        ),
-        f"estimator_kernels_deg{degree}_all.png": kernel_grid(
-            state,
-            degree_maps,
-            ["Target Kernel", "Bayesian Kernel", "Kernel Error"],
-        ),
-        "estimator_kernel_ratios.png": figures.plot_kernel_error_ratios(
-            region_ratios,
-            degree_rows=degree_ratios,
-            degree_label=f"degree {degree} (Bayesian only)",
-        ),
-    }
-    return "".join(lines), kernel_figures
 
 
 # ================================================================ #
@@ -555,23 +417,55 @@ def main():
         )
         metrics.append(table)
 
-    if args.prior_sensitivity:
-        print("Estimator kernels...")
-        resolution = qoi_inversion.kalman_operator @ forward - (
-            inf.LinearOperator.identity(load_space)
+    independent = noise_info.get("independent")
+    if args.prior_sensitivity and independent is None:
+        print("--prior-sensitivity needs --load-prior model; skipped.")
+    elif args.prior_sensitivity:
+        print("Prior sensitivity, field by field...")
+        model_hs = None
+        if args.paper_bound:
+            # A generator of its own, so that the draws that follow do not
+            # depend on the option.
+            model_hs = prior.hilbert_schmidt_norm(
+                method="stochastic",
+                rtol=0.02,
+                rng=np.random.default_rng(None if args.seed is None else args.seed + 1),
+            )
+        for title, target, labels in (
+            ("regional averages of the total load (mm EWT)", total_average, names),
+            (
+                f"degree-{degree} coefficients of the direct load (mm EWT)",
+                coefficients,
+                [name for name, _ in components],
+            ),
+        ):
+            metrics.append(
+                common.posterior_sensitivity(
+                    target,
+                    qoi_inversion,
+                    independent,
+                    labels,
+                    title=title,
+                    model_hs=model_hs,
+                )
+            )
+        # WMB's estimate of the same averages, in the same terms. It states
+        # no variance for its leakage, so the shares are of the whole of its
+        # error variance under the prior.
+        metrics.append(
+            common.prior_sensitivity(
+                common.wmb_error_operator(
+                    physics, scale_mm * average, wmb_average, args
+                ),
+                wmb_average,
+                noise,
+                independent,
+                names,
+                title="WMB's regional averages of the total load (mm EWT); "
+                "the std is that of its error under the prior",
+            )
         )
-        table, kernel_figures = estimator_kernels(
-            state,
-            names,
-            degree,
-            components,
-            resolution,
-            common.wmb_error_operator(physics, scale_mm * average, wmb_average, args),
-            total_average,
-            coefficients,
-        )
-        metrics.append(table)
-        output.update(kernel_figures)
+        metrics.append(common.prior_perturbation_sizes(independent))
 
     if metrics:
         text = "".join(metrics)

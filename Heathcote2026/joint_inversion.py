@@ -42,7 +42,8 @@ The three posteriors are compared with the prior and with each other on
 Outputs, in output_plots_joint_inversion/ at 300 dpi:
 
 - joint_metrics.txt: the variance reductions and KL divergences of each
-  case, with the checks on the truth;
+  case, with the checks on the truth; with --prior-sensitivity, the tables
+  of `common.ocean_prior_sensitivity` for each case;
 - gmslr_pdf.png;
 - gmslr_split_corner_{altimetry,grace,joint}.png, gmslr_split_ellipses.png;
 - posterior_maps_joint.png, and posterior_maps_{altimetry,grace}.png with
@@ -127,6 +128,14 @@ def parse_arguments() -> argparse.Namespace:
         help="The barystatic/steric split of the GMSL change.",
     )
     parser.add_argument(
+        "--prior-sensitivity",
+        action="store_true",
+        help="The sensitivity of the posterior variances of the GMSL change, "
+        "its split and the regional decomposition to the prior of each "
+        "field, for each case (`common.prior_sensitivity`); one more solve "
+        "for each quantity and case.",
+    )
+    parser.add_argument(
         "--std-samples",
         type=int,
         default=0,
@@ -152,7 +161,7 @@ def parse_arguments() -> argparse.Namespace:
     args = parser.parse_args()
     if args.all:
         args.plot_pdfs = args.plot_maps = args.plot_regions = True
-        args.plot_gmsl_split = True
+        args.plot_gmsl_split = args.prior_sensitivity = True
     if args.map_all_cases:
         args.plot_maps = True
     return args
@@ -541,7 +550,8 @@ def main():
 
     altimetry = physics.altimetry
     grace = physics.grace(args)
-    joint = inf.ColumnLinearOperator([altimetry, grace])
+    # The column of the two, with the sea level equation solved once.
+    joint = physics.joint(args)
     # The error of the GIA correction is one model's error in both data
     # sets, so in the joint problem it is correlated between them. The
     # surrogate preconditioner does not see it; the blocks correct for it.
@@ -603,7 +613,7 @@ def main():
         args.alt_noise_std_mm / common.sea_level_std_mm(args),
         grace_info["std_factor"],
     )
-    posteriors, qoi_posteriors = {}, {}
+    posteriors, qoi_posteriors, qoi_inversions = {}, {}, {}
     for case, (name, _, _) in CASES.items():
         print(f" -> Solving {name}...")
         inversion = inf.LinearGaussianInversion(problems[case], prior)
@@ -631,8 +641,10 @@ def main():
                 noise,
                 max_jobs=common.jobs(args),
             )
-        posteriors[case], qoi_posteriors[case], _ = common.solve_posterior(
-            inversion, data[case], preconditioner, rtol=rtol, qoi_rtol=args.qoi_rtol
+        posteriors[case], qoi_posteriors[case], qoi_inversions[case] = (
+            common.solve_posterior(
+                inversion, data[case], preconditioner, rtol=rtol, qoi_rtol=args.qoi_rtol
+            )
         )
 
     # ------------------ Diagnostics ------------------
@@ -657,6 +669,21 @@ def main():
         figs |= regional_decomposition(
             physics, prior, qoi_posteriors, true_model, args, rng
         )
+
+    if args.prior_sensitivity:
+        print("\nPrior sensitivity, field by field...")
+        for case, (name, _, _) in CASES.items():
+            common.write_metrics(
+                METRICS_FILE,
+                common.ocean_prior_sensitivity(
+                    physics,
+                    qoi_inversions[case],
+                    calib,
+                    OCEAN_REGION,
+                    case=name,
+                    sizes=case == list(CASES)[-1],
+                ),
+            )
 
     if figs:
         print(f"\nSaving {len(figs)} plots to '{OUTPUT_DIR}/'...")

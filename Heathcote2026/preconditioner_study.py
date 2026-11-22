@@ -63,6 +63,33 @@ The preconditioners, by name (--variants):
   For GRACE's data alone the preconditioner is then the inverse of the
   normal matrix but for the low-rank parts of the noise; with the altimetry
   it leaves out only the coupling of the two sets of data.
+- wmb-block, reduced-<n>, wmb-sle-<n>, the last two with any of the
+  suffixes -taper, -smooth and -fields: as exact-low-rank, with GRACE's
+  block built more cheaply (`Problem.grace_signal`). wmb-block: WMB's
+  physics, the load Love numbers and no sea level equation, at the
+  problem's degree and with the true prior. reduced-<n>: the true physics,
+  sea level equation included, on a model of degree n, given the problem's
+  loads truncated at that degree; the coefficients above n have the noise
+  alone. wmb-sle-<n>: WMB's physics at the problem's degree plus what the
+  sea level equation adds to it on the model of degree n. wmb-sl-<n>: the
+  model of degree n gives the sea level change alone, and its ocean load is
+  formed on the problem's own ocean function, so that it reaches every
+  degree of the data. -taper: the
+  loads given to the model of degree n fall smoothly to zero towards n.
+  -smooth: that model's ocean function is the problem's, band-limited, and
+  not the sharp one of its own coarse grid. -fields: the fields are
+  truncated before they are masked, and not the loads after. The low-rank
+  parts of the noise are corrected for as in exact-low-rank.
+- exact-block: exact-low-rank by the same route as those, so that
+  --block-cache keeps it.
+- model-<n>: as those, with GRACE's block built wholly on a model of degree
+  n: its own grid, masks, loads and sea level equation, and the prior's
+  independent fields truncated at n. No operation is at the problem's
+  degree. At n the problem's degree it is the exact block.
+- <any local, exact or block variant>+vecchia-<k>: the altimetry's part is
+  not the tapered covariance but the sparse inverse of `vecchia.py`, each
+  point regressed on its k nearest neighbours among those before it in the
+  maximin order: no cut-off, no taper, positive definite by construction.
 - two-level, two-level-low-rank: the scalable form of both ideas. Each
   field's prior spectrum is split smoothly at about half of
   --surrogate-degree into a long-wavelength part and the rest. The
@@ -77,6 +104,11 @@ The preconditioners, by name (--variants):
 - spectral-<r>: `pygeoinf.SpectralPreconditioner` at rank r on the operator
   itself, which uses no surrogate and costs applications of the full
   operator to build.
+- sketch-<k> or sketch-<k>-<block>: GRACE's block from k applications of
+  the physics of a block above (the exact one if none is named) in place
+  of one a datum: the randomised Nystrom approximation in the metric of
+  the noise (`Problem.sketched_signal`). The cost of the build is k rows
+  of that block.
 
 Output, in output_plots_preconditioner_study/: preconditioner_metrics.txt,
 a table per case.
@@ -84,21 +116,30 @@ a table per case.
 
 import argparse
 import copy
+import hashlib
 import os
 import time
 from typing import Optional
 
 import numpy as np
-from scipy import sparse
+from scipy import linalg, sparse
 
 import pygeoinf as inf
-from pyslfp import set_num_threads
+from pyslfp import EarthState, set_num_threads
+from pyslfp.core import sobolev_load_space
+from pyslfp.core.spaces import underlying_space
+from pyslfp.elastic import FingerPrintOperator
+from pyslfp.models import sea_level_change_to_load_operator
 
 import common
+import recycling
+from vecchia import VecchiaInverse, unit_vectors
 
 OUTPUT_DIR = "output_plots_preconditioner_study"
 METRICS_FILE = os.path.join(OUTPUT_DIR, "preconditioner_metrics.txt")
 TOLERANCES = (1.0e-2, 1.0e-4, 1.0e-6)
+# The most altimetry points on which a variant may form a dense matrix.
+DENSE_ALTIMETRY_LIMIT = 5000
 CASES = ("altimetry", "grace", "joint")
 DEFAULT_VARIANTS = [
     "noise",
@@ -130,6 +171,40 @@ def parse_arguments() -> argparse.Namespace:
         type=int,
         default=40,
         help="Modes kept of the large-scale correlated altimetry noise.",
+    )
+    parser.add_argument(
+        "--seed-directions",
+        type=int,
+        default=0,
+        help="After each variant's solve, the data's solve again with the "
+        "preconditioner corrected by this many random directions "
+        "(`recycling.RecycledSolver.seed`): a randomised low-rank correction "
+        "of the preconditioned operator.",
+    )
+    parser.add_argument(
+        "--seed-power",
+        type=int,
+        default=1,
+        help="With --seed-directions: powers of the preconditioned operator "
+        "applied to the random vectors.",
+    )
+    parser.add_argument(
+        "--block-cache",
+        default=None,
+        metavar="DIRECTORY",
+        help="Keep the signal part of each GRACE block in this directory, "
+        "under a name made from every option that is not listed as leaving "
+        "it unchanged, and read it back if it is there. A change to the "
+        "code is not seen: empty the directory after one.",
+    )
+    parser.add_argument(
+        "--recycle",
+        type=int,
+        default=0,
+        help="After each variant's solve, this many further solves with "
+        "other right-hand sides (`Problem.right_hand_sides`), each reusing "
+        "the search directions of those before it (`recycling.py`), and "
+        "the same solves without reuse, for comparison.",
     )
     parser.add_argument(
         "--legacy-grace-noise",
@@ -190,6 +265,62 @@ def low_pass(space, degree: Optional[int]) -> np.ndarray:
     return np.exp(-((space.degrees / (0.5 * degree)) ** 2))
 
 
+def taper(space, degree: int) -> np.ndarray:
+    """The weight, per component of a sphere space, of a taper that is one
+    to half of `degree` and falls as a squared cosine to zero just above
+    `degree`."""
+    start = 0.5 * degree
+    phase = np.clip((space.degrees - start) / (degree + 1.0 - start), 0.0, 1.0)
+    return np.cos(0.5 * np.pi * phase) ** 2
+
+
+def assemble(operator, n_jobs=None) -> np.ndarray:
+    """The matrix of a self-adjoint operator on a Euclidean data space, one
+    application per datum. Each worker is handed one share of the columns,
+    so that the operator is carried to it once, and workers are used only
+    if the whole assembly is slow (as `common.exact_preconditioner`)."""
+    space = operator.domain
+
+    def columns(indices):
+        return np.array(
+            [
+                space.to_components(operator(space.basis_vector(int(index))))
+                for index in indices
+            ]
+        )
+
+    start = time.perf_counter()
+    columns([0])
+    serial_seconds = (time.perf_counter() - start) * space.dim
+    workers = 1 if n_jobs is None or serial_seconds < 60.0 else n_jobs
+    shares = np.array_split(np.arange(space.dim), workers)
+    matrix = np.vstack(inf.parallel.parallel_map(columns, shares, n_jobs=workers))
+    return 0.5 * (matrix + matrix.T)
+
+
+def images(operator, probes: np.ndarray, n_jobs=None) -> np.ndarray:
+    """The images of the columns of `probes` under an operator on a
+    Euclidean data space, as columns: one application each, shared between
+    workers as in `assemble`."""
+    space = operator.domain
+
+    def columns(indices):
+        return np.array(
+            [
+                space.to_components(operator(space.from_components(probes[:, index])))
+                for index in indices
+            ]
+        )
+
+    count = probes.shape[1]
+    start = time.perf_counter()
+    columns([0])
+    serial_seconds = (time.perf_counter() - start) * count
+    workers = 1 if n_jobs is None or serial_seconds < 60.0 else n_jobs
+    shares = np.array_split(np.arange(count), workers)
+    return np.vstack(inf.parallel.parallel_map(columns, shares, n_jobs=workers)).T
+
+
 def white_load_noise(physics, args, prior, forward, degree: int, rng, samples=30):
     """
     GRACE noise that is white as a load: every coefficient of the load has
@@ -230,13 +361,21 @@ def white_load_noise(physics, args, prior, forward, degree: int, rng, samples=30
     return inf.GaussianMeasure.from_standard_deviations(domain, np.sqrt(variance))
 
 
+class _Inverse:
+    """A `vecchia.VecchiaInverse` with the two methods of
+    `common.SparseSolve`: `apply` the covariance, `solve` its inverse."""
+
+    def __init__(self, approximate):
+        self.apply, self.solve = approximate.forward, approximate.inverse
+
+
 class Problem:
     """One case of the study: its forward operator, noise and data, and what
     a preconditioner may use of them."""
 
     def __init__(self, case, physics, prior, calib, args, rng):
         self.case, self.physics, self.args, self.calib = case, physics, args, calib
-        self.prior, self._cheap, self._short = prior, None, {}
+        self.prior, self._cheap, self._short, self._reduced = prior, None, {}, {}
         stds = calib["derived_stds"]
         parts = {}
         alt_noise, self.alt_local = common.altimetry_noise(
@@ -266,7 +405,7 @@ class Problem:
             self.grace_matrix = None
         use_alt, use_grace = case != "grace", case != "altimetry"
         if case == "joint":
-            self.forward = inf.ColumnLinearOperator([altimetry, grace])
+            self.forward = physics.joint(args)
             noise = inf.GaussianMeasure.from_product(
                 [alt_noise, self.grace_noise], domain=self.forward.codomain
             )
@@ -296,8 +435,38 @@ class Problem:
             self.factors.append(gia.covariance_factor)
 
         problem = inf.LinearForwardProblem(self.forward, error=noise)
+        self.forward_problem = problem
         _, self.data = problem.synthetic_model_and_data(prior, rng=rng)
         self.normal = inf.LinearGaussianInversion(problem, prior).normal_operator
+
+    def right_hand_sides(self, count: int, rng) -> list:
+        """Right-hand sides of the kinds a run solves for after the data's:
+        alternately a new draw of the data, as a posterior sample needs, and
+        A Q B* e for a quantity of interest B, as a row of its posterior
+        covariance needs. The quantities are the barystatic and steric
+        global mean sea level changes and the three parts of the regional
+        mean sea level change. Returns (label, vector) pairs."""
+        setup = self.physics.setup
+        targets = [
+            ("barystatic GMSL", setup.barystatic_gmsl(), 0),
+            ("steric GMSL", setup.steric_gmsl, 0),
+        ]
+        regional = self.physics.regional_decomposition(common.OCEAN_REGION)
+        targets += [(f"regional part {i + 1}", regional, i) for i in range(3)]
+        sides = []
+        for index in range(count):
+            if index % 2 == 0:
+                _, data = self.forward_problem.synthetic_model_and_data(
+                    self.prior, rng=rng
+                )
+                sides.append(("data draw", data))
+            else:
+                label, target, row = targets[(index // 2) % len(targets)]
+                unit = target.codomain.basis_vector(row)
+                sides.append(
+                    (label, self.forward(self.prior.covariance(target.adjoint(unit))))
+                )
+        return sides
 
     def add_grace_noise(self, matrix: np.ndarray) -> None:
         """Adds GRACE's noise covariance to a matrix on its data, in place."""
@@ -330,6 +499,15 @@ class Problem:
         if self._cheap is None:
             physics, args = self.physics, self.args
             setup = physics.setup
+            # A dense matrix on every datum: for small tests alone. The
+            # altimetry points are not bounded in number, and nothing dense
+            # is to be formed on them at scale (`short_noise` is sparse).
+            if self.case != "grace" and len(physics.points) > DENSE_ALTIMETRY_LIMIT:
+                raise ValueError(
+                    f"The cheap variants form a dense matrix on the altimetry "
+                    f"data; refused above {DENSE_ALTIMETRY_LIMIT} points. Use "
+                    "the local variants."
+                )
             parts = []
             if self.case != "grace":
                 parts.append(
@@ -361,8 +539,275 @@ class Problem:
             )
         return self._cheap
 
+    def reduced_model(self, degree: int, smooth: bool):
+        """A model of degree `degree` for the sea level equation's part of
+        GRACE's block: its fingerprint operator on loads, the truncation of
+        the problem's loads to it, the coefficients it predicts and WMB's
+        map on it. With `smooth`, its ocean function is not the sharp one
+        of its own coarse grid but the problem's, truncated at `degree`
+        with a taper: a band-limited function that takes values between
+        nought and one along the coasts."""
+        key = (degree, smooth)
+        if key not in self._reduced:
+            physics, args = self.physics, self.args
+            state = EarthState.from_defaults(lmax=degree)
+            scale = args.load_scale_km * 1000.0 / state.model.parameters.length_scale
+            if smooth:
+                flat = underlying_space(physics.load_space)
+                coarse = underlying_space(
+                    sobolev_load_space(state.model, args.load_order, scale)
+                )
+                # Set before anything reads the state's own, which is made
+                # on first use and kept.
+                state.__dict__["ocean_function"] = coarse.spectral_operator(
+                    taper(coarse, degree)
+                )(flat.degree_transfer_operator(coarse)(physics.state.ocean_function))
+            fingerprint = FingerPrintOperator(
+                state,
+                load_parameters=(args.load_order, scale),
+                response_parameters=(args.load_order + 1.0, scale),
+            )
+            reduced_args = copy.copy(args)
+            reduced_args.obs_degree = min(args.obs_degree, degree)
+            observe = common.grace_coefficients(
+                fingerprint.codomain,
+                state.model,
+                reduced_args.obs_degree,
+                args.grace_convention,
+            )
+            cheap = common.wmb_method(
+                state, reduced_args
+            ).load_to_potential_coefficient_operator(fingerprint.domain)
+            transfer = physics.load_space.degree_transfer_operator(fingerprint.domain)
+            # The sea level change of the model, as a field of its own and
+            # as one of the problem's degree, and the ocean load it makes on
+            # each: on the model's coarse ocean function, and on the
+            # problem's.
+            sea_level = fingerprint.codomain.field_operator("relative_sea_level_change")
+            fine = physics.fingerprint.codomain.field_operator(
+                "relative_sea_level_change"
+            ).codomain
+            ocean_loads = (
+                sea_level,
+                sea_level_change_to_load_operator(
+                    state, sea_level.codomain, fingerprint.domain
+                ),
+                sea_level_change_to_load_operator(
+                    physics.state, fine, physics.load_space
+                )
+                @ sea_level.codomain.degree_transfer_operator(fine),
+            )
+            self._reduced[key] = (fingerprint, transfer, observe, cheap, ocean_loads)
+        return self._reduced[key]
+
+    def grace_signal(self, mode, surrogates, n_jobs, probes=None) -> np.ndarray:
+        """
+        The covariance of GRACE's coefficients under the true prior, with
+        physics that is cheaper than the true one: the whole matrix, one
+        application a datum, or with `probes`, an array (data, k), its
+        product with them alone, k applications. `mode` is
+
+        - ("exact",): the true physics, nothing cheaper;
+
+        - ("wmb",): WMB's physics at the problem's degree, W L, the loads L
+          of the fields taken to the coefficients by the load Love numbers;
+        - ("model", n, flags): everything on a model of degree n, its
+          own masks, loads and sea level equation, with the prior's
+          independent fields truncated at n (`common.ocean_prior` with
+          a reference): O_n F_n L_n Q_n L_n* F_n* O_n*. No operation is
+          at the problem's degree, so the cost of a row does not depend
+          on it. Coefficients above degree n have no signal;
+        - ("reduced", n, flags): the true physics of a model of degree n,
+          sea level equation included, O_n F_n T L: the loads are those of
+          the problem, masks and all, truncated at n by T. Coefficients
+          above degree n have no signal;
+        - ("wmb-sle", n, flags): W L + (O_n F_n - W_n) T L, WMB's physics at
+          the problem's degree plus what the sea level equation adds on the
+          model of degree n;
+        - ("wmb-sl", n, flags): the model of degree n supplies the sea level
+          change alone, a smooth field, and the ocean load it makes is
+          formed on the problem's own ocean function: W (L + D P S_n T L)
+          + (O_n F_n - W_n (1 + D_n S_n)) T L, with S_n the model's sea
+          level change, P its prolongation to the problem's degree, D the
+          ocean load of a sea level change on the problem's ocean function
+          and D_n that on the model's. The ocean load then has its
+          coefficients at every degree of the data, which the coarse ocean
+          function cannot give it; the last term is what the model predicts
+          beyond the loads' own attraction, the rotational part, at its own
+          degrees.
+
+        `flags` is a set of: "taper", the truncated loads fall smoothly to
+        zero towards n; "smooth", the model of degree n has a band-limited
+        ocean function (`reduced_model`); "fields", the fields are
+        truncated before they are masked, on the model's own coarse masks,
+        and not the loads after (the first form tried: the low-degree load
+        then lacks what the masks bring down from the fields' higher
+        degrees).
+        """
+        physics, args = self.physics, self.args
+        setup = physics.setup
+        covariance = self.prior.covariance
+        domain = self.grace_noise.domain
+
+        def matrix_of(operator):
+            # The coefficients are ordered by degree: an operator on fewer
+            # than all of them is on those that lead, and the rest have no
+            # signal.
+            count = operator.domain.dim
+            if probes is None:
+                block = assemble(operator, n_jobs)
+                if count == domain.dim:
+                    return block
+                matrix = np.zeros((domain.dim, domain.dim))
+                matrix[:count, :count] = block
+                return matrix
+            matrix = np.zeros((domain.dim, probes.shape[1]))
+            matrix[:count] = images(operator, probes[:count], n_jobs)
+            return matrix
+
+        if mode[0] == "model":
+            reduced_args = copy.copy(args)
+            reduced_args.lmax = mode[1]
+            reduced_args.obs_degree = min(args.obs_degree, mode[1])
+            model = common.ocean_physics(reduced_args, points=physics.points)
+            reference = {
+                name: measure.covariance.eigenvalues
+                for name, measure in self.calib["independent"]["measures"].items()
+            }
+            prior, _ = common.ocean_prior(
+                model, reduced_args, np.random.default_rng(0), reference=reference
+            )
+            grace = model.grace(reduced_args)
+            return matrix_of(grace @ prior.covariance @ grace.adjoint)
+        wmb = None
+        if mode[0] != "reduced":
+            wmb = (
+                common.wmb_method(
+                    physics.state, args
+                ).load_to_potential_coefficient_operator(physics.load_space)
+                @ setup.load_operator
+            )
+        if mode[0] == "wmb":
+            return matrix_of(wmb @ covariance @ wmb.adjoint)
+        if mode[0] == "exact":
+            grace = physics.grace(args)
+            return matrix_of(grace @ covariance @ grace.adjoint)
+        _, degree, flags = mode
+        if "fields" in flags:
+            surrogate, _ = surrogates.get(degree, "all", None, True)
+            transfers = []
+            for name in setup.names:
+                space = setup.component(name).space
+                target = surrogate.setup.component(name).space
+                transfer = space.degree_transfer_operator(target)
+                if "taper" in flags:
+                    transfer = (
+                        target.spectral_operator(taper(target, degree)) @ transfer
+                    )
+                transfers.append(transfer)
+            transfer = inf.BlockDiagonalLinearOperator(
+                transfers, domain=setup.space, codomain=surrogate.setup.space
+            )
+            reduced_args = copy.copy(args)
+            reduced_args.obs_degree = min(args.obs_degree, degree)
+            full = (
+                common.grace_coefficients(
+                    surrogate.fingerprint.codomain,
+                    surrogate.state.model,
+                    reduced_args.obs_degree,
+                    args.grace_convention,
+                )
+                @ surrogate.fingerprint
+                @ surrogate.setup.load_operator
+                @ transfer
+            )
+            cheap = (
+                common.wmb_method(
+                    surrogate.state, reduced_args
+                ).load_to_potential_coefficient_operator(surrogate.load_space)
+                @ surrogate.setup.load_operator
+                @ transfer
+            )
+        else:
+            fingerprint, transfer, observe, cheap, ocean_loads = self.reduced_model(
+                degree, "smooth" in flags
+            )
+            if "taper" in flags:
+                target = fingerprint.domain
+                transfer = target.spectral_operator(taper(target, degree)) @ transfer
+            loads = transfer @ setup.load_operator
+            if mode[0] == "wmb-sl":
+                sea_level, coarse_load, fine_load = ocean_loads
+                level = sea_level @ fingerprint @ loads
+                wmb_load = common.wmb_method(
+                    physics.state, args
+                ).load_to_potential_coefficient_operator(physics.load_space)
+                count = observe.codomain.dim
+                pad = domain.coordinate_selection(np.arange(count)).adjoint
+                rest = observe @ fingerprint @ loads - cheap @ (
+                    loads + coarse_load @ level
+                )
+                forward = wmb + wmb_load @ fine_load @ level + pad @ rest
+                return matrix_of(forward @ covariance @ forward.adjoint)
+            full = observe @ fingerprint @ loads
+            cheap = cheap @ loads
+        count = full.codomain.dim
+        if mode[0] == "reduced":
+            return matrix_of(full @ covariance @ full.adjoint)
+        pad = domain.coordinate_selection(np.arange(count)).adjoint
+        forward = wmb + pad @ (full - cheap)
+        return matrix_of(forward @ covariance @ forward.adjoint)
+
+    def sketched_signal(self, mode, rank: int, surrogates, n_jobs) -> np.ndarray:
+        """
+        `grace_signal` of a mode from `rank` applications in place of one a
+        datum: the randomised Nystrom approximation (Frangella, Tropp and
+        Udell, 2023) in the metric of GRACE's noise.
+
+        With R = L L^T the noise, the signal in the noise's metric is
+        M = L^-1 S L^-T, whose eigenvalues above one are the directions the
+        data resolve. Its sketch is M G for G white, that is L^-1 S applied
+        to the probes L^-T G: `rank` applications of S. From it comes
+        M ~ U E U^T of that rank, the best the sketch can give, and the
+        signal L U E U^T L^T. What is left out is signal below the noise.
+
+        Returned as a matrix on the data, as `grace_signal` is: GRACE's
+        noise is one already. Nothing needs it formed, the inverse of the
+        sum being L^-T (1 - U E (1 + E)^-1 U^T) L^-1.
+        """
+        dim = self.grace_noise.domain.dim
+        noise = np.zeros((dim, dim))
+        self.add_grace_noise(noise)
+        lower = linalg.cholesky(noise, lower=True)
+        white = np.random.default_rng(0).standard_normal((dim, rank))
+        probes = linalg.solve_triangular(lower, white, lower=True, trans="T")
+        sketch = linalg.solve_triangular(
+            lower,
+            self.grace_signal(mode, surrogates, n_jobs, probes=probes),
+            lower=True,
+        )
+        # The stable form: a small shift makes the core definite to rounding,
+        # and is taken off the eigenvalues after.
+        shift = np.sqrt(dim) * np.finfo(float).eps * np.linalg.norm(sketch, 2)
+        sketch += shift * white
+        core = white.T @ sketch
+        factor = linalg.cholesky(0.5 * (core + core.T), lower=True)
+        basis, singular, _ = np.linalg.svd(
+            linalg.solve_triangular(factor, sketch.T, lower=True).T,
+            full_matrices=False,
+        )
+        half = lower @ (basis * np.sqrt(np.maximum(singular**2 - shift, 0.0)))
+        return half @ half.T
+
     def short_noise(
-        self, split_degree, cutoff_km, n_jobs, grace_split=True, exact_grace=False
+        self,
+        split_degree,
+        cutoff_km,
+        n_jobs,
+        grace_split=True,
+        exact_grace=False,
+        grace_signal=None,
+        vecchia=None,
     ):
         """
         The local noise with the short-wavelength part of the signal added
@@ -377,9 +822,19 @@ class Problem:
         a dense matrix of the size of GRACE's data; without `grace_split`
         it takes the whole of each spectrum. With `exact_grace` it is the
         covariance of the coefficients under the whole prior with the true
-        physics.
+        physics. With `grace_signal`, a pair of a key and a matrix, it is
+        that matrix (`Problem.grace_signal`). With `vecchia`, a number of
+        neighbours, the altimetry's part is not tapered: its inverse is the
+        sparse one of `vecchia.VecchiaInverse`, with no cut-off.
         """
-        key = (split_degree, cutoff_km, grace_split, exact_grace)
+        key = (
+            split_degree,
+            cutoff_km,
+            grace_split,
+            exact_grace,
+            None if grace_signal is None else grace_signal[0],
+            vecchia,
+        )
         if key in self._short:
             return self._short[key]
         physics, args = self.physics, self.args
@@ -399,21 +854,39 @@ class Problem:
             high = space.invariant_measure(
                 spectra[common.ETA] * (1.0 - low_pass(space, split_degree)), unsafe=True
             )
-            rows, columns, distances = space.pairs_within_distance(
-                points, cutoff, with_distances=True
-            )
-            values = space.covariance_function(high, distances) * gaspari_cohn(
-                distances / (0.5 * cutoff)
-            )
             count = len(points)
-            matrix = sparse.csc_matrix((values, (rows, columns)), shape=(count, count))
-            matrix = matrix + sparse.diags(self.alt_local.covariance.diagonals()[0])
-            print(
-                f"    altimetry: {matrix.nnz / count:.0f} entries per point within "
-                f"{cutoff_km:.0f} km",
-                flush=True,
-            )
-            solve = SparseSolve(matrix)
+            if vecchia is None:
+                rows, columns, distances = space.pairs_within_distance(
+                    points, cutoff, with_distances=True
+                )
+                values = space.covariance_function(high, distances) * gaspari_cohn(
+                    distances / (0.5 * cutoff)
+                )
+                matrix = sparse.csc_matrix(
+                    (values, (rows, columns)), shape=(count, count)
+                )
+                matrix = matrix + sparse.diags(self.alt_local.covariance.diagonals()[0])
+                print(
+                    f"    altimetry: {matrix.nnz / count:.0f} entries per point "
+                    f"within {cutoff_km:.0f} km",
+                    flush=True,
+                )
+                solve = SparseSolve(matrix)
+            else:
+                # No taper and no cut-off: each point regressed on its
+                # nearest neighbours among those before it (`vecchia.py`).
+                approximate = VecchiaInverse(
+                    unit_vectors(points),
+                    lambda angle: space.covariance_function(high, space.radius * angle),
+                    self.alt_local.covariance.diagonals()[0],
+                    neighbours=vecchia,
+                )
+                print(
+                    f"    altimetry: {approximate.entries_per_point:.0f} neighbours "
+                    "per point, no cut-off",
+                    flush=True,
+                )
+                solve = _Inverse(approximate)
             domain = self.alt_local.domain
             measures.append(
                 inf.GaussianMeasure(
@@ -457,8 +930,11 @@ class Problem:
             if exact_grace:
                 grace = physics.grace(args)
                 signal = grace @ self.prior.covariance @ grace.adjoint
-            matrix = signal.matrix(form="components", by="rows", n_jobs=n_jobs)
-            matrix = 0.5 * (matrix + matrix.T)
+            if grace_signal is not None:
+                matrix = grace_signal[1].copy()
+            else:
+                matrix = signal.matrix(form="components", by="rows", n_jobs=n_jobs)
+                matrix = 0.5 * (matrix + matrix.T)
             self.add_grace_noise(matrix)
             domain = self.grace_noise.domain
             measures.append(
@@ -588,6 +1064,13 @@ def specification(name: str, args: argparse.Namespace) -> dict:
         "low_rank": False,
         "matched": False,
     }
+    # A suffix asks for the altimetry block to be the nearest-neighbour
+    # sparse inverse, in place of the tapered covariance.
+    neighbours = None
+    if "+vecchia-" in name:
+        name, count = name.rsplit("+vecchia-", 1)
+        neighbours = int(count)
+    spec["vecchia"] = neighbours
     # A prefix asks for the surrogate's prior to be the true one, truncated.
     if name.startswith("matched"):
         spec["matched"] = True
@@ -607,6 +1090,32 @@ def specification(name: str, args: argparse.Namespace) -> dict:
             "low_rank": name != "exact",
             "fingerprint": name == "exact-fingerprint",
         }
+    elif name.startswith("sketch-"):
+        # sketch-<k> or sketch-<k>-<block>: k applications of the block's
+        # physics (the exact one if none is named).
+        _, rank, *inner = name.split("-", 2)
+        inner = specification(inner[0] if inner else "exact-block", args)
+        spec |= {
+            "kind": "local",
+            "low_rank": True,
+            "fingerprint": False,
+            "mode": ("sketch", int(rank), inner["mode"]),
+        }
+    elif name in ("wmb-block", "exact-block") or name.startswith(
+        ("model-", "reduced-", "wmb-sle-", "wmb-sl-")
+    ):
+        stem, flags = name, set()
+        while stem.rsplit("-", 1)[-1] in ("taper", "smooth", "fields"):
+            stem, flag = stem.rsplit("-", 1)
+            flags.add(flag)
+        if stem == "wmb-block":
+            mode = ("wmb",)
+        elif stem == "exact-block":
+            mode = ("exact",)
+        else:
+            kind, degree = stem.rsplit("-", 1)
+            mode = (kind, int(degree), frozenset(flags))
+        spec |= {"kind": "local", "low_rank": True, "fingerprint": False, "mode": mode}
     elif name in ("hybrid", "hybrid-low-rank"):
         spec |= {"kind": "hybrid", "low_rank": name != "hybrid", "alpha": 0.0}
     elif name in ("two-level", "two-level-low-rank"):
@@ -643,6 +1152,63 @@ def specification(name: str, args: argparse.Namespace) -> dict:
     if name.endswith("-alpha-0"):
         spec["alpha"] = 0.0
     return spec
+
+
+# Options that leave the signal part of a GRACE block unchanged.
+_NOT_OF_THE_BLOCK = (
+    "variants",
+    "cases",
+    "recycle",
+    "seed_directions",
+    "seed_power",
+    "max_iterations",
+    "serial_threads",
+    "block_cache",
+    "spacing",
+    "cutoff_km",
+    "seed",
+)
+
+
+def grace_block(mode, problem: Problem, surrogates: Surrogates, args) -> np.ndarray:
+    """`Problem.grace_signal`, kept on disk with --block-cache for the other
+    variants and cases that use the same block. It does not depend on the
+    case."""
+
+    def label(mode):
+        return "-".join(str(part) for part in mode[:2]) + "".join(
+            f"-{flag}" for flag in sorted(mode[2] if len(mode) > 2 else ())
+        )
+
+    sketched = mode[0] == "sketch"
+    name = f"sketch-{mode[1]}-{label(mode[2])}" if sketched else label(mode)
+    path = None
+    if args.block_cache:
+        options = sorted(
+            (key, repr(value))
+            for key, value in vars(args).items()
+            if key not in _NOT_OF_THE_BLOCK
+        )
+        digest = hashlib.sha1(repr(options).encode()).hexdigest()[:12]
+        path = os.path.join(args.block_cache, f"{name}-{digest}.npy")
+        if os.path.exists(path):
+            print(f"    GRACE block read from {path}", flush=True)
+            return np.load(path)
+    start = time.perf_counter()
+    if sketched:
+        matrix = problem.sketched_signal(
+            mode[2], mode[1], surrogates, common.jobs(args)
+        )
+    else:
+        matrix = problem.grace_signal(mode, surrogates, common.jobs(args))
+    print(
+        f"    GRACE block {name} built in {time.perf_counter() - start:.0f} s",
+        flush=True,
+    )
+    if path is not None:
+        os.makedirs(args.block_cache, exist_ok=True)
+        np.save(path, matrix)
+    return matrix
 
 
 def build(spec: dict, problem: Problem, surrogates: Surrogates, args, rng):
@@ -700,11 +1266,19 @@ def build(spec: dict, problem: Problem, surrogates: Surrogates, args, rng):
         return preconditioner
     if spec["kind"] in ("cheap", "local"):
         if spec["kind"] == "local":
+            signal = None
+            if spec.get("mode") is not None and problem.case != "altimetry":
+                signal = (
+                    spec["mode"],
+                    grace_block(spec["mode"], problem, surrogates, args),
+                )
             preconditioner = problem.short_noise(
                 None,
                 args.cutoff_km,
                 common.jobs(args),
                 exact_grace=spec.get("exact", False),
+                grace_signal=signal,
+                vecchia=spec.get("vecchia"),
             ).precision
         else:
             preconditioner = problem.cheap_inverse(common.jobs(args))
@@ -763,6 +1337,55 @@ def solve(problem: Problem, preconditioner, max_iterations: int):
     return counts, elapsed
 
 
+def seeded_solve(problem: Problem, preconditioner, args, rng) -> str:
+    """The iterations of the data's solve with the preconditioner corrected
+    by --seed-directions random directions (`RecycledSolver.seed`)."""
+    solver = recycling.RecycledSolver(problem.normal, preconditioner)
+    start = time.perf_counter()
+    solver.seed(args.seed_directions, power=args.seed_power, rng=rng)
+    built, used = time.perf_counter() - start, solver.applications
+    _, residuals = solver.solve(
+        problem.data,
+        rtol=TOLERANCES[-1],
+        max_iterations=args.max_iterations,
+        recycle=False,
+    )
+    return (
+        f"    seeded with {solver.rank} directions ({used} applications, "
+        f"{built:.0f} s): {recycling.iterations_to(residuals, TOLERANCES)}\n"
+    )
+
+
+def recycled_solves(problem: Problem, preconditioner, args, rng) -> str:
+    """The iterations of a sequence of solves under one preconditioner,
+    each reusing the search directions of those before it, against the same
+    solves without reuse. The first is for the data."""
+    reused = recycling.RecycledSolver(problem.normal, preconditioner)
+    plain = recycling.RecycledSolver(problem.normal, preconditioner)
+    sides = [("data", problem.data)] + problem.right_hand_sides(args.recycle, rng)
+    lines = ""
+    for index, (label, side) in enumerate(sides):
+        kept = reused.rank
+        _, residuals = reused.solve(
+            side, rtol=TOLERANCES[-1], max_iterations=args.max_iterations
+        )
+        with_reuse = recycling.iterations_to(residuals, TOLERANCES)
+        without = with_reuse
+        if index > 0:
+            _, residuals = plain.solve(
+                side,
+                rtol=TOLERANCES[-1],
+                max_iterations=args.max_iterations,
+                recycle=False,
+            )
+            without = recycling.iterations_to(residuals, TOLERANCES)
+        lines += (
+            f"    solve {index + 1:<3}{label:<18}kept {kept:<5}"
+            f"reused {str(with_reuse):<22}not reused {without}\n"
+        )
+    return lines
+
+
 def main():
     args = parse_arguments()
     rng = common.configure(args)
@@ -809,6 +1432,14 @@ def main():
             row += f"{elapsed:>11.1f}\n"
             print("  " + row, end="", flush=True)
             text += row
+            if args.seed_directions > 0:
+                lines = seeded_solve(problem, preconditioner, args, rng)
+                print(lines, end="", flush=True)
+                text += lines
+            if args.recycle > 0:
+                lines = recycled_solves(problem, preconditioner, args, rng)
+                print(lines, end="", flush=True)
+                text += lines
         common.write_metrics(METRICS_FILE, text)
     print(f"\nsaved {METRICS_FILE}")
 

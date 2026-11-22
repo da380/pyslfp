@@ -2,9 +2,8 @@
 Figures shared by the experiments of Heathcote et al. (2026): the style and
 helpers of the maps, single maps with a panel letter, the densities of an
 estimator's error, the grids of model fields and of covariances of the ocean
-inversions, region boundaries, corner plots, the kernel-error summary of the
-GRACE inversion, and the GMSL split ellipses and component variance dots of
-the joint inversion.
+inversions, region boundaries, corner plots, and the GMSL split ellipses and
+component variance dots of the joint inversion.
 """
 
 import numpy as np
@@ -394,109 +393,6 @@ _SUMMARY_RC = {
     "axes.linewidth": 0.7,
     "font.family": "sans-serif",
 }
-_C_BAYES = "#0072B2"  # Okabe-Ito blue
-_C_WMB = "#D55E00"  # Okabe-Ito vermillion
-
-
-def plot_kernel_error_ratios(
-    region_rows,
-    /,
-    *,
-    degree_rows=None,
-    degree_label=None,
-):
-    """
-    Dumbbell chart of relative estimator-kernel errors ||k - t|| / ||t||
-    in the load-space norm: Bayesian (filled) vs WMB (open) per region,
-    with an optional Bayesian-only cluster for single-degree
-    coefficients below a separator. Smaller is better. region_rows is a
-    sequence of (name, bayes_ratio, wmb_ratio); degree_rows of
-    (name, bayes_ratio). Returns the figure.
-    """
-    region_rows = list(region_rows)
-    degree_rows = list(degree_rows) if degree_rows else []
-    n_deg = len(degree_rows)
-    n_total = len(region_rows) + n_deg
-    ys_reg = np.arange(len(region_rows))[::-1] + (n_deg + 1.0 if n_deg else 0.0)
-    ys_deg = np.arange(n_deg)[::-1]
-
-    ratios = [b for _, b, _ in region_rows]
-    ratios += [w for _, _, w in region_rows]
-    ratios += [b for _, b in degree_rows]
-    xmax = max(0.5, 1.12 * max(ratios))
-
-    with mpl.rc_context(_SUMMARY_RC):
-        fig, ax = plt.subplots(
-            figsize=(4.8, 1.0 + 0.30 * (n_total + (1 if n_deg else 0))),
-            layout="constrained",
-        )
-        for y, (_, bayes, wmb) in zip(ys_reg, region_rows):
-            ax.plot([bayes, wmb], [y, y], color="0.6", lw=1.1, zorder=1)
-            ax.plot(bayes, y, "o", ms=5, color=_C_BAYES, zorder=2)
-            ax.plot(
-                wmb,
-                y,
-                "o",
-                ms=5,
-                mec=_C_WMB,
-                mfc="white",
-                mew=1.4,
-                zorder=2,
-            )
-        for y, (_, bayes) in zip(ys_deg, degree_rows):
-            ax.plot(bayes, y, "o", ms=5, color=_C_BAYES, zorder=2)
-        if n_deg:
-            ax.axhline(n_deg, color="0.8", lw=0.7, ls=":")
-            if degree_label:
-                ax.text(
-                    0.98 * xmax,
-                    ys_deg[0] + 0.55,
-                    degree_label,
-                    fontsize=7.5,
-                    color="0.4",
-                    ha="right",
-                )
-        ax.set_yticks(np.concatenate([ys_reg, ys_deg]))
-        ax.set_yticklabels([r[0] for r in region_rows] + [d[0] for d in degree_rows])
-        ax.set_xlim(0.0, xmax)
-        ax.set_ylim(-0.6, ys_reg[0] + 1.05)
-        ax.set_xlabel("Relative estimator-kernel error  $\\|k - t\\|\\, /\\, \\|t\\|$")
-        ax.grid(axis="x", color="0.9", lw=0.6)
-        ax.tick_params(axis="y", length=0)
-        for side in ("top", "right", "left"):
-            ax.spines[side].set_visible(False)
-        ax.annotate(
-            "$\\leftarrow$ better",
-            xy=(0.02 * xmax, ys_reg[0] + 0.62),
-            fontsize=7.5,
-            color="0.4",
-        )
-        handles = [
-            Line2D(
-                [],
-                [],
-                ls="none",
-                marker="o",
-                ms=5,
-                color=_C_BAYES,
-                label="Bayesian",
-            ),
-            Line2D(
-                [],
-                [],
-                ls="none",
-                marker="o",
-                ms=5,
-                mec=_C_WMB,
-                mfc="white",
-                mew=1.4,
-                label="WMB",
-            ),
-        ]
-        ax.legend(handles=handles, loc="upper right", frameon=False)
-    return fig
-
-
 _C_PRIOR = "#888888"
 _C_ALT = "#D55E00"
 _C_GRACE = "#0072B2"

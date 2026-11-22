@@ -3183,8 +3183,9 @@ def gia_correction_error(
         return measure
     altimetry_factor, grace_factor = gia_statistics.correction_error(
         model,
+        # The altimetry's scripts have no options for GRACE's data.
         obs_degree=args.obs_degree if grace else None,
-        convention=args.grace_convention,
+        convention=args.grace_convention if grace else "orthonormal",
         field_space=field_space,
         points=points,
         years=args.gia_years,

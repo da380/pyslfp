@@ -353,6 +353,10 @@ def main() -> None:
     parser.add_argument("command", choices=["build", "check"])
     args = parser.parse_args()
     if args.command == "build":
+        if MODES_FILE.exists():
+            # The reduced file may have been copied without the downloads.
+            print(f"{MODES_FILE} is there already; remove it to build again")
+            return
         for name in [_band_file(band) for band in BANDS] + [EXPECTATION, MAPS]:
             download(name)
         print(f"saved {build()}")

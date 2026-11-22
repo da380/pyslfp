@@ -3103,14 +3103,14 @@ test = ["pytest", "pytest-doctestplus (>=0.7)"]
 
 [[package]]
 name = "pygeoinf"
-version = "2.4.0"
+version = "2.5.0"
 description = "A package for solving geophysical inference and inverse problems"
 optional = false
 python-versions = ">=3.12"
 groups = ["main"]
 files = [
-    {file = "pygeoinf-2.4.0-py3-none-any.whl", hash = "sha256:b79abb4857b2740dcb6690f78c49fd894d8c9a4d84084b106d0243ada2ed6b3d"},
-    {file = "pygeoinf-2.4.0.tar.gz", hash = "sha256:de80b54f99166bc40f685007bbb97e5f83a44a9c25b3d6df03707c762f145bf8"},
+    {file = "pygeoinf-2.5.0-py3-none-any.whl", hash = "sha256:d7aa9e82461022bcdf546e61498610405f1585607fa6927d00b574689d856975"},
+    {file = "pygeoinf-2.5.0.tar.gz", hash = "sha256:cbf925f46b56a61c45d3df540d530ad88805c45928ebea02d9de97e49837cca4"},
 ]
 
 [package.dependencies]
@@ -4758,4 +4758,4 @@ interactive = ["pyqt6"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12"
-content-hash = "1954021644801b03c8d5aa6eaebcb3c5a6de63f122e9086b8221018c85c9369d"
+content-hash = "74e3535d5866730ba568c448e83c2d333e2767c0ae074dd5d67bf842031d23f2"

@@ -239,6 +239,34 @@ degree 180 the spectrum continues by the same law, so the prior does not
 depend on the truncation of the model. $\eta_d$ and $\delta\rho$ are as
 above.
 
+**The ice prior, modulated.** With `--ice-modulation margin`, which
+`run_all.sh` passes, the ice is $h = \gamma u$: $u$ the invariant field just
+described and $\gamma$ a positive function of position, so that the pointwise
+standard deviation of $h$ is $\gamma$ times that of $u$ and its correlation is
+that of $u$ (`common.ice_modulation`). Over the grounded ice of each ice
+sheet
+
+$$\gamma \propto 1 + a p ,$$
+
+with $p$ the nearness of a point to the edge of the grounded ice: the heat
+kernel at the ice prior's own scale $\lambda_i$ applied to the indicator of
+everything that is not grounded ice sheet, which is nought deep in the
+interior and about a half at the edge. $a = 10$ (`--ice-margin-growth`).
+For each sheet $\gamma$ is scaled so that the root mean square of the standard
+deviation over its grounded ice is the sheet's own: 155 mm of equivalent
+water thickness for Greenland and 60 for Antarctica
+(`--ice-greenland-std-mm`, `--ice-antarctica-std-mm`). The floating ice
+takes the interior's value, and $\gamma = 1$ off the ice sheets, where the load
+operator discards the field. The three numbers are from the year-on-year
+changes of the land ice of the ESA Earth System Model, 1995 to 2006: the
+root mean square over the grounded ice of each sheet, and a least-squares
+fit of the profile to the root mean square at each point. The product $\gamma u$
+is truncated to the degrees of the space. The ice is independent of the
+other fields and absent from the constraint on the ocean's mass, so the
+prior is the image of the unmodulated one under $\gamma$ acting on the ice
+alone. `--ice-modulation none` gives the invariant field with the single
+standard deviation above.
+
 **The load of the GRACE experiments.** With `--load-prior model` the
 unknown of the GRACE experiments is still one field, the direct load
 $\zeta$, now in $H^{1/4}$, and it is not divided into its causes. Its prior
@@ -256,6 +284,31 @@ experiments therefore share one model. `--load-prior sobolev` keeps the
 prior of the submitted paper. The covariance maps, which need the load's
 value at a point, use its average over a cap of radius 2 degrees, since
 point values are not defined on $H^{1/4}$.
+
+**Regional averages and WMB's estimate of them.** In `grace_bias.py`,
+`grace_inversion.py` and `grace_coverage.py` the averages are over the
+regions themselves: $B$ has the region masks as weights, unsmoothed
+(`--smoothing-scale-km` smooths them, as in the submitted paper). WMB's
+estimate is made as it is in practice (`common.wmb_estimator`): the
+coefficients are filtered, taken to a load by the load Love numbers as in
+$\hat\sigma$ above, averaged over the region, and rescaled,
+
+$$\hat q_j = s_j \, b_j^T \, W_{\mathrm{L}} \, F \, d ,$$
+
+with $F$ the filter, $W_{\mathrm{L}}$ the map from coefficients to a load,
+$b_j$ the average over region $j$ and $s_j$ the factor that makes the
+estimate right for a load uniform over the region and absent elsewhere
+(Velicogna and Wahr, 2006; `--wmb-rescale`). The filter is the
+decorrelating filter DDK5 of Kusche et al. (2009) on all the coefficients
+(`--wmb-filter ddk`, `--wmb-ddk-level`; `ddk_filter.py`), the default, or
+the Gaussian filter of Wahr et al. (1998) of half-width 300 km on the
+coefficients to degree 60 (`--wmb-filter gaussian`, `--wmb-radius-km`,
+`--wmb-degree`). The filter and the factor are part of the estimator, so
+what they cost in leakage counts as its error, $(CA - B)\zeta$ with $C$ the
+matrix of the estimator. The WMB map of `grace_inversion.py` and
+`grace_coverage.py` is $W_{\mathrm{L}} F d$, the filtered load with no
+averaging. DDK5 is the default because it is the better of the two on
+these data.
 
 **GRACE data and noise.** The data are the coefficients of degrees 2 to 96,
 every degree of the solutions the noise is taken from. Their noise is the formal error covariance of the
@@ -327,8 +380,9 @@ replaced by its randomised Nyström approximation of rank $k$ (Frangella et
 al., 2023), $U E U^T$; the block is $L (U E U^T + 1) L^T$, and the exact
 one is the case of $k$ the number of data. At degree 256 with data to
 degree 96, 1944 of the 9405 eigenvalues of $M$ exceed one and 2966 exceed
-0.1; a sketch of rank 2397 gives 8 iterations in place of one, and jointly
-with the altimetry 13 in place of 10, for a quarter of the applications.
+0.1; at degree 255 a sketch of rank 2400 gives 8 iterations to a relative
+residual of $10^{-6}$ in place of one, and jointly with the altimetry 12 in
+place of 9, for a quarter of the applications.
 
 The ocean experiments use blocks assembled in the data space
 (`common.block_preconditioner`, `--preconditioner blocks`):
@@ -343,8 +397,11 @@ The ocean experiments use blocks assembled in the data space
   $T^{-1} \approx (1 - B)^T F^{-1} (1 - B)$ with $B$ sparse and strictly
   lower triangular and $F$ diagonal (Vecchia, 1988; Schäfer et al., 2021;
   `vecchia.py`). It is positive definite by construction and has no
-  cut-off to choose. At degree 256 with 34,516 points it takes the
-  altimetry solve from 22 iterations to 8;
+  cut-off to choose. The order and the neighbours are found with a tree,
+  so that the build is linear in the number of points. At degree 255 with
+  34,216 points it takes the altimetry solve from 22 iterations to 8; with
+  the points at 0.5 and 0.25 degrees (137,000 and 549,000) the solve takes
+  16 and 64;
 - with `--altimetry-neighbours 0` the altimetry's block is instead that
   covariance tapered to vanish beyond 1500 km by the function of Gaspari
   and Cohn (1999), plus the local noise: a sparse matrix, factorised once;
@@ -377,7 +434,10 @@ into the fields of the model (the sterodynamic sea level is the sum of the
 two heights) and $P = 1 - Q C^* (C Q C^*)^{-1} C$ the projection that
 conditioning on the conservation of the ocean's mass, $C m = 0$, amounts
 to, $Q$ being the covariance of $M u$. In the GRACE experiments $T = L P
-M$. So the prior covariance is $T (\oplus_f Q_f) T^*$ exactly.
+M$. With the ice modulated $T$ has a further factor, the multiplication by
+$\gamma$ on the ice, after $P M$: the independent field is then the invariant
+$u$, and the tables state the sensitivity to its prior with $\gamma$ fixed. So
+the prior covariance is $T (\oplus_f Q_f) T^*$ exactly.
 
 For one quantity with target kernel $t$, the posterior expectation is an
 estimator whose error on a model $m$ with noise $z$ is $(k - t, m) +
@@ -418,6 +478,25 @@ longer or shorter, and an order higher by a half. `--paper-bound` in
 space, $\|Q\|_{HS} \|k - t\|^2 / s^2$ with $Q$ the load's prior
 covariance, its norm estimated with random probes.
 
+**Maps for a load not drawn from the prior.** `grace_coverage.py
+--plot-maps` takes one of the true loads of the ESA Earth System Model
+(`--map-truth`), adds one draw of the noise to its data and solves for the
+posterior as `grace_inversion.py` does: the figure has the true total
+load, WMB's filtered load and the posterior mean, the pointwise posterior
+standard deviation from `--std-samples` samples, and the two estimates'
+errors. The squared misfit of the data to the prior's prediction, printed
+with it, measures how far the load is from the prior.
+
+**Truncation** (`truncation_check.py`). A model is drawn from the prior at
+the highest of `--degrees`; its fields are truncated to each lower degree
+(the coefficients to that degree), the forward problem of the joint
+experiment is solved there with that degree's own grids and masks, and the
+predicted data are set against those of the highest degree: the altimetry
+at the same points, in mm and against the local error of a point; GRACE's
+coefficients as the root mean square of the difference whitened by their
+error covariance, which is one for a draw of the noise; and global mean sea
+level, its two parts and the parts of a regional mean.
+
 ## References
 
 Caron, L., Ivins, E. R., Larour, E., Adhikari, S., Nilsson, J. and Blewitt,
@@ -439,6 +518,10 @@ variability and change, both local and global. *Surveys in Geophysics* 40,
 Heathcote, D. A. et al. (2026). A scalable Bayesian framework for modern
 sea-level inference. *Geophysical Journal International*.
 
+Kusche, J., Schmidt, R., Petrovic, S. and Rietbroek, R. (2009).
+Decorrelated GRACE time-variable gravity solutions by GFZ, and their
+validation using a hydrological model. *Journal of Geodesy* 83, 903–913.
+
 Prandi, P. et al. (2021). Local sea level trends, accelerations and
 uncertainties over 1993–2019. *Scientific Data* 8, 1.
 
@@ -449,3 +532,10 @@ Computing* 43, A2019–A2046.
 Vecchia, A. V. (1988). Estimation and model identification for continuous
 spatial processes. *Journal of the Royal Statistical Society, Series B* 50,
 297–312.
+
+Velicogna, I. and Wahr, J. (2006). Measurements of time-variable gravity
+show mass loss in Antarctica. *Science* 311, 1754–1756.
+
+Wahr, J., Molenaar, M. and Bryan, F. (1998). Time variability of the
+Earth's gravity field: hydrological and oceanic effects and their possible
+detection using GRACE. *Journal of Geophysical Research* 103, 30205–30229.

@@ -2870,14 +2870,14 @@ xmp = ["defusedxml"]
 
 [[package]]
 name = "planetmodel"
-version = "2.1.1"
+version = "2.2.0"
 description = "Spherically layered planetary models: reference bodies, fields, mappings and meshes"
 optional = false
 python-versions = ">=3.12"
 groups = ["main"]
 files = [
-    {file = "planetmodel-2.1.1-py3-none-any.whl", hash = "sha256:032a6796a5d4756040e958e6bc0e42179f5d184dd8b7690336fe53b595f58782"},
-    {file = "planetmodel-2.1.1.tar.gz", hash = "sha256:38475c64e66f428319d075d145ad8cf23e2c9a89d01eec034efb824df4bf031c"},
+    {file = "planetmodel-2.2.0-py3-none-any.whl", hash = "sha256:685ea7be9fee7265526f563cb35e23061b29047c1bd196e12998aa1f20b70407"},
+    {file = "planetmodel-2.2.0.tar.gz", hash = "sha256:6127ff4304c00855ca27c018ab9da2784f3d9ea21fea5aba002257ff228a27af"},
 ]
 
 [package.dependencies]
@@ -4758,4 +4758,4 @@ interactive = ["pyqt6"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12"
-content-hash = "74e3535d5866730ba568c448e83c2d333e2767c0ae074dd5d67bf842031d23f2"
+content-hash = "f7d5773a0875fb3a80ba5dbfefe680e1ea5a877ae94ffbf3b1ab8a7117616d91"

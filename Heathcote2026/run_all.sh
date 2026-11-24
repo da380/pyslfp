@@ -355,8 +355,13 @@ fi
 # coefficients: WMB_FILTER=gaussian gives the 300 km Gaussian filter to
 # degree 60 in its place. In grace_bias, grace_inversion and grace_coverage.
 WMB=(--wmb-filter "${WMB_FILTER:-ddk}")
+# MAP_TRUTH="0 6" picks the loads of the maps (--plot-maps), counted from
+# zero, a figure for each; the last of the thirteen, the change to 2020, if
+# not given.
+read -r -a MAP_TRUTHS <<<"${MAP_TRUTH:-12}"
 GRACE_COVERAGE_EXTRA=(--truth-mean "${TRUTH_MEAN:-kept}"
-    --prior-truths "${PRIOR_TRUTHS:-0}")
+    --prior-truths "${PRIOR_TRUTHS:-0}"
+    --plot-maps --map-truth "${MAP_TRUTHS[@]}" --std-samples 50)
 
 # ---------------------------------------------------------------------------
 # 5. Run

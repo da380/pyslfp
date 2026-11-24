@@ -86,6 +86,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import pygeoinf as inf
+import pyslfp as sl
 from pyslfp.core import averaging_operator
 
 import common
@@ -151,6 +152,27 @@ def parse_arguments() -> argparse.Namespace:
         default=50,
         help="Draws of the noise for each true load.",
     )
+    parser.add_argument(
+        "--plot-maps",
+        action="store_true",
+        help="Maps for one of the true loads: the load, the two estimates of "
+        "it from one draw of the noise, and their errors.",
+    )
+    parser.add_argument(
+        "--map-truth",
+        type=int,
+        nargs="+",
+        default=[0],
+        help="With --plot-maps: which of the true loads, counted from zero; "
+        "a figure for each.",
+    )
+    parser.add_argument(
+        "--std-samples",
+        type=int,
+        default=0,
+        help="With --plot-maps: posterior samples for the pointwise standard "
+        "deviation map.",
+    )
     common.add_qoi_arguments(parser)
     common.add_parallel_arguments(parser)
     args = parser.parse_args()
@@ -193,6 +215,50 @@ def true_loads(state, years, ocean="O", share=1.0, mean="kept"):
         load_mean = sum(loads[1:], loads[0]) * (1.0 / len(loads))
         loads = [load - load_mean for load in loads]
     return labels, loads
+
+
+def truth_maps(state, label, truth, wmb, mean, std=None):
+    """One true load and its two estimates from one draw of the noise, in mm
+    EWT: above, the load, WMB's filtered estimate and the posterior mean;
+    below, the pointwise posterior standard deviation (left empty without
+    `std`) and the two estimates' errors. The load maps and the error maps
+    share the colour scale of the truth and the posterior mean, at the value
+    that all but a two-hundredth of the grid lies within."""
+
+    def extent(field):
+        return float(np.percentile(np.abs(field.data), 99.5))
+
+    limit = max(extent(truth), extent(mean))
+    loads = {"vmin": -limit, "vmax": limit, "cmap": "seismic"}
+    panels = [
+        (truth, f"True total load ({label})", "Load (mm EWT)", loads),
+        (wmb, "WMB estimate (filtered)", "Load (mm EWT)", loads),
+        (mean, "Posterior mean", "Load (mm EWT)", loads),
+        (
+            std,
+            "Posterior std. deviation",
+            "Std. deviation (mm EWT)",
+            None if std is None else {"vmin": 0.0, "vmax": extent(std), "cmap": "Blues"},
+        ),
+        (wmb - truth, "WMB estimate less the truth", "Error (mm EWT)", loads),
+        (mean - truth, "Posterior mean less the truth", "Error (mm EWT)", loads),
+    ]
+    fig, axes = sl.subplots(2, 3, figsize=(27, 12), gridspec_kw={"hspace": 0.10})
+    for ax, (field, title, colour_label, style) in zip(axes.flat, panels):
+        if field is None:
+            ax.set_axis_off()
+            continue
+        _, image = sl.plot(
+            field,
+            ax=ax,
+            colorbar=True,
+            colorbar_kwargs=figures.COLORBAR,
+            gridlines_kwargs=figures.GRIDLINES,
+            **style,
+        )
+        ax.set_title(title, fontsize=16)
+        image.colorbar.set_label(colour_label, fontsize=14)
+    return fig
 
 
 def regions_of(state, groups) -> tuple[list, list, list]:
@@ -357,7 +423,7 @@ def main():
     average = scale_mm * averaging_operator(state, load_space, masks)
 
     # WMB's estimator as it is made in practice (`common.wmb_estimator`).
-    _, wmb_matrix, wmb_description = common.wmb_estimator(
+    wmb_load, wmb_matrix, wmb_description = common.wmb_estimator(
         state, load_space, args, average=average, sharp_masks=sharp_masks, scale=scale_mm
     )
 
@@ -497,14 +563,40 @@ def main():
     print(text[: text.index("Region by region")])
     print(f"saved {METRICS_FILE}")
 
-    common.save_figures(
-        {
-            "coverage_histograms.png": histogram_figure(ratios, classes),
-            "coverage_regions.png": region_figure(errors, stds, classes),
-        },
-        OUTPUT_DIR,
-        dpi=200,
-    )
+    output = {
+        "coverage_histograms.png": histogram_figure(ratios, classes),
+        "coverage_regions.png": region_figure(errors, stds, classes),
+    }
+    for chosen in args.map_truth if args.plot_maps else []:
+        # One of the loads, inverted from one draw of the noise as it would
+        # be in practice: its misfit to the prior's prediction says how far
+        # from the prior this load is.
+        print(f"Maps for the load {labels[chosen]}...")
+        data = forward.codomain.add(clean_data[chosen], noise.sample(rng=rng))
+        estimate, _, _ = common.solve_posterior(
+            inf.LinearGaussianInversion(
+                inf.LinearForwardProblem(forward, error=noise), prior
+            ),
+            data,
+            preconditioner,
+            rtol=args.qoi_rtol,
+            qoi_rtol=args.qoi_rtol,
+        )
+        std = None
+        if args.std_samples > 0:
+            std = estimate.affine_map(total_load).sample_pointwise_std(
+                args.std_samples, rng=rng, n_jobs=common.jobs(args)
+            )
+            std = std * scale_mm
+        output[f"coverage_maps_{labels[chosen]}.png"] = truth_maps(
+            state,
+            labels[chosen],
+            totals[chosen] * scale_mm,
+            wmb_load(data) * scale_mm,
+            total_load(estimate.expectation) * scale_mm,
+            std,
+        )
+    common.save_figures(output, OUTPUT_DIR, dpi=200)
 
 
 if __name__ == "__main__":

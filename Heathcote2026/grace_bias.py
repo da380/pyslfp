@@ -49,7 +49,7 @@ import numpy as np
 import pygeoinf as inf
 
 import common
-from figures import error_density, field_map
+from figures import error_density, field_map, ice_sheet_maps
 
 OUTPUT_DIR = "output_plots_grace_bias"
 
@@ -136,6 +136,36 @@ def main():
         print("Plotting a prior sample of the direct load and the load it induces...")
         direct = prior.sample(rng=rng)
         induced = total_load(direct) - direct
+        modulation = (
+            common.ice_modulation(common.ocean_physics(args), args)
+            if args.load_prior == "model"
+            else None
+        )
+        if modulation is not None:
+            # The ice prior's std as a load, at the resolution of the stated
+            # numbers, over the ice sheets alone, beside the draw there.
+            weight, _ = modulation
+            sheets = state.ice_sheet_projection(value=0.0)
+            ice_std = weight * sheets * args.ice_std_mm
+            draw = direct * sheets * scale_mm
+            inside = sheets.data > 0.5
+            limit = float(np.percentile(np.abs(draw.data[inside]), 99.5))
+            figures["grace_bias_ice_prior.png"] = ice_sheet_maps(
+                [
+                    (
+                        ice_std,
+                        "Prior standard deviation of the ice load",
+                        "Std. deviation (mm EWT)",
+                        {"vmin": 0.0, "vmax": float(ice_std.data.max()), "cmap": "Blues"},
+                    ),
+                    (
+                        draw,
+                        "One draw from the prior",
+                        "Load (mm EWT)",
+                        {"vmin": -limit, "vmax": limit, "cmap": "seismic"},
+                    ),
+                ]
+            )
         for name, field, label, panel in [
             ("direct", direct, "Direct Load (mm EWT)", "(a)"),
             ("induced", induced, "Induced Load (mm EWT)", "(b)"),

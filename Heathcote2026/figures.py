@@ -176,6 +176,39 @@ def field_map(field, label: str, panel: str, /, *, state=None, regions=None):
     return fig
 
 
+def ice_sheet_maps(columns, /):
+    """Fields over the two ice sheets, in polar projections: a column for
+    each (field, title, label, style) of `columns`, Greenland above and
+    Antarctica below, each map with its own colour bar. `style` holds the
+    keywords of the colour scale (vmin, vmax, cmap)."""
+    import cartopy.crs as ccrs
+
+    sheets = [
+        (ccrs.NorthPolarStereo(central_longitude=-42.0), [-74.0, -10.0, 58.5, 84.5]),
+        (ccrs.SouthPolarStereo(), [-180.0, 180.0, -90.0, -62.0]),
+    ]
+    fig = plt.figure(figsize=(6.5 * len(columns), 12.5), layout="constrained")
+    for row, (projection, extent) in enumerate(sheets):
+        for column, (field, title, label, style) in enumerate(columns):
+            ax = fig.add_subplot(
+                2, len(columns), row * len(columns) + column + 1, projection=projection
+            )
+            _, image = sl.plot(
+                field,
+                ax=ax,
+                map_extent=extent,
+                gridlines=False,
+                colorbar=True,
+                colorbar_kwargs=COLORBAR,
+                **style,
+            )
+            ax.gridlines(linewidth=0.3, color="grey", alpha=0.5)
+            if row == 0:
+                ax.set_title(title, fontsize=16)
+            image.colorbar.set_label(label, fontsize=13)
+    return fig
+
+
 def normal_pdf(x, mean, std):
     return np.exp(-0.5 * ((x - mean) / std) ** 2) / (std * np.sqrt(2.0 * np.pi))
 

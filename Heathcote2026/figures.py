@@ -2,9 +2,8 @@
 Figures shared by the experiments of Heathcote et al. (2026): the style and
 helpers of the maps, single maps with a panel letter, the densities of an
 estimator's error, the grids of model fields and of covariances of the ocean
-inversions, region boundaries, corner plots, the kernel-error summary of the
-GRACE inversion, and the GMSL split ellipses and component variance dots of
-the joint inversion.
+inversions, region boundaries, corner plots, and the GMSL split ellipses and
+component variance dots of the joint inversion.
 """
 
 import numpy as np
@@ -16,7 +15,7 @@ from matplotlib.patches import Ellipse
 import pygeoinf as inf
 import pyslfp as sl
 
-from common import ETA, ICE, RHO
+from common import ETA, ICE, LAND, RHO, STERIC
 
 # The fonts of the inversion scripts' figures; see `set_inversion_style`.
 INVERSION_STYLE = {
@@ -32,14 +31,29 @@ GRIDLINES = {"xlabel_style": {"size": 12}, "ylabel_style": {"size": 12}}
 COLORBAR = {"orientation": "horizontal", "shrink": 0.8, "pad": 0.05}
 
 # The fields of the ocean experiments, in the rows of their map grids: the
-# row title and the display unit (see `common.OceanPhysics.display`).
-FIELDS = (ICE, ETA, RHO)
+# row title and the display unit (see `common.OceanPhysics.display`). A map
+# grid has a row for each of these that the model holds.
+FIELDS = (ICE, LAND, ETA, RHO, STERIC)
 ROW_TITLES = {
     ICE: "Ice Thickness Change",
+    LAND: "Land Water Change",
     ETA: "Sterodynamic SL Change",
     RHO: "Averaged Density Change",
+    STERIC: "Steric Height Change",
 }
-UNIT_LABELS = {ICE: "mm", ETA: "mm", RHO: r"g m$^{-3}$"}
+UNIT_LABELS = {
+    ICE: "mm",
+    LAND: "mm",
+    ETA: "mm",
+    RHO: r"g m$^{-3}$",
+    STERIC: "mm",
+}
+
+
+def rows(fields: dict) -> list:
+    """The fields a map grid shows, in order: those of `FIELDS` that
+    `fields` holds."""
+    return [name for name in FIELDS if name in fields]
 
 
 def set_inversion_style() -> None:
@@ -55,7 +69,7 @@ def field_label(name: str) -> str:
 def covariance_label(row: str, perturbed: str) -> str:
     """The colour bar label of the covariance of field `row` with field
     `perturbed`, in the product of their units."""
-    heights = {ICE, ETA}
+    heights = {ICE, LAND, ETA, STERIC}
     if row in heights and perturbed in heights:
         return "Covariance (mm²)"
     if row not in heights and perturbed not in heights:
@@ -162,6 +176,39 @@ def field_map(field, label: str, panel: str, /, *, state=None, regions=None):
     return fig
 
 
+def ice_sheet_maps(columns, /):
+    """Fields over the two ice sheets, in polar projections: a column for
+    each (field, title, label, style) of `columns`, Greenland above and
+    Antarctica below, each map with its own colour bar. `style` holds the
+    keywords of the colour scale (vmin, vmax, cmap)."""
+    import cartopy.crs as ccrs
+
+    sheets = [
+        (ccrs.NorthPolarStereo(central_longitude=-42.0), [-74.0, -10.0, 58.5, 84.5]),
+        (ccrs.SouthPolarStereo(), [-180.0, 180.0, -90.0, -62.0]),
+    ]
+    fig = plt.figure(figsize=(6.5 * len(columns), 12.5), layout="constrained")
+    for row, (projection, extent) in enumerate(sheets):
+        for column, (field, title, label, style) in enumerate(columns):
+            ax = fig.add_subplot(
+                2, len(columns), row * len(columns) + column + 1, projection=projection
+            )
+            _, image = sl.plot(
+                field,
+                ax=ax,
+                map_extent=extent,
+                gridlines=False,
+                colorbar=True,
+                colorbar_kwargs=COLORBAR,
+                **style,
+            )
+            ax.gridlines(linewidth=0.3, color="grey", alpha=0.5)
+            if row == 0:
+                ax.set_title(title, fontsize=16)
+            image.colorbar.set_label(label, fontsize=13)
+    return fig
+
+
 def normal_pdf(x, mean, std):
     return np.exp(-0.5 * ((x - mean) / std) ** 2) / (std * np.sqrt(2.0 * np.pi))
 
@@ -242,8 +289,9 @@ def state_maps(
 ):
     """
     The true state and a posterior expectation, field by field, and the
-    posterior's pointwise standard deviation if `std` is given: three rows
-    and two or three columns. Each argument maps the field names to fields
+    posterior's pointwise standard deviation if `std` is given: a row per
+    field and two or three columns; `figsize` is that of three rows, and
+    the height grows with their number. Each argument maps the field names to fields
     on their supports in display units (`common.OceanPhysics.display`).
     `limits` holds each row's symmetric colour limit and `std_limits` that of
     the standard deviations, autoscaled if omitted. With `row_titles` the
@@ -251,8 +299,12 @@ def state_maps(
     drawn on every map.
     """
     ncols = 2 if std is None else 3
-    fig, axes = sl.subplots(3, ncols, figsize=figsize, gridspec_kw={"hspace": 0.15})
-    for row, name in enumerate(FIELDS):
+    names = rows(true)
+    figsize = (figsize[0], figsize[1] * len(names) / 3.0)
+    fig, axes = sl.subplots(
+        len(names), ncols, figsize=figsize, gridspec_kw={"hspace": 0.15}
+    )
+    for row, name in enumerate(names):
         for col, field in enumerate((true[name], mean[name])):
             sl.plot(
                 field,
@@ -281,7 +333,7 @@ def state_maps(
     draw_boundaries(state, axes, boundaries)
     label_columns(axes, ["True State", mean_title, "Pointwise Std. Deviation"][:ncols])
     if row_titles:
-        label_rows(axes, [ROW_TITLES[name] for name in FIELDS])
+        label_rows(axes, [ROW_TITLES[name] for name in names])
     return fig
 
 
@@ -310,8 +362,14 @@ def covariance_maps(
     gridspec = {"hspace": 0.15}
     if wspace is not None:
         gridspec["wspace"] = wspace
-    fig, axes = sl.subplots(3, ncols, figsize=(8 * ncols, 16), gridspec_kw=gridspec)
-    for row, name in enumerate(FIELDS):
+    names = rows(columns[0][1])
+    fig, axes = sl.subplots(
+        len(names),
+        ncols,
+        figsize=(8 * ncols, 16 * len(names) / 3.0),
+        gridspec_kw=gridspec,
+    )
+    for row, name in enumerate(names):
         fields = [fields[name] for _, fields in columns]
         limits = [peak(field) for field in fields]
         fallback = max(limits) if max(limits) > 0 else 1.0
@@ -348,7 +406,7 @@ def covariance_maps(
                     gridlines=False,
                 )
     label_columns(axes, [title for title, _ in columns])
-    label_rows(axes, [ROW_TITLES[name] for name in FIELDS])
+    label_rows(axes, [ROW_TITLES[name] for name in names])
     draw_boundaries(state, axes, boundaries)
     return fig
 
@@ -368,109 +426,6 @@ _SUMMARY_RC = {
     "axes.linewidth": 0.7,
     "font.family": "sans-serif",
 }
-_C_BAYES = "#0072B2"  # Okabe-Ito blue
-_C_WMB = "#D55E00"  # Okabe-Ito vermillion
-
-
-def plot_kernel_error_ratios(
-    region_rows,
-    /,
-    *,
-    degree_rows=None,
-    degree_label=None,
-):
-    """
-    Dumbbell chart of relative estimator-kernel errors ||k - t|| / ||t||
-    in the load-space norm: Bayesian (filled) vs WMB (open) per region,
-    with an optional Bayesian-only cluster for single-degree
-    coefficients below a separator. Smaller is better. region_rows is a
-    sequence of (name, bayes_ratio, wmb_ratio); degree_rows of
-    (name, bayes_ratio). Returns the figure.
-    """
-    region_rows = list(region_rows)
-    degree_rows = list(degree_rows) if degree_rows else []
-    n_deg = len(degree_rows)
-    n_total = len(region_rows) + n_deg
-    ys_reg = np.arange(len(region_rows))[::-1] + (n_deg + 1.0 if n_deg else 0.0)
-    ys_deg = np.arange(n_deg)[::-1]
-
-    ratios = [b for _, b, _ in region_rows]
-    ratios += [w for _, _, w in region_rows]
-    ratios += [b for _, b in degree_rows]
-    xmax = max(0.5, 1.12 * max(ratios))
-
-    with mpl.rc_context(_SUMMARY_RC):
-        fig, ax = plt.subplots(
-            figsize=(4.8, 1.0 + 0.30 * (n_total + (1 if n_deg else 0))),
-            layout="constrained",
-        )
-        for y, (_, bayes, wmb) in zip(ys_reg, region_rows):
-            ax.plot([bayes, wmb], [y, y], color="0.6", lw=1.1, zorder=1)
-            ax.plot(bayes, y, "o", ms=5, color=_C_BAYES, zorder=2)
-            ax.plot(
-                wmb,
-                y,
-                "o",
-                ms=5,
-                mec=_C_WMB,
-                mfc="white",
-                mew=1.4,
-                zorder=2,
-            )
-        for y, (_, bayes) in zip(ys_deg, degree_rows):
-            ax.plot(bayes, y, "o", ms=5, color=_C_BAYES, zorder=2)
-        if n_deg:
-            ax.axhline(n_deg, color="0.8", lw=0.7, ls=":")
-            if degree_label:
-                ax.text(
-                    0.98 * xmax,
-                    ys_deg[0] + 0.55,
-                    degree_label,
-                    fontsize=7.5,
-                    color="0.4",
-                    ha="right",
-                )
-        ax.set_yticks(np.concatenate([ys_reg, ys_deg]))
-        ax.set_yticklabels([r[0] for r in region_rows] + [d[0] for d in degree_rows])
-        ax.set_xlim(0.0, xmax)
-        ax.set_ylim(-0.6, ys_reg[0] + 1.05)
-        ax.set_xlabel("Relative estimator-kernel error  $\\|k - t\\|\\, /\\, \\|t\\|$")
-        ax.grid(axis="x", color="0.9", lw=0.6)
-        ax.tick_params(axis="y", length=0)
-        for side in ("top", "right", "left"):
-            ax.spines[side].set_visible(False)
-        ax.annotate(
-            "$\\leftarrow$ better",
-            xy=(0.02 * xmax, ys_reg[0] + 0.62),
-            fontsize=7.5,
-            color="0.4",
-        )
-        handles = [
-            Line2D(
-                [],
-                [],
-                ls="none",
-                marker="o",
-                ms=5,
-                color=_C_BAYES,
-                label="Bayesian",
-            ),
-            Line2D(
-                [],
-                [],
-                ls="none",
-                marker="o",
-                ms=5,
-                mec=_C_WMB,
-                mfc="white",
-                mew=1.4,
-                label="WMB",
-            ),
-        ]
-        ax.legend(handles=handles, loc="upper right", frameon=False)
-    return fig
-
-
 _C_PRIOR = "#888888"
 _C_ALT = "#D55E00"
 _C_GRACE = "#0072B2"

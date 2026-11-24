@@ -1,0 +1,1712 @@
+Cores: 64 physical, 128 logical; budget 48.
+Parallel: up to 48 worker(s) x 1 thread(s) each; serial phases use 48 thread(s).
+
+======================================================================
+>>> grace_bias.py  (11:13:17)
+>>> args: --lmax 255 --load-scale-km 500.0 --prior-order 3.0 --prior-shift 0.0 --obs-degree 96 --load-order 0.25 --spacing 1.0 --land-water --source-order 0.25 --source-prior-order 1.5 --ice-std-mm 80.0 --ice-scale-km 180.0 --land-water-std-mm 65.0 --land-water-scale-km 340.0 --ocean-prior steric --field-order 1.25 --steric-std-mm 46.0 --steric-scale-km 280.0 --steric-order 3.0 --manometric-std-mm 8.0 --manometric-scale-km 330.0 --manometric-order 2.5 --load-prior model --spacing 8.0 --ocean-case partly --coefficient-errors 2007 2008 --gia-years 1.0 --gia-model caron --serial-threads 48 --parallel --max-jobs 48 --plot-maps
+======================================================================
+Prior amplitudes: sterodynamic std = 46.043 mm (input), density std = 1.2558e-02 kg m^-3 (mean-depth steric std = 46.000 mm), ice std = 90.157 mm, land water std = 66.076 mm
+  realised GMSL prior stds under the mass constraint: barystatic = 1.689 mm (the ice alone 0.380), steric = 3.214 mm (verified 3.214); barystatic/steric ratio = 0.53
+  <eta>_O -- <eta_s>_O prior correlation rho_XY = 0.999; unconstrained <eta>_O std = 3.217 mm
+GRACE coefficient errors: ITSG-Grace2018, annual means of 2007 and 2008, std x 1.00: pointwise 569.8 mm EWT to degree 96, unfiltered; white load floor 0.00 mm
+GIA correction error from 50 eigenvectors of the covariance of Caron et al. (2018)
+Plotting a prior sample of the direct load and the load it induces...
+Computing the error distributions...
+Regional averages of the total load, in mm EWT (error = WMB less true):
+  GRL (S Basin)    true std  8.504, WMB error mean +0.000, std  3.812 (nominal  2.681)
+  WAIS             true std 10.288, WMB error mean +0.000, std  4.215 (nominal  3.052)
+  Gulf of Mexico   true std  8.482, WMB error mean +0.000, std  2.608 (nominal  1.654)
+  GBM basin        true std 16.756, WMB error mean +0.000, std  2.805 (nominal  1.691)
+saved output_plots_grace_bias/grace_bias_direct_load.png
+saved output_plots_grace_bias/grace_bias_induced_load.png
+saved output_plots_grace_bias/grace_bias_pdfs.png
+
+real	1m18.221s
+user	9m29.862s
+sys	0m13.143s
+
+======================================================================
+>>> altimetry_bias.py  (11:14:36)
+>>> args: --lmax 255 --load-scale-km 500.0 --prior-order 3.0 --prior-shift 0.0 --load-order 0.25 --spacing 1.0 --land-water --source-order 0.25 --source-prior-order 1.5 --ice-std-mm 80.0 --ice-scale-km 180.0 --land-water-std-mm 65.0 --land-water-scale-km 340.0 --ocean-prior steric --field-order 1.25 --steric-std-mm 46.0 --steric-scale-km 280.0 --steric-order 3.0 --manometric-std-mm 8.0 --manometric-scale-km 330.0 --manometric-order 2.5 --noise-std-mm 6.0 --noise-corr-std-mm 0.7 --noise-corr-scale-km 2000.0 --noise-global-std-mm 1.0 --noise-frame-std-mm 0.33 --gia-years 1.0 --gia-model caron --serial-threads 48 --parallel --max-jobs 48 --plot-maps
+======================================================================
+Building the physics, prior and noise...
+GIA correction error from 50 eigenvectors of the covariance of Caron et al. (2018)
+Prior amplitudes: sterodynamic std = 46.690 mm (input), density std = 1.2558e-02 kg m^-3 (mean-depth steric std = 46.000 mm), ice std = 90.157 mm, land water std = 66.076 mm
+  realised GMSL prior stds under the mass constraint: barystatic = 1.689 mm (the ice alone 0.380), steric = 3.214 mm (verified 3.214); barystatic/steric ratio = 0.53
+  <eta>_O -- <eta_s>_O prior correlation rho_XY = 0.985; unconstrained <eta>_O std = 3.264 mm
+  correlated altimetry error component: implied GMSL error floor = 0.316 mm
+Computing the exact moments of the error...
+  GMSL error (estimate less true): mean = 0.0000 mm, std = 1.2681 mm; nominal (noise only) std = 1.0517 mm; true GMSL std = 3.6307 mm
+Drawing a sample to show the fields...
+Plotting the error densities...
+
+Saving 6 plots to 'output_plots_altimetry_bias/'...
+saved output_plots_altimetry_bias/bias_ice_thickness.png
+saved output_plots_altimetry_bias/bias_sterodynamic.png
+saved output_plots_altimetry_bias/bias_steric_height.png
+saved output_plots_altimetry_bias/bias_geocentric_sl_map.png
+saved output_plots_altimetry_bias/bias_altimetry_data.png
+saved output_plots_altimetry_bias/bias_pdf.png
+
+real	0m30.737s
+user	2m43.851s
+sys	0m5.930s
+
+======================================================================
+>>> grace_inversion.py  (11:15:06)
+>>> args: --lmax 255 --load-scale-km 500.0 --prior-order 3.0 --prior-shift 0.0 --obs-degree 96 --load-order 0.25 --spacing 1.0 --land-water --source-order 0.25 --source-prior-order 1.5 --ice-std-mm 80.0 --ice-scale-km 180.0 --land-water-std-mm 65.0 --land-water-scale-km 340.0 --ocean-prior steric --field-order 1.25 --steric-std-mm 46.0 --steric-scale-km 280.0 --steric-order 3.0 --manometric-std-mm 8.0 --manometric-scale-km 330.0 --manometric-order 2.5 --load-prior model --spacing 8.0 --ocean-case partly --coefficient-errors 2007 2008 --gia-years 1.0 --gia-model caron --qoi-rtol 1e-6 --serial-threads 48 --parallel --max-jobs 48 --all --paper-bound --std-samples 100
+======================================================================
+Building the physics, prior and noise (lmax=255)...
+Prior amplitudes: sterodynamic std = 46.043 mm (input), density std = 1.2558e-02 kg m^-3 (mean-depth steric std = 46.000 mm), ice std = 90.157 mm, land water std = 66.076 mm
+  realised GMSL prior stds under the mass constraint: barystatic = 1.689 mm (the ice alone 0.380), steric = 3.214 mm (verified 3.214); barystatic/steric ratio = 0.53
+  <eta>_O -- <eta_s>_O prior correlation rho_XY = 0.999; unconstrained <eta>_O std = 3.217 mm
+GRACE coefficient errors: ITSG-Grace2018, annual means of 2007 and 2008, std x 1.00: pointwise 569.8 mm EWT to degree 96, unfiltered; white load floor 0.00 mm
+GIA correction error from 50 eigenvectors of the covariance of Caron et al. (2018)
+Drawing a synthetic load and dataset...
+Assembling the normal matrix of 9405 data...
+iteration 0: residual 6.61456e-11
+iteration 1: residual 5.00208e-20
+Solving for the posterior...
+iteration 0: residual 2.64564e-10
+iteration 1: residual 4.07706e-19
+Solution reached in 1 iterations.
+Squared misfit of the data to their prior prediction: 9594 for 9405 data (expected 9405 +/- 137).
+Regional averages...
+Degree-1 coefficients...
+Prior sensitivity, field by field...
+iteration 0: residual 6.61456e-11
+iteration 1: residual 5.00208e-20
+iteration 0: residual 8.78783e-11
+iteration 1: residual 1.18921e-20
+iteration 0: residual 1.11564e-10
+iteration 1: residual 2.96282e-20
+iteration 0: residual 2.92653e-10
+iteration 1: residual 6.22082e-20
+iteration 0: residual 7.28075e-11
+iteration 1: residual 4.22256e-20
+iteration 0: residual 7.29405e-11
+iteration 1: residual 1.69614e-20
+iteration 0: residual 8.74272e-11
+iteration 1: residual 1.90386e-20
+Region           | KL Divergence   | Prior Var (mm² EWT) | Post Var (mm² EWT) | Variance Reduction
+------------------------------------------------------------------------------------------------
+GRL (S Basin)    | 2.09            | 72.31               | 2.86               |            96.05%
+WAIS             | 3.76            | 105.85              | 1.41               |            98.67%
+Gulf of Mexico   | 2.19            | 71.95               | 0.74               |            98.97%
+GBM basin        | 1.94            | 280.77              | 2.58               |            99.08%
+
+
+Degree-1 Spherical Harmonic Coefficients
+=================================================================
+Joint KL Divergence:      4.3269 nats
+Prior Total Var (Trace):  54.6594 mm²
+Post Total Var (Trace):   1.4293 mm²
+Overall Trace Reduction:  97.39%
+Prior Generalised Var:    5.5194e+03
+Post Generalised Var:     1.0028e-01
+-----------------------------------------------------------------
+Component          | Prior Var    | Post Var     | Reduction
+-----------------------------------------------------------------
+(1,0)              | 20.0215      | 0.6166       |    96.92%
+(1,1)              | 15.4539      | 0.3703       |    97.60%
+(1,-1)             | 19.1840      | 0.4424       |    97.69%
+-----------------------------------------------------------------
+
+
+==============================================================================================================
+PRIOR SENSITIVITY: regional averages of the total load (mm EWT)
+A share is a part of the stated variance. 'sum - 1' is the prior's and the noise's shares together,
+less one: zero for an estimate that states the whole of its error variance under the prior.
+------------------------------------------------------------------
+                  stated std   prior   noise   sum - 1    model HS
+------------------------------------------------------------------
+GRL (S Basin)          1.691   0.362   0.638  -1.8e-09   2.137e+03
+WAIS                   1.187   0.452   0.548  -2.8e-10   3.984e+03
+Gulf of Mexico         0.860   0.328   0.672  -9.0e-09   1.841e+03
+GBM basin              1.605   0.086   0.914  -7.5e-09   3.438e+02
+
+Share of the stated variance from each field's prior
+                             ice      land water   steric height      manometric
+GRL (S Basin)          7.820e-02       1.145e-01       0.000e+00       1.691e-01
+WAIS                   1.799e-01       5.961e-03       0.000e+00       2.660e-01
+Gulf of Mexico         2.325e-03       3.670e-02       0.000e+00       2.894e-01
+GBM basin              2.733e-04       2.388e-02       0.000e+00       6.148e-02
+
+Bound factor F, operator norm
+                             ice      land water   steric height      manometric
+GRL (S Basin)          2.195e-01       1.127e+00       0.000e+00       1.978e-01
+WAIS                   7.865e-01       6.756e-02       0.000e+00       3.270e-01
+Gulf of Mexico         9.923e-03       4.308e-01       0.000e+00       3.057e-01
+GBM basin              9.340e-04       1.163e-01       0.000e+00       6.412e-02
+
+Bound factor F, Hilbert-Schmidt norm
+                             ice      land water   steric height      manometric
+GRL (S Basin)          8.565e+00       1.891e+01       0.000e+00       5.382e+00
+WAIS                   3.068e+01       1.134e+00       0.000e+00       8.897e+00
+Gulf of Mexico         3.871e-01       7.232e+00       0.000e+00       8.316e+00
+GBM basin              3.644e-02       1.953e+00       0.000e+00       1.744e+00
+
+
+==============================================================================================================
+PRIOR SENSITIVITY: degree-1 coefficients of the direct load (mm EWT)
+A share is a part of the stated variance. 'sum - 1' is the prior's and the noise's shares together,
+less one: zero for an estimate that states the whole of its error variance under the prior.
+------------------------------------------------------------------
+                  stated std   prior   noise   sum - 1    model HS
+------------------------------------------------------------------
+(1,0)                  0.785   0.660   0.340  -7.0e-10   3.131e+03
+(1,1)                  0.609   0.790   0.210  -4.3e-09   3.387e+03
+(1,-1)                 0.665   0.743   0.257  -1.2e-08   3.222e+03
+
+Share of the stated variance from each field's prior
+                             ice      land water   steric height      manometric
+(1,0)                  1.591e-02       7.579e-02       0.000e+00       5.687e-01
+(1,1)                  7.024e-04       2.345e-02       0.000e+00       7.659e-01
+(1,-1)                 3.887e-04       2.908e-02       0.000e+00       7.140e-01
+
+Bound factor F, operator norm
+                             ice      land water   steric height      manometric
+(1,0)                  5.536e-02       7.655e-01       0.000e+00       5.923e-01
+(1,1)                  2.657e-03       2.669e-01       0.000e+00       7.850e-01
+(1,-1)                 1.554e-03       3.068e-01       0.000e+00       7.336e-01
+
+Bound factor F, Hilbert-Schmidt norm
+                             ice      land water   steric height      manometric
+(1,0)                  2.159e+00       1.285e+01       0.000e+00       1.612e+01
+(1,1)                  1.036e-01       4.481e+00       0.000e+00       2.136e+01
+(1,-1)                 6.062e-02       5.149e+00       0.000e+00       1.996e+01
+
+
+==============================================================================================================
+PRIOR SENSITIVITY: WMB's regional averages of the total load (mm EWT); the std is that of its error under the prior
+A share is a part of the stated variance. 'sum - 1' is the prior's and the noise's shares together,
+less one: zero for an estimate that states the whole of its error variance under the prior.
+------------------------------------------------------
+                  stated std   prior   noise   sum - 1
+------------------------------------------------------
+GRL (S Basin)          3.812   0.505   0.495   0.0e+00
+WAIS                   4.215   0.476   0.524   0.0e+00
+Gulf of Mexico         2.608   0.598   0.402   0.0e+00
+GBM basin              2.805   0.637   0.363   0.0e+00
+
+Share of the stated variance from each field's prior
+                             ice      land water   steric height      manometric
+GRL (S Basin)          4.247e-02       4.596e-01       0.000e+00       3.238e-03
+WAIS                   3.475e-02       4.391e-01       0.000e+00       1.889e-03
+Gulf of Mexico         4.564e-02       5.432e-01       0.000e+00       9.050e-03
+GBM basin              1.507e-02       6.140e-01       0.000e+00       7.758e-03
+
+Bound factor F, operator norm
+                             ice      land water   steric height      manometric
+GRL (S Basin)          4.465e-02       5.210e-01       0.000e+00       3.301e-03
+WAIS                   3.674e-02       4.853e-01       0.000e+00       1.928e-03
+Gulf of Mexico         4.779e-02       6.555e-01       0.000e+00       9.221e-03
+GBM basin              1.682e-02       7.142e-01       0.000e+00       7.905e-03
+
+Bound factor F, Hilbert-Schmidt norm
+                             ice      land water   steric height      manometric
+GRL (S Basin)          1.742e+00       8.745e+00       0.000e+00       8.980e-02
+WAIS                   1.433e+00       8.146e+00       0.000e+00       5.246e-02
+Gulf of Mexico         1.864e+00       1.100e+01       0.000e+00       2.509e-01
+GBM basin              6.561e-01       1.199e+01       0.000e+00       2.150e-01
+
+
+==============================================================================================================
+PRIOR SENSITIVITY: the size ||dQ|| / ||Q|| of changes of one field's prior (operator norm, Hilbert-Schmidt norm)
+------------------------------------------------------------------------------------------------
+                           std x1.25          scale x1.5          scale /1.5          order +0.5
+------------------------------------------------------------------------------------------------
+ice                    0.56     0.56       1.13     0.42       0.51     0.32       0.75     0.42
+land water             0.56     0.56       1.19     0.49       0.54     0.35       0.86     0.52
+steric height          0.56     0.56       1.16     0.52       0.52     0.77       0.23     0.23
+manometric             0.56     0.56       1.22     0.50       0.54     0.75       0.33     0.31
+
+saved output_plots_grace_inversion/grace_metrics.txt
+Maps...
+Pointwise standard deviation from 100 posterior samples...
+iteration 0: residual 1.02502e-21
+iteration 1: residual 8.75118e-31
+iteration 0: residual 1.18193e-20
+iteration 1: residual 1.73329e-30
+iteration 0: residual 2.86253e-21
+iteration 1: residual 1.11882e-29
+saved output_plots_grace_inversion/grace_regional_pdfs.png
+saved output_plots_grace_inversion/grace_degree_1_corner.png
+saved output_plots_grace_inversion/grace_posterior_maps.png
+saved output_plots_grace_inversion/grace_covariance_maps.png
+iteration 0: residual 2.68217e-10
+iteration 1: residual 3.18543e-19
+iteration 0: residual 2.62607e-10
+iteration 1: residual 8.95369e-20
+iteration 0: residual 2.6485e-10
+iteration 1: residual 3.61126e-19
+iteration 0: residual 2.54013e-10
+iteration 1: residual 3.45403e-19
+iteration 0: residual 2.75077e-10
+iteration 1: residual 3.77927e-19
+iteration 0: residual 2.65399e-10
+iteration 1: residual 1.67274e-19
+iteration 0: residual 2.60473e-10
+iteration 1: residual 3.32783e-19
+iteration 0: residual 2.63503e-10
+iteration 1: residual 1.91653e-19
+iteration 0: residual 2.54966e-10
+iteration 1: residual 4.21546e-19
+iteration 0: residual 2.6263e-10
+iteration 1: residual 3.38458e-19
+iteration 0: residual 2.66417e-10
+iteration 1: residual 4.72207e-19
+iteration 0: residual 2.55694e-10
+iteration 1: residual 3.96096e-19
+iteration 0: residual 2.52717e-10
+iteration 1: residual 2.78161e-19
+iteration 0: residual 2.56908e-10
+iteration 1: residual 3.32872e-19
+iteration 0: residual 2.68551e-10
+iteration 1: residual 5.23042e-19
+iteration 0: residual 2.57287e-10
+iteration 1: residual 2.15962e-19
+iteration 0: residual 2.49965e-10
+iteration 1: residual 3.09008e-19
+iteration 0: residual 2.57843e-10
+iteration 1: residual 2.38145e-19
+iteration 0: residual 2.58067e-10
+iteration 1: residual 2.48348e-19
+iteration 0: residual 2.44007e-10
+iteration 1: residual 2.1528e-19
+iteration 0: residual 2.50011e-10
+iteration 1: residual 2.13473e-19
+iteration 0: residual 2.5555e-10
+iteration 1: residual 2.65926e-19
+iteration 0: residual 2.41065e-10
+iteration 1: residual 9.59494e-20
+iteration 0: residual 2.58787e-10
+iteration 1: residual 3.13445e-19
+iteration 0: residual 2.54079e-10
+iteration 1: residual 3.21303e-19
+iteration 0: residual 2.57555e-10
+iteration 1: residual 3.84889e-19
+iteration 0: residual 2.69078e-10
+iteration 1: residual 3.52963e-19
+iteration 0: residual 2.62382e-10
+iteration 1: residual 2.01796e-19
+iteration 0: residual 2.64252e-10
+iteration 1: residual 1.95219e-19
+iteration 0: residual 2.48972e-10
+iteration 1: residual 2.39767e-19
+iteration 0: residual 2.71201e-10
+iteration 1: residual 2.14564e-19
+iteration 0: residual 2.6278e-10
+iteration 1: residual 1.64149e-19
+iteration 0: residual 2.74333e-10
+iteration 1: residual 4.53739e-19
+iteration 0: residual 2.54467e-10
+iteration 1: residual 3.91405e-19
+iteration 0: residual 2.57802e-10
+iteration 1: residual 3.69837e-19
+iteration 0: residual 2.51588e-10
+iteration 1: residual 3.69758e-19
+iteration 0: residual 2.65339e-10
+iteration 1: residual 3.07697e-19
+iteration 0: residual 2.70801e-10
+iteration 1: residual 3.29874e-19
+iteration 0: residual 2.58897e-10
+iteration 1: residual 2.7591e-19
+iteration 0: residual 2.68474e-10
+iteration 1: residual 4.7529e-19
+iteration 0: residual 2.47522e-10
+iteration 1: residual 2.18172e-19
+iteration 0: residual 2.51314e-10
+iteration 1: residual 3.77597e-19
+iteration 0: residual 2.74561e-10
+iteration 1: residual 1.48928e-19
+iteration 0: residual 2.62152e-10
+iteration 1: residual 3.50306e-19
+iteration 0: residual 2.52065e-10
+iteration 1: residual 2.62095e-19
+iteration 0: residual 2.39862e-10
+iteration 1: residual 1.86089e-19
+iteration 0: residual 2.68853e-10
+iteration 1: residual 2.04924e-19
+iteration 0: residual 2.58691e-10
+iteration 1: residual 2.52828e-19
+iteration 0: residual 2.61373e-10
+iteration 1: residual 2.19907e-19
+iteration 0: residual 2.8343e-10
+iteration 1: residual 4.84943e-19
+iteration 0: residual 2.6485e-10
+iteration 1: residual 4.98972e-19
+iteration 0: residual 2.63965e-10
+iteration 1: residual 3.62431e-19
+iteration 0: residual 2.73874e-10
+iteration 1: residual 3.17043e-19
+iteration 0: residual 2.67279e-10
+iteration 1: residual 1.53399e-19
+iteration 0: residual 2.81966e-10
+iteration 1: residual 9.00867e-20
+iteration 0: residual 2.49517e-10
+iteration 1: residual 2.63736e-19
+iteration 0: residual 2.61314e-10
+iteration 1: residual 2.52781e-19
+iteration 0: residual 2.72844e-10
+iteration 1: residual 2.29006e-19
+iteration 0: residual 2.6547e-10
+iteration 1: residual 2.86622e-19
+iteration 0: residual 2.65808e-10
+iteration 1: residual 3.67039e-19
+iteration 0: residual 2.66375e-10
+iteration 1: residual 1.76829e-19
+iteration 0: residual 2.76469e-10
+iteration 1: residual 1.06142e-19
+iteration 0: residual 2.62574e-10
+iteration 1: residual 1.59562e-19
+iteration 0: residual 2.83567e-10
+iteration 1: residual 2.9567e-19
+iteration 0: residual 2.64149e-10
+iteration 1: residual 4.04322e-19
+iteration 0: residual 2.58002e-10
+iteration 1: residual 4.63514e-19
+iteration 0: residual 2.5175e-10
+iteration 1: residual 3.2612e-19
+iteration 0: residual 2.59584e-10
+iteration 1: residual 1.07704e-19
+iteration 0: residual 2.65503e-10
+iteration 1: residual 3.90896e-19
+iteration 0: residual 2.44309e-10
+iteration 1: residual 2.79486e-19
+iteration 0: residual 2.54835e-10
+iteration 1: residual 1.23828e-19
+iteration 0: residual 2.77928e-10
+iteration 1: residual 1.38425e-19
+iteration 0: residual 2.64496e-10
+iteration 1: residual 4.24073e-19
+iteration 0: residual 2.45843e-10
+iteration 1: residual 2.38231e-19
+iteration 0: residual 2.61674e-10
+iteration 1: residual 2.7506e-19
+iteration 0: residual 2.74758e-10
+iteration 1: residual 3.56414e-19
+iteration 0: residual 2.67966e-10
+iteration 1: residual 2.78018e-19
+iteration 0: residual 2.63278e-10
+iteration 1: residual 2.15615e-19
+iteration 0: residual 2.51319e-10
+iteration 1: residual 2.49077e-19
+iteration 0: residual 2.67686e-10
+iteration 1: residual 4.17313e-19
+iteration 0: residual 2.60304e-10
+iteration 1: residual 1.16672e-19
+iteration 0: residual 2.62194e-10
+iteration 1: residual 1.29378e-19
+iteration 0: residual 2.65859e-10
+iteration 1: residual 1.59429e-19
+iteration 0: residual 2.58155e-10
+iteration 1: residual 3.2981e-19
+iteration 0: residual 2.58371e-10
+iteration 1: residual 3.59777e-19
+iteration 0: residual 2.4539e-10
+iteration 1: residual 2.7277e-19
+iteration 0: residual 8.78783e-11
+iteration 1: residual 1.18918e-20
+iteration 0: residual 7.28075e-11
+iteration 1: residual 4.22257e-20
+iteration 0: residual 2.68698e-10
+iteration 1: residual 2.63123e-19
+iteration 0: residual 2.58102e-10
+iteration 1: residual 1.97009e-19
+iteration 0: residual 2.62536e-10
+iteration 1: residual 2.72971e-19
+iteration 0: residual 1.11564e-10
+iteration 1: residual 2.96287e-20
+iteration 0: residual 7.29405e-11
+iteration 1: residual 1.69611e-20
+iteration 0: residual 2.71002e-10
+iteration 1: residual 3.75826e-19
+iteration 0: residual 2.59683e-10
+iteration 1: residual 4.85186e-19
+iteration 0: residual 2.59523e-10
+iteration 1: residual 3.51344e-19
+iteration 0: residual 2.57283e-10
+iteration 1: residual 4.81856e-19
+iteration 0: residual 2.54234e-10
+iteration 1: residual 4.9573e-19
+iteration 0: residual 2.92653e-10
+iteration 1: residual 6.22077e-20
+iteration 0: residual 8.74272e-11
+iteration 1: residual 1.90389e-20
+iteration 0: residual 2.69147e-10
+iteration 1: residual 2.74074e-19
+iteration 0: residual 2.72699e-10
+iteration 1: residual 3.50642e-19
+iteration 0: residual 2.71029e-10
+iteration 1: residual 4.59783e-19
+iteration 0: residual 2.61061e-10
+iteration 1: residual 2.37915e-19
+iteration 0: residual 2.62969e-10
+iteration 1: residual 3.50027e-19
+iteration 0: residual 2.60892e-10
+iteration 1: residual 1.92246e-19
+
+real	11m37.007s
+user	176m14.084s
+sys	7m9.176s
+
+======================================================================
+>>> grace_coverage.py  (11:26:43)
+>>> args: --lmax 255 --load-scale-km 500.0 --prior-order 3.0 --prior-shift 0.0 --obs-degree 96 --load-order 0.25 --spacing 1.0 --land-water --source-order 0.25 --source-prior-order 1.5 --ice-std-mm 80.0 --ice-scale-km 180.0 --land-water-std-mm 65.0 --land-water-scale-km 340.0 --ocean-prior steric --field-order 1.25 --steric-std-mm 46.0 --steric-scale-km 280.0 --steric-order 3.0 --manometric-std-mm 8.0 --manometric-scale-km 330.0 --manometric-order 2.5 --load-prior model --spacing 8.0 --ocean-case partly --coefficient-errors 2007 2008 --gia-years 1.0 --gia-model caron --qoi-rtol 1e-6 --serial-threads 48 --parallel --max-jobs 48 --truth-mean kept --prior-truths 0 --wmb-filter gaussian
+======================================================================
+Building the physics, prior and noise (lmax=255)...
+Prior amplitudes: sterodynamic std = 46.043 mm (input), density std = 1.2558e-02 kg m^-3 (mean-depth steric std = 46.000 mm), ice std = 90.157 mm, land water std = 66.076 mm
+  realised GMSL prior stds under the mass constraint: barystatic = 1.689 mm (the ice alone 0.380), steric = 3.214 mm (verified 3.214); barystatic/steric ratio = 0.53
+  <eta>_O -- <eta_s>_O prior correlation rho_XY = 0.999; unconstrained <eta>_O std = 3.217 mm
+GRACE coefficient errors: ITSG-Grace2018, annual means of 2007 and 2008, std x 1.00: pointwise 569.8 mm EWT to degree 96, unfiltered; white load floor 0.00 mm
+GIA correction error from 50 eigenvectors of the covariance of Caron et al. (2018)
+Reading the loads of the ESA Earth System Model, version 3.0...
+  13 loads (2008-01 to 2020-01) and 83 regions: 25 ice sheets, 35 land, 23 ocean
+Assembling the normal matrix of 9405 data...
+Assembling the estimators...
+The GRACE estimators' errors against their stated standard deviations
+13 loads of the ESA Earth System Model, version 3.0 (2008-01 to 2020-01; the ocean's part a quarter left), 50 draws of the noise for each, data to degree 96,
+83 regions, their masks unsmoothed.
+WMB: degrees to 60, Gaussian filter of 300 km, rescaled.
+A ratio is an error over the standard deviation its estimator states; for a standard normal the
+root mean square is 1 and the fractions within 1 and 2 are 0.683 and 0.954. Stds and errors in mm EWT.
+WMB's stated standard deviation is that of its whole error under the prior, noise and leakage; the
+rows 'WMB, noise alone' set the same errors against the noise it propagates.
+
+                                 rms ratio    within 1    within 2  median std  median rms
+------------------------------------------------------------------------------------------
+ice sheets, WMB                      2.159       0.461       0.678      32.687      52.886
+ice sheets, WMB, noise alone         6.631       0.162       0.308      10.280      52.886
+ice sheets, Bayesian                 1.902       0.483       0.741       5.716       8.561
+land, WMB                            1.058       0.662       0.939       5.388       5.144
+land, WMB, noise alone               2.658       0.327       0.584       2.232       5.144
+land, Bayesian                       1.399       0.580       0.865       1.584       1.917
+ocean, WMB                           1.246       0.606       0.897       3.915       4.452
+ocean, WMB, noise alone              3.207       0.281       0.524       1.633       4.452
+ocean, Bayesian                      2.373       0.407       0.687       0.763       1.537
+all, WMB                             1.518       0.586       0.849       5.753       5.876
+all, WMB, noise alone                4.367       0.265       0.484       2.469       5.876
+all, Bayesian                        1.864       0.503       0.778       1.719       2.057
+
+
+
+saved output_plots_grace_coverage/coverage_metrics.txt
+saved output_plots_grace_coverage/coverage_histograms.png
+saved output_plots_grace_coverage/coverage_regions.png
+
+real	11m32.040s
+user	246m43.883s
+sys	6m45.949s
+
+======================================================================
+>>> altimetry_inversion.py  (11:38:16)
+>>> args: --lmax 255 --load-scale-km 500.0 --prior-order 3.0 --prior-shift 0.0 --surrogate-degree 32 --preconditioner blocks --altimetry-neighbours 40 --grace-block-rank 0 --load-order 0.25 --spacing 1.0 --land-water --source-order 0.25 --source-prior-order 1.5 --ice-std-mm 80.0 --ice-scale-km 180.0 --land-water-std-mm 65.0 --land-water-scale-km 340.0 --ocean-prior steric --field-order 1.25 --steric-std-mm 46.0 --steric-scale-km 280.0 --steric-order 3.0 --manometric-std-mm 8.0 --manometric-scale-km 330.0 --manometric-order 2.5 --noise-std-mm 6.0 --noise-corr-std-mm 0.7 --noise-corr-scale-km 2000.0 --noise-global-std-mm 1.0 --noise-frame-std-mm 0.33 --gia-years 1.0 --gia-model caron --qoi-rtol 1e-6 --serial-threads 48 --parallel --max-jobs 48 --all
+======================================================================
+
+Building the physics, prior and noise (lmax=255)...
+Generated 34216 ocean altimetry observation points.
+GIA correction error from 50 eigenvectors of the covariance of Caron et al. (2018)
+Prior amplitudes: sterodynamic std = 46.690 mm (input), density std = 1.2558e-02 kg m^-3 (mean-depth steric std = 46.000 mm), ice std = 90.157 mm, land water std = 66.076 mm
+  realised GMSL prior stds under the mass constraint: barystatic = 1.689 mm (the ice alone 0.380), steric = 3.214 mm (verified 3.214); barystatic/steric ratio = 0.53
+  <eta>_O -- <eta_s>_O prior correlation rho_XY = 0.985; unconstrained <eta>_O std = 3.264 mm
+  correlated altimetry error component: implied GMSL error floor = 0.316 mm
+Correlated (sterodynamic, density) prior: r0 = 0.90, correlation scale factor = 0.40
+Sobolev priors: common order = 3.00
+Correlated altimetry error component: std = 0.70 mm, scale = 2000 km
+Setting up the Bayesian inversion...
+  altimetry block: 40 neighbours per point, no cut-off
+
+Solving for the posterior expectation...
+iteration 0: residual 1.37955e-06
+iteration 1: residual 1.62634e-07
+iteration 2: residual 2.97243e-08
+iteration 3: residual 6.5046e-09
+iteration 4: residual 8.71319e-10
+Solution reached in 4 iterations.
+Squared misfit of the data to their prior prediction: 34480 for 34216 data (expected 34216 +/- 262).
+Pushing forward onto the GMSL change...
+iteration 0: residual 3.8167e-07
+iteration 1: residual 1.59042e-08
+iteration 2: residual 5.85039e-09
+iteration 3: residual 2.96836e-10
+iteration 4: residual 1.03801e-10
+iteration 5: residual 6.87503e-12
+iteration 6: residual 1.87706e-12
+iteration 7: residual 1.82003e-13
+
+Pushing forward onto the barystatic/steric GMSL split...
+
+Plotting the true and posterior fields...
+Plotting the geocentric sea level change and the data...
+
+Plotting the covariance maps...
+  Covariance with Ice at (-78.0, -110.0)...
+iteration 0: residual 1.93857e-17
+iteration 1: residual 7.02482e-19
+iteration 2: residual 3.29707e-19
+iteration 3: residual 1.64335e-20
+iteration 4: residual 6.00507e-21
+iteration 5: residual 2.48272e-22
+iteration 6: residual 1.07939e-22
+iteration 7: residual 6.89999e-24
+  Covariance with Sterodynamic at (30.0, -45.0)...
+iteration 0: residual 4.61939e-16
+iteration 1: residual 1.45665e-17
+iteration 2: residual 1.0412e-17
+iteration 3: residual 1.14105e-18
+iteration 4: residual 1.86618e-19
+iteration 5: residual 3.3373e-20
+iteration 6: residual 6.06842e-22
+iteration 7: residual 6.46623e-22
+iteration 8: residual 2.79957e-23
+
+Decomposing the regional sea level change...
+
+Prior sensitivity, field by field...
+iteration 0: residual 3.8167e-07
+iteration 1: residual 1.59042e-08
+iteration 2: residual 5.85039e-09
+iteration 3: residual 2.96836e-10
+iteration 4: residual 1.03801e-10
+iteration 5: residual 6.87503e-12
+iteration 6: residual 1.87706e-12
+iteration 7: residual 1.82003e-13
+iteration 0: residual 7.56262e-08
+iteration 1: residual 2.45317e-09
+iteration 2: residual 1.2761e-09
+iteration 3: residual 5.48729e-11
+iteration 4: residual 2.31551e-11
+iteration 5: residual 1.35896e-12
+iteration 6: residual 4.06177e-13
+iteration 7: residual 3.24165e-14
+iteration 0: residual 3.06706e-07
+iteration 1: residual 1.30954e-08
+iteration 2: residual 4.63236e-09
+iteration 3: residual 2.55343e-10
+iteration 4: residual 8.37717e-11
+iteration 5: residual 5.92097e-12
+iteration 6: residual 1.51306e-12
+iteration 7: residual 1.54885e-13
+iteration 0: residual 2.1423e-06
+iteration 1: residual 8.18705e-08
+iteration 2: residual 5.08729e-08
+iteration 3: residual 5.22386e-09
+iteration 4: residual 9.52351e-10
+iteration 5: residual 1.84872e-10
+iteration 6: residual 7.37048e-12
+iteration 7: residual 3.49976e-12
+iteration 8: residual 8.90676e-14
+iteration 0: residual 8.88219e-08
+iteration 1: residual 2.95607e-09
+iteration 2: residual 2.05613e-09
+iteration 3: residual 1.12901e-10
+iteration 4: residual 3.88263e-11
+iteration 5: residual 5.41566e-12
+iteration 6: residual 5.38417e-13
+iteration 7: residual 1.44508e-13
+iteration 8: residual 4.74027e-15
+iteration 0: residual 7.98075e-08
+iteration 1: residual 2.5821e-09
+iteration 2: residual 1.34982e-09
+iteration 3: residual 5.93096e-11
+iteration 4: residual 2.44704e-11
+iteration 5: residual 1.46309e-12
+iteration 6: residual 4.28729e-13
+iteration 7: residual 3.44413e-14
+
+Saving 7 plots to 'output_plots_altimetry_inversion/'...
+saved output_plots_altimetry_inversion/gmslr_pdf.png
+saved output_plots_altimetry_inversion/gmslr_split_corner.png
+saved output_plots_altimetry_inversion/posterior_maps.png
+saved output_plots_altimetry_inversion/geocentric_sl_data.png
+saved output_plots_altimetry_inversion/covariance_Ice_WAIS.png
+saved output_plots_altimetry_inversion/covariance_Sterodynamic_North_Atlantic.png
+saved output_plots_altimetry_inversion/regional_corner.png
+iteration 0: residual 3.06706e-07
+iteration 1: residual 1.30954e-08
+iteration 2: residual 4.63236e-09
+iteration 3: residual 2.55343e-10
+iteration 4: residual 8.37717e-11
+iteration 5: residual 5.92097e-12
+iteration 6: residual 1.51306e-12
+iteration 7: residual 1.54885e-13
+iteration 0: residual 2.1423e-06
+iteration 1: residual 8.18705e-08
+iteration 2: residual 5.08729e-08
+iteration 3: residual 5.22386e-09
+iteration 4: residual 9.52351e-10
+iteration 5: residual 1.84872e-10
+iteration 6: residual 7.37048e-12
+iteration 7: residual 3.49976e-12
+iteration 8: residual 8.90676e-14
+iteration 0: residual 7.98075e-08
+iteration 1: residual 2.5821e-09
+iteration 2: residual 1.34982e-09
+iteration 3: residual 5.93096e-11
+iteration 4: residual 2.44704e-11
+iteration 5: residual 1.46309e-12
+iteration 6: residual 4.28729e-13
+iteration 7: residual 3.44413e-14
+iteration 0: residual 7.56262e-08
+iteration 1: residual 2.45317e-09
+iteration 2: residual 1.2761e-09
+iteration 3: residual 5.48729e-11
+iteration 4: residual 2.31551e-11
+iteration 5: residual 1.35896e-12
+iteration 6: residual 4.06177e-13
+iteration 7: residual 3.24165e-14
+iteration 0: residual 8.88219e-08
+iteration 1: residual 2.95607e-09
+iteration 2: residual 2.05613e-09
+iteration 3: residual 1.12901e-10
+iteration 4: residual 3.88263e-11
+iteration 5: residual 5.41566e-12
+iteration 6: residual 5.38417e-13
+iteration 7: residual 1.44508e-13
+iteration 8: residual 4.74027e-15
+
+real	5m4.664s
+user	31m38.433s
+sys	1m11.105s
+
+======================================================================
+>>> joint_inversion.py  (11:43:20)
+>>> args: --lmax 255 --load-scale-km 500.0 --prior-order 3.0 --prior-shift 0.0 --surrogate-degree 32 --preconditioner blocks --altimetry-neighbours 40 --grace-block-rank 0 --obs-degree 96 --load-order 0.25 --spacing 1.0 --land-water --source-order 0.25 --source-prior-order 1.5 --ice-std-mm 80.0 --ice-scale-km 180.0 --land-water-std-mm 65.0 --land-water-scale-km 340.0 --ocean-prior steric --field-order 1.25 --steric-std-mm 46.0 --steric-scale-km 280.0 --steric-order 3.0 --manometric-std-mm 8.0 --manometric-scale-km 330.0 --manometric-order 2.5 --alt-noise-std-mm 6.0 --alt-noise-corr-std-mm 0.7 --alt-noise-corr-scale-km 2000.0 --alt-noise-global-std-mm 1.0 --alt-noise-frame-std-mm 0.33 --grace-coefficient-errors 2007 2008 --gia-years 1.0 --gia-model caron --qoi-rtol 1e-6 --serial-threads 48 --parallel --max-jobs 48 --all --std-samples 100
+======================================================================
+
+Building the exact physics, prior and noise (lmax=255)...
+Generated 34216 ocean altimetry observation points.
+GRACE coefficient errors: ITSG-Grace2018, annual means of 2007 and 2008, std x 1.00: pointwise 569.8 mm EWT to degree 96, unfiltered; white load floor 0.00 mm
+Prior amplitudes: sterodynamic std = 46.690 mm (input), density std = 1.2558e-02 kg m^-3 (mean-depth steric std = 46.000 mm), ice std = 90.157 mm, land water std = 66.076 mm
+  realised GMSL prior stds under the mass constraint: barystatic = 1.689 mm (the ice alone 0.380), steric = 3.214 mm (verified 3.214); barystatic/steric ratio = 0.53
+  <eta>_O -- <eta_s>_O prior correlation rho_XY = 0.985; unconstrained <eta>_O std = 3.264 mm
+  correlated altimetry error component: implied GMSL error floor = 0.316 mm
+Correlated (sterodynamic, density) prior: r0 = 0.90, correlation scale factor = 0.40
+Sobolev priors: common order = 3.00
+Correlated altimetry error component: std = 0.70 mm, scale = 2000 km
+GIA correction error from 50 eigenvectors of the covariance of Caron et al. (2018)
+GIA correction error from 50 eigenvectors of the covariance of Caron et al. (2018)
+GIA correction error from 50 eigenvectors of the covariance of Caron et al. (2018)
+
+Drawing the synthetic truth and data...
+
+Solving for Posteriors...
+ -> Solving Alt-Only...
+  altimetry block: 40 neighbours per point, no cut-off
+iteration 0: residual 1.35471e-06
+iteration 1: residual 1.33672e-07
+iteration 2: residual 2.12419e-08
+iteration 3: residual 3.77828e-09
+iteration 4: residual 5.94853e-10
+Solution reached in 4 iterations.
+Squared misfit of the data to their prior prediction: 34488 for 34216 data (expected 34216 +/- 262).
+ -> Solving GRACE-Only...
+  GRACE block: 9405 applications of the normal operator...
+iteration 0: residual 2.72896e-10
+iteration 1: residual 1.37024e-19
+Solution reached in 1 iterations.
+Squared misfit of the data to their prior prediction: 9303 for 9405 data (expected 9405 +/- 137).
+ -> Solving Joint...
+iteration 0: residual 1.35471e-06
+iteration 1: residual 2.48287e-07
+iteration 2: residual 4.84412e-08
+iteration 3: residual 1.58514e-08
+iteration 4: residual 2.60563e-09
+iteration 5: residual 8.70867e-10
+iteration 6: residual 1.70875e-10
+Solution reached in 6 iterations.
+Squared misfit of the data to their prior prediction: 43803 for 43621 data (expected 43621 +/- 295).
+
+Plotting GMSLR PDFs...
+iteration 0: residual 3.8167e-07
+iteration 1: residual 1.59042e-08
+iteration 2: residual 5.85038e-09
+iteration 3: residual 2.96836e-10
+iteration 4: residual 1.03801e-10
+iteration 5: residual 6.87504e-12
+iteration 6: residual 1.87706e-12
+iteration 7: residual 1.82004e-13
+iteration 0: residual 3.25374e-11
+iteration 1: residual 4.34077e-21
+iteration 0: residual 3.8167e-07
+iteration 1: residual 3.65435e-08
+iteration 2: residual 8.21188e-09
+iteration 3: residual 1.25785e-09
+iteration 4: residual 2.67322e-10
+iteration 5: residual 3.55008e-11
+iteration 6: residual 7.68036e-12
+iteration 7: residual 9.46274e-13
+iteration 8: residual 2.06116e-13
+
+Pushing forward onto the 2D GMSLR split (barystatic, steric)...
+
+Generating 3-component spatial maps...
+  Computing pointwise standard deviation from 100 Joint Posterior samples...
+iteration 0: residual 1.33162e-06
+iteration 1: residual 2.68565e-07
+iteration 2: residual 5.07813e-08
+iteration 3: residual 1.40604e-08
+iteration 4: residual 2.85668e-09
+iteration 5: residual 7.81667e-10
+iteration 6: residual 1.45315e-10
+iteration 0: residual 1.32761e-06
+iteration 1: residual 2.58576e-07
+iteration 2: residual 5.38335e-08
+iteration 3: residual 9.2079e-09
+iteration 4: residual 4.6316e-09
+iteration 5: residual 4.00919e-10
+iteration 0: residual 1.36184e-06
+iteration 1: residual 2.60139e-07
+iteration 2: residual 5.72372e-08
+iteration 3: residual 1.62534e-08
+iteration 4: residual 2.93399e-09
+iteration 5: residual 1.05168e-09
+iteration 6: residual 1.61835e-10
+iteration 0: residual 1.41584e-06
+iteration 1: residual 2.92009e-07
+iteration 2: residual 8.10769e-08
+iteration 3: residual 2.99726e-08
+iteration 4: residual 2.533e-09
+iteration 5: residual 1.17634e-09
+iteration 6: residual 2.52746e-10
+iteration 0: residual 1.42914e-06
+iteration 1: residual 2.76983e-07
+iteration 2: residual 5.92274e-08
+iteration 3: residual 1.33037e-08
+iteration 4: residual 1.83349e-09
+iteration 5: residual 6.83574e-10
+iteration 6: residual 8.68295e-11
+iteration 0: residual 1.39588e-06
+iteration 1: residual 2.38369e-07
+iteration 2: residual 7.68211e-08
+iteration 3: residual 1.59773e-08
+iteration 4: residual 5.62068e-09
+iteration 5: residual 9.31256e-10
+iteration 6: residual 2.81362e-10
+iteration 0: residual 1.35694e-06
+iteration 1: residual 2.59634e-07
+iteration 2: residual 5.71363e-08
+iteration 3: residual 1.26247e-08
+iteration 4: residual 2.52833e-09
+iteration 5: residual 8.38815e-10
+iteration 6: residual 1.14035e-10
+iteration 0: residual 1.29977e-06
+iteration 1: residual 2.77169e-07
+iteration 2: residual 4.95883e-08
+iteration 3: residual 1.19955e-08
+iteration 4: residual 2.1328e-09
+iteration 5: residual 7.58104e-10
+iteration 6: residual 1.25193e-10
+iteration 0: residual 1.33671e-06
+iteration 1: residual 2.44806e-07
+iteration 2: residual 6.00782e-08
+iteration 3: residual 1.73145e-08
+iteration 4: residual 3.85777e-09
+iteration 5: residual 5.16917e-10
+iteration 0: residual 1.37329e-06
+iteration 1: residual 2.57835e-07
+iteration 2: residual 5.40242e-08
+iteration 3: residual 9.1198e-09
+iteration 4: residual 3.51046e-09
+iteration 5: residual 2.73049e-10
+iteration 0: residual 1.29775e-06
+iteration 1: residual 2.37999e-07
+iteration 2: residual 4.4634e-08
+iteration 3: residual 7.89562e-09
+iteration 4: residual 1.20375e-09
+iteration 5: residual 2.30182e-10
+iteration 0: residual 1.34964e-06
+iteration 1: residual 2.67167e-07
+iteration 2: residual 5.54144e-08
+iteration 3: residual 1.13705e-08
+iteration 4: residual 5.20274e-09
+iteration 5: residual 5.37258e-10
+iteration 0: residual 1.31022e-06
+iteration 1: residual 2.54047e-07
+iteration 2: residual 5.40413e-08
+iteration 3: residual 1.08393e-08
+iteration 4: residual 2.52346e-09
+iteration 5: residual 9.1064e-10
+iteration 6: residual 1.50294e-10
+iteration 0: residual 1.35329e-06
+iteration 1: residual 2.6111e-07
+iteration 2: residual 4.74857e-08
+iteration 3: residual 1.10179e-08
+iteration 4: residual 1.42396e-09
+iteration 5: residual 8.68291e-10
+iteration 6: residual 1.08421e-10
+iteration 0: residual 1.35784e-06
+iteration 1: residual 2.59678e-07
+iteration 2: residual 6.37084e-08
+iteration 3: residual 1.54031e-08
+iteration 4: residual 4.41326e-09
+iteration 5: residual 6.75285e-10
+iteration 6: residual 1.80484e-10
+iteration 0: residual 1.3643e-06
+iteration 1: residual 2.60085e-07
+iteration 2: residual 5.68578e-08
+iteration 3: residual 2.09936e-08
+iteration 4: residual 2.89607e-09
+iteration 5: residual 8.0012e-10
+iteration 6: residual 1.78135e-10
+iteration 0: residual 1.36474e-06
+iteration 1: residual 2.65312e-07
+iteration 2: residual 7.76478e-08
+iteration 3: residual 2.03573e-08
+iteration 4: residual 4.62667e-09
+iteration 5: residual 8.04089e-10
+iteration 6: residual 2.33056e-10
+iteration 0: residual 1.33431e-06
+iteration 1: residual 2.87458e-07
+iteration 2: residual 8.50869e-08
+iteration 3: residual 2.50402e-08
+iteration 4: residual 3.96432e-09
+iteration 5: residual 5.39944e-10
+iteration 0: residual 1.34164e-06
+iteration 1: residual 2.4218e-07
+iteration 2: residual 5.49973e-08
+iteration 3: residual 9.93157e-09
+iteration 4: residual 3.45567e-09
+iteration 5: residual 4.21988e-10
+iteration 0: residual 1.38071e-06
+iteration 1: residual 2.60533e-07
+iteration 2: residual 6.42815e-08
+iteration 3: residual 1.93874e-08
+iteration 4: residual 3.88501e-09
+iteration 5: residual 5.86079e-10
+iteration 0: residual 1.41632e-06
+iteration 1: residual 2.83357e-07
+iteration 2: residual 5.95127e-08
+iteration 3: residual 2.4374e-08
+iteration 4: residual 2.51241e-09
+iteration 5: residual 1.11441e-09
+iteration 6: residual 2.27802e-10
+iteration 0: residual 1.32037e-06
+iteration 1: residual 2.54244e-07
+iteration 2: residual 5.61489e-08
+iteration 3: residual 1.74475e-08
+iteration 4: residual 3.81254e-09
+iteration 5: residual 6.63918e-10
+iteration 6: residual 1.12542e-10
+iteration 0: residual 1.39159e-06
+iteration 1: residual 2.42574e-07
+iteration 2: residual 5.58031e-08
+iteration 3: residual 9.38129e-09
+iteration 4: residual 2.62492e-09
+iteration 5: residual 5.35725e-10
+iteration 0: residual 1.40319e-06
+iteration 1: residual 2.57293e-07
+iteration 2: residual 5.19576e-08
+iteration 3: residual 8.87142e-09
+iteration 4: residual 1.76502e-09
+iteration 5: residual 4.27068e-10
+iteration 0: residual 1.31459e-06
+iteration 1: residual 3.05686e-07
+iteration 2: residual 6.78784e-08
+iteration 3: residual 2.6227e-08
+iteration 4: residual 3.21931e-09
+iteration 5: residual 9.52573e-10
+iteration 6: residual 1.81108e-10
+iteration 0: residual 1.39931e-06
+iteration 1: residual 2.77677e-07
+iteration 2: residual 5.84194e-08
+iteration 3: residual 1.47847e-08
+iteration 4: residual 3.71327e-09
+iteration 5: residual 5.61131e-10
+iteration 0: residual 1.38392e-06
+iteration 1: residual 2.59875e-07
+iteration 2: residual 5.53829e-08
+iteration 3: residual 1.92087e-08
+iteration 4: residual 1.86391e-09
+iteration 5: residual 1.55794e-09
+iteration 6: residual 2.41813e-10
+iteration 0: residual 1.36531e-06
+iteration 1: residual 2.61323e-07
+iteration 2: residual 6.53817e-08
+iteration 3: residual 1.41727e-08
+iteration 4: residual 5.78895e-09
+iteration 5: residual 7.74009e-10
+iteration 6: residual 2.75361e-10
+iteration 0: residual 7.56262e-08
+iteration 1: residual 2.45317e-09
+iteration 2: residual 1.2761e-09
+iteration 3: residual 5.48727e-11
+iteration 4: residual 2.3155e-11
+iteration 5: residual 1.35896e-12
+iteration 6: residual 4.06177e-13
+iteration 7: residual 3.24164e-14
+iteration 0: residual 3.25374e-11
+iteration 1: residual 4.34077e-21
+iteration 0: residual 7.56262e-08
+iteration 1: residual 4.33172e-08
+iteration 2: residual 4.4915e-09
+iteration 3: residual 1.52059e-09
+iteration 4: residual 1.05059e-10
+iteration 5: residual 2.96062e-11
+iteration 6: residual 3.02234e-12
+iteration 7: residual 6.60373e-13
+iteration 8: residual 9.32122e-14
+iteration 9: residual 1.42495e-14
+iteration 0: residual 1.37198e-06
+iteration 1: residual 2.59224e-07
+iteration 2: residual 5.77882e-08
+iteration 3: residual 2.18767e-08
+iteration 4: residual 2.56713e-09
+iteration 5: residual 1.29547e-09
+iteration 6: residual 2.40378e-10
+iteration 0: residual 1.37138e-06
+iteration 1: residual 2.54834e-07
+iteration 2: residual 5.40211e-08
+iteration 3: residual 1.55834e-08
+iteration 4: residual 3.92456e-09
+iteration 5: residual 5.98182e-10
+iteration 0: residual 1.358e-06
+iteration 1: residual 3.00466e-07
+iteration 2: residual 7.19878e-08
+iteration 3: residual 3.00707e-08
+iteration 4: residual 3.17155e-09
+iteration 5: residual 1.271e-09
+iteration 6: residual 2.52459e-10
+iteration 0: residual 1.31453e-06
+iteration 1: residual 2.49629e-07
+iteration 2: residual 4.6665e-08
+iteration 3: residual 1.18239e-08
+iteration 4: residual 1.57473e-09
+iteration 5: residual 1.32238e-09
+iteration 6: residual 1.74114e-10
+iteration 0: residual 1.33349e-06
+iteration 1: residual 2.89927e-07
+iteration 2: residual 7.13918e-08
+iteration 3: residual 2.7874e-08
+iteration 4: residual 3.42488e-09
+iteration 5: residual 9.88346e-10
+iteration 6: residual 2.22163e-10
+iteration 0: residual 1.35416e-06
+iteration 1: residual 2.62882e-07
+iteration 2: residual 4.99175e-08
+iteration 3: residual 1.02457e-08
+iteration 4: residual 2.53717e-09
+iteration 5: residual 4.98064e-10
+iteration 0: residual 1.36996e-06
+iteration 1: residual 2.69965e-07
+iteration 2: residual 5.69201e-08
+iteration 3: residual 1.33045e-08
+iteration 4: residual 5.02077e-09
+iteration 5: residual 5.27137e-10
+iteration 0: residual 1.41533e-06
+iteration 1: residual 2.65437e-07
+iteration 2: residual 6.27149e-08
+iteration 3: residual 1.22641e-08
+iteration 4: residual 2.38562e-09
+iteration 5: residual 7.10243e-10
+iteration 6: residual 1.19461e-10
+iteration 0: residual 1.31251e-06
+iteration 1: residual 2.46265e-07
+iteration 2: residual 4.9336e-08
+iteration 3: residual 1.14639e-08
+iteration 4: residual 1.8979e-09
+iteration 5: residual 9.11862e-10
+iteration 6: residual 1.20929e-10
+iteration 0: residual 1.36086e-06
+iteration 1: residual 2.99344e-07
+iteration 2: residual 7.57536e-08
+iteration 3: residual 3.12189e-08
+iteration 4: residual 3.02018e-09
+iteration 5: residual 1.06356e-09
+iteration 6: residual 2.52121e-10
+iteration 0: residual 1.24791e-06
+iteration 1: residual 2.41753e-07
+iteration 2: residual 4.66471e-08
+iteration 3: residual 1.44158e-08
+iteration 4: residual 2.53576e-09
+iteration 5: residual 8.57918e-10
+iteration 6: residual 1.41471e-10
+iteration 0: residual 1.35351e-06
+iteration 1: residual 2.85781e-07
+iteration 2: residual 6.84671e-08
+iteration 3: residual 2.07135e-08
+iteration 4: residual 4.71859e-09
+iteration 5: residual 5.76716e-10
+iteration 0: residual 1.45884e-06
+iteration 1: residual 2.5143e-07
+iteration 2: residual 5.89744e-08
+iteration 3: residual 9.44567e-09
+iteration 4: residual 3.33073e-09
+iteration 5: residual 2.51355e-10
+iteration 0: residual 1.3425e-06
+iteration 1: residual 2.71105e-07
+iteration 2: residual 4.91705e-08
+iteration 3: residual 9.00611e-09
+iteration 4: residual 2.63333e-09
+iteration 5: residual 2.54817e-10
+iteration 0: residual 1.28894e-06
+iteration 1: residual 2.66494e-07
+iteration 2: residual 4.5089e-08
+iteration 3: residual 1.91999e-08
+iteration 4: residual 2.05655e-09
+iteration 5: residual 1.4299e-09
+iteration 6: residual 2.12896e-10
+iteration 0: residual 3.06706e-07
+iteration 1: residual 1.30954e-08
+iteration 2: residual 4.63236e-09
+iteration 3: residual 2.55343e-10
+iteration 4: residual 8.37716e-11
+iteration 5: residual 5.92098e-12
+iteration 6: residual 1.51306e-12
+iteration 7: residual 1.54885e-13
+iteration 0: residual 4.0145e-26
+iteration 1: residual 1.40247e-34
+iteration 0: residual 3.06706e-07
+iteration 1: residual 1.30737e-08
+iteration 2: residual 9.17335e-09
+iteration 3: residual 4.08373e-10
+iteration 4: residual 2.82638e-10
+iteration 5: residual 1.97982e-11
+iteration 6: residual 6.95179e-12
+iteration 7: residual 8.44795e-13
+iteration 8: residual 1.77748e-13
+iteration 0: residual 1.32744e-06
+iteration 1: residual 2.4951e-07
+iteration 2: residual 4.59385e-08
+iteration 3: residual 9.52807e-09
+iteration 4: residual 1.4523e-09
+iteration 5: residual 7.08384e-10
+iteration 6: residual 8.92548e-11
+iteration 0: residual 1.36977e-06
+iteration 1: residual 2.58517e-07
+iteration 2: residual 5.88236e-08
+iteration 3: residual 2.12335e-08
+iteration 4: residual 2.75064e-09
+iteration 5: residual 9.45774e-10
+iteration 6: residual 1.96872e-10
+iteration 0: residual 1.37096e-06
+iteration 1: residual 2.52114e-07
+iteration 2: residual 6.4421e-08
+iteration 3: residual 1.50125e-08
+iteration 4: residual 4.63554e-09
+iteration 5: residual 7.38858e-10
+iteration 6: residual 2.04068e-10
+iteration 0: residual 1.35113e-06
+iteration 1: residual 2.75187e-07
+iteration 2: residual 7.98516e-08
+iteration 3: residual 2.25706e-08
+iteration 4: residual 3.68789e-09
+iteration 5: residual 6.28926e-10
+iteration 6: residual 1.80793e-10
+iteration 0: residual 1.42341e-06
+iteration 1: residual 2.65403e-07
+iteration 2: residual 5.7187e-08
+iteration 3: residual 1.34446e-08
+iteration 4: residual 2.51126e-09
+iteration 5: residual 9.58014e-10
+iteration 6: residual 1.34199e-10
+iteration 0: residual 1.39055e-06
+iteration 1: residual 2.87824e-07
+iteration 2: residual 8.35528e-08
+iteration 3: residual 2.72097e-08
+iteration 4: residual 3.1525e-09
+iteration 5: residual 7.47495e-10
+iteration 6: residual 1.69265e-10
+iteration 0: residual 1.36871e-06
+iteration 1: residual 2.55732e-07
+iteration 2: residual 5.58761e-08
+iteration 3: residual 1.21255e-08
+iteration 4: residual 2.58529e-09
+iteration 5: residual 7.61953e-10
+iteration 6: residual 1.08862e-10
+iteration 0: residual 1.40186e-06
+iteration 1: residual 2.47287e-07
+iteration 2: residual 6.37412e-08
+iteration 3: residual 1.87966e-08
+iteration 4: residual 3.53475e-09
+iteration 5: residual 5.02822e-10
+iteration 0: residual 1.29701e-06
+iteration 1: residual 2.30248e-07
+iteration 2: residual 4.61933e-08
+iteration 3: residual 7.69782e-09
+iteration 4: residual 1.60158e-09
+iteration 5: residual 3.26805e-10
+iteration 0: residual 1.34536e-06
+iteration 1: residual 2.32341e-07
+iteration 2: residual 4.63801e-08
+iteration 3: residual 7.81114e-09
+iteration 4: residual 2.01708e-09
+iteration 5: residual 2.08797e-10
+iteration 0: residual 1.3862e-06
+iteration 1: residual 2.63693e-07
+iteration 2: residual 5.514e-08
+iteration 3: residual 1.31242e-08
+iteration 4: residual 2.55422e-09
+iteration 5: residual 9.13475e-10
+iteration 6: residual 1.22539e-10
+iteration 0: residual 1.41371e-06
+iteration 1: residual 2.55696e-07
+iteration 2: residual 5.7471e-08
+iteration 3: residual 1.23005e-08
+iteration 4: residual 2.65561e-09
+iteration 5: residual 8.42098e-10
+iteration 6: residual 1.18171e-10
+iteration 0: residual 1.38392e-06
+iteration 1: residual 2.48772e-07
+iteration 2: residual 5.54408e-08
+iteration 3: residual 1.04119e-08
+iteration 4: residual 1.85993e-09
+iteration 5: residual 5.37315e-10
+iteration 0: residual 1.37916e-06
+iteration 1: residual 2.64528e-07
+iteration 2: residual 5.36001e-08
+iteration 3: residual 2.0737e-08
+iteration 4: residual 3.04815e-09
+iteration 5: residual 7.23294e-10
+iteration 6: residual 1.53731e-10
+iteration 0: residual 1.31905e-06
+iteration 1: residual 2.56053e-07
+iteration 2: residual 5.48579e-08
+iteration 3: residual 1.36548e-08
+iteration 4: residual 5.52222e-09
+iteration 5: residual 6.14728e-10
+iteration 6: residual 2.52842e-10
+iteration 0: residual 1.36787e-06
+iteration 1: residual 2.48098e-07
+iteration 2: residual 5.63564e-08
+iteration 3: residual 1.14763e-08
+iteration 4: residual 2.04394e-09
+iteration 5: residual 1.30454e-09
+iteration 6: residual 1.73644e-10
+iteration 0: residual 1.31319e-06
+iteration 1: residual 2.5862e-07
+iteration 2: residual 4.53247e-08
+iteration 3: residual 1.16231e-08
+iteration 4: residual 3.06209e-09
+iteration 5: residual 5.7734e-10
+iteration 0: residual 1.32203e-06
+iteration 1: residual 2.80814e-07
+iteration 2: residual 1.24946e-07
+iteration 3: residual 1.8236e-08
+iteration 4: residual 6.13784e-09
+iteration 5: residual 1.08172e-09
+iteration 6: residual 2.36898e-10
+iteration 0: residual 1.3609e-06
+iteration 1: residual 2.60398e-07
+iteration 2: residual 7.81806e-08
+iteration 3: residual 2.0752e-08
+iteration 4: residual 4.34911e-09
+iteration 5: residual 7.96893e-10
+iteration 6: residual 2.3099e-10
+iteration 0: residual 1.36913e-06
+iteration 1: residual 2.75561e-07
+iteration 2: residual 5.79921e-08
+iteration 3: residual 1.1612e-08
+iteration 4: residual 3.30101e-09
+iteration 5: residual 5.18447e-10
+iteration 0: residual 1.44018e-06
+iteration 1: residual 2.77309e-07
+iteration 2: residual 6.96544e-08
+iteration 3: residual 1.94726e-08
+iteration 4: residual 4.19263e-09
+iteration 5: residual 6.69895e-10
+iteration 6: residual 1.44088e-10
+iteration 0: residual 1.34594e-06
+iteration 1: residual 2.65284e-07
+iteration 2: residual 5.87037e-08
+iteration 3: residual 2.66314e-08
+iteration 4: residual 2.19216e-09
+iteration 5: residual 1.20654e-09
+iteration 6: residual 2.52199e-10
+iteration 0: residual 1.37744e-06
+iteration 1: residual 2.64466e-07
+iteration 2: residual 6.36242e-08
+iteration 3: residual 1.54584e-08
+iteration 4: residual 2.20269e-09
+iteration 5: residual 1.40497e-09
+iteration 6: residual 1.87303e-10
+iteration 0: residual 1.42442e-06
+iteration 1: residual 2.53438e-07
+iteration 2: residual 5.54033e-08
+iteration 3: residual 1.56454e-08
+iteration 4: residual 3.23551e-09
+iteration 5: residual 6.97646e-10
+iteration 6: residual 1.20074e-10
+iteration 0: residual 1.33219e-06
+iteration 1: residual 2.67528e-07
+iteration 2: residual 5.17065e-08
+iteration 3: residual 1.67494e-08
+iteration 4: residual 3.32258e-09
+iteration 5: residual 7.28538e-10
+iteration 6: residual 1.57568e-10
+iteration 0: residual 1.33481e-06
+iteration 1: residual 2.74063e-07
+iteration 2: residual 6.36409e-08
+iteration 3: residual 2.0517e-08
+iteration 4: residual 3.24569e-09
+iteration 5: residual 8.64304e-10
+iteration 6: residual 1.06937e-10
+iteration 0: residual 1.45233e-06
+iteration 1: residual 2.54722e-07
+iteration 2: residual 6.85954e-08
+iteration 3: residual 1.96889e-08
+iteration 4: residual 3.87897e-09
+iteration 5: residual 6.43878e-10
+iteration 6: residual 1.67693e-10
+iteration 0: residual 1.31182e-06
+iteration 1: residual 2.4831e-07
+iteration 2: residual 4.86835e-08
+iteration 3: residual 9.44512e-09
+iteration 4: residual 1.8814e-09
+iteration 5: residual 7.88209e-10
+iteration 6: residual 9.52589e-11
+iteration 0: residual 1.35291e-06
+iteration 1: residual 2.68053e-07
+iteration 2: residual 5.52266e-08
+iteration 3: residual 2.48874e-08
+iteration 4: residual 2.5527e-09
+iteration 5: residual 9.39384e-10
+iteration 6: residual 1.92479e-10
+iteration 0: residual 1.36596e-06
+iteration 1: residual 2.59457e-07
+iteration 2: residual 5.81356e-08
+iteration 3: residual 2.76443e-08
+iteration 4: residual 2.11091e-09
+iteration 5: residual 1.22749e-09
+iteration 6: residual 2.584e-10
+iteration 0: residual 1.40169e-06
+iteration 1: residual 2.76691e-07
+iteration 2: residual 6.21822e-08
+iteration 3: residual 1.42618e-08
+iteration 4: residual 5.27415e-09
+iteration 5: residual 6.43979e-10
+iteration 6: residual 2.53078e-10
+iteration 0: residual 1.41861e-06
+iteration 1: residual 2.60504e-07
+iteration 2: residual 5.78064e-08
+iteration 3: residual 1.08974e-08
+iteration 4: residual 3.45236e-09
+iteration 5: residual 6.49961e-10
+iteration 6: residual 1.42345e-10
+iteration 0: residual 1.3509e-06
+iteration 1: residual 2.92298e-07
+iteration 2: residual 5.13086e-08
+iteration 3: residual 2.38053e-08
+iteration 4: residual 2.17374e-09
+iteration 5: residual 1.58695e-09
+iteration 6: residual 2.65807e-10
+iteration 0: residual 1.36441e-06
+iteration 1: residual 2.62042e-07
+iteration 2: residual 6.98558e-08
+iteration 3: residual 1.25046e-08
+iteration 4: residual 5.80177e-09
+iteration 5: residual 8.17685e-10
+iteration 6: residual 3.15893e-10
+iteration 0: residual 1.31586e-06
+iteration 1: residual 2.47201e-07
+iteration 2: residual 7.44827e-08
+iteration 3: residual 1.42899e-08
+iteration 4: residual 6.36755e-09
+iteration 5: residual 1.02857e-09
+iteration 6: residual 3.04692e-10
+iteration 0: residual 1.38818e-06
+iteration 1: residual 2.68671e-07
+iteration 2: residual 6.0197e-08
+iteration 3: residual 1.21673e-08
+iteration 4: residual 4.43254e-09
+iteration 5: residual 4.94382e-10
+iteration 0: residual 1.38429e-06
+iteration 1: residual 2.79261e-07
+iteration 2: residual 6.14794e-08
+iteration 3: residual 1.45195e-08
+iteration 4: residual 3.08963e-09
+iteration 5: residual 8.51826e-10
+iteration 6: residual 9.15985e-11
+iteration 0: residual 1.40423e-06
+iteration 1: residual 2.69695e-07
+iteration 2: residual 5.41465e-08
+iteration 3: residual 1.25574e-08
+iteration 4: residual 2.06117e-09
+iteration 5: residual 7.95342e-10
+iteration 6: residual 1.30655e-10
+iteration 0: residual 1.34838e-06
+iteration 1: residual 2.69315e-07
+iteration 2: residual 7.08444e-08
+iteration 3: residual 1.99298e-08
+iteration 4: residual 4.22947e-09
+iteration 5: residual 6.16418e-10
+iteration 6: residual 1.6834e-10
+iteration 0: residual 1.34444e-06
+iteration 1: residual 2.43365e-07
+iteration 2: residual 5.86649e-08
+iteration 3: residual 9.93787e-09
+iteration 4: residual 2.54155e-09
+iteration 5: residual 6.3655e-10
+iteration 6: residual 8.27839e-11
+iteration 0: residual 1.36676e-06
+iteration 1: residual 2.57357e-07
+iteration 2: residual 5.54959e-08
+iteration 3: residual 1.66855e-08
+iteration 4: residual 3.53544e-09
+iteration 5: residual 5.05111e-10
+iteration 0: residual 1.35221e-06
+iteration 1: residual 2.80024e-07
+iteration 2: residual 7.50847e-08
+iteration 3: residual 2.49176e-08
+iteration 4: residual 3.23968e-09
+iteration 5: residual 5.19494e-10
+iteration 0: residual 1.36373e-06
+iteration 1: residual 2.58834e-07
+iteration 2: residual 7.96567e-08
+iteration 3: residual 2.40756e-08
+iteration 4: residual 2.97477e-09
+iteration 5: residual 6.02154e-10
+iteration 6: residual 7.54215e-11
+iteration 0: residual 1.35514e-06
+iteration 1: residual 2.52419e-07
+iteration 2: residual 6.1373e-08
+iteration 3: residual 1.69603e-08
+iteration 4: residual 3.69266e-09
+iteration 5: residual 4.94078e-10
+iteration 0: residual 1.45073e-06
+iteration 1: residual 2.50927e-07
+iteration 2: residual 5.09186e-08
+iteration 3: residual 8.9503e-09
+iteration 4: residual 1.42615e-09
+iteration 5: residual 7.68841e-10
+iteration 6: residual 9.05378e-11
+iteration 0: residual 1.29651e-06
+iteration 1: residual 2.56885e-07
+iteration 2: residual 4.8157e-08
+iteration 3: residual 1.34644e-08
+iteration 4: residual 1.58883e-09
+iteration 5: residual 1.3599e-09
+iteration 6: residual 1.9214e-10
+iteration 0: residual 1.28026e-06
+iteration 1: residual 2.61768e-07
+iteration 2: residual 5.17286e-08
+iteration 3: residual 1.25662e-08
+iteration 4: residual 4.7228e-09
+iteration 5: residual 5.25812e-10
+iteration 0: residual 1.40777e-06
+iteration 1: residual 2.76562e-07
+iteration 2: residual 5.86948e-08
+iteration 3: residual 1.79122e-08
+iteration 4: residual 3.58029e-09
+iteration 5: residual 8.84245e-10
+iteration 6: residual 1.57042e-10
+iteration 0: residual 1.26562e-06
+iteration 1: residual 2.62062e-07
+iteration 2: residual 4.47147e-08
+iteration 3: residual 1.94747e-08
+iteration 4: residual 2.30375e-09
+iteration 5: residual 1.14235e-09
+iteration 6: residual 2.07248e-10
+  Rendering Joint Posterior maps...
+
+Generating Point-wise Covariance Maps (Prior vs GRACE-Only Posterior vs Altimetry-Only Posterior vs Joint Posterior)...
+  Evaluating perturbation in Ice at (-78.0, -110.0)...
+iteration 0: residual 3.79785e-20
+iteration 1: residual 6.70841e-29
+iteration 0: residual 1.93857e-17
+iteration 1: residual 7.02482e-19
+iteration 2: residual 3.29707e-19
+iteration 3: residual 1.64335e-20
+iteration 4: residual 6.00507e-21
+iteration 5: residual 2.48271e-22
+iteration 6: residual 1.07939e-22
+iteration 7: residual 6.8999e-24
+iteration 0: residual 1.93857e-17
+iteration 1: residual 2.46438e-17
+iteration 2: residual 2.31019e-18
+iteration 3: residual 9.03766e-19
+iteration 4: residual 6.33576e-20
+iteration 5: residual 2.25354e-20
+iteration 6: residual 1.63614e-21
+iteration 7: residual 4.50761e-22
+iteration 8: residual 5.36527e-23
+iteration 9: residual 1.03077e-23
+  Evaluating perturbation in Sterodynamic at (30.0, -45.0)...
+iteration 0: residual 2.72721e-21
+iteration 1: residual 1.16395e-28
+iteration 0: residual 4.61939e-16
+iteration 1: residual 1.45665e-17
+iteration 2: residual 1.0412e-17
+iteration 3: residual 1.14105e-18
+iteration 4: residual 1.86617e-19
+iteration 5: residual 3.33731e-20
+iteration 6: residual 6.06824e-22
+iteration 7: residual 6.46623e-22
+iteration 8: residual 2.79955e-23
+iteration 0: residual 4.61939e-16
+iteration 1: residual 1.5904e-17
+iteration 2: residual 1.83764e-17
+iteration 3: residual 2.52051e-18
+iteration 4: residual 9.92616e-19
+iteration 5: residual 1.33917e-19
+iteration 6: residual 4.48404e-20
+iteration 7: residual 6.25504e-21
+iteration 8: residual 1.22409e-21
+iteration 9: residual 1.66559e-22
+
+Decomposing Regional Sea Level Signals (3-way)...
+  -> Prior push-forward (3 covariance actions)...
+  -> Alt-Only push-forward (3 posterior solves)...
+  -> GRACE-Only push-forward (3 posterior solves)...
+  -> Joint push-forward (3 posterior solves)...
+
+Prior sensitivity, field by field...
+iteration 0: residual 3.8167e-07
+iteration 1: residual 1.59042e-08
+iteration 2: residual 5.85038e-09
+iteration 3: residual 2.96836e-10
+iteration 4: residual 1.03801e-10
+iteration 5: residual 6.87504e-12
+iteration 6: residual 1.87706e-12
+iteration 7: residual 1.82004e-13
+iteration 0: residual 7.56262e-08
+iteration 1: residual 2.45317e-09
+iteration 2: residual 1.2761e-09
+iteration 3: residual 5.48727e-11
+iteration 4: residual 2.3155e-11
+iteration 5: residual 1.35896e-12
+iteration 6: residual 4.06177e-13
+iteration 7: residual 3.24164e-14
+iteration 0: residual 3.06706e-07
+iteration 1: residual 1.30954e-08
+iteration 2: residual 4.63236e-09
+iteration 3: residual 2.55343e-10
+iteration 4: residual 8.37716e-11
+iteration 5: residual 5.92098e-12
+iteration 6: residual 1.51306e-12
+iteration 7: residual 1.54885e-13
+iteration 0: residual 2.1423e-06
+iteration 1: residual 8.18706e-08
+iteration 2: residual 5.08729e-08
+iteration 3: residual 5.22386e-09
+iteration 4: residual 9.52352e-10
+iteration 5: residual 1.84871e-10
+iteration 6: residual 7.37055e-12
+iteration 7: residual 3.49976e-12
+iteration 8: residual 8.90696e-14
+iteration 0: residual 8.88219e-08
+iteration 1: residual 2.95607e-09
+iteration 2: residual 2.05613e-09
+iteration 3: residual 1.12901e-10
+iteration 4: residual 3.88264e-11
+iteration 5: residual 5.41566e-12
+iteration 6: residual 5.38419e-13
+iteration 7: residual 1.44508e-13
+iteration 8: residual 4.74033e-15
+iteration 0: residual 7.98075e-08
+iteration 1: residual 2.5821e-09
+iteration 2: residual 1.34982e-09
+iteration 3: residual 5.93094e-11
+iteration 4: residual 2.44703e-11
+iteration 5: residual 1.46308e-12
+iteration 6: residual 4.28729e-13
+iteration 7: residual 3.44412e-14
+iteration 0: residual 3.25374e-11
+iteration 1: residual 4.34077e-21
+iteration 0: residual 3.25374e-11
+iteration 1: residual 4.34079e-21
+iteration 0: residual 8.15334e-27
+iteration 1: residual 1.45472e-34
+iteration 0: residual 4.59951e-27
+iteration 1: residual 9.08465e-35
+iteration 0: residual 1.82407e-11
+iteration 1: residual 3.83691e-20
+iteration 0: residual 3.59813e-11
+iteration 1: residual 3.32602e-21
+iteration 0: residual 3.8167e-07
+iteration 1: residual 3.65435e-08
+iteration 2: residual 8.21188e-09
+iteration 3: residual 1.25785e-09
+iteration 4: residual 2.67322e-10
+iteration 5: residual 3.55008e-11
+iteration 6: residual 7.68036e-12
+iteration 7: residual 9.46274e-13
+iteration 8: residual 2.06116e-13
+iteration 0: residual 7.56262e-08
+iteration 1: residual 4.33172e-08
+iteration 2: residual 4.4915e-09
+iteration 3: residual 1.52059e-09
+iteration 4: residual 1.05059e-10
+iteration 5: residual 2.96062e-11
+iteration 6: residual 3.02234e-12
+iteration 7: residual 6.60373e-13
+iteration 8: residual 9.32122e-14
+iteration 9: residual 1.42495e-14
+iteration 0: residual 3.06706e-07
+iteration 1: residual 1.30737e-08
+iteration 2: residual 9.17335e-09
+iteration 3: residual 4.08373e-10
+iteration 4: residual 2.82638e-10
+iteration 5: residual 1.97982e-11
+iteration 6: residual 6.95179e-12
+iteration 7: residual 8.44795e-13
+iteration 8: residual 1.77748e-13
+iteration 0: residual 2.1423e-06
+iteration 1: residual 8.181e-08
+iteration 2: residual 8.13855e-08
+iteration 3: residual 1.19947e-08
+iteration 4: residual 4.22157e-09
+iteration 5: residual 6.00512e-10
+iteration 6: residual 2.01131e-10
+iteration 7: residual 2.07656e-11
+iteration 8: residual 4.78954e-12
+iteration 9: residual 7.94047e-13
+iteration 0: residual 8.88219e-08
+iteration 1: residual 6.14379e-08
+iteration 2: residual 4.55808e-09
+iteration 3: residual 1.72651e-09
+iteration 4: residual 1.55304e-10
+iteration 5: residual 1.10398e-10
+iteration 6: residual 1.36527e-11
+iteration 7: residual 4.92957e-12
+iteration 8: residual 7.38013e-13
+iteration 9: residual 1.23432e-13
+iteration 10: residual 2.51708e-14
+iteration 0: residual 7.98076e-08
+iteration 1: residual 4.86561e-08
+iteration 2: residual 5.28427e-09
+iteration 3: residual 1.7185e-09
+iteration 4: residual 1.23405e-10
+iteration 5: residual 3.6052e-11
+iteration 6: residual 3.96661e-12
+iteration 7: residual 8.54919e-13
+iteration 8: residual 1.2132e-13
+iteration 9: residual 1.91271e-14
+
+Saving 12 plots to 'output_plots_joint_inversion/'...
+saved output_plots_joint_inversion/gmslr_pdf.png
+saved output_plots_joint_inversion/gmslr_split_corner_altimetry.png
+saved output_plots_joint_inversion/gmslr_split_corner_grace.png
+saved output_plots_joint_inversion/gmslr_split_corner_joint.png
+saved output_plots_joint_inversion/gmslr_split_ellipses.png
+saved output_plots_joint_inversion/posterior_maps_joint.png
+saved output_plots_joint_inversion/covariance_comparison_Ice_WAIS.png
+saved output_plots_joint_inversion/covariance_comparison_Sterodynamic_North_Atlantic.png
+saved output_plots_joint_inversion/regional_corner_altimetry.png
+saved output_plots_joint_inversion/regional_corner_grace.png
+saved output_plots_joint_inversion/regional_corner_joint.png
+saved output_plots_joint_inversion/regional_variance_dots.png
+iteration 0: residual 1.34344e-06
+iteration 1: residual 2.44167e-07
+iteration 2: residual 5.28559e-08
+iteration 3: residual 1.03475e-08
+iteration 4: residual 3.46156e-09
+iteration 5: residual 4.36022e-10
+iteration 0: residual 1.43587e-06
+iteration 1: residual 2.71866e-07
+iteration 2: residual 1.05049e-07
+iteration 3: residual 2.09519e-08
+iteration 4: residual 5.77833e-09
+iteration 5: residual 1.0779e-09
+iteration 6: residual 2.83623e-10
+iteration 0: residual 1.34181e-06
+iteration 1: residual 2.71118e-07
+iteration 2: residual 5.90282e-08
+iteration 3: residual 1.30222e-08
+iteration 4: residual 4.49819e-09
+iteration 5: residual 6.72514e-10
+iteration 6: residual 1.64251e-10
+iteration 0: residual 2.1423e-06
+iteration 1: residual 8.18706e-08
+iteration 2: residual 5.08729e-08
+iteration 3: residual 5.22386e-09
+iteration 4: residual 9.52352e-10
+iteration 5: residual 1.84871e-10
+iteration 6: residual 7.37055e-12
+iteration 7: residual 3.49976e-12
+iteration 8: residual 8.90696e-14
+iteration 0: residual 7.16425e-26
+iteration 1: residual 4.30091e-34
+iteration 0: residual 2.1423e-06
+iteration 1: residual 8.181e-08
+iteration 2: residual 8.13855e-08
+iteration 3: residual 1.19947e-08
+iteration 4: residual 4.22157e-09
+iteration 5: residual 6.00512e-10
+iteration 6: residual 2.01131e-10
+iteration 7: residual 2.07656e-11
+iteration 8: residual 4.78954e-12
+iteration 9: residual 7.94047e-13
+iteration 0: residual 1.37629e-06
+iteration 1: residual 2.60821e-07
+iteration 2: residual 5.3733e-08
+iteration 3: residual 1.57252e-08
+iteration 4: residual 3.41059e-09
+iteration 5: residual 6.75218e-10
+iteration 6: residual 9.74931e-11
+iteration 0: residual 1.3539e-06
+iteration 1: residual 2.70344e-07
+iteration 2: residual 7.829e-08
+iteration 3: residual 2.53928e-08
+iteration 4: residual 3.17917e-09
+iteration 5: residual 7.49559e-10
+iteration 6: residual 1.31115e-10
+iteration 0: residual 8.88219e-08
+iteration 1: residual 2.95607e-09
+iteration 2: residual 2.05613e-09
+iteration 3: residual 1.12901e-10
+iteration 4: residual 3.88264e-11
+iteration 5: residual 5.41566e-12
+iteration 6: residual 5.38419e-13
+iteration 7: residual 1.44508e-13
+iteration 8: residual 4.74033e-15
+iteration 0: residual 1.82407e-11
+iteration 1: residual 3.83691e-20
+iteration 0: residual 8.88219e-08
+iteration 1: residual 6.14379e-08
+iteration 2: residual 4.55808e-09
+iteration 3: residual 1.72651e-09
+iteration 4: residual 1.55304e-10
+iteration 5: residual 1.10398e-10
+iteration 6: residual 1.36527e-11
+iteration 7: residual 4.92957e-12
+iteration 8: residual 7.38013e-13
+iteration 9: residual 1.23432e-13
+iteration 10: residual 2.51708e-14
+iteration 0: residual 1.41206e-06
+iteration 1: residual 2.53182e-07
+iteration 2: residual 5.9677e-08
+iteration 3: residual 1.06266e-08
+iteration 4: residual 5.26379e-09
+iteration 5: residual 4.32166e-10
+iteration 0: residual 1.38029e-06
+iteration 1: residual 3.09536e-07
+iteration 2: residual 9.40144e-08
+iteration 3: residual 3.12255e-08
+iteration 4: residual 2.95527e-09
+iteration 5: residual 1.15253e-09
+iteration 6: residual 2.69544e-10
+iteration 0: residual 1.37025e-06
+iteration 1: residual 2.33145e-07
+iteration 2: residual 5.31586e-08
+iteration 3: residual 1.18148e-08
+iteration 4: residual 3.27958e-09
+iteration 5: residual 6.39783e-10
+iteration 6: residual 8.42399e-11
+iteration 0: residual 7.98075e-08
+iteration 1: residual 2.5821e-09
+iteration 2: residual 1.34982e-09
+iteration 3: residual 5.93094e-11
+iteration 4: residual 2.44703e-11
+iteration 5: residual 1.46308e-12
+iteration 6: residual 4.28729e-13
+iteration 7: residual 3.44412e-14
+iteration 0: residual 3.59813e-11
+iteration 1: residual 3.32602e-21
+iteration 0: residual 7.98076e-08
+iteration 1: residual 4.86561e-08
+iteration 2: residual 5.28427e-09
+iteration 3: residual 1.7185e-09
+iteration 4: residual 1.23405e-10
+iteration 5: residual 3.6052e-11
+iteration 6: residual 3.96661e-12
+iteration 7: residual 8.54919e-13
+iteration 8: residual 1.2132e-13
+iteration 9: residual 1.91271e-14
+
+real	11m53.197s
+user	172m6.427s
+sys	4m23.750s
+
+All done.

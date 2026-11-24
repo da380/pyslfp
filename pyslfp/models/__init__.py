@@ -1,12 +1,12 @@
 """
 Model spaces for sea level inversions, built from named load components.
 
-`components` holds the vocabulary: the `LoadComponent` record, its two
+`components` holds the vocabulary: the `LoadComponent` record, its three
 roles, and the factories for ice sheets, glaciers, land water storage,
-firn, sterodynamic sea level and ocean density; `loads` the operators from
-the components' fields to their loads. `setup` holds the assembler,
-`ModelSetup`, which derives a model space and its operators from a list of
-components, and `setups` the set-ups in common use.
+firn, firn air content, sterodynamic sea level and ocean density; `loads`
+the operators from the components' fields to their loads. `setup` holds
+the assembler, `ModelSetup`, which derives a model space and its operators
+from a list of components, and `setups` the set-ups in common use.
 """
 
 from .components import (
@@ -18,6 +18,7 @@ from .components import (
     barystatic_gmsl_operator,
     sterodynamic_sea_level,
     firn,
+    firn_air_content,
     glaciers,
     ice_sheets,
     land_water_storage,
@@ -32,7 +33,13 @@ from .loads import (
 )
 from .history import HistorySetup
 from .setup import OCEAN_MASS, ModelSetup, RegionalDecomposition
-from .setups import ice_and_firn, ice_and_ocean, ice_ocean_and_density, sea_level_budget
+from .setups import (
+    ice_and_firn,
+    ice_and_firn_air,
+    ice_and_ocean,
+    ice_ocean_and_density,
+    sea_level_budget,
+)
 
 __all__ = [
     "ice_thickness_change_to_load_operator",
@@ -49,6 +56,7 @@ __all__ = [
     "glaciers",
     "land_water_storage",
     "firn",
+    "firn_air_content",
     "sterodynamic_sea_level",
     "ocean_density",
     "barystatic_gmsl_operator",
@@ -60,4 +68,5 @@ __all__ = [
     "ice_ocean_and_density",
     "sea_level_budget",
     "ice_and_firn",
+    "ice_and_firn_air",
 ]

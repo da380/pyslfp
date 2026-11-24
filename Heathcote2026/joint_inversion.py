@@ -42,7 +42,8 @@ The three posteriors are compared with the prior and with each other on
 Outputs, in output_plots_joint_inversion/ at 300 dpi:
 
 - joint_metrics.txt: the variance reductions and KL divergences of each
-  case, with the checks on the truth;
+  case, with the checks on the truth; with --prior-sensitivity, the tables
+  of `common.ocean_prior_sensitivity` for each case;
 - gmslr_pdf.png;
 - gmslr_split_corner_{altimetry,grace,joint}.png, gmslr_split_ellipses.png;
 - posterior_maps_joint.png, and posterior_maps_{altimetry,grace}.png with
@@ -127,20 +128,40 @@ def parse_arguments() -> argparse.Namespace:
         help="The barystatic/steric split of the GMSL change.",
     )
     parser.add_argument(
+        "--prior-sensitivity",
+        action="store_true",
+        help="The sensitivity of the posterior variances of the GMSL change, "
+        "its split and the regional decomposition to the prior of each "
+        "field, for each case (`common.prior_sensitivity`); one more solve "
+        "for each quantity and case.",
+    )
+    parser.add_argument(
         "--std-samples",
         type=int,
         default=0,
         help="Samples for the pointwise standard deviation of each mapped posterior.",
     )
+    parser.add_argument(
+        "--truth-years",
+        nargs=2,
+        type=int,
+        default=None,
+        help="Take the true model from the change between these two years "
+        "of the ESA Earth System Model and the EN4 analyses "
+        "(`common.model_truth`), not from the prior. Needs --ocean-prior "
+        "steric.",
+    )
     common.add_ocean_arguments(parser, surrogate=True)
     common.add_altimetry_noise_arguments(parser, prefix="alt-")
     common.add_joint_grace_noise_arguments(parser)
+    common.add_gia_arguments(parser)
+    common.add_preconditioner_arguments(parser)
     common.add_qoi_arguments(parser)
     common.add_parallel_arguments(parser)
     args = parser.parse_args()
     if args.all:
         args.plot_pdfs = args.plot_maps = args.plot_regions = True
-        args.plot_gmsl_split = True
+        args.plot_gmsl_split = args.prior_sensitivity = True
     if args.map_all_cases:
         args.plot_maps = True
     return args
@@ -511,73 +532,119 @@ def main():
 
     # The altimetry noise is a local part and a large-scale correlated part;
     # the preconditioners see the local part alone.
+    alt_parts = {}
     alt_noise, alt_local_noise = common.altimetry_noise(
         physics,
-        stds["dyn_std"],
         args.prior_order,
-        args.alt_noise_std_factor,
-        args.alt_noise_corr_std_factor,
-        args.alt_noise_corr_scale_factor,
         calib=calib,
+        parts=alt_parts,
+        **common.altimetry_noise_options(args, "alt_"),
     )
     grace_noise, grace_info = common.joint_grace_noise(
         physics, stds["ice_std"], args.prior_order, args
     )
     common.print_calibration_report(calib, physics)
     common.print_prior_settings(
-        args, args.alt_noise_corr_std_factor, args.alt_noise_corr_scale_factor
+        args, args.alt_noise_corr_std_mm, args.alt_noise_corr_scale_km
     )
 
     altimetry = physics.altimetry
-    grace = physics.grace(args.obs_degree)
-    joint = inf.ColumnLinearOperator([altimetry, grace])
+    grace = physics.grace(args)
+    # The column of the two, with the sea level equation solved once.
+    joint = physics.joint(args)
+    # The error of the GIA correction is one model's error in both data
+    # sets, so in the joint problem it is correlated between them. The
+    # surrogate preconditioner does not see it; the blocks correct for it.
+    joint_noise = inf.GaussianMeasure.from_product(
+        [alt_noise, grace_noise], domain=joint.codomain
+    )
+    grace_total = grace_noise
+    gia = {case: None for case in CASES}
+    if args.gia_years > 0.0:
+        gia = {
+            "altimetry": common.ocean_gia_error(physics, args),
+            "grace": common.ocean_gia_error(physics, args, altimetry=False, grace=True),
+            "joint": common.ocean_gia_error(physics, args, grace=True),
+        }
+        alt_noise = alt_noise + gia["altimetry"]
+        grace_total = grace_noise + gia["grace"]
+        joint_noise = joint_noise + gia["joint"]
     problems = {
         "altimetry": inf.LinearForwardProblem(altimetry, error=alt_noise),
-        "grace": inf.LinearForwardProblem(grace, error=grace_noise),
-        "joint": inf.LinearForwardProblem(
-            joint,
-            error=inf.GaussianMeasure.from_product(
-                [alt_noise, grace_noise], domain=joint.codomain
-            ),
-        ),
+        "grace": inf.LinearForwardProblem(grace, error=grace_total),
+        "joint": inf.LinearForwardProblem(joint, error=joint_noise),
     }
 
-    print("\nDrawing the synthetic truth and data...")
-    true_model, joint_data = problems["joint"].synthetic_model_and_data(prior, rng=rng)
+    if args.truth_years is None:
+        print("\nDrawing the synthetic truth and data...")
+        true_model, joint_data = problems["joint"].synthetic_model_and_data(
+            prior, rng=rng
+        )
+    else:
+        print(
+            f"\nThe truth is the change from {args.truth_years[0]} to "
+            f"{args.truth_years[1]} of the models; drawing the noise..."
+        )
+        true_model = common.model_truth(physics, args, args.truth_years)
+        joint_data = joint.codomain.add(joint(true_model), joint_noise.sample(rng=rng))
     data = {"altimetry": joint_data[0], "grace": joint_data[1], "joint": joint_data}
 
-    # ------------------ The surrogate of the preconditioners ------------------
-    surrogate, surrogate_prior = common.ocean_surrogate(args, physics, calib)
-    surrogate_altimetry = surrogate.altimetry
-    surrogate_grace = surrogate.grace(args.obs_degree)
-    surrogates = {
-        "altimetry": (surrogate_altimetry, alt_local_noise),
-        "grace": (surrogate_grace, grace_noise),
-        "joint": (
-            inf.ColumnLinearOperator([surrogate_altimetry, surrogate_grace]),
-            inf.GaussianMeasure.from_product(
-                [alt_local_noise, grace_noise], domain=joint.codomain
+    # ------------------ The preconditioners ------------------
+    surrogates, blocks = {}, {}
+    if args.preconditioner == "surrogate":
+        surrogate, surrogate_prior = common.ocean_surrogate(args, physics, calib)
+        surrogate_altimetry = surrogate.altimetry
+        surrogate_grace = surrogate.grace(args)
+        surrogates = {
+            "altimetry": (surrogate_altimetry, alt_local_noise),
+            "grace": (surrogate_grace, grace_noise),
+            "joint": (
+                inf.ColumnLinearOperator([surrogate_altimetry, surrogate_grace]),
+                inf.GaussianMeasure.from_product(
+                    [alt_local_noise, grace_noise], domain=joint.codomain
+                ),
             ),
-        ),
-    }
+        }
 
     # ------------------ Posteriors ------------------
     print("\nSolving for Posteriors...")
-    rtol = 0.01 * min(args.alt_noise_std_factor, grace_info["std_factor"])
-    posteriors, qoi_posteriors = {}, {}
+    rtol = 0.01 * min(
+        1.0,
+        args.alt_noise_std_mm / common.sea_level_std_mm(args),
+        grace_info["std_factor"],
+    )
+    posteriors, qoi_posteriors, qoi_inversions = {}, {}, {}
     for case, (name, _, _) in CASES.items():
         print(f" -> Solving {name}...")
         inversion = inf.LinearGaussianInversion(problems[case], prior)
-        forward, noise = surrogates[case]
-        preconditioner = common.surrogate_preconditioner(
-            inversion.normal_operator,
-            forward,
-            surrogate_prior,
-            noise,
-            max_jobs=common.jobs(args),
-        )
-        posteriors[case], qoi_posteriors[case], _ = common.solve_posterior(
-            inversion, data[case], preconditioner, rtol=rtol, qoi_rtol=args.qoi_rtol
+        if args.preconditioner == "blocks":
+            preconditioner = common.block_preconditioner(
+                case,
+                physics,
+                args,
+                prior,
+                calib,
+                alt_local=alt_local_noise,
+                alt_parts=alt_parts,
+                grace_noise=grace_noise,
+                grace_matrix=grace_info.get("covariance"),
+                gia=gia[case],
+                rng=rng,
+                cache=blocks,
+            )
+        else:
+            forward, noise = surrogates[case]
+            preconditioner = common.surrogate_preconditioner(
+                inversion.normal_operator,
+                forward,
+                surrogate_prior,
+                noise,
+                max_jobs=common.jobs(args),
+            )
+        posteriors[case], qoi_posteriors[case], qoi_inversions[case] = (
+            common.solve_posterior(
+                inversion, data[case], preconditioner, rtol=rtol, qoi_rtol=args.qoi_rtol
+            )
         )
 
     # ------------------ Diagnostics ------------------
@@ -602,6 +669,21 @@ def main():
         figs |= regional_decomposition(
             physics, prior, qoi_posteriors, true_model, args, rng
         )
+
+    if args.prior_sensitivity:
+        print("\nPrior sensitivity, field by field...")
+        for case, (name, _, _) in CASES.items():
+            common.write_metrics(
+                METRICS_FILE,
+                common.ocean_prior_sensitivity(
+                    physics,
+                    qoi_inversions[case],
+                    calib,
+                    OCEAN_REGION,
+                    case=name,
+                    sizes=case == list(CASES)[-1],
+                ),
+            )
 
     if figs:
         print(f"\nSaving {len(figs)} plots to '{OUTPUT_DIR}/'...")

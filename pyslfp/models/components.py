@@ -50,11 +50,14 @@ observations do when their points lie in it, so all of them have the same
 posterior as under a masked prior. The `support` field serves display and
 diagnostics: plot `support(u)` to show a field where it is physical.
 
-There are two roles. A mass source lives on land and adds mass to the
+There are three roles. A mass source lives on land and adds mass to the
 ocean or takes it away, so it has a barystatic global mean sea level
 change (`barystatic_gmsl_operator`). An ocean-internal component
 rearranges the ocean's mass without changing it, and is what the ocean
-mass-conservation constraint couples.
+mass-conservation constraint couples. A massless component carries no
+mass: it loads nothing, and enters the physics through its direct
+contributions alone, as the firn air content enters the ice surface
+height.
 
 The factories below build the components in use. Every component's space, and
 every observable space, must share the load space's grid, so that a
@@ -118,6 +121,7 @@ class Role(Enum):
 
     MASS_SOURCE = "mass source"
     OCEAN_INTERNAL = "ocean internal"
+    MASSLESS = "massless"
 
 
 @dataclass(frozen=True)
@@ -135,7 +139,8 @@ class LoadComponent:
             and the pointwise contributions leave it to their observation
             points; it is for display and diagnostics, not for masking a
             prior.
-        role: Whether the component is a mass source or ocean-internal.
+        role: Whether the component is a mass source, ocean-internal or
+            massless; a massless component has no load operator.
         observables: The component's direct contributions to named
             observables, each an operator from `space` into that
             observable's space. Read-only.
@@ -155,6 +160,10 @@ class LoadComponent:
             raise ValueError("A component needs a non-empty name.")
         if not isinstance(self.role, Role):
             raise TypeError(f"The role must be a Role, not {self.role!r}.")
+        if self.role is Role.MASSLESS and self.to_load is not None:
+            raise ValueError(
+                f"'{self.name}' is massless, so it cannot have a load operator."
+            )
         if self.to_load is not None and self.to_load.domain != self.space:
             raise ValueError(
                 f"The load operator of '{self.name}' must act on its space."
@@ -450,6 +459,77 @@ def ocean_density(
         role=Role.OCEAN_INTERNAL,
         observables={
             STERIC_SEA_LEVEL: steric_sea_level_operator(state, space, load_space)
+        },
+    )
+
+
+# ================================================================ #
+#                       Massless components                        #
+# ================================================================ #
+
+
+def firn_air_content(
+    state: EarthState,
+    load_space: Space,
+    /,
+    *,
+    space: Optional[Space] = None,
+    observable_space: Optional[Space] = None,
+    name: str = "firn_air_content",
+) -> LoadComponent:
+    """
+    A change in firn air content over the ice sheets: the change a in the
+    thickness of the air column that the firn holds.
+
+    With the field of `ice_sheets` read as the ice-equivalent thickness
+    change h, the change in mass per unit area over the density of ice, the
+    pair (h, a) describes the surface of an ice sheet completely and
+    linearly. All the mass is in h, and the surface rises by h + a over
+    the solid surface. A snowfall anomaly of mass m per unit area at
+    density rho_s is h = m / rho_i with a = m (1 / rho_s - 1 / rho_i); a
+    change in ice discharge is h alone; compaction of the firn is a alone.
+    The component is to the ice sheets what the ocean density is to the
+    ocean, the field that changes a height without changing a mass, which
+    gravimetry cannot see and altimetry can.
+
+    Air has no mass, so the component is massless: it has no load operator
+    and no barystatic sea level change. The support is the ice sheets', as
+    for `ice_sheets`. The change contributes directly, unmasked, to the
+    ice surface height, which ice altimetry samples at points on the
+    grounded ice (`pyslfp.observations.IceAltimetryObservationModel`).
+
+    The processes above move h and a together, so a prior on the pair is
+    in general correlated. When the two share a space, its
+    `correlated_measure` (pygeoinf) builds such a prior from a covariance
+    matrix of the pair at each harmonic; otherwise independent priors on
+    the processes are carried to (h, a) by `GaussianMeasure.affine_map`.
+
+    The component is an alternative to `firn`, which holds a firn
+    thickness F of a given density rho_f beside an ice thickness I: the
+    two descriptions are related by h = I + (rho_f / rho_i) F and
+    a = (1 - rho_f / rho_i) F. A set-up holds one or the other.
+
+    Args:
+        state: The Earth state supplying the masks.
+        load_space: The space of the set-up's loads, whose grid the
+            component's space must share; the component itself loads
+            nothing.
+        space: The component's space, on the load space's grid. The load
+            space if omitted.
+        observable_space: The space of the ice surface height, as for
+            `ice_sheets`. The component's space if omitted.
+        name: The component's name.
+    """
+    space = _component_space(space, load_space)
+    ice = state.ice_sheet_projection(value=0.0)
+    return LoadComponent(
+        name=name,
+        space=space,
+        to_load=None,
+        support=_mask(space, ice),
+        role=Role.MASSLESS,
+        observables={
+            ICE_SURFACE_HEIGHT: _inclusion(space, observable_space, load_space)
         },
     )
 

@@ -204,18 +204,11 @@ class SeaLevelEquation:
 
     def _expand(self, data: np.ndarray) -> np.ndarray:
         """Forward transform of grid values, returning the coefficient array."""
-        grid = SHGrid.from_array(data, grid=self._model.grid, copy=False)
-        return self._model.expand_field(grid).coeffs
+        return self._model.analyse(data)
 
     def _synthesise(self, coeffs: np.ndarray) -> np.ndarray:
         """Inverse transform of a coefficient array, returning grid values."""
-        clm = SHCoeffs.from_array(
-            coeffs,
-            normalization=self._model.normalization,
-            csphase=self._model.csphase,
-            copy=False,
-        )
-        return self._model.expand_coefficient(clm).data
+        return self._model.synthesise(coeffs)
 
     def _rotation(
         self,

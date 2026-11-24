@@ -1,8 +1,13 @@
 """
 The error of the WMB estimate of regional mass change (Heathcote et al., 2026).
 
-The model is the direct surface mass load zeta, a global field with a Sobolev
-prior. The quantities of interest are the averages over the GRACE regions
+The model is one field, the direct surface mass load zeta. Its prior and
+the noise are those of `grace_inversion.py` (`common.grace_experiment`):
+with --load-prior model, the image under the load operator of the prior of
+the fields of the ocean experiments, and with --coefficient-errors the
+formal error covariance of GRACE's coefficients; or the Sobolev prior and
+noise field of the submitted paper. The quantities of interest are the
+averages over the GRACE regions
 (`common.GRACE_REGIONS`) of the total load: zeta plus the ocean load
 rho_w C xi that it induces through the sea level equation. The WMB method
 (Wahr, Molenaar and Bryan, 1998) estimates them from GRACE's potential
@@ -42,10 +47,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import pygeoinf as inf
-from pyslfp.observations import WMBMethod
 
 import common
-from figures import error_density, field_map
+from figures import error_density, field_map, ice_sheet_maps
 
 OUTPUT_DIR = "output_plots_grace_bias"
 
@@ -55,6 +59,11 @@ def parse_arguments() -> argparse.Namespace:
         description="The error of the WMB regional averages of the total load."
     )
     common.add_grace_arguments(parser)
+    # The averages are over the regions themselves, their masks unsmoothed
+    # (--smoothing-scale-km smooths them), and WMB's estimate of them is
+    # made as it is in practice (`common.wmb_estimator`).
+    parser.set_defaults(smoothing_scale_km=0.0)
+    common.add_wmb_arguments(parser)
     common.add_parallel_arguments(parser)
     parser.add_argument(
         "--samples",
@@ -104,23 +113,63 @@ def main():
     rng = common.configure(args)
     common.start_run(OUTPUT_DIR, args)
 
-    physics = common.grace_physics(args.lmax, args.load_order, args.load_scale_km)
+    physics, _, prior, noise, _, _ = common.grace_experiment(args, rng)
     state, load_space, scale_mm = physics.state, physics.load_space, physics.scale_mm
-    _, prior, noise_load, _ = common.grace_measures(physics, args, rng)
     names, average = common.regional_averaging(physics, args)
 
-    wmb = WMBMethod(state.model, args.obs_degree)
-    noise = wmb.load_measure_to_observation_measure(noise_load)
     total_load = common.total_load_operator(physics)
-    forward = common.grace_forward_operator(physics, args.obs_degree)
     true_average = average @ total_load
-    wmb_average = average @ wmb.potential_coefficient_to_load_operator(load_space)
+    _, wmb_matrix, wmb_description = common.wmb_estimator(
+        state,
+        load_space,
+        args,
+        average=average,
+        sharp_masks=common.grace_region_masks(state),
+    )
+    wmb_average = inf.LinearOperator.from_matrix(
+        noise.domain, average.codomain, wmb_matrix, form="components"
+    )
+    print(wmb_description)
 
     figures = {}
     if args.plot_maps:
         print("Plotting a prior sample of the direct load and the load it induces...")
         direct = prior.sample(rng=rng)
         induced = total_load(direct) - direct
+        modulation = (
+            common.ice_modulation(common.ocean_physics(args), args)
+            if args.load_prior == "model"
+            else None
+        )
+        if modulation is not None:
+            # The ice prior's std as a load, at the resolution of the stated
+            # numbers, over the ice sheets alone, beside the draw there.
+            weight, _ = modulation
+            sheets = state.ice_sheet_projection(value=0.0)
+            ice_std = weight * sheets * args.ice_std_mm
+            draw = direct * sheets * scale_mm
+            inside = sheets.data > 0.5
+            limit = float(np.percentile(np.abs(draw.data[inside]), 99.5))
+            figures["grace_bias_ice_prior.png"] = ice_sheet_maps(
+                [
+                    (
+                        ice_std,
+                        "Prior standard deviation of the ice load",
+                        "Std. deviation (mm EWT)",
+                        {
+                            "vmin": 0.0,
+                            "vmax": float(ice_std.data.max()),
+                            "cmap": "Blues",
+                        },
+                    ),
+                    (
+                        draw,
+                        "One draw from the prior",
+                        "Load (mm EWT)",
+                        {"vmin": -limit, "vmax": limit, "cmap": "seismic"},
+                    ),
+                ]
+            )
         for name, field, label, panel in [
             ("direct", direct, "Direct Load (mm EWT)", "(a)"),
             ("induced", induced, "Induced Load (mm EWT)", "(b)"),
@@ -135,8 +184,14 @@ def main():
 
     # WMB's error as a function of (zeta, e): WMB applied to the data,
     # GRACE's coefficients of the response plus the noise, less the true
-    # average.
-    error = inf.RowLinearOperator([wmb_average @ forward - true_average, wmb_average])
+    # average. The part acting on zeta reads the data and the induced load
+    # from one solution of the sea level equation.
+    error = inf.RowLinearOperator(
+        [
+            common.wmb_error_operator(physics, average, wmb_average, args),
+            wmb_average,
+        ]
+    )
     joint = inf.GaussianMeasure.from_product([prior, noise])
 
     print("Computing the error distributions...")

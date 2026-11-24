@@ -1,0 +1,206 @@
+Cores: 64 physical, 128 logical; budget 48.
+Parallel: up to 48 worker(s) x 1 thread(s) each; serial phases use 48 thread(s).
+Resolution: FAST/TEST mode (lmax=64, obs_degree=32, spacing=8.0).
+
+======================================================================
+>>> grace_bias.py  (17:49:40)
+>>> args: --lmax 64 --load-scale-km 500.0 --prior-order 3.0 --prior-shift 0.0 --obs-degree 32 --load-order 0.25 --spacing 8.0 --land-water --source-order 0.25 --source-prior-order 1.5 --ice-std-mm 80.0 --ice-scale-km 180.0 --ice-modulation none --land-water-std-mm 65.0 --land-water-scale-km 340.0 --ocean-prior steric --field-order 1.25 --steric-std-mm 46.0 --steric-scale-km 280.0 --steric-order 3.0 --manometric-std-mm 8.0 --manometric-scale-km 330.0 --manometric-order 2.5 --load-prior model --spacing 8.0 --ocean-case partly --coefficient-errors 2007 2008 --gia-years 1.0 --gia-model caron --serial-threads 48 --parallel --max-jobs 48 --plot-maps
+======================================================================
+Prior amplitudes: sterodynamic std = 46.043 mm (input), density std = 1.2579e-02 kg m^-3 (mean-depth steric std = 46.000 mm), ice std = 70.113 mm, land water std = 58.362 mm
+  realised GMSL prior stds under the mass constraint: barystatic = 1.684 mm (the ice alone 0.379), steric = 3.232 mm (verified 3.232); barystatic/steric ratio = 0.52
+  <eta>_O -- <eta_s>_O prior correlation rho_XY = 0.999; unconstrained <eta>_O std = 3.236 mm
+GRACE coefficient errors: ITSG-Grace2018, annual means of 2007 and 2008, std x 1.00: pointwise 8.3 mm EWT to degree 32, unfiltered; white load floor 0.00 mm
+GIA correction error from 50 eigenvectors of the covariance of Caron et al. (2018)
+Plotting a prior sample of the direct load and the load it induces...
+Computing the error distributions...
+Regional averages of the total load, in mm EWT (error = WMB less true):
+  GRL (S Basin)    true std  8.474, WMB error mean +0.000, std  3.817 (nominal  2.688)
+  WAIS             true std 10.253, WMB error mean +0.000, std  4.218 (nominal  3.056)
+  Gulf of Mexico   true std  8.349, WMB error mean +0.000, std  2.602 (nominal  1.647)
+  GBM basin        true std 16.635, WMB error mean +0.000, std  2.793 (nominal  1.681)
+saved output_plots_grace_bias/grace_bias_direct_load.png
+saved output_plots_grace_bias/grace_bias_induced_load.png
+saved output_plots_grace_bias/grace_bias_pdfs.png
+
+real	0m51.967s
+user	1m43.041s
+sys	0m3.429s
+
+======================================================================
+>>> altimetry_bias.py  (17:50:32)
+>>> args: --lmax 64 --load-scale-km 500.0 --prior-order 3.0 --prior-shift 0.0 --load-order 0.25 --spacing 8.0 --land-water --source-order 0.25 --source-prior-order 1.5 --ice-std-mm 80.0 --ice-scale-km 180.0 --ice-modulation none --land-water-std-mm 65.0 --land-water-scale-km 340.0 --ocean-prior steric --field-order 1.25 --steric-std-mm 46.0 --steric-scale-km 280.0 --steric-order 3.0 --manometric-std-mm 8.0 --manometric-scale-km 330.0 --manometric-order 2.5 --noise-std-mm 6.0 --noise-corr-std-mm 0.7 --noise-corr-scale-km 2000.0 --noise-global-std-mm 1.0 --noise-frame-std-mm 0.33 --gia-years 1.0 --gia-model caron --serial-threads 48 --parallel --max-jobs 48 --plot-maps
+======================================================================
+Building the physics, prior and noise...
+GIA correction error from 50 eigenvectors of the covariance of Caron et al. (2018)
+Prior amplitudes: sterodynamic std = 46.690 mm (input), density std = 1.2579e-02 kg m^-3 (mean-depth steric std = 46.000 mm), ice std = 70.113 mm, land water std = 58.362 mm
+  realised GMSL prior stds under the mass constraint: barystatic = 1.684 mm (the ice alone 0.379), steric = 3.232 mm (verified 3.232); barystatic/steric ratio = 0.52
+  <eta>_O -- <eta_s>_O prior correlation rho_XY = 0.985; unconstrained <eta>_O std = 3.283 mm
+  correlated altimetry error component: implied GMSL error floor = 0.316 mm
+Computing the exact moments of the error...
+  GMSL error (estimate less true): mean = 0.0000 mm, std = 1.5420 mm; nominal (noise only) std = 1.0846 mm; true GMSL std = 3.6448 mm
+Drawing a sample to show the fields...
+Plotting the error densities...
+
+Saving 6 plots to 'output_plots_altimetry_bias/'...
+saved output_plots_altimetry_bias/bias_ice_thickness.png
+saved output_plots_altimetry_bias/bias_sterodynamic.png
+saved output_plots_altimetry_bias/bias_steric_height.png
+saved output_plots_altimetry_bias/bias_geocentric_sl_map.png
+saved output_plots_altimetry_bias/bias_altimetry_data.png
+saved output_plots_altimetry_bias/bias_pdf.png
+
+real	0m19.393s
+user	0m39.459s
+sys	0m1.532s
+
+======================================================================
+>>> grace_inversion.py  (17:50:51)
+>>> args: --lmax 64 --load-scale-km 500.0 --prior-order 3.0 --prior-shift 0.0 --obs-degree 32 --load-order 0.25 --spacing 8.0 --land-water --source-order 0.25 --source-prior-order 1.5 --ice-std-mm 80.0 --ice-scale-km 180.0 --ice-modulation none --land-water-std-mm 65.0 --land-water-scale-km 340.0 --ocean-prior steric --field-order 1.25 --steric-std-mm 46.0 --steric-scale-km 280.0 --steric-order 3.0 --manometric-std-mm 8.0 --manometric-scale-km 330.0 --manometric-order 2.5 --load-prior model --spacing 8.0 --ocean-case partly --coefficient-errors 2007 2008 --gia-years 1.0 --gia-model caron --qoi-rtol 1e-6 --wmb-filter ddk --serial-threads 48 --parallel --max-jobs 48 --std-samples 0
+======================================================================
+Building the physics, prior and noise (lmax=64)...
+Prior amplitudes: sterodynamic std = 46.043 mm (input), density std = 1.2579e-02 kg m^-3 (mean-depth steric std = 46.000 mm), ice std = 70.113 mm, land water std = 58.362 mm
+  realised GMSL prior stds under the mass constraint: barystatic = 1.684 mm (the ice alone 0.379), steric = 3.232 mm (verified 3.232); barystatic/steric ratio = 0.52
+  <eta>_O -- <eta_s>_O prior correlation rho_XY = 0.999; unconstrained <eta>_O std = 3.236 mm
+GRACE coefficient errors: ITSG-Grace2018, annual means of 2007 and 2008, std x 1.00: pointwise 8.3 mm EWT to degree 32, unfiltered; white load floor 0.00 mm
+GIA correction error from 50 eigenvectors of the covariance of Caron et al. (2018)
+Drawing a synthetic load and dataset...
+Assembling the normal matrix of 1085 data...
+Solving for the posterior...
+iteration 0: residual 1.00026e-10
+iteration 1: residual 1.38253e-19
+Solution reached in 1 iterations.
+Squared misfit of the data to their prior prediction: 1119 for 1085 data (expected 1085 +/- 47).
+WMB: degrees to 32, filter DDK5, rescaled.
+
+real	2m17.769s
+user	5m32.764s
+sys	2m20.107s
+
+======================================================================
+>>> grace_coverage.py  (17:53:09)
+>>> args: --lmax 64 --load-scale-km 500.0 --prior-order 3.0 --prior-shift 0.0 --obs-degree 32 --load-order 0.25 --spacing 8.0 --land-water --source-order 0.25 --source-prior-order 1.5 --ice-std-mm 80.0 --ice-scale-km 180.0 --ice-modulation none --land-water-std-mm 65.0 --land-water-scale-km 340.0 --ocean-prior steric --field-order 1.25 --steric-std-mm 46.0 --steric-scale-km 280.0 --steric-order 3.0 --manometric-std-mm 8.0 --manometric-scale-km 330.0 --manometric-order 2.5 --load-prior model --spacing 8.0 --ocean-case partly --coefficient-errors 2007 2008 --gia-years 1.0 --gia-model caron --qoi-rtol 1e-6 --wmb-filter ddk --serial-threads 48 --parallel --max-jobs 48 --truth-mean kept --prior-truths 0
+======================================================================
+Building the physics, prior and noise (lmax=64)...
+Prior amplitudes: sterodynamic std = 46.043 mm (input), density std = 1.2579e-02 kg m^-3 (mean-depth steric std = 46.000 mm), ice std = 70.113 mm, land water std = 58.362 mm
+  realised GMSL prior stds under the mass constraint: barystatic = 1.684 mm (the ice alone 0.379), steric = 3.232 mm (verified 3.232); barystatic/steric ratio = 0.52
+  <eta>_O -- <eta_s>_O prior correlation rho_XY = 0.999; unconstrained <eta>_O std = 3.236 mm
+GRACE coefficient errors: ITSG-Grace2018, annual means of 2007 and 2008, std x 1.00: pointwise 8.3 mm EWT to degree 32, unfiltered; white load floor 0.00 mm
+GIA correction error from 50 eigenvectors of the covariance of Caron et al. (2018)
+Reading the loads of the ESA Earth System Model, version 3.0...
+  13 loads (2008-01 to 2020-01) and 83 regions: 25 ice sheets, 35 land, 23 ocean
+Assembling the normal matrix of 1085 data...
+Assembling the estimators...
+The GRACE estimators' errors against their stated standard deviations
+13 loads of the ESA Earth System Model, version 3.0 (2008-01 to 2020-01; the ocean's part a quarter left), 50 draws of the noise for each, data to degree 32,
+83 regions, their masks unsmoothed.
+WMB: degrees to 32, filter DDK5, rescaled.
+A ratio is an error over the standard deviation its estimator states; for a standard normal the
+root mean square is 1 and the fractions within 1 and 2 are 0.683 and 0.954. Stds and errors in mm EWT.
+WMB's stated standard deviation is that of its whole error under the prior, noise and leakage; the
+rows 'WMB, noise alone' set the same errors against the noise it propagates.
+
+                                 rms ratio    within 1    within 2  median std  median rms
+------------------------------------------------------------------------------------------
+ice sheets, WMB                      2.025       0.526       0.747      37.882      37.404
+ice sheets, WMB, noise alone         8.073       0.151       0.304       9.784      37.404
+ice sheets, Bayesian                 1.477       0.609       0.853       7.678       8.369
+land, WMB                            1.037       0.671       0.941       4.969       4.848
+land, WMB, noise alone               2.456       0.346       0.618       2.191       4.848
+land, Bayesian                       1.332       0.617       0.891       2.079       2.109
+ocean, WMB                           1.281       0.599       0.884       3.733       4.347
+ocean, WMB, noise alone              3.194       0.285       0.519       1.534       4.347
+ocean, Bayesian                      2.307       0.415       0.699       0.870       1.633
+all, WMB                             1.464       0.607       0.867       5.500       5.330
+all, WMB, noise alone                5.000       0.270       0.496       2.386       5.330
+all, Bayesian                        1.697       0.559       0.826       2.178       2.236
+
+
+
+saved output_plots_grace_coverage/coverage_metrics.txt
+saved output_plots_grace_coverage/coverage_histograms.png
+saved output_plots_grace_coverage/coverage_regions.png
+
+real	5m19.456s
+user	29m25.244s
+sys	4m26.356s
+
+======================================================================
+>>> altimetry_inversion.py  (17:58:29)
+>>> args: --lmax 64 --load-scale-km 500.0 --prior-order 3.0 --prior-shift 0.0 --surrogate-degree 32 --preconditioner blocks --altimetry-neighbours 40 --grace-block-rank 0 --load-order 0.25 --spacing 8.0 --land-water --source-order 0.25 --source-prior-order 1.5 --ice-std-mm 80.0 --ice-scale-km 180.0 --ice-modulation none --land-water-std-mm 65.0 --land-water-scale-km 340.0 --ocean-prior steric --field-order 1.25 --steric-std-mm 46.0 --steric-scale-km 280.0 --steric-order 3.0 --manometric-std-mm 8.0 --manometric-scale-km 330.0 --manometric-order 2.5 --noise-std-mm 6.0 --noise-corr-std-mm 0.7 --noise-corr-scale-km 2000.0 --noise-global-std-mm 1.0 --noise-frame-std-mm 0.33 --gia-years 1.0 --gia-model caron --qoi-rtol 1e-6 --serial-threads 48 --parallel --max-jobs 48 --std-samples 0
+======================================================================
+
+Building the physics, prior and noise (lmax=64)...
+Generated 522 ocean altimetry observation points.
+GIA correction error from 50 eigenvectors of the covariance of Caron et al. (2018)
+Prior amplitudes: sterodynamic std = 46.690 mm (input), density std = 1.2579e-02 kg m^-3 (mean-depth steric std = 46.000 mm), ice std = 70.113 mm, land water std = 58.362 mm
+  realised GMSL prior stds under the mass constraint: barystatic = 1.684 mm (the ice alone 0.379), steric = 3.232 mm (verified 3.232); barystatic/steric ratio = 0.52
+  <eta>_O -- <eta_s>_O prior correlation rho_XY = 0.985; unconstrained <eta>_O std = 3.283 mm
+  correlated altimetry error component: implied GMSL error floor = 0.316 mm
+Correlated (sterodynamic, density) prior: r0 = 0.90, correlation scale factor = 0.40
+Sobolev priors: common order = 3.00
+Correlated altimetry error component: std = 0.70 mm, scale = 2000 km
+Setting up the Bayesian inversion...
+  altimetry block: 38 neighbours per point, no cut-off
+
+Solving for the posterior expectation...
+iteration 0: residual 1.74701e-07
+iteration 1: residual 4.46996e-10
+iteration 2: residual 3.84173e-11
+Solution reached in 2 iterations.
+Squared misfit of the data to their prior prediction: 563 for 522 data (expected 522 +/- 32).
+
+real	0m5.339s
+user	0m40.015s
+sys	0m1.988s
+
+======================================================================
+>>> joint_inversion.py  (17:58:34)
+>>> args: --lmax 64 --load-scale-km 500.0 --prior-order 3.0 --prior-shift 0.0 --surrogate-degree 32 --preconditioner blocks --altimetry-neighbours 40 --grace-block-rank 0 --obs-degree 32 --load-order 0.25 --spacing 8.0 --land-water --source-order 0.25 --source-prior-order 1.5 --ice-std-mm 80.0 --ice-scale-km 180.0 --ice-modulation none --land-water-std-mm 65.0 --land-water-scale-km 340.0 --ocean-prior steric --field-order 1.25 --steric-std-mm 46.0 --steric-scale-km 280.0 --steric-order 3.0 --manometric-std-mm 8.0 --manometric-scale-km 330.0 --manometric-order 2.5 --alt-noise-std-mm 6.0 --alt-noise-corr-std-mm 0.7 --alt-noise-corr-scale-km 2000.0 --alt-noise-global-std-mm 1.0 --alt-noise-frame-std-mm 0.33 --grace-coefficient-errors 2007 2008 --gia-years 1.0 --gia-model caron --qoi-rtol 1e-6 --serial-threads 48 --parallel --max-jobs 48 --std-samples 0
+======================================================================
+
+Building the exact physics, prior and noise (lmax=64)...
+Generated 522 ocean altimetry observation points.
+GRACE coefficient errors: ITSG-Grace2018, annual means of 2007 and 2008, std x 1.00: pointwise 8.3 mm EWT to degree 32, unfiltered; white load floor 0.00 mm
+Prior amplitudes: sterodynamic std = 46.690 mm (input), density std = 1.2579e-02 kg m^-3 (mean-depth steric std = 46.000 mm), ice std = 70.113 mm, land water std = 58.362 mm
+  realised GMSL prior stds under the mass constraint: barystatic = 1.684 mm (the ice alone 0.379), steric = 3.232 mm (verified 3.232); barystatic/steric ratio = 0.52
+  <eta>_O -- <eta_s>_O prior correlation rho_XY = 0.985; unconstrained <eta>_O std = 3.283 mm
+  correlated altimetry error component: implied GMSL error floor = 0.316 mm
+Correlated (sterodynamic, density) prior: r0 = 0.90, correlation scale factor = 0.40
+Sobolev priors: common order = 3.00
+Correlated altimetry error component: std = 0.70 mm, scale = 2000 km
+GIA correction error from 50 eigenvectors of the covariance of Caron et al. (2018)
+GIA correction error from 50 eigenvectors of the covariance of Caron et al. (2018)
+GIA correction error from 50 eigenvectors of the covariance of Caron et al. (2018)
+
+Drawing the synthetic truth and data...
+
+Solving for Posteriors...
+ -> Solving Alt-Only...
+  altimetry block: 38 neighbours per point, no cut-off
+iteration 0: residual 1.63357e-07
+iteration 1: residual 3.24959e-09
+iteration 2: residual 4.09204e-11
+iteration 3: residual 1.58681e-13
+Solution reached in 3 iterations.
+Squared misfit of the data to their prior prediction: 465 for 522 data (expected 522 +/- 32).
+ -> Solving GRACE-Only...
+  GRACE block: 1085 applications of the normal operator...
+iteration 0: residual 1.05167e-10
+iteration 1: residual 9.63475e-20
+Solution reached in 1 iterations.
+Squared misfit of the data to their prior prediction: 999 for 1085 data (expected 1085 +/- 47).
+ -> Solving Joint...
+iteration 0: residual 1.63357e-07
+iteration 1: residual 2.47651e-08
+iteration 2: residual 4.621e-09
+iteration 3: residual 8.01248e-10
+iteration 4: residual 1.18216e-10
+iteration 5: residual 1.92493e-11
+Solution reached in 5 iterations.
+Squared misfit of the data to their prior prediction: 1454 for 1607 data (expected 1607 +/- 57).
+
+real	1m2.742s
+user	47m38.427s
+sys	1m28.546s
+
+All done.

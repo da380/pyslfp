@@ -1,3 +1,58 @@
+Changes in 4.3
+==============
+
+Ice altimetry joins the observations, with the firn air content, which
+altimetry sees and gravimetry does not. No signature changes and no
+changed results. The minimum versions are ``pygeoinf>=2.5.0`` and
+``planetmodel>=2.2.0``; planetmodel 2 replaces 1.x.
+
+
+Additions
+---------
+
+- Ice altimetry in :mod:`pyslfp.observations`: the change in the height
+  of the surface of the grounded ice at points, ``h + a + u``, with ``h``
+  the ice-equivalent thickness change, ``a`` the change in firn air
+  content and ``u`` the vertical displacement of the solid surface.
+  ``IceAltimetryObservationModel`` samples the observable at points that
+  ``on_grounded_ice`` accepts, and ``grounded_ice_altimetry_points``
+  gives evenly spaced ones. ``ice_altimetry_point_operator`` samples the
+  displacement alone from a response, as ``altimetry_point_operator``
+  does over the ocean.
+- ``ModelSetup.ice_surface_height``: the observable, the vertical
+  displacement in the response to the total load plus the components'
+  direct contributions to the ice surface height. The displacement is in
+  the centre-of-mass frame, as in ``geocentric_sea_level``, so the two
+  altimetries share a frame.
+- ``firn_air_content``: a component for the change in the air column of
+  the firn, and ``Role.MASSLESS`` for a component that carries no mass
+  and so has no load operator. It is an alternative to ``firn``, and a
+  set-up holds one or the other. ``ice_and_firn_air`` is the set-up of
+  the ice sheets and their firn air content.
+- ``EarthModel.analyse`` and ``EarthModel.synthesise``: the spherical
+  harmonic transforms on plain arrays in the model's conventions,
+  without the pyshtools objects around them.
+- Tutorial 11, anelastic softening and sea level fingerprints, and
+  tutorial 12, ice altimetry and GRACE over the ice sheets.
+
+
+Other
+-----
+
+- When ducc0 is pyshtools' backend, the transforms call it directly,
+  with the packing of the coefficients tabulated once per truncation;
+  pyshtools repacks them in Python on every call. ``expand_field``,
+  ``expand_coefficient`` and the sea level equation all take this route.
+  The numbers are the same to rounding. With pyshtools' other backend the
+  transforms go through pyshtools as before.
+- planetmodel 2.2.0 corrects the sampling of a radial field that jumps
+  inside a layer. The Love numbers change only for a model with such a
+  field. The models pyslfp builds have none, since each viscosity
+  boundary becomes an interface. The changes that make planetmodel 2 a
+  major version, to meshes with faults and to
+  ``randomfield.RadialOperatorFamily``, do not reach pyslfp.
+
+
 Changes in 4.2
 ==============
 

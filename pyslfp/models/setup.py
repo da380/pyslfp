@@ -18,7 +18,9 @@ space needs from the physics:
 - through the sea level equation, given a fingerprint operator: the relative
   sea level change, its global mean, and its regional decomposition into
   steric, dynamic manometric and barystatic manometric parts after Gregory et
-  al. (2019).
+  al. (2019); the geocentric sea level change, which altimetry observes over
+  the ocean, and the ice surface height change, which it observes over the
+  ice sheets.
 
 Adding a component never means changing the assembler. A set-up is passive:
 it holds spaces and operators, and leaves priors, conditioning and solvers to
@@ -71,7 +73,12 @@ from pyshtools import SHGrid
 
 from pyslfp.core import EarthState
 from pyslfp.core.observables import geocentric_sea_level_operator
-from pyslfp.core.response import GRDResponse, RELATIVE_SEA_LEVEL_CHANGE, GRDSpace
+from pyslfp.core.response import (
+    DISPLACEMENT,
+    GRDResponse,
+    RELATIVE_SEA_LEVEL_CHANGE,
+    GRDSpace,
+)
 from pyslfp.elastic import FingerPrintOperator
 from pyslfp.core import (
     ocean_average_operator,
@@ -80,6 +87,7 @@ from pyslfp.core import (
 from pyslfp.core import averaging_operator
 from pyslfp.models.components import (
     GEOCENTRIC_SEA_LEVEL,
+    ICE_SURFACE_HEIGHT,
     STERIC_SEA_LEVEL,
     LoadComponent,
     Role,
@@ -430,6 +438,48 @@ class ModelSetup:
         if direct.codomain != response.field_space:
             raise ValueError(
                 "the geocentric sea level contributions must lie in the "
+                "fingerprint operator's field space"
+            )
+        return change + direct
+
+    def ice_surface_height(
+        self, fingerprint: FingerPrintOperator, /
+    ) -> LinearOperator[tuple, SHGrid]:
+        """
+        The ice surface height change, into the fingerprint operator's field
+        space, the observable of ice altimetry: the vertical displacement of
+        the solid surface in the response to the total load, plus the direct
+        contributions to the ice surface height, the thickness changes of the
+        ice and of its firn, which stand on that surface. Point evaluation of
+        it on the grounded ice gives ice altimetry data
+        (`pyslfp.observations.IceAltimetryObservationModel`).
+
+        The displacement is the response's own, in the centre-of-mass frame
+        and with its degree one, the frame of `geocentric_sea_level`: the
+        geocentric sea level change less the relative sea level change is
+        this displacement, when the centrifugal potential's height is not
+        added. The displacement includes the deformation that the change in
+        rotation drives. The observable holds on grounded ice alone, since
+        floating ice stands on the sea surface and not on the solid one.
+
+        Args:
+            fingerprint: The fingerprint operator, on the set-up's load space;
+                the ice surface height contributions must lie in its field
+                space (the components' `observable_space`).
+
+        Raises:
+            ValueError: If the spaces do not match.
+        """
+        response = self._response_space(fingerprint)
+        change = (
+            response.field_operator(DISPLACEMENT) @ fingerprint @ self._load_operator
+        )
+        if ICE_SURFACE_HEIGHT not in self._observables:
+            return change
+        direct = self._observables[ICE_SURFACE_HEIGHT]
+        if direct.codomain != response.field_space:
+            raise ValueError(
+                "the ice surface height contributions must lie in the "
                 "fingerprint operator's field space"
             )
         return change + direct

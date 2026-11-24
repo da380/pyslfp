@@ -5,6 +5,7 @@ from one consistent body."""
 
 from __future__ import annotations
 from dataclasses import dataclass, field, replace
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional, Union
 
@@ -284,6 +285,39 @@ class EarthModelParameters:
         )
 
 
+@lru_cache(maxsize=8)
+def _harmonic_layout(lmax: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """How pyshtools' real coefficient array maps onto ducc0's complex one.
+
+    ducc0 stores a_lm for m >= 0 with m outermost and l running from m to
+    lmax. For orthonormal real harmonics without the Condon-Shortley phase,
+    the model's convention, a_l0 is the cosine coefficient and
+    a_lm = (-1)^m (c_lm - i s_lm) / sqrt(2) for m > 0, with c = cilm[0] and
+    s = cilm[1]. Returned as the position of each complex entry in a
+    flattened (lmax + 1, lmax + 1) array of one part, the factor taking a
+    real coefficient to its entry, and that factor's inverse.
+    """
+    orders = np.concatenate([np.full(lmax + 1 - m, m) for m in range(lmax + 1)])
+    degrees = np.concatenate([np.arange(m, lmax + 1) for m in range(lmax + 1)])
+    flat = degrees * (lmax + 1) + orders
+    scale = np.where(orders == 0, 1.0, ((-1.0) ** orders) / np.sqrt(2.0))
+    tables = (flat, scale, 1.0 / scale)
+    for table in tables:
+        table.flags.writeable = False
+    return tables
+
+
+def _ducc_backend():
+    """ducc0 and the thread count pyshtools holds for it, if ducc0 is the
+    backend pyshtools is using; None if it is not. Asked on every transform:
+    the backend and its threads are pyshtools' settings, which
+    `pyslfp.set_num_threads` changes."""
+    if sh.backends.preferred_backend() != "ducc":
+        return None
+    wrapper = sh.backends.ducc0_wrapper
+    return wrapper.ducc0, wrapper.nthreads
+
+
 class EarthModel:
     """
     The unified physics configuration object for the library.
@@ -531,20 +565,133 @@ class EarthModel:
             lmax=self.lmax, normalization=self.normalization, csphase=self.csphase
         )
 
+    def analyse(
+        self, data: np.ndarray, /, *, lmax_calc: Optional[int] = None
+    ) -> np.ndarray:
+        """
+        The spherical harmonic coefficients of a field given by its values on
+        the model's grid, as an array (2, lmax + 1, lmax + 1) in the model's
+        conventions: what `expand_field` returns, without the pyshtools
+        objects around it, as the solvers hold fields.
+
+        The transform is made by ducc0 directly when it is the backend
+        pyshtools is using. pyshtools' own route to it repacks and
+        renormalises the coefficients in Python loops on every call; here
+        the packing is tabulated once per truncation. The numbers are the
+        same to rounding. With pyshtools' other backend the transform goes
+        through pyshtools.
+
+        Args:
+            data: The field's values, laid out as the model's grid.
+            lmax_calc: The degree to expand to, the model's if None.
+
+        Raises:
+            ValueError: If the array's shape is not the model's grid shape.
+        """
+        data = np.asarray(data, dtype=float)
+        if data.shape != self._grid_shape:
+            raise ValueError(
+                f"the array's shape {data.shape} is not the model's grid "
+                f"shape {self._grid_shape}"
+            )
+        lmax = self.lmax if lmax_calc is None else lmax_calc
+        backend = _ducc_backend()
+        if backend is None or lmax > self.lmax:
+            field = SHGrid.from_array(data, grid=self._grid, copy=False)
+            return field.expand(
+                lmax_calc=lmax_calc,
+                normalization=self.normalization,
+                csphase=self.csphase,
+            ).coeffs
+        ducc0, threads = backend
+        if self._extend:
+            core = data[:-1, :-1] if self._grid == "DH" else data[:, :-1]
+        else:
+            core = data
+        alm = ducc0.sht.experimental.analysis_2d(
+            map=core[None],
+            spin=0,
+            lmax=lmax,
+            geometry="DH" if self._grid == "DH" else "GL",
+            nthreads=threads,
+        )[0]
+        flat, _, inverse = _harmonic_layout(lmax)
+        coeffs = np.zeros((2, lmax + 1, lmax + 1))
+        coeffs[0].ravel()[flat] = alm.real * inverse
+        coeffs[1].ravel()[flat[lmax + 1 :]] = (
+            alm.imag[lmax + 1 :] * -inverse[lmax + 1 :]
+        )
+        return coeffs
+
+    def synthesise(self, coeffs: np.ndarray, /) -> np.ndarray:
+        """
+        The values on the model's grid of the field with the given
+        coefficients, an array (2, lmax + 1, lmax + 1) in the model's
+        conventions: what `expand_coefficient` returns, without the
+        pyshtools objects around it. The transform is made as in `analyse`.
+
+        Raises:
+            ValueError: If the array is not that of the model's degree.
+        """
+        coeffs = np.asarray(coeffs)
+        lmax = self.lmax
+        if coeffs.shape != (2, lmax + 1, lmax + 1):
+            raise ValueError(
+                f"the coefficients' shape {coeffs.shape} is not that of the "
+                f"model's degree, (2, {lmax + 1}, {lmax + 1})"
+            )
+        backend = _ducc_backend()
+        if backend is None or np.iscomplexobj(coeffs):
+            field = SHCoeffs.from_array(
+                coeffs,
+                normalization=self.normalization,
+                csphase=self.csphase,
+                copy=False,
+            )
+            return field.expand(grid=self.grid_name, extend=self.extend).data
+        ducc0, threads = backend
+        flat, scale, _ = _harmonic_layout(lmax)
+        alm = np.empty(flat.size, dtype=np.complex128)
+        alm.real = coeffs[0].ravel()[flat] * scale
+        alm.imag = coeffs[1].ravel()[flat] * -scale
+        # The sine coefficients of order zero are not part of the field.
+        alm.imag[: lmax + 1] = 0.0
+        data = np.empty(self._grid_shape)
+        core = data[:, :-1] if self._extend else data
+        if self._grid == "DH":
+            # Extended, the rows are Driscoll and Healy's and the south
+            # pole: ducc0's Clenshaw-Curtis rows.
+            geometry = "CC" if self._extend else "DH"
+        else:
+            geometry = "GL"
+        ducc0.sht.experimental.synthesis_2d(
+            alm=alm[None],
+            map=core[None],
+            spin=0,
+            lmax=lmax,
+            geometry=geometry,
+            nthreads=threads,
+        )
+        if self._extend:
+            data[:, -1] = data[:, 0]
+        return data
+
     def expand_field(
         self, f: SHGrid, /, *, lmax_calc: Optional[int] = None
     ) -> SHCoeffs:
         """Expands an SHGrid object into spherical harmonic coefficients."""
         self.check_field(f)
-        return f.expand(
-            lmax_calc=lmax_calc, normalization=self.normalization, csphase=self.csphase
+        return SHCoeffs.from_array(
+            self.analyse(f.data, lmax_calc=lmax_calc),
+            normalization=self.normalization,
+            csphase=self.csphase,
+            copy=False,
         )
 
     def expand_coefficient(self, f: SHCoeffs) -> SHGrid:
         """Expands spherical harmonic coefficients into an SHGrid object."""
         self.check_coefficient(f)
-        grid = "DH2" if self._sampling == 2 else self.grid
-        return f.expand(grid=grid, extend=self.extend)
+        return SHGrid.from_array(self.synthesise(f.coeffs), grid=self.grid, copy=False)
 
     def times_from_dates(self, dates, origin: float, /) -> np.ndarray:
         """

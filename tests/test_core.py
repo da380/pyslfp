@@ -299,6 +299,117 @@ def test_earth_model_expand_methods(earth_model):
 
 
 # ==================================================================== #
+#              Transforms on ducc0 directly, against pyshtools          #
+# ==================================================================== #
+
+
+def _through_pyshtools(model, *, data=None, coeffs=None, lmax_calc=None):
+    """The transforms as pyshtools' own classes make them: the reference
+    the conventions were set by."""
+    if data is not None:
+        field = SHGrid.from_array(data, grid=model.grid, copy=False)
+        return field.expand(
+            lmax_calc=lmax_calc,
+            normalization=model.normalization,
+            csphase=model.csphase,
+        ).coeffs
+    clm = SHCoeffs.from_array(
+        coeffs, normalization=model.normalization, csphase=model.csphase, copy=False
+    )
+    return clm.expand(grid=model.grid_name, extend=model.extend).data
+
+
+@pytest.fixture(
+    params=[(g, e) for g in ("DH", "DH2", "GLQ") for e in (True, False)],
+    ids=lambda p: f"{p[0]}-{'extended' if p[1] else 'plain'}",
+)
+def any_grid_model(request):
+    grid, extend = request.param
+    return EarthModel(21, grid=grid, extend=extend)
+
+
+def test_the_transforms_run_on_ducc_here():
+    """Otherwise the comparisons below compare pyshtools with itself."""
+    from pyslfp.core import model as model_module
+
+    backend = model_module._ducc_backend()
+    assert backend is not None
+    assert hasattr(backend[0].sht.experimental, "analysis_2d")
+
+
+def test_synthesise_agrees_with_pyshtools(any_grid_model):
+    model = any_grid_model
+    rng = np.random.default_rng(3)
+    # Every entry is set, those pyshtools does not read among them.
+    coeffs = rng.standard_normal((2, model.lmax + 1, model.lmax + 1))
+    data = model.synthesise(coeffs)
+    reference = _through_pyshtools(model, coeffs=coeffs)
+    assert data.shape == reference.shape == model.zero_grid().data.shape
+    np.testing.assert_allclose(data, reference, rtol=0.0, atol=1e-12)
+
+
+@pytest.mark.parametrize("lmax_calc", [None, 0, 8])
+def test_analyse_agrees_with_pyshtools(any_grid_model, lmax_calc):
+    """On a field that is not band-limited too, where the two could differ
+    in what they do with the rest."""
+    model = any_grid_model
+    data = np.random.default_rng(4).standard_normal(model.zero_grid().data.shape)
+    coeffs = model.analyse(data, lmax_calc=lmax_calc)
+    reference = _through_pyshtools(model, data=data, lmax_calc=lmax_calc)
+    degree = model.lmax if lmax_calc is None else lmax_calc
+    assert coeffs.shape == reference.shape == (2, degree + 1, degree + 1)
+    np.testing.assert_allclose(coeffs, reference, rtol=0.0, atol=1e-12)
+
+
+def test_the_transforms_invert_each_other(any_grid_model):
+    model = any_grid_model
+    coeffs = model.zero_coefficients().coeffs
+    rng = np.random.default_rng(5)
+    for degree in range(model.lmax + 1):
+        coeffs[0, degree, : degree + 1] = rng.standard_normal(degree + 1)
+        coeffs[1, degree, 1 : degree + 1] = rng.standard_normal(degree)
+    returned = model.analyse(model.synthesise(coeffs))
+    np.testing.assert_allclose(returned, coeffs, rtol=0.0, atol=1e-11)
+
+
+def test_the_objects_and_the_arrays_agree(any_grid_model):
+    """`expand_field` and `expand_coefficient` are the array transforms with
+    pyshtools' objects around them."""
+    model = any_grid_model
+    clm = model.zero_coefficients()
+    clm.coeffs[:] = np.random.default_rng(6).standard_normal(clm.coeffs.shape)
+    field = model.expand_coefficient(clm)
+    assert isinstance(field, SHGrid) and model.check_field(field)
+    np.testing.assert_array_equal(field.data, model.synthesise(clm.coeffs))
+    back = model.expand_field(field)
+    assert isinstance(back, SHCoeffs) and model.check_coefficient(back)
+    np.testing.assert_array_equal(back.coeffs, model.analyse(field.data))
+
+
+def test_the_transforms_fall_back_to_pyshtools(any_grid_model, monkeypatch):
+    """With pyshtools' other backend selected the transforms are pyshtools'
+    own, and give the same numbers."""
+    from pyslfp.core import model as model_module
+
+    model = any_grid_model
+    rng = np.random.default_rng(7)
+    coeffs = rng.standard_normal((2, model.lmax + 1, model.lmax + 1))
+    data = rng.standard_normal(model.zero_grid().data.shape)
+    direct = model.synthesise(coeffs), model.analyse(data)
+    monkeypatch.setattr(model_module, "_ducc_backend", lambda: None)
+    np.testing.assert_allclose(model.synthesise(coeffs), direct[0], atol=1e-12)
+    np.testing.assert_allclose(model.analyse(data), direct[1], atol=1e-12)
+
+
+def test_the_transforms_check_their_arrays(earth_model):
+    grid = earth_model.zero_grid().data
+    with pytest.raises(ValueError, match="grid shape"):
+        earth_model.analyse(grid[:-1])
+    with pytest.raises(ValueError, match="model's degree"):
+        earth_model.synthesise(np.zeros((2, 3, 3)))
+
+
+# ==================================================================== #
 #                  Quadrature-based integration and DH2 support         #
 # ==================================================================== #
 

@@ -1,0 +1,406 @@
+Cores: 64 physical, 128 logical; budget 48.
+Parallel: up to 48 worker(s) x 1 thread(s) each; serial phases use 48 thread(s).
+Resolution: FAST/TEST mode (lmax=64, obs_degree=32, spacing=8.0).
+
+======================================================================
+>>> grace_inversion.py  (18:08:42)
+>>> args: --lmax 64 --load-scale-km 500.0 --prior-order 3.0 --prior-shift 0.0 --obs-degree 32 --load-order 0.25 --spacing 8.0 --land-water --source-order 0.25 --source-prior-order 1.5 --ice-std-mm 80.0 --ice-scale-km 180.0 --ice-modulation margin --land-water-std-mm 65.0 --land-water-scale-km 340.0 --ocean-prior steric --field-order 1.25 --steric-std-mm 46.0 --steric-scale-km 280.0 --steric-order 3.0 --manometric-std-mm 8.0 --manometric-scale-km 330.0 --manometric-order 2.5 --load-prior model --spacing 8.0 --ocean-case partly --coefficient-errors 2007 2008 --gia-years 1.0 --gia-model caron --qoi-rtol 1e-6 --wmb-filter ddk --serial-threads 48 --parallel --max-jobs 48 --all --paper-bound --std-samples 100
+======================================================================
+Building the physics, prior and noise (lmax=64)...
+Ice prior modulated: std 155 mm EWT over Greenland's grounded ice and 60 over Antarctica's, growing towards the edge by 1 + 10 p
+Prior amplitudes: sterodynamic std = 46.043 mm (input), density std = 1.2579e-02 kg m^-3 (mean-depth steric std = 46.000 mm), ice std = 70.113 mm, land water std = 58.362 mm
+  realised GMSL prior stds under the mass constraint: barystatic = 1.664 mm (the ice alone 0.273), steric = 3.232 mm (verified 3.232); barystatic/steric ratio = 0.51
+  <eta>_O -- <eta_s>_O prior correlation rho_XY = 0.999; unconstrained <eta>_O std = 3.236 mm
+GRACE coefficient errors: ITSG-Grace2018, annual means of 2007 and 2008, std x 1.00: pointwise 8.3 mm EWT to degree 32, unfiltered; white load floor 0.00 mm
+GIA correction error from 50 eigenvectors of the covariance of Caron et al. (2018)
+Drawing a synthetic load and dataset...
+Assembling the normal matrix of 1085 data...
+iteration 0: residual 5.21249e-10
+iteration 1: residual 8.71143e-20
+Solving for the posterior...
+iteration 0: residual 9.32455e-11
+iteration 1: residual 3.33647e-20
+Solution reached in 1 iterations.
+Squared misfit of the data to their prior prediction: 1082 for 1085 data (expected 1085 +/- 47).
+WMB: degrees to 32, filter DDK5, rescaled.
+Regional averages...
+Degree-1 coefficients...
+Prior sensitivity, field by field...
+iteration 0: residual 5.21249e-10
+iteration 1: residual 8.71134e-20
+iteration 0: residual 6.14711e-11
+iteration 1: residual 3.53412e-20
+iteration 0: residual 4.47613e-11
+iteration 1: residual 2.02809e-20
+iteration 0: residual 3.81225e-10
+iteration 1: residual 7.22226e-20
+iteration 0: residual 7.53635e-11
+iteration 1: residual 3.18593e-20
+iteration 0: residual 7.34724e-11
+iteration 1: residual 1.6188e-20
+iteration 0: residual 8.75337e-11
+iteration 1: residual 1.76528e-20
+Region           | KL Divergence   | Prior Var (mm² EWT) | Post Var (mm² EWT) | Variance Reduction
+------------------------------------------------------------------------------------------------
+GRL (S Basin)    | 1.53            | 5448.80             | 126.18             |            97.68%
+WAIS             | 1.80            | 177.48              | 9.86               |            94.45%
+Gulf of Mexico   | 0.64            | 11.79               | 1.87               |            84.14%
+GBM basin        | 2.36            | 885.76              | 22.49              |            97.46%
+
+
+Degree-1 Spherical Harmonic Coefficients
+=================================================================
+Joint KL Divergence:      5.3085 nats
+Prior Total Var (Trace):  53.2015 mm²
+Post Total Var (Trace):   1.6812 mm²
+Overall Trace Reduction:  96.84%
+Prior Generalised Var:    5.0676e+03
+Post Generalised Var:     1.5282e-01
+-----------------------------------------------------------------
+Component          | Prior Var    | Post Var     | Reduction
+-----------------------------------------------------------------
+(1,0)              | 18.7373      | 0.7973       |    95.74%
+(1,1)              | 15.4876      | 0.4046       |    97.39%
+(1,-1)             | 18.9766      | 0.4793       |    97.47%
+-----------------------------------------------------------------
+
+
+==============================================================================================================
+PRIOR SENSITIVITY: regional averages of the total load (mm EWT)
+A share is a part of the stated variance. 'sum - 1' is the prior's and the noise's shares together,
+less one: zero for an estimate that states the whole of its error variance under the prior.
+------------------------------------------------------------------
+                  stated std   prior   noise   sum - 1    model HS
+------------------------------------------------------------------
+GRL (S Basin)         11.233   0.632   0.368  -1.0e-09   9.422e+02
+WAIS                   3.139   0.536   0.464  -3.8e-11   1.697e+03
+Gulf of Mexico         1.367   0.733   0.267  -1.4e-09   3.413e+03
+GBM basin              4.742   0.462   0.538  -1.1e-09   4.769e+02
+
+Share of the stated variance from each field's prior
+                             ice      land water   steric height      manometric
+GRL (S Basin)          4.331e-01       1.335e-01       0.000e+00       6.574e-02
+WAIS                   4.198e-01       2.547e-02       0.000e+00       9.027e-02
+Gulf of Mexico         5.461e-03       3.491e-01       0.000e+00       3.788e-01
+GBM basin              1.167e-03       4.383e-01       0.000e+00       2.287e-02
+
+Bound factor F, operator norm
+                             ice      land water   steric height      manometric
+GRL (S Basin)          1.202e+00       7.126e-01       0.000e+00       8.162e-02
+WAIS                   7.983e-01       1.609e-01       0.000e+00       1.222e-01
+Gulf of Mexico         1.100e-02       3.472e+00       0.000e+00       4.212e-01
+GBM basin              2.390e-03       3.938e+00       0.000e+00       3.196e-02
+
+Bound factor F, Hilbert-Schmidt norm
+                             ice      land water   steric height      manometric
+GRL (S Basin)          4.323e+01       1.181e+01       0.000e+00       2.159e+00
+WAIS                   2.872e+01       2.666e+00       0.000e+00       3.232e+00
+Gulf of Mexico         3.958e-01       5.754e+01       0.000e+00       1.114e+01
+GBM basin              8.598e-02       6.527e+01       0.000e+00       8.456e-01
+
+
+==============================================================================================================
+PRIOR SENSITIVITY: degree-1 coefficients of the direct load (mm EWT)
+A share is a part of the stated variance. 'sum - 1' is the prior's and the noise's shares together,
+less one: zero for an estimate that states the whole of its error variance under the prior.
+------------------------------------------------------------------
+                  stated std   prior   noise   sum - 1    model HS
+------------------------------------------------------------------
+(1,0)                  0.893   0.670   0.330  -5.2e-10   2.455e+03
+(1,1)                  0.636   0.796   0.204  -4.8e-09   3.045e+03
+(1,-1)                 0.692   0.755   0.245  -1.2e-08   2.884e+03
+
+Share of the stated variance from each field's prior
+                             ice      land water   steric height      manometric
+(1,0)                  3.514e-02       1.102e-01       0.000e+00       5.243e-01
+(1,1)                  1.878e-03       3.523e-02       0.000e+00       7.584e-01
+(1,-1)                 1.111e-03       4.377e-02       0.000e+00       7.105e-01
+
+Bound factor F, operator norm
+                             ice      land water   steric height      manometric
+(1,0)                  5.718e-02       3.968e-01       0.000e+00       5.428e-01
+(1,1)                  3.194e-03       1.673e-01       0.000e+00       7.769e-01
+(1,-1)                 2.082e-03       2.122e-01       0.000e+00       7.288e-01
+
+Bound factor F, Hilbert-Schmidt norm
+                             ice      land water   steric height      manometric
+(1,0)                  2.057e+00       6.576e+00       0.000e+00       1.436e+01
+(1,1)                  1.149e-01       2.773e+00       0.000e+00       2.055e+01
+(1,-1)                 7.491e-02       3.517e+00       0.000e+00       1.928e+01
+
+
+==============================================================================================================
+PRIOR SENSITIVITY: WMB's regional averages of the total load (mm EWT); the std is that of its error under the prior
+A share is a part of the stated variance. 'sum - 1' is the prior's and the noise's shares together,
+less one: zero for an estimate that states the whole of its error variance under the prior.
+------------------------------------------------------
+                  stated std   prior   noise   sum - 1
+------------------------------------------------------
+GRL (S Basin)         46.429   0.883   0.117   0.0e+00
+WAIS                   7.287   0.336   0.664   0.0e+00
+Gulf of Mexico         5.497   0.660   0.340  -1.1e-16
+GBM basin             11.144   0.824   0.176   2.2e-16
+
+Share of the stated variance from each field's prior
+                             ice      land water   steric height      manometric
+GRL (S Basin)          8.223e-01       6.008e-02       0.000e+00       5.331e-04
+WAIS                   1.020e-01       2.331e-01       0.000e+00       1.330e-03
+Gulf of Mexico         6.351e-03       6.492e-01       0.000e+00       4.717e-03
+GBM basin              2.364e-03       8.203e-01       0.000e+00       9.630e-04
+
+Bound factor F, operator norm
+                             ice      land water   steric height      manometric
+GRL (S Basin)          1.025e+00       1.985e-01       0.000e+00       7.250e-04
+WAIS                   1.436e-01       2.656e-01       0.000e+00       1.484e-03
+Gulf of Mexico         7.569e-03       1.994e+00       0.000e+00       5.304e-03
+GBM basin              3.232e-03       1.942e+00       0.000e+00       1.022e-03
+
+Bound factor F, Hilbert-Schmidt norm
+                             ice      land water   steric height      manometric
+GRL (S Basin)          3.686e+01       3.289e+00       0.000e+00       1.918e-02
+WAIS                   5.167e+00       4.403e+00       0.000e+00       3.927e-02
+Gulf of Mexico         2.723e-01       3.306e+01       0.000e+00       1.403e-01
+GBM basin              1.162e-01       3.218e+01       0.000e+00       2.704e-02
+
+
+==============================================================================================================
+PRIOR SENSITIVITY: the size ||dQ|| / ||Q|| of changes of one field's prior (operator norm, Hilbert-Schmidt norm)
+------------------------------------------------------------------------------------------------
+                           std x1.25          scale x1.5          scale /1.5          order +0.5
+------------------------------------------------------------------------------------------------
+ice                    0.56     0.56       0.78     0.30       0.37     0.23       0.35     0.20
+land water             0.56     0.56       1.00     0.41       0.47     0.30       0.57     0.33
+steric height          0.56     0.56       1.14     0.52       0.50     0.72       0.22     0.21
+manometric             0.56     0.56       1.19     0.49       0.52     0.66       0.30     0.27
+
+saved output_plots_grace_inversion/grace_metrics.txt
+Maps...
+Pointwise standard deviation from 100 posterior samples...
+iteration 0: residual 1.00919e-21
+iteration 1: residual 8.35499e-31
+iteration 0: residual 1.17679e-20
+iteration 1: residual 2.61469e-30
+iteration 0: residual 1.61668e-21
+iteration 1: residual 1.28309e-29
+saved output_plots_grace_inversion/grace_regional_pdfs.png
+saved output_plots_grace_inversion/grace_degree_1_corner.png
+saved output_plots_grace_inversion/grace_posterior_maps.png
+saved output_plots_grace_inversion/grace_covariance_maps.png
+iteration 0: residual 1.14748e-10
+iteration 1: residual 1.8762e-19
+iteration 0: residual 1.02673e-10
+iteration 1: residual 4.12026e-20
+iteration 0: residual 9.09674e-11
+iteration 1: residual 9.75521e-20
+iteration 0: residual 8.81429e-11
+iteration 1: residual 1.04685e-19
+iteration 0: residual 8.89264e-11
+iteration 1: residual 1.39065e-19
+iteration 0: residual 7.9902e-11
+iteration 1: residual 2.42839e-19
+iteration 0: residual 8.64698e-11
+iteration 1: residual 3.67194e-19
+iteration 0: residual 8.54314e-11
+iteration 1: residual 1.61415e-19
+iteration 0: residual 8.1663e-11
+iteration 1: residual 1.59441e-19
+iteration 0: residual 9.16031e-11
+iteration 1: residual 6.35103e-20
+iteration 0: residual 8.80152e-11
+iteration 1: residual 1.198e-19
+iteration 0: residual 9.19404e-11
+iteration 1: residual 2.16318e-19
+iteration 0: residual 8.95261e-11
+iteration 1: residual 2.10339e-19
+iteration 0: residual 9.33363e-11
+iteration 1: residual 1.62595e-19
+iteration 0: residual 8.54536e-11
+iteration 1: residual 2.27262e-19
+iteration 0: residual 8.7474e-11
+iteration 1: residual 2.3557e-19
+iteration 0: residual 8.1799e-11
+iteration 1: residual 3.60848e-19
+iteration 0: residual 9.1581e-11
+iteration 1: residual 7.57502e-20
+iteration 0: residual 1.09687e-10
+iteration 1: residual 2.59723e-19
+iteration 0: residual 1.06468e-10
+iteration 1: residual 2.11672e-19
+iteration 0: residual 8.78922e-11
+iteration 1: residual 1.39332e-19
+iteration 0: residual 9.08278e-11
+iteration 1: residual 9.07778e-20
+iteration 0: residual 8.68497e-11
+iteration 1: residual 1.00904e-19
+iteration 0: residual 9.03291e-11
+iteration 1: residual 1.23693e-19
+iteration 0: residual 8.78458e-11
+iteration 1: residual 1.97749e-19
+iteration 0: residual 8.77248e-11
+iteration 1: residual 1.94355e-19
+iteration 0: residual 9.83481e-11
+iteration 1: residual 1.99004e-19
+iteration 0: residual 9.13003e-11
+iteration 1: residual 3.06181e-19
+iteration 0: residual 9.44527e-11
+iteration 1: residual 1.11614e-19
+iteration 0: residual 9.83545e-11
+iteration 1: residual 2.50272e-19
+iteration 0: residual 1.25429e-10
+iteration 1: residual 1.9042e-19
+iteration 0: residual 1.00269e-10
+iteration 1: residual 1.99313e-19
+iteration 0: residual 9.36303e-11
+iteration 1: residual 1.73759e-19
+iteration 0: residual 7.99788e-11
+iteration 1: residual 1.39847e-18
+iteration 0: residual 9.63181e-11
+iteration 1: residual 1.0644e-19
+iteration 0: residual 8.15782e-11
+iteration 1: residual 2.58248e-19
+iteration 0: residual 8.07708e-11
+iteration 1: residual 2.38503e-19
+iteration 0: residual 9.15609e-11
+iteration 1: residual 1.30939e-19
+iteration 0: residual 8.59115e-11
+iteration 1: residual 1.0646e-19
+iteration 0: residual 9.38607e-11
+iteration 1: residual 2.12951e-19
+iteration 0: residual 9.03613e-11
+iteration 1: residual 3.53775e-19
+iteration 0: residual 1.01146e-10
+iteration 1: residual 2.4546e-19
+iteration 0: residual 8.95362e-11
+iteration 1: residual 2.44482e-19
+iteration 0: residual 9.75347e-11
+iteration 1: residual 1.50975e-19
+iteration 0: residual 9.14159e-11
+iteration 1: residual 1.71423e-19
+iteration 0: residual 9.92726e-11
+iteration 1: residual 1.46528e-19
+iteration 0: residual 9.03524e-11
+iteration 1: residual 2.44299e-19
+iteration 0: residual 9.02054e-11
+iteration 1: residual 2.3903e-19
+iteration 0: residual 9.56844e-11
+iteration 1: residual 2.19943e-19
+iteration 0: residual 8.79373e-11
+iteration 1: residual 1.22935e-19
+iteration 0: residual 9.58902e-11
+iteration 1: residual 6.15836e-20
+iteration 0: residual 1.04897e-10
+iteration 1: residual 5.21058e-20
+iteration 0: residual 9.44339e-11
+iteration 1: residual 2.73714e-19
+iteration 0: residual 9.80562e-11
+iteration 1: residual 3.11631e-19
+iteration 0: residual 8.11713e-11
+iteration 1: residual 1.08295e-19
+iteration 0: residual 8.84788e-11
+iteration 1: residual 2.23819e-19
+iteration 0: residual 1.1351e-10
+iteration 1: residual 2.44652e-19
+iteration 0: residual 9.05817e-11
+iteration 1: residual 1.30176e-19
+iteration 0: residual 9.07934e-11
+iteration 1: residual 1.57966e-19
+iteration 0: residual 1.02898e-10
+iteration 1: residual 2.01396e-19
+iteration 0: residual 7.8019e-11
+iteration 1: residual 1.69828e-19
+iteration 0: residual 9.94514e-11
+iteration 1: residual 1.87498e-19
+iteration 0: residual 8.82112e-11
+iteration 1: residual 9.341e-20
+iteration 0: residual 7.88893e-11
+iteration 1: residual 3.00227e-19
+iteration 0: residual 8.40979e-11
+iteration 1: residual 2.39318e-19
+iteration 0: residual 7.88155e-11
+iteration 1: residual 1.92275e-19
+iteration 0: residual 9.51898e-11
+iteration 1: residual 6.90558e-20
+iteration 0: residual 9.67241e-11
+iteration 1: residual 1.84142e-19
+iteration 0: residual 1.0971e-10
+iteration 1: residual 2.06077e-19
+iteration 0: residual 9.69083e-11
+iteration 1: residual 2.50982e-19
+iteration 0: residual 1.03524e-10
+iteration 1: residual 1.88202e-19
+iteration 0: residual 7.61621e-11
+iteration 1: residual 2.90098e-19
+iteration 0: residual 1.04286e-10
+iteration 1: residual 2.36564e-19
+iteration 0: residual 8.79906e-11
+iteration 1: residual 1.68725e-19
+iteration 0: residual 8.24278e-11
+iteration 1: residual 1.64299e-19
+iteration 0: residual 1.01096e-10
+iteration 1: residual 2.57481e-19
+iteration 0: residual 9.05377e-11
+iteration 1: residual 1.70547e-19
+iteration 0: residual 8.14456e-11
+iteration 1: residual 2.1896e-19
+iteration 0: residual 9.11334e-11
+iteration 1: residual 2.32704e-19
+iteration 0: residual 9.01096e-11
+iteration 1: residual 8.42052e-20
+iteration 0: residual 8.87431e-11
+iteration 1: residual 1.53731e-19
+iteration 0: residual 1.058e-10
+iteration 1: residual 1.27196e-19
+iteration 0: residual 8.23628e-11
+iteration 1: residual 2.77872e-19
+iteration 0: residual 8.79566e-11
+iteration 1: residual 1.46795e-19
+iteration 0: residual 8.67872e-11
+iteration 1: residual 3.26142e-19
+iteration 0: residual 9.75207e-11
+iteration 1: residual 2.81838e-19
+iteration 0: residual 3.81225e-10
+iteration 1: residual 7.22223e-20
+iteration 0: residual 7.53635e-11
+iteration 1: residual 3.18594e-20
+iteration 0: residual 8.00613e-11
+iteration 1: residual 2.33222e-19
+iteration 0: residual 9.9267e-11
+iteration 1: residual 1.89277e-19
+iteration 0: residual 1.01065e-10
+iteration 1: residual 2.01537e-19
+iteration 0: residual 9.45568e-11
+iteration 1: residual 1.0673e-19
+iteration 0: residual 1.14878e-10
+iteration 1: residual 4.48729e-19
+iteration 0: residual 6.14711e-11
+iteration 1: residual 3.53409e-20
+iteration 0: residual 7.34724e-11
+iteration 1: residual 1.6188e-20
+iteration 0: residual 1.08886e-10
+iteration 1: residual 2.79248e-19
+iteration 0: residual 8.12619e-11
+iteration 1: residual 1.92012e-19
+iteration 0: residual 9.47735e-11
+iteration 1: residual 1.57626e-19
+iteration 0: residual 4.47613e-11
+iteration 1: residual 2.02807e-20
+iteration 0: residual 8.75337e-11
+iteration 1: residual 1.76527e-20
+iteration 0: residual 1.102e-10
+iteration 1: residual 1.85034e-19
+iteration 0: residual 8.33134e-11
+iteration 1: residual 2.11672e-19
+iteration 0: residual 7.84426e-11
+iteration 1: residual 2.35979e-19
+iteration 0: residual 9.62857e-11
+iteration 1: residual 2.92926e-19
+iteration 0: residual 9.53192e-11
+iteration 1: residual 1.13716e-19
+iteration 0: residual 9.26015e-11
+iteration 1: residual 1.30401e-19
+
+real	6m49.116s
+user	13m57.618s
+sys	5m40.723s
+
+All done.

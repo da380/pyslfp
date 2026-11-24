@@ -52,6 +52,7 @@ import argparse
 import shutil
 import subprocess
 import zipfile
+import os
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -59,7 +60,8 @@ import numpy as np
 
 URL = "https://www.metoffice.gov.uk/hadobs/en4/data/en4-2-1/EN.4.2.2"
 VARIANT = "g10"
-DATA_DIR = Path.home() / ".pyslfp_data" / "en4"
+# The data folder of pyslfp, which PYSLFP_DATA moves.
+DATA_DIR = Path(os.getenv("PYSLFP_DATA", Path.home() / ".pyslfp_data")) / "en4"
 RAW_DIR = DATA_DIR / "raw"
 ANNUAL_DIR = DATA_DIR / "annual"
 

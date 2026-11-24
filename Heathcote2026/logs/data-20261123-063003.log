@@ -1,0 +1,117 @@
+annual_difference_covariance_n96_2007_2008.npy: already built
+mtm_1995_H.tar.gz: already reduced
+mtm_1995_I.tar.gz: already reduced
+mtm_1995_O.tar.gz: already reduced
+mtm_1996_H.tar.gz: already reduced
+mtm_1996_I.tar.gz: already reduced
+mtm_1996_O.tar.gz: already reduced
+mtm_1997_H.tar.gz: already reduced
+mtm_1997_I.tar.gz: already reduced
+mtm_1997_O.tar.gz: already reduced
+mtm_1998_H.tar.gz: already reduced
+mtm_1998_I.tar.gz: already reduced
+mtm_1998_O.tar.gz: already reduced
+mtm_1999_H.tar.gz: already reduced
+mtm_1999_I.tar.gz: already reduced
+mtm_1999_O.tar.gz: already reduced
+mtm_2000_H.tar.gz: already reduced
+mtm_2000_I.tar.gz: already reduced
+mtm_2000_O.tar.gz: already reduced
+mtm_2001_H.tar.gz: already reduced
+mtm_2001_I.tar.gz: already reduced
+mtm_2001_O.tar.gz: already reduced
+mtm_2002_H.tar.gz: already reduced
+mtm_2002_I.tar.gz: already reduced
+mtm_2002_O.tar.gz: already reduced
+mtm_2003_H.tar.gz: already reduced
+mtm_2003_I.tar.gz: already reduced
+mtm_2003_O.tar.gz: already reduced
+mtm_2004_H.tar.gz: already reduced
+mtm_2004_I.tar.gz: already reduced
+mtm_2004_O.tar.gz: already reduced
+mtm_2005_H.tar.gz: already reduced
+mtm_2005_I.tar.gz: already reduced
+mtm_2005_O.tar.gz: already reduced
+mtm_2006_H.tar.gz: already reduced
+mtm_2006_I.tar.gz: already reduced
+mtm_2006_O.tar.gz: already reduced
+mtm_2007_H.tar.gz: already reduced
+mtm_2007_I.tar.gz: already reduced
+mtm_2007_O.tar.gz: already reduced
+mtm_2008_H.tar.gz: already reduced
+mtm_2008_I.tar.gz: already reduced
+mtm_2008_O.tar.gz: already reduced
+mtm_2009_H.tar.gz: already reduced
+mtm_2009_I.tar.gz: already reduced
+mtm_2009_O.tar.gz: already reduced
+mtm_2010_H.tar.gz: already reduced
+mtm_2010_I.tar.gz: already reduced
+mtm_2010_O.tar.gz: already reduced
+mtm_2011_H.tar.gz: already reduced
+mtm_2011_I.tar.gz: already reduced
+mtm_2011_O.tar.gz: already reduced
+mtm_2012_H.tar.gz: already reduced
+mtm_2012_I.tar.gz: already reduced
+mtm_2012_O.tar.gz: already reduced
+mtm_2013_H.tar.gz: already reduced
+mtm_2013_I.tar.gz: already reduced
+mtm_2013_O.tar.gz: already reduced
+mtm_2014_H.tar.gz: already reduced
+mtm_2014_I.tar.gz: already reduced
+mtm_2014_O.tar.gz: already reduced
+mtm_2015_H.tar.gz: already reduced
+mtm_2015_I.tar.gz: already reduced
+mtm_2015_O.tar.gz: already reduced
+mtm_2016_H.tar.gz: already reduced
+mtm_2016_I.tar.gz: already reduced
+mtm_2016_O.tar.gz: already reduced
+mtm_2017_H.tar.gz: already reduced
+mtm_2017_I.tar.gz: already reduced
+mtm_2017_O.tar.gz: already reduced
+mtm_2018_H.tar.gz: already reduced
+mtm_2018_I.tar.gz: already reduced
+mtm_2018_O.tar.gz: already reduced
+mtm_2019_H.tar.gz: already reduced
+mtm_2019_I.tar.gz: already reduced
+mtm_2019_O.tar.gz: already reduced
+mtm_2020_H.tar.gz: already reduced
+mtm_2020_I.tar.gz: already reduced
+mtm_2020_O.tar.gz: already reduced
+done
+1995: already reduced
+1996: already reduced
+1997: already reduced
+1998: already reduced
+1999: already reduced
+2000: already reduced
+2001: already reduced
+2002: already reduced
+2003: already reduced
+2004: already reduced
+2005: already reduced
+2006: already reduced
+2007: already reduced
+2008: already reduced
+2009: already reduced
+2010: already reduced
+2011: already reduced
+2012: already reduced
+2013: already reduced
+2014: already reduced
+2015: already reduced
+2016: already reduced
+2017: already reduced
+2018: already reduced
+2019: already reduced
+2020: already reduced
+done
+/home/da380/.pyslfp_data/ddk/Wbd_2-120.a_1d12p_4
+/home/da380/.pyslfp_data/ddk/Wbd_2-120.a_1d11p_4
+largest relative difference from the published output: 8.1e-15
+/home/da380/.pyslfp_data/caron_gia/reduced/modes_caron_2018.npz is there already; remove it to build again
+200 modes hold 1.00000000 of the trace; the largest 6.895e-23 yr^-2
+rank  10: geoid std over the published, median 1.0108 (5 to 95 per cent 0.999 to 1.023); trace on GRACE's data 1.179737e-22 yr^-2
+rank  20: geoid std over the published, median 1.0142 (5 to 95 per cent 1.002 to 1.025); trace on GRACE's data 1.184901e-22 yr^-2
+rank  50: geoid std over the published, median 1.0145 (5 to 95 per cent 1.002 to 1.025); trace on GRACE's data 1.185574e-22 yr^-2
+rank 200: geoid std over the published, median 1.0146 (5 to 95 per cent 1.002 to 1.026); trace on GRACE's data 1.185587e-22 yr^-2
+expected geoid rate against the published map: slope 1.0028, correlation 0.999974

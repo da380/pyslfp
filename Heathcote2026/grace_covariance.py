@@ -49,6 +49,7 @@ import argparse
 import gzip
 import io
 import subprocess
+import os
 from pathlib import Path
 from typing import Sequence
 
@@ -59,7 +60,8 @@ URL = (
     "https://ftp.tugraz.at/pub/ITSG/GRACE/ITSG-Grace2018/monthly/"
     "normals_SINEX/monthly_n96"
 )
-DATA_DIR = Path.home() / ".pyslfp_data" / "itsg_grace2018"
+# The data folder of pyslfp, which PYSLFP_DATA moves.
+DATA_DIR = Path(os.getenv("PYSLFP_DATA", Path.home() / ".pyslfp_data")) / "itsg_grace2018"
 RAW_DIR = DATA_DIR / "normals_n96"
 REDUCED_DIR = DATA_DIR / "reduced"
 DEGREE = 96

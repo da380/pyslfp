@@ -52,32 +52,64 @@ def unit_vectors(points) -> np.ndarray:
     )
 
 
-def maximin_order(xyz: np.ndarray) -> np.ndarray:
+def maximin_order(xyz: np.ndarray, switch: int = 1024) -> np.ndarray:
     """The maximin order of points on the unit sphere: the first is that
     nearest their mean direction, and each after is the one farthest from
-    all those before it."""
+    all those before it.
+
+    A point's distance to those chosen can only fall when a point is chosen
+    within the distance it now has, and no point's is more than the chosen
+    one's own. So once `switch` points are in, and that distance is small,
+    each choice updates only the points in a ball about it, found with a
+    tree, and the next is read from a heap: the cost is then nearly linear
+    in the number of points, where updating every point each time is
+    quadratic."""
+    import heapq
+
+    from scipy.spatial import cKDTree
+
     count = len(xyz)
     order = np.empty(count, dtype=int)
     order[0] = int(np.argmax(xyz @ xyz.mean(axis=0)))
     # The largest cosine to a chosen point: the smallest is the farthest.
     nearest = xyz @ xyz[order[0]]
     nearest[order[0]] = np.inf
-    for index in range(1, count):
+    direct = min(count, max(switch, 1))
+    for index in range(1, direct):
         chosen = int(np.argmin(nearest))
         order[index] = chosen
         np.maximum(nearest, xyz @ xyz[chosen], out=nearest)
         nearest[chosen] = np.inf
+    if direct == count:
+        return order
+    tree = cKDTree(xyz)
+    left = np.flatnonzero(np.isfinite(nearest))
+    heap = list(zip(nearest[left].tolist(), left.tolist()))
+    heapq.heapify(heap)
+    for index in range(direct, count):
+        while True:
+            value, chosen = heapq.heappop(heap)
+            if nearest[chosen] == value:
+                break
+        order[index] = chosen
+        nearest[chosen] = np.inf
+        # Those nearer the chosen point than it was to the rest: the chord
+        # of the angle whose cosine is `value`, with a margin for rounding.
+        radius = np.sqrt(max(2.0 - 2.0 * value, 0.0)) * (1.0 + 1.0e-9) + 1.0e-12
+        ball = np.asarray(tree.query_ball_point(xyz[chosen], radius), dtype=int)
+        cosines = xyz[ball] @ xyz[chosen]
+        closer = cosines > nearest[ball]
+        for member, cosine in zip(ball[closer].tolist(), cosines[closer].tolist()):
+            nearest[member] = cosine
+            heapq.heappush(heap, (cosine, member))
     return order
 
 
-def earlier_neighbours(xyz: np.ndarray, count: int, block: int = 512) -> np.ndarray:
-    """For points in their order, the indices of the `count` nearest of
-    those before each, nearest first; -1 where there are fewer. Returns an
-    array (n, count)."""
-    total = len(xyz)
-    result = np.full((total, count), -1, dtype=int)
-    for start in range(1, total, block):
-        stop = min(start + block, total)
+def _earlier_neighbours_direct(xyz, count, result, first, last, block=512):
+    """`earlier_neighbours` for the points first to last, by comparing each
+    with every point before it."""
+    for start in range(first, last, block):
+        stop = min(start + block, last)
         cosines = xyz[start:stop] @ xyz[:stop].T
         rows = np.arange(start, stop)
         # A point's neighbours come before it.
@@ -90,6 +122,49 @@ def earlier_neighbours(xyz: np.ndarray, count: int, block: int = 512) -> np.ndar
         values = np.take_along_axis(values, inner, axis=1)
         nearest[~np.isfinite(values)] = -1
         result[start:stop, :keep] = nearest
+
+
+def earlier_neighbours(xyz: np.ndarray, count: int, direct: int = 4096) -> np.ndarray:
+    """For points in their order, the indices of the `count` nearest of
+    those before each, nearest first; -1 where there are fewer. Returns an
+    array (n, count).
+
+    The first `direct` points are compared with every point before them.
+    The rest are taken in stretches that double the number of points so
+    far: a tree of the points to the end of a stretch gives each of its
+    points more of its nearest than are wanted, and those that come after
+    it are dropped; a point left short is asked for more. The cost is then
+    nearly linear in the number of points."""
+    from scipy.spatial import cKDTree
+
+    total = len(xyz)
+    result = np.full((total, count), -1, dtype=int)
+    first = min(total, max(direct, count + 1))
+    _earlier_neighbours_direct(xyz, count, result, 1, first)
+    start = first
+    while start < total:
+        stop = min(2 * start, total)
+        tree = cKDTree(xyz[:stop])
+        rows = np.arange(start, stop)
+        asked = min(stop, 3 * count + 1)
+        while len(rows) > 0:
+            _, found = tree.query(xyz[rows], k=asked, workers=-1)
+            found = found.reshape(len(rows), -1)
+            earlier = found < rows[:, None]
+            enough = (earlier.sum(axis=1) >= count) | (asked == stop)
+            # The first `count` of those before the point, in the order
+            # found, which is nearest first.
+            rank = np.cumsum(earlier, axis=1)
+            keep = earlier & (rank <= count)
+            done = np.flatnonzero(enough)
+            for row in done[keep[done].sum(axis=1) < count]:
+                # Fewer than `count` before it: cannot arise after `direct`.
+                result[rows[row], : keep[row].sum()] = found[row][keep[row]]
+            full = done[keep[done].sum(axis=1) == count]
+            result[rows[full]] = found[full][keep[full]].reshape(len(full), count)
+            rows = rows[~enough]
+            asked = min(stop, 2 * asked)
+        start = stop
     return result
 
 

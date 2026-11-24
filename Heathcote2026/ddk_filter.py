@@ -42,13 +42,15 @@ from __future__ import annotations
 import argparse
 import struct
 import subprocess
+import os
 from pathlib import Path
 
 import numpy as np
 from scipy import sparse
 
 URL = "https://raw.githubusercontent.com/strawpants/GRACE-filter/master"
-DATA_DIR = Path.home() / ".pyslfp_data" / "ddk"
+# The data folder of pyslfp, which PYSLFP_DATA moves.
+DATA_DIR = Path(os.getenv("PYSLFP_DATA", Path.home() / ".pyslfp_data")) / "ddk"
 MAX_DEGREE, MIN_DEGREE = 120, 2
 
 # The weight of each filter, as its file is named.

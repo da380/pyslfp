@@ -62,6 +62,7 @@ import argparse
 import io
 import subprocess
 import tarfile
+import os
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -71,7 +72,8 @@ SERVER = "https://isdc-data.gfz.de/future_missions/esaesm"
 # The updated model (Dobslaw et al., 2015) covers 1995 to 2006 and its
 # successor, version 3.0, 2007 to 2020, in the same format and file names.
 FIRST_YEAR_OF_VERSION_3 = 2007
-DATA_DIR = Path.home() / ".pyslfp_data" / "esaesm"
+# The data folder of pyslfp, which PYSLFP_DATA moves.
+DATA_DIR = Path(os.getenv("PYSLFP_DATA", Path.home() / ".pyslfp_data")) / "esaesm"
 RAW_DIR = DATA_DIR / "raw"
 MONTHLY_DIR = DATA_DIR / "monthly"
 

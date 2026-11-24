@@ -89,7 +89,6 @@ import pygeoinf as inf
 from pyslfp.core import averaging_operator
 
 import common
-import ddk_filter
 import esm_loads
 import figures
 
@@ -115,38 +114,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.set_defaults(
         load_prior="model", coefficient_errors=[2007, 2008], smoothing_scale_km=0.0
     )
-    parser.add_argument(
-        "--wmb-filter",
-        choices=("gaussian", "ddk"),
-        default="gaussian",
-        help="The filter of WMB's estimate.",
-    )
-    parser.add_argument(
-        "--wmb-degree",
-        type=int,
-        default=None,
-        help="The highest degree WMB's estimate uses, --obs-degree at most: "
-        "60 by default with the Gaussian filter, and every degree with DDK.",
-    )
-    parser.add_argument(
-        "--wmb-ddk-level",
-        type=int,
-        default=5,
-        help="With --wmb-filter ddk: the filter, 1 (the strongest) to 8.",
-    )
-    parser.add_argument(
-        "--wmb-radius-km",
-        type=float,
-        default=300.0,
-        help="Half-width of the Gaussian filter of WMB's estimate; zero for none.",
-    )
-    parser.add_argument(
-        "--wmb-rescale",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Scale WMB's estimate of each region to be right for a load "
-        "uniform over the region.",
-    )
+    common.add_wmb_arguments(parser)
     parser.add_argument("--region-groups", nargs="+", default=DEFAULT_GROUPS)
     parser.add_argument(
         "--truth-years",
@@ -225,14 +193,6 @@ def true_loads(state, years, ocean="O", share=1.0, mean="kept"):
         load_mean = sum(loads[1:], loads[0]) * (1.0 / len(loads))
         loads = [load - load_mean for load in loads]
     return labels, loads
-
-
-def gaussian_weights(degrees, radius: float, earth_radius: float):
-    """The weights by degree of the Gaussian filter of half-width `radius`
-    (Wahr et al., 1998, after Jekeli, 1981), in the closed form that is
-    accurate where the weights are not negligible: exp(-(l r / a)^2 / (4 ln
-    2))."""
-    return np.exp(-((degrees * radius / earth_radius) ** 2) / (4.0 * np.log(2.0)))
 
 
 def regions_of(state, groups) -> tuple[list, list, list]:
@@ -367,8 +327,6 @@ def main():
     km = 1000.0 / model.parameters.length_scale
     forward = common.grace_forward_operator(physics, args)
     total_load = common.total_load_operator(physics)
-    wmb = common.wmb_method(state, args)
-    wmb_load = wmb.potential_coefficient_to_load_operator(load_space)
 
     if args.prior_truths > 0:
         print(f"Drawing {args.prior_truths} loads from the prior...")
@@ -398,25 +356,10 @@ def main():
         masks = [smoother(mask) for mask in masks]
     average = scale_mm * averaging_operator(state, load_space, masks)
 
-    # WMB's estimator: the data cut off and filtered, taken to a load by the
-    # load Love numbers, averaged over each region, and rescaled.
-    degrees, _ = wmb._observed_labels()
-    ddk = args.wmb_filter == "ddk"
-    wmb_degree = args.wmb_degree or (args.obs_degree if ddk else 60)
-    wmb_degree = min(wmb_degree, args.obs_degree)
-    weights = (degrees <= wmb_degree).astype(float)
-    if not ddk and args.wmb_radius_km > 0.0:
-        weights *= gaussian_weights(degrees, args.wmb_radius_km * km, load_space.radius)
-    wmb_matrix = (average @ wmb_load).matrix(form="components", by="rows") * weights
-    if ddk:
-        decorrelate = ddk_filter.filter_matrix(args.wmb_ddk_level, args.obs_degree)
-        wmb_matrix = (decorrelate.T @ wmb_matrix.T).T
-    if args.wmb_rescale:
-        to_data = wmb.load_to_potential_coefficient_operator(load_space)
-        uniform = np.array(
-            [row @ to_data(mask) for row, mask in zip(wmb_matrix, sharp_masks)]
-        )
-        wmb_matrix *= (scale_mm / uniform)[:, None]
+    # WMB's estimator as it is made in practice (`common.wmb_estimator`).
+    _, wmb_matrix, wmb_description = common.wmb_estimator(
+        state, load_space, args, average=average, sharp_masks=sharp_masks, scale=scale_mm
+    )
 
     print(f"Assembling the normal matrix of {forward.codomain.dim} data...")
     preconditioner = common.exact_preconditioner(
@@ -499,14 +442,8 @@ def main():
             if args.smoothing_scale_km > 0.0
             else "unsmoothed.\n"
         )
-        + f"WMB: degrees to {wmb_degree}, "
-        + (
-            f"filter DDK{args.wmb_ddk_level}, "
-            if ddk
-            else f"Gaussian filter of {args.wmb_radius_km:.0f} km, "
-        )
-        + ("rescaled" if args.wmb_rescale else "not rescaled")
-        + ".\n"
+        + wmb_description
+        + "\n"
         "A ratio is an error over the standard deviation its estimator states; "
         "for a standard normal the\nroot mean square is 1 and the fractions "
         "within 1 and 2 are 0.683 and 0.954. Stds and errors in mm EWT.\n"

@@ -59,6 +59,11 @@ def parse_arguments() -> argparse.Namespace:
         description="The error of the WMB regional averages of the total load."
     )
     common.add_grace_arguments(parser)
+    # The averages are over the regions themselves, their masks unsmoothed
+    # (--smoothing-scale-km smooths them), and WMB's estimate of them is
+    # made as it is in practice (`common.wmb_estimator`).
+    parser.set_defaults(smoothing_scale_km=0.0)
+    common.add_wmb_arguments(parser)
     common.add_parallel_arguments(parser)
     parser.add_argument(
         "--samples",
@@ -112,10 +117,19 @@ def main():
     state, load_space, scale_mm = physics.state, physics.load_space, physics.scale_mm
     names, average = common.regional_averaging(physics, args)
 
-    wmb = common.wmb_method(state, args)
     total_load = common.total_load_operator(physics)
     true_average = average @ total_load
-    wmb_average = average @ wmb.potential_coefficient_to_load_operator(load_space)
+    _, wmb_matrix, wmb_description = common.wmb_estimator(
+        state,
+        load_space,
+        args,
+        average=average,
+        sharp_masks=common.grace_region_masks(state),
+    )
+    wmb_average = inf.LinearOperator.from_matrix(
+        noise.domain, average.codomain, wmb_matrix, form="components"
+    )
+    print(wmb_description)
 
     figures = {}
     if args.plot_maps:

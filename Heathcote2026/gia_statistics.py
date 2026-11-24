@@ -66,6 +66,7 @@ from __future__ import annotations
 
 import argparse
 import subprocess
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -77,7 +78,8 @@ import grace_covariance
 from pyslfp.observations.grace import stokes_coefficient_operator
 
 URL = "https://vesl.jpl.nasa.gov/solid-earth/gia/downloads"
-DATA_DIR = Path.home() / ".pyslfp_data" / "caron_gia"
+# The data folder of pyslfp, which PYSLFP_DATA moves.
+DATA_DIR = Path(os.getenv("PYSLFP_DATA", Path.home() / ".pyslfp_data")) / "caron_gia"
 RAW_DIR = DATA_DIR / "raw"
 MODES_FILE = DATA_DIR / "reduced" / "modes_caron_2018.npz"
 BANDS = ("deg2to60", "deg61to75", "deg76to83", "deg84to89")

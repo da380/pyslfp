@@ -143,7 +143,7 @@ def add_parallel_arguments(parser: argparse.ArgumentParser) -> None:
         "--serial-threads",
         type=int,
         default=None,
-        help="Threads for the transforms when running serially.",
+        help="Threads of the main process, for the transforms and dense algebra.",
     )
     parser.add_argument(
         "--seed",
@@ -358,6 +358,34 @@ def add_ocean_arguments(
         help="With --source-order: the pointwise std of the ice load, mm EWT.",
     )
     parser.add_argument("--ice-scale-km", type=float, default=180.0)
+    parser.add_argument(
+        "--ice-modulation",
+        choices=("none", "margin"),
+        default="none",
+        help="With --source-order: the ice field's std varies over the ice "
+        "sheets (`ice_modulation`). margin: an amplitude for each sheet, "
+        "growing towards the edge of its grounded ice.",
+    )
+    parser.add_argument(
+        "--ice-greenland-std-mm",
+        type=float,
+        default=155.0,
+        help="With --ice-modulation margin: the root mean square over "
+        "Greenland's grounded ice of the std of the ice load, mm EWT.",
+    )
+    parser.add_argument(
+        "--ice-antarctica-std-mm",
+        type=float,
+        default=60.0,
+        help="The same for Antarctica.",
+    )
+    parser.add_argument(
+        "--ice-margin-growth",
+        type=float,
+        default=10.0,
+        help="With --ice-modulation margin: a in the std's profile 1 + a p, "
+        "p the nearness of a point to the edge of the grounded ice.",
+    )
     parser.add_argument(
         "--land-water-std-mm",
         type=float,
@@ -679,7 +707,10 @@ def configure(args: argparse.Namespace) -> np.random.Generator:
     if hasattr(args, "preconditioner") and args.preconditioner is None:
         errors = getattr(args, "grace_coefficient_errors", None) is not None
         args.preconditioner = "blocks" if errors else "surrogate"
-    if not args.parallel and args.serial_threads is not None:
+    # With --parallel too: the main process does the dense algebra and the
+    # solves between the parallel loops, while the workers, which read their
+    # thread count from the environment, are idle.
+    if args.serial_threads is not None:
         set_num_threads(args.serial_threads)
     return np.random.default_rng(args.seed)
 
@@ -744,6 +775,134 @@ def grace_coefficients(
 def wmb_method(state: EarthState, args: argparse.Namespace) -> WMBMethod:
     """The WMB method at --obs-degree in the data's convention."""
     return WMBMethod(state.model, args.obs_degree, convention=args.grace_convention)
+
+
+def add_wmb_arguments(parser: argparse.ArgumentParser) -> None:
+    """The options of WMB's estimate as it is made in practice
+    (`wmb_estimator`)."""
+    parser.add_argument(
+        "--wmb-filter",
+        choices=("gaussian", "ddk"),
+        default="ddk",
+        help="The filter of WMB's estimate: DDK, the better of the two on "
+        "these data, unless told otherwise.",
+    )
+    parser.add_argument(
+        "--wmb-degree",
+        type=int,
+        default=None,
+        help="The highest degree WMB's estimate uses, --obs-degree at most: "
+        "60 by default with the Gaussian filter, and every degree with DDK.",
+    )
+    parser.add_argument(
+        "--wmb-ddk-level",
+        type=int,
+        default=5,
+        help="With --wmb-filter ddk: the filter, 1 (the strongest) to 8.",
+    )
+    parser.add_argument(
+        "--wmb-radius-km",
+        type=float,
+        default=300.0,
+        help="Half-width of the Gaussian filter of WMB's estimate; zero for none.",
+    )
+    parser.add_argument(
+        "--wmb-rescale",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Scale WMB's estimate of each region to be right for a load "
+        "uniform over the region.",
+    )
+
+
+def gaussian_weights(degrees, radius: float, earth_radius: float):
+    """The weights by degree of the Gaussian filter of half-width `radius`
+    (Wahr et al., 1998, after Jekeli, 1981), in the closed form that is
+    accurate where the weights are not negligible: exp(-(l r / a)^2 / (4 ln
+    2))."""
+    return np.exp(-((degrees * radius / earth_radius) ** 2) / (4.0 * np.log(2.0)))
+
+
+def wmb_estimator(
+    state: EarthState,
+    load_space,
+    args: argparse.Namespace,
+    /,
+    *,
+    average=None,
+    sharp_masks=None,
+    scale: float = 1.0,
+):
+    """
+    WMB's estimate as it is made in practice: the coefficients cut off at
+    --wmb-degree and filtered, taken to a load by the load Love numbers,
+    averaged over each region and rescaled.
+
+    The filter (--wmb-filter) is the Gaussian one of Wahr et al. (1998), of
+    half-width --wmb-radius-km, on the coefficients to degree 60; or the
+    decorrelating filter DDK of Kusche et al. (2009) at the strength
+    --wmb-ddk-level (`ddk_filter.py`), on all the coefficients. With
+    --wmb-rescale each average is multiplied by the factor that makes it
+    right for a load uniform over the region and absent elsewhere, the
+    scaling of Velicogna and Wahr (2006): `sharp_masks` are the regions'
+    own masks, and `scale` the value such a load of unit height should
+    give, the factor that `average` carries.
+
+    Returns (filtered_load, matrix, description): the operator from the
+    data to the filtered load, a field, with no averaging or rescaling; the
+    matrix of the estimator of the averages on the data's components (None
+    without `average`); and a sentence saying what was done.
+    """
+    wmb = wmb_method(state, args)
+    km = 1000.0 / state.model.parameters.length_scale
+    wmb_load = wmb.potential_coefficient_to_load_operator(load_space)
+    data_space = wmb_load.domain
+    degrees, _ = wmb._observed_labels()
+    ddk = args.wmb_filter == "ddk"
+    wmb_degree = args.wmb_degree or (args.obs_degree if ddk else 60)
+    wmb_degree = min(wmb_degree, args.obs_degree)
+    weights = (degrees <= wmb_degree).astype(float)
+    if not ddk and args.wmb_radius_km > 0.0:
+        weights = weights * gaussian_weights(
+            degrees, args.wmb_radius_km * km, load_space.radius
+        )
+    decorrelate = None
+    if ddk:
+        import ddk_filter
+
+        decorrelate = ddk_filter.filter_matrix(args.wmb_ddk_level, args.obs_degree)
+
+    def filtered(data):
+        components = data_space.to_components(data)
+        if decorrelate is not None:
+            components = decorrelate @ components
+        return wmb_load(data_space.from_components(weights * components))
+
+    filtered_load = inf.LinearOperator.from_callables(
+        data_space, wmb_load.codomain, filtered
+    )
+    matrix = None
+    if average is not None:
+        matrix = (average @ wmb_load).matrix(form="components", by="rows") * weights
+        if decorrelate is not None:
+            matrix = (decorrelate.T @ matrix.T).T
+        if args.wmb_rescale:
+            to_data = wmb.load_to_potential_coefficient_operator(load_space)
+            uniform = np.array(
+                [row @ to_data(mask) for row, mask in zip(matrix, sharp_masks)]
+            )
+            matrix *= (scale / uniform)[:, None]
+    description = (
+        f"WMB: degrees to {wmb_degree}, "
+        + (
+            f"filter DDK{args.wmb_ddk_level}, "
+            if ddk
+            else f"Gaussian filter of {args.wmb_radius_km:.0f} km, "
+        )
+        + ("rescaled" if args.wmb_rescale else "not rescaled")
+        + "."
+    )
+    return filtered_load, matrix, description
 
 
 def grace_forward_operator(physics: GracePhysics, args: argparse.Namespace):
@@ -961,6 +1120,11 @@ def regional_averaging(physics: GracePhysics, args: argparse.Namespace):
         smoother = load_space.heat_measure(scale).covariance
         weights = [smoother(w) for w in weights]
     return list(GRACE_REGIONS), averaging_operator(state, load_space, weights)
+
+
+def grace_region_masks(state: EarthState) -> list:
+    """The masks of the GRACE regions (`GRACE_REGIONS`) themselves, sharp."""
+    return [state.get_projection(names, value=0.0) for names in GRACE_REGIONS.values()]
 
 
 def _coefficient_profile(order, scale, space_order, space_scale, degrees, *, radius):
@@ -2162,6 +2326,76 @@ def steric_depth_share(physics: OceanPhysics, args: argparse.Namespace):
     )
 
 
+def ice_modulation(physics: OceanPhysics, args: argparse.Namespace):
+    """
+    With --ice-modulation margin: the positive function w by which the ice
+    field's invariant prior is multiplied, and the multiplication as an
+    operator on the ice's space; None without. The ice is then w u with u
+    the invariant field of `_field_measure`, a Gaussian field on the same
+    space whose pointwise std is w times u's, and whose correlation is u's.
+
+    Ice sheets change most near their edges, and Greenland more than
+    Antarctica. So over the grounded ice of each sheet the std follows the
+    profile 1 + a p, with a = --ice-margin-growth and p the nearness of a
+    point to the edge of the grounded ice: the fraction of the surface that
+    is not grounded ice sheet within the ice prior's own scale of the point
+    (the heat kernel at --ice-scale-km applied to the complement), nought
+    deep in the interior and about a half at the edge. The profile is
+    scaled so that its root mean square over the sheet's grounded ice is
+    the sheet's own std, --ice-greenland-std-mm or --ice-antarctica-std-mm.
+    The floating ice, which loads nothing, takes the interior's value, and
+    w is one off the ice sheets, where the load operator discards the field.
+
+    The numbers are those of the year-on-year changes of the land ice of the
+    ESA Earth System Model, 1995 to 2006: root mean square 156 mm EWT over
+    Greenland's grounded ice and 61 over Antarctica's, and a = 10 from a
+    least-squares fit of the profile to the root mean square at each point.
+
+    The product with w is truncated to the degrees of the space, as every
+    field is. Returns (w, operator).
+    """
+    if getattr(args, "ice_modulation", "none") == "none":
+        return None
+    if not physics.rough_sources:
+        raise ValueError("--ice-modulation needs --source-order.")
+    state, space = physics.state, physics.source_space
+    model = state.model
+    smoother = space.heat_measure(_source_scale(physics, args, ICE)).covariance
+    grounded_all = state.ice_sheet_projection(value=0.0, exclude_ice_shelves=True)
+    nearness = np.clip(smoother(1.0 - grounded_all).data, 0.0, 1.0)
+    profile = 1.0 + args.ice_margin_growth * nearness
+    weight = model.constant_grid(1.0)
+    stds = {
+        "greenland": args.ice_greenland_std_mm,
+        "antarctic": args.ice_antarctica_std_mm,
+    }
+    for sheet, std_mm in stds.items():
+        whole = state.ice_sheet_projection(value=0.0, sheets=sheet)
+        grounded = state.ice_sheet_projection(
+            value=0.0, sheets=sheet, exclude_ice_shelves=True
+        )
+        inside = grounded.data > 0.5
+        if not inside.any():
+            continue
+        shape = grounded.copy()
+        shape.data[:] = np.where(inside, profile, 0.0)
+        rms = np.sqrt(model.integrate(shape * shape) / model.integrate(grounded))
+        factor = std_mm / args.ice_std_mm / rms
+        weight.data[whole.data > 0.5] = factor
+        weight.data[inside] = factor * profile[inside]
+    flat = underlying_space(space)
+
+    def mapping(u):
+        return flat.from_components(flat.to_components(weight * u))
+
+    operator = inf.LinearOperator.from_formal_adjoint(
+        space,
+        space,
+        inf.LinearOperator.from_callables(flat, flat, mapping, adjoint=mapping),
+    )
+    return weight, operator
+
+
 def _field_measure(physics: OceanPhysics, args: argparse.Namespace, name, std):
     """The prior of one field alone, with pointwise std `std`.
 
@@ -2510,6 +2744,47 @@ def ocean_prior(
             )
     else:
         prior = conditioned(unconditioned)
+    ice_barystatic = q_ice * ice_std
+    modulation = ice_modulation(physics, args)
+    if modulation is not None:
+        # The ice is independent of the other fields and absent from the
+        # constraint, so its modulation follows everything above: the prior
+        # is the image of the unmodulated one under w on the ice alone.
+        _, on_ice = modulation
+        i_ice = names.index(ICE)
+
+        def on_model(operator):
+            def mapping(m):
+                m = list(m)
+                m[i_ice] = operator(m[i_ice])
+                return tuple(m)
+
+            return mapping
+
+        modulate = inf.LinearOperator.from_callables(
+            setup.space,
+            setup.space,
+            on_model(on_ice),
+            adjoint=on_model(on_ice.adjoint),
+        )
+        constraint = setup.constraints[OCEAN_MASS]
+        for index in range(constraint.codomain.dim):
+            representer = constraint.adjoint(constraint.codomain.basis_vector(index))
+            if np.any(representer[i_ice].data != 0.0):
+                raise ValueError("--ice-modulation: the constraint involves the ice.")
+        prior = prior.affine_map(modulate)
+        if record is not None:
+            record = record | {"map": modulate @ record["map"]}
+        ice_barystatic = _std(
+            _field_measure(physics, args, ICE, ice_std).affine_map(on_ice),
+            barystatic_gmsl_operator(state, setup.component(ICE)),
+        )
+        print(
+            f"Ice prior modulated: std {args.ice_greenland_std_mm:.0f} mm EWT over "
+            f"Greenland's grounded ice and {args.ice_antarctica_std_mm:.0f} over "
+            f"Antarctica's, growing towards the edge by 1 + "
+            f"{args.ice_margin_growth:g} p"
+        )
     barystatic = _std(prior, setup.barystatic_gmsl())
     derived = {"ice_std": ice_std, "dyn_std": dyn_std, "rho_std": rho_std}
     if LAND in names:
@@ -2524,7 +2799,7 @@ def ocean_prior(
         },
         "gmsl": {
             "barystatic_std": barystatic,
-            "ice_barystatic_std": q_ice * ice_std,
+            "ice_barystatic_std": ice_barystatic,
             "steric_std": sigma_s,
             "eta_mean_std_unconstrained": a,
             "bary_steric_ratio": barystatic / sigma_s,

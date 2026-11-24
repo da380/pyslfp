@@ -109,6 +109,11 @@ def parse_arguments() -> argparse.Namespace:
         description="Bayesian inversion of synthetic GRACE data, against WMB."
     )
     common.add_grace_arguments(parser)
+    # The averages are over the regions themselves, their masks unsmoothed
+    # (--smoothing-scale-km smooths them), and WMB's estimate of them is
+    # made as it is in practice (`common.wmb_estimator`).
+    parser.set_defaults(smoothing_scale_km=0.0)
+    common.add_wmb_arguments(parser)
     common.add_qoi_arguments(parser)
     common.add_parallel_arguments(parser)
     parser.add_argument("--all", action="store_true", help="Every option below.")
@@ -246,29 +251,41 @@ def degree_coefficients(
 
 def posterior_maps(state, panels, std=None):
     """The load maps, row by row: the true load, WMB's estimate and the
-    posterior mean, each a (field, title) in `panels`, on one colour scale
-    set by the largest absolute value among them, then the pointwise posterior
+    posterior mean, each a (field, title) in `panels`, on the colour scale
+    of the first and last of them (values beyond it saturate), then the
+    pointwise posterior
     standard deviation `std` on a scale of its own; that panel is left empty
     without it. Each map has its own colour bar beneath it, so that the four
     are drawn at one size."""
-    limit = max(peak(field) for field, _ in panels)
+    # The scale is that of the true load and the posterior mean, the first
+    # and last panels; a panel that exceeds it more than twofold, as WMB's
+    # estimate does where the noise survives its filter, takes its own.
+    # The limit is the value that all but a two-hundredth of the grid lies
+    # within, not the largest: with the ice's std growing towards the edge
+    # of the ice sheets a few points there would set the scale for the rest.
+    def extent(field):
+        return float(np.percentile(np.abs(field.data), 99.5))
+
+    limit = max(extent(panels[0][0]), extent(panels[-1][0]))
     fig, axes = sl.subplots(2, 2, figsize=(18, 12), gridspec_kw={"hspace": 0.10})
-    maps = [
-        (
-            field,
-            title,
-            "Load (mm EWT)",
-            {"vmin": -limit, "vmax": limit, "cmap": "seismic"},
+    maps = []
+    for field, title in panels:
+        own = extent(field) if extent(field) > 2.0 * limit else limit
+        maps.append(
+            (
+                field,
+                title,
+                "Load (mm EWT)",
+                {"vmin": -own, "vmax": own, "cmap": "seismic"},
+            )
         )
-        for field, title in panels
-    ]
     if std is not None:
         maps.append(
             (
                 std,
                 "Posterior Std. Deviation",
                 "Std. deviation (mm EWT)",
-                {"vmin": 0.0, "cmap": "Blues"},
+                {"vmin": 0.0, "vmax": extent(std), "cmap": "Blues"},
             )
         )
     else:
@@ -342,7 +359,6 @@ def main():
     forward = common.grace_forward_operator(physics, args)
     total_load = common.total_load_operator(physics)
     wmb = common.wmb_method(state, args)
-    wmb_load = wmb.potential_coefficient_to_load_operator(load_space)
 
     print("Drawing a synthetic load and dataset...")
     problem = inf.LinearForwardProblem(forward, error=noise)
@@ -375,7 +391,18 @@ def main():
     # direct load at the target degree, in the order m = 0, 1, ..., l, then
     # -1, ..., -l.
     total_average = scale_mm * average @ total_load
-    wmb_average = scale_mm * average @ wmb_load
+    wmb_load, wmb_matrix, wmb_description = common.wmb_estimator(
+        state,
+        load_space,
+        args,
+        average=scale_mm * average,
+        sharp_masks=common.grace_region_masks(state),
+        scale=scale_mm,
+    )
+    wmb_average = inf.LinearOperator.from_matrix(
+        forward.codomain, average.codomain, wmb_matrix, form="components"
+    )
+    print(wmb_description)
     degree = args.target_degree
     coefficients = (scale_mm / load_space.radius) * load_space.coefficient_operator(
         lmax=degree, lmin=degree
@@ -478,7 +505,7 @@ def main():
         posterior_total = qoi_posterior.affine_map(total_load)
         panels = [
             (total_load(model), "True Total Load"),
-            (wmb_load(data), "WMB Estimate"),
+            (wmb_load(data), "WMB Estimate (filtered)"),
             (posterior_total.expectation, "Bayesian Posterior"),
         ]
         std = None

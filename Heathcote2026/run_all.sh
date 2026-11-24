@@ -39,6 +39,9 @@
 #   ALT_NEIGHBOURS=0 ./run_all.sh joint_inversion
 #                                             the tapered altimetry block in
 #                                             place of the nearest-neighbour one
+#   WMB_FILTER=gaussian ./run_all.sh grace_coverage
+#                                             WMB with the 300 km Gaussian
+#                                             filter in place of DDK5
 #   PRIOR_TRUTHS=100 ./run_all.sh grace_coverage
 #                                             the reference case: truths drawn
 #                                             from the prior
@@ -201,6 +204,12 @@ QOI=(--qoi-rtol 1e-6)
 # and km (from the year-on-year changes of the ESA Earth System Model,
 # 1995 to 2006).
 #
+# The ice's std varies over the ice sheets: an amplitude for each sheet (155
+# and 60 mm EWT over the grounded ice of Greenland and Antarctica), growing
+# towards the edge of the grounded ice (common.ice_modulation). The field is
+# then a positive function times the invariant one, on the same space.
+# ICE_MODULATION=none gives the invariant field alone, at --ice-std-mm.
+#
 # The ocean's fields are the sterodynamic sea level and the steric height,
 # in H^(5/4), the space of the response. Their prior is stated on two
 # independent fields: the steric height (EN4's year-on-year changes: 46 mm,
@@ -224,6 +233,7 @@ OCEAN_PRIOR=(
     --source-prior-order 1.5
     --ice-std-mm 80.0
     --ice-scale-km 180.0
+    --ice-modulation "${ICE_MODULATION:-margin}"
     --land-water-std-mm 65.0
     --land-water-scale-km 340.0
     --ocean-prior steric
@@ -341,9 +351,12 @@ fi
 # TRUTH_MEAN=ice-removed (or removed) takes the mean over the true loads from
 # each: the diagnostic of the zero-mean prior. PRIOR_TRUTHS=N draws N true
 # loads from the prior instead: the reference case.
-# WMB_FILTER=ddk filters WMB's estimate with DDK in place of the Gaussian.
+# WMB's estimate is filtered with DDK5 (Kusche et al., 2009), on all the
+# coefficients: WMB_FILTER=gaussian gives the 300 km Gaussian filter to
+# degree 60 in its place. In grace_bias, grace_inversion and grace_coverage.
+WMB=(--wmb-filter "${WMB_FILTER:-ddk}")
 GRACE_COVERAGE_EXTRA=(--truth-mean "${TRUTH_MEAN:-kept}"
-    --prior-truths "${PRIOR_TRUTHS:-0}" --wmb-filter "${WMB_FILTER:-gaussian}")
+    --prior-truths "${PRIOR_TRUTHS:-0}")
 
 # ---------------------------------------------------------------------------
 # 5. Run
@@ -363,7 +376,7 @@ for s in "${SCRIPTS[@]}"; do
     case "$s" in
     grace_bias)
         run "$s" "${COMMON[@]}" "${OBS_DEGREE[@]}" "${OCEAN_PRIOR[@]}" "${GRACE_PRIOR[@]}" \
-            "${GRACE_NOISE[@]}" "${GIA[@]}" \
+            "${GRACE_NOISE[@]}" "${GIA[@]}" "${WMB[@]}" \
             ${PAR_ARGS[@]+"${PAR_ARGS[@]}"} \
             ${GRACE_BIAS_EXTRA[@]+"${GRACE_BIAS_EXTRA[@]}"}
         ;;
@@ -374,13 +387,13 @@ for s in "${SCRIPTS[@]}"; do
         ;;
     grace_inversion)
         run "$s" "${COMMON[@]}" "${OBS_DEGREE[@]}" "${OCEAN_PRIOR[@]}" "${GRACE_PRIOR[@]}" \
-            "${GRACE_NOISE[@]}" "${GIA[@]}" "${QOI[@]}" \
+            "${GRACE_NOISE[@]}" "${GIA[@]}" "${QOI[@]}" "${WMB[@]}" \
             ${PAR_ARGS[@]+"${PAR_ARGS[@]}"} \
             ${GRACE_INV_EXTRA[@]+"${GRACE_INV_EXTRA[@]}"}
         ;;
     grace_coverage)
         run "$s" "${COMMON[@]}" "${OBS_DEGREE[@]}" "${OCEAN_PRIOR[@]}" "${GRACE_PRIOR[@]}" \
-            "${GRACE_NOISE[@]}" "${GIA[@]}" "${QOI[@]}" \
+            "${GRACE_NOISE[@]}" "${GIA[@]}" "${QOI[@]}" "${WMB[@]}" \
             ${PAR_ARGS[@]+"${PAR_ARGS[@]}"} \
             ${GRACE_COVERAGE_EXTRA[@]+"${GRACE_COVERAGE_EXTRA[@]}"}
         ;;

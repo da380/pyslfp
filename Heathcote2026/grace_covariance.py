@@ -61,7 +61,9 @@ URL = (
     "normals_SINEX/monthly_n96"
 )
 # The data folder of pyslfp, which PYSLFP_DATA moves.
-DATA_DIR = Path(os.getenv("PYSLFP_DATA", Path.home() / ".pyslfp_data")) / "itsg_grace2018"
+DATA_DIR = (
+    Path(os.getenv("PYSLFP_DATA", Path.home() / ".pyslfp_data")) / "itsg_grace2018"
+)
 RAW_DIR = DATA_DIR / "normals_n96"
 REDUCED_DIR = DATA_DIR / "reduced"
 DEGREE = 96

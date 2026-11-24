@@ -91,7 +91,7 @@ import pyslfp as sl
 
 import common
 import figures
-from figures import COLORBAR, GRIDLINES, draw_region_boundaries, peak
+from figures import COLORBAR, GRIDLINES, draw_region_boundaries
 
 OUTPUT_DIR = "output_plots_grace_inversion"
 METRICS_FILE = os.path.join(OUTPUT_DIR, "grace_metrics.txt")
@@ -257,6 +257,7 @@ def posterior_maps(state, panels, std=None):
     standard deviation `std` on a scale of its own; that panel is left empty
     without it. Each map has its own colour bar beneath it, so that the four
     are drawn at one size."""
+
     # The scale is that of the true load and the posterior mean, the first
     # and last panels; a panel that exceeds it more than twofold, as WMB's
     # estimate does where the noise survives its filter, takes its own.

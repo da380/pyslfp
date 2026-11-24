@@ -238,7 +238,9 @@ def truth_maps(state, label, truth, wmb, mean, std=None):
             std,
             "Posterior std. deviation",
             "Std. deviation (mm EWT)",
-            None if std is None else {"vmin": 0.0, "vmax": extent(std), "cmap": "Blues"},
+            None
+            if std is None
+            else {"vmin": 0.0, "vmax": extent(std), "cmap": "Blues"},
         ),
         (wmb - truth, "WMB estimate less the truth", "Error (mm EWT)", loads),
         (mean - truth, "Posterior mean less the truth", "Error (mm EWT)", loads),
@@ -424,7 +426,12 @@ def main():
 
     # WMB's estimator as it is made in practice (`common.wmb_estimator`).
     wmb_load, wmb_matrix, wmb_description = common.wmb_estimator(
-        state, load_space, args, average=average, sharp_masks=sharp_masks, scale=scale_mm
+        state,
+        load_space,
+        args,
+        average=average,
+        sharp_masks=sharp_masks,
+        scale=scale_mm,
     )
 
     print(f"Assembling the normal matrix of {forward.codomain.dim} data...")

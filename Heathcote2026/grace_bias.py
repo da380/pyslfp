@@ -156,7 +156,11 @@ def main():
                         ice_std,
                         "Prior standard deviation of the ice load",
                         "Std. deviation (mm EWT)",
-                        {"vmin": 0.0, "vmax": float(ice_std.data.max()), "cmap": "Blues"},
+                        {
+                            "vmin": 0.0,
+                            "vmax": float(ice_std.data.max()),
+                            "cmap": "Blues",
+                        },
                     ),
                     (
                         draw,

@@ -1,0 +1,28 @@
+Building the reference (lmax=511)...
+  34548 altimetry points; built in 1 s
+Ice prior modulated: std 155 mm EWT over Greenland's grounded ice and 60 over Antarctica's, growing towards the edge by 1 + 10 p
+GRACE coefficient errors: ITSG-Grace2018, annual means of 2007 and 2008, std x 1.00: pointwise 569.8 mm EWT to degree 96, unfiltered; white load floor 0.00 mm
+Drawing 3 model(s) from the prior...
+  lmax=511: built in 0 s, 2.3 s a model
+  lmax=255: built in 0 s, 0.7 s a model
+  lmax=127: built in 0 s, 0.2 s a model
+  lmax=63: built in 0 s, 0.1 s a model
+
+Truncation check: 3 model(s) drawn from the prior at degree 511, truncated to each degree; differences from degree 511.
+34548 altimetry points (spacing 1.0 degrees), GRACE to degree 96 (9405 coefficients).
+Altimetry: root mean square and largest difference over the points, in mm, and the first over the local error of a point (6.0 mm).
+GRACE: root mean square over the coefficients of the difference whitened by the error covariance (one for a draw of the noise).
+
+Size of the data at degree 511: altimetry 46.72 mm rms; GRACE 4.65 whitened rms.
+
+degree |  alt rms  alt max rms/noise | GRACE whitened |       GMSL barystatic     steric       SSLC      DMSLC      BMSLC
+-------------------------------------------------------------------------------------------------------------------------
+    63 |    5.225   23.676     0.871 |         0.5923 |     0.0209     0.0560     0.0660     0.4232     0.3519     0.0941
+   127 |    1.476    6.753     0.246 |         0.2328 |     0.0398     0.0404     0.0178     0.3907     0.0861     0.0665
+   255 |    0.379    1.858     0.063 |         0.0786 |     0.0121     0.0039     0.0093     0.0977     0.0128     0.0122
+   511 |    0.000    0.000     0.000 |         0.0000 |     0.0000     0.0000     0.0000     0.0000     0.0000     0.0000
+
+The last six columns are root mean square differences over the models of the quantities of interest, in mm (Tasman Sea for the last three).
+Their sizes at degree 511 (rms over the models, mm): GMSL 4.881, barystatic 3.176, steric 2.937, SSLC 23.721, DMSLC 2.281, BMSLC 3.736
+
+saved output_plots_truncation_check/truncation_metrics.txt

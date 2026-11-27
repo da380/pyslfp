@@ -24,6 +24,8 @@
 #   OCEAN_CASE=removed ./run_all.sh grace_inversion grace_coverage
 #                                             the GRACE experiments with the
 #                                             ocean removed (or: partly, full)
+#   STERIC_DEPTH_SCALE_M=0 ./run_all.sh       the steric height independent of
+#                                             the water's depth (default: 500)
 #   PROBE=1 ./run_all.sh grace_inversion joint_inversion
 #                                             the posterior expectations alone,
 #                                             for iteration counts and timings
@@ -216,8 +218,11 @@ QOI=(--qoi-rtol 1e-6)
 # 280 km, order 3) and the manometric sea level, the ocean's load as a
 # height of water (the Earth System Model's ocean component: 8 mm, at the
 # lowest order the space allows, 2.5, and the scale fitted at that order,
-# 330 km). The sterodynamic sea level is their sum. Optional:
-# --steric-depth-scale-m 500 makes the steric height fall away over shelves.
+# 330 km). The sterodynamic sea level is their sum. The steric height of a
+# column of depth D is 1 - exp(-D / 500 m) of that of deep water, as EN4's
+# changes fall away over shallow water, and the load takes up the
+# difference (--steric-depth-scale-m; 0 leaves the steric height
+# independent of the depth, as in the runs of 23 November).
 #
 # The submitted paper had the ice alone, in H^2 with the other fields, and
 # the density as the ocean's second field, coupled to the sea level: for
@@ -241,6 +246,7 @@ OCEAN_PRIOR=(
     --steric-std-mm 46.0
     --steric-scale-km 280.0
     --steric-order 3.0
+    --steric-depth-scale-m "${STERIC_DEPTH_SCALE_M:-500.0}"
     --manometric-std-mm 8.0
     --manometric-scale-km 330.0
     --manometric-order 2.5

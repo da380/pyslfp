@@ -94,6 +94,12 @@ STERIC = "steric_height"
 # - full: nothing is removed, as in the altimetry and joint experiments;
 #   the prior's ocean term is as given (--manometric-std-mm and
 #   --manometric-scale-km).
+#
+# With --steric-depth-scale-m the ocean's load has a second term, what the
+# steric height of deep water leaves to the load over shallow water
+# (`steric_depth_share`). The removal takes it as it takes the first: it is
+# left in the ratio of the case's std to the full one (`configure`), so
+# next to none of it with "removed" and a quarter with "partly".
 OCEAN_CASES = {
     "removed": (0.2, 200.0, "AOe07", 1.0),
     "partly": (2.0, 330.0, "O", 0.25),
@@ -446,8 +452,9 @@ def add_ocean_arguments(
         "column of depth D is 1 - exp(-D / this) of that of deep water, most "
         "of the change being in the upper ocean (about 500 m in EN4). Where it "
         "falls away over a shelf the sea level stays smooth, so the load takes "
-        "up the difference. Zero, the default, leaves the steric height "
-        "independent of the depth.",
+        "up the difference (in the GRACE experiments, as much of it as "
+        "--ocean-case leaves). Zero, the default, leaves the steric height "
+        "independent of the depth; the paper's runs take 500.",
     )
     parser.add_argument(
         "--manometric-std-mm",
@@ -700,6 +707,9 @@ def configure(args: argparse.Namespace) -> np.random.Generator:
             args.ocean_case = "full"
         std_mm, scale_km, _, _ = OCEAN_CASES[args.ocean_case]
         if std_mm is not None:
+            # The load that the steric height leaves over shallow water is
+            # removed as the rest of the ocean's load is.
+            args.shelf_load_share = std_mm / args.manometric_std_mm
             args.manometric_std_mm, args.manometric_scale_km = std_mm, scale_km
     if hasattr(args, "load_prior") and args.load_order is None:
         # The masked loads of the fields are rough; a Sobolev load is not.
@@ -2305,15 +2315,23 @@ def steric_depth_share(physics: OceanPhysics, args: argparse.Namespace):
     that a column of depth D has, w(D) = 1 - exp(-D / D_0), as an operator
     on the fields' space; the identity if --steric-depth-scale-m is zero.
     The product with w is truncated to the degrees of the space, as every
-    field is."""
+    field is.
+
+    What the share takes from the steric height, 1 - w of deep water's, is
+    left to the load. In the GRACE experiments in which a model of the
+    ocean is removed from the data (`OCEAN_CASES`) only the part f of that
+    load is left, f being `args.shelf_load_share` (set by `configure`; one
+    where it is not set), and the share is then 1 - f (1 - w): the steric
+    height itself is not seen by GRACE, so only the load matters there."""
     space = physics.field_space
     if args.steric_depth_scale_m <= 0.0:
         return inf.LinearOperator.identity(space)
     state = physics.state
     depth = (state.sea_level * state.ocean_function).data
     scale = args.steric_depth_scale_m / state.model.parameters.length_scale
+    left = float(getattr(args, "shelf_load_share", 1.0))
     share = state.ocean_function.copy()
-    share.data[:] = -np.expm1(-np.maximum(depth, 0.0) / scale)
+    share.data[:] = 1.0 - left * np.exp(-np.maximum(depth, 0.0) / scale)
     flat = underlying_space(space)
 
     def mapping(u):

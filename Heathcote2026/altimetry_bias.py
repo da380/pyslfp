@@ -183,6 +183,12 @@ def main():
             (*second, "(b)"),
         ]:
             figures[file] = field_map(shown[name], field_label(name), panel)
+        if STERIC in shown:
+            # The manometric part: what of the sea level change is not the
+            # steric height, and so loads the ocean.
+            figures["bias_manometric.png"] = field_map(
+                shown[ETA] - shown[STERIC], "Manometric SL Change (mm)", ""
+            )
         data_mm = mm * (physics.altimetry(model) + noise.sample(rng=rng))
         (
             figures["bias_geocentric_sl_map.png"],

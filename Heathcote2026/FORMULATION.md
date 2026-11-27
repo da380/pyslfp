@@ -239,6 +239,36 @@ degree 180 the spectrum continues by the same law, so the prior does not
 depend on the truncation of the model. $\eta_d$ and $\delta\rho$ are as
 above.
 
+**The ocean's fields.** With `--ocean-prior steric`, which `run_all.sh`
+passes, the ocean's second field is the steric height $\eta_s$ itself, in
+place of the density, and the two ocean fields lie in $H^{5/4}$, the space
+of the response. Their prior is stated on two independent fields with
+spectra of the form above: $u_s$, the steric height of deep water (46 mm,
+280 km, $t = 3$; the year-on-year changes of EN4), and $u_m$, a manometric
+sea level (8 mm, 330 km, $t = 2.5$; the ocean component of the ESA Earth
+System Model). Then
+
+$$\eta_d = u_s + u_m , \qquad \eta_s = w\, u_s , \qquad w = 1 - e^{-\eta_0 / D_0} ,$$
+
+with $\eta_0$ the depth of the water and $D_0 = 500$ m
+(`--steric-depth-scale-m`; `common.steric_depth_share`): the steric height
+of a column falls away over shallow water as EN4's changes do, the sea
+level does not, and the load takes up the difference. The manometric part
+is $\eta_d - \eta_s = u_m + (1 - w) u_s$, and the constraint on the
+ocean's mass, which is on this, involves both fields. The product with $w$
+is truncated to the degrees of the space. With `--steric-depth-scale-m 0`,
+the scripts' own default, $w = 1$. The two fields have the correlation
+$(1 + \sigma_m^2 / \sigma_s^2)^{-1/2} = 0.985$ at a point, whatever $w$.
+
+In the GRACE experiments with `--ocean-case removed` or `partly` a model of
+the ocean is taken as removed from the data, and the prior's $u_m$ has the
+case's standard deviation and scale in place of its own
+(`common.OCEAN_CASES`). The load over shallow water is left in the same
+proportion: with $f$ the ratio of the case's standard deviation to the full
+one (0.025 and 0.25), the ocean's load is that of $u_m + f (1 - w) u_s$,
+which the scripts obtain by taking $1 - f (1 - w)$ for $w$. The steric
+height itself is not seen by GRACE.
+
 **The ice prior, modulated.** With `--ice-modulation margin`, which
 `run_all.sh` passes, the ice is $h = \gamma u$: $u$ the invariant field just
 described and $\gamma$ a positive function of position, so that the pointwise
@@ -418,10 +448,13 @@ The joint forward operator (`OceanPhysics.joint`) is the column of the
 altimetry over GRACE with the sea level equation solved once for the two:
 both sets of data are read from one response.
 
-The prior covariance is applied on the spherical harmonic coefficients
-(`common._steric_covariance`): the independent fields' spectra, their
-mixing and the rank-one projection for the conservation of mass are
-arithmetic there, between one analysis and one synthesis a field.
+With $w = 1$ the prior covariance is applied on the spherical harmonic
+coefficients (`common._steric_covariance`): the independent fields'
+spectra, their mixing and the rank-one projection for the conservation of
+mass are arithmetic there, between one analysis and one synthesis a field.
+With the depth share it is applied as the image of the independent fields
+under the mixing and the projection, the products with $w$ being made on
+the grid; at degree 128 one action then takes about a quarter longer.
 
 **Sensitivity to the prior, field by field** (`common.sensitivity_table`;
 `--prior-sensitivity` in the inversion scripts, which produces these tables

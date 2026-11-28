@@ -97,10 +97,12 @@ OUTPUT_DIR = "output_plots_grace_inversion"
 METRICS_FILE = os.path.join(OUTPUT_DIR, "grace_metrics.txt")
 
 # The points of the covariance maps, (latitude, longitude), one per regime.
+# The points of the covariance maps, each on the support of a mass source:
+# the gravity experiments look at the land and the ice alone.
 COVARIANCE_POINTS = [
-    ((30.0, -45.0), "Ocean"),
-    ((-5.0, -60.0), "Hydrology (Amazon)"),
-    ((-75.0, -110.0), "Ice (WAIS)"),
+    ((-5.0, -60.0), "Land water (Amazon)", common.LAND),
+    ((-75.0, -110.0), "Ice (West Antarctica)", common.ICE),
+    ((66.0, -46.0), "Ice (South Greenland)", common.ICE),
 ]
 
 
@@ -206,6 +208,10 @@ def regional_densities(
             title=name,
             labels=["Bayesian", "WMB"],
         )
+        if i % 2 == 0:
+            axes[i].set_ylabel("Probability density")
+        else:
+            axes[i].set_ylabel("")
         if i != 1 and axes[i].get_legend() is not None:
             axes[i].get_legend().remove()
     for ax in axes[len(names) :]:
@@ -307,41 +313,51 @@ def posterior_maps(state, panels, std=None):
     return fig
 
 
-def point_covariance(measure, point):
-    """The covariance under `measure` of the load with its value at
-    `point`. A load space too rough for point values has no such thing, and
-    the load's average over a cap of `common.COVARIANCE_CAP_DEGREES` about
-    the point stands for the value there."""
-    space = measure.domain
-    if space.order > 1.0:
-        return measure.two_point_covariance(point)
-    cap = space.spherical_cap_average(point, common.COVARIANCE_CAP_DEGREES)
-    return measure.covariance(cap.representer)
+def covariance_maps(physics, prior, posterior):
+    """The posterior covariance of the total load with its value at each of
+    COVARIANCE_POINTS, in mm² EWT, and the prior and posterior variances
+    there as a line of text for each point.
 
+    Returns (figure, text)."""
+    scale = physics.scale_mm**2
+    fig, axes = sl.subplots(
+        1, len(COVARIANCE_POINTS), figsize=(8.5 * len(COVARIANCE_POINTS), 5.6),
+        gridspec_kw={"wspace": 0.08},
+    )
+    text = "\nVariance of the total load at the points of the covariance maps (mm² EWT)\n"
+    for ax, (point, label, component) in zip(axes, COVARIANCE_POINTS):
+        _, prior_variance = common.load_point_covariance(
+            physics, prior, component, point
+        )
+        field, variance = common.load_point_covariance(
+            physics, posterior, component, point
+        )
+        text += (
+            f"  {label:<26} prior {prior_variance * scale:10.1f}, posterior "
+            f"{variance * scale:10.1f}\n"
+        )
+        _, image = sl.plot(
+            field * scale,
+            ax=ax,
+            colorbar=True,
+            cmap="seismic",
+            symmetric=True,
+            colorbar_kwargs=COLORBAR,
+            gridlines_kwargs=GRIDLINES,
+        )
+        ax.set_title(f"Posterior covariance: {label}", fontsize=16)
+        sl.plot_points([point], ax=ax, color="black", gridlines=False, coasts=False)
+        # The covariance is local: a region about the point, not the globe.
+        import cartopy.crs as ccrs
 
-def covariance_maps(prior_total, posterior_total, scale_mm):
-    """The prior (left) and posterior (right) covariance of the total load
-    with each of COVARIANCE_POINTS, in mm² EWT."""
-    fig, axes = sl.subplots(3, 2, figsize=(16, 15), gridspec_kw={"hspace": 0.1})
-    for row, (point, label) in enumerate(COVARIANCE_POINTS):
-        for col, (measure, kind) in enumerate(
-            [(prior_total, "Prior"), (posterior_total, "Posterior")]
-        ):
-            ax = axes[row, col]
-            _, image = sl.plot(
-                point_covariance(measure, point) * scale_mm**2,
-                ax=ax,
-                colorbar=True,
-                cmap="seismic",
-                symmetric=True,
-                colorbar_kwargs=COLORBAR,
-                gridlines_kwargs=GRIDLINES,
-            )
-            ax.set_title(f"{kind} Covariance: {label}", fontsize=16)
-            sl.plot_points([point], ax=ax, color="black", gridlines=False, coasts=False)
-            image.colorbar.set_label("Covariance (mm² EWT)", fontsize=14)
-            image.colorbar.ax.tick_params(labelsize=12)
-    return fig
+        lat, lon = point
+        ax.set_extent(
+            [lon - 40.0, lon + 40.0, max(lat - 25.0, -89.0), min(lat + 25.0, 89.0)],
+            crs=ccrs.PlateCarree(),
+        )
+        image.colorbar.set_label("Covariance (mm² EWT)", fontsize=14)
+        image.colorbar.ax.tick_params(labelsize=12)
+    return fig, text
 
 
 def main():
@@ -383,7 +399,7 @@ def main():
         inf.LinearGaussianInversion(problem, prior),
         data,
         preconditioner,
-        rtol=0.01 * noise_info["std_factor"],
+        rtol=args.qoi_rtol,
         qoi_rtol=args.qoi_rtol,
     )
 
@@ -405,8 +421,10 @@ def main():
     )
     print(wmb_description)
     degree = args.target_degree
-    coefficients = (scale_mm / load_space.radius) * load_space.coefficient_operator(
-        lmax=degree, lmin=degree
+    coefficients = (
+        (scale_mm / load_space.radius)
+        * load_space.coefficient_operator(lmax=degree, lmin=degree)
+        @ common.direct_load_operator(physics)
     )
     components = [
         (f"({degree},{m})", rf"$\zeta_{{{degree},{m}}}$ (mm EWT)")
@@ -524,9 +542,12 @@ def main():
         output["grace_posterior_maps.png"] = posterior_maps(
             state, [(field * scale_mm, title) for field, title in panels], std
         )
-        output["grace_covariance_maps.png"] = covariance_maps(
-            prior.affine_map(total_load), posterior_total, scale_mm
-        )
+        if physics.fields is not None:
+            output["grace_covariance_maps.png"], text = covariance_maps(
+                physics, prior, qoi_posterior
+            )
+            common.write_metrics(METRICS_FILE, text)
+            print(text)
 
     common.save_figures(output, OUTPUT_DIR, dpi=300)
 

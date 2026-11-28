@@ -263,7 +263,13 @@ def posterior_maps(physics, model, posterior, std_samples, n_jobs, rng, boundari
             "posterior samples..."
         )
         std = physics.display(
-            common.pointwise_std(posterior, std_samples, rng=rng, n_jobs=n_jobs)
+            common.pointwise_std(
+                posterior.affine_map(physics.outputs),
+                std_samples,
+                rng=rng,
+                n_jobs=n_jobs,
+            ),
+            outputs=True,
         )
     limits = {name: max(peak(true[name]), peak(mean[name])) for name in true}
     return figures.state_maps(
@@ -406,7 +412,7 @@ def main():
         inversion,
         data,
         preconditioner,
-        rtol=0.01 * min(1.0, args.noise_std_mm / common.sea_level_std_mm(args)),
+        rtol=args.qoi_rtol,
         qoi_rtol=args.qoi_rtol,
     )
 

@@ -73,6 +73,12 @@ ICE, ETA, RHO = "ice_sheets", "sterodynamic_sea_level", "ocean_density"
 # With --ocean-prior steric the ocean's second field is the steric height
 # itself, in place of the density.
 STERIC = "steric_height"
+# Names of fields that are shown and are not components of the model: the
+# manometric sea level, the sterodynamic sea level less the steric height,
+# and the barystatic sea level, the response of the sea level equation to
+# the loads on the land (the fingerprint of those loads).
+MANOMETRIC = "manometric_sea_level"
+BARYSTATIC = "barystatic_sea_level"
 
 # What a GRACE experiment takes the ocean's load in its data to be
 # (--ocean-case). A model of the ocean is removed from GRACE's data before a
@@ -85,12 +91,14 @@ STERIC = "steric_height"
 # System Model and the share of it that is left.
 #
 # - removed: the removal is taken as the error series has it (AOe07, which
-#   holds no slow error): 0.2 mm at 200 km, as that series' own year-on-year
-#   changes.
+#   holds no slow error): 0.2 mm, as that series' own year-on-year changes,
+#   with the spectrum fitted to them through the ocean's mask
+#   (`prior_fit.py`): `REMOVED_TAPERED` with the taper, and 209 km at
+#   --manometric-order without it.
 # - partly: a quarter of the ocean's load is left: 2 mm, about the unforced
 #   variability of the ocean's mass from year to year (Carret et al., 2021),
 #   which no model forced by the weather can follow; the scale is the
-#   ocean load's own.
+#   ocean load's own (--manometric-scale-km), which None stands for.
 # - full: nothing is removed, as in the altimetry and joint experiments;
 #   the prior's ocean term is as given (--manometric-std-mm and
 #   --manometric-scale-km).
@@ -101,10 +109,15 @@ STERIC = "steric_height"
 # left in the ratio of the case's std to the full one (`configure`), so
 # next to none of it with "removed" and a quarter with "partly".
 OCEAN_CASES = {
-    "removed": (0.2, 200.0, "AOe07", 1.0),
-    "partly": (2.0, 330.0, "O", 0.25),
+    "removed": (0.2, 209.0, "AOe07", 1.0),
+    "partly": (2.0, None, "O", 0.25),
     "full": (None, None, "O", 1.0),
 }
+# The scale (km) and order of the spectrum of what the removal leaves in
+# the case "removed", as fitted to the error series with the taper
+# (--prior-taper-degree); without the taper the scale above at
+# --manometric-order.
+REMOVED_TAPERED = (529.0, 1.28)
 
 # The fields of the three-field GRACE model beside the ice sheets: the water
 # stored on the land that carries no ice sheet, and the ocean's own load, both
@@ -113,10 +126,10 @@ LAND, OCEAN = "land_water", "ocean"
 
 # The regions of the GRACE experiments, by `EarthState.get_projection` names.
 GRACE_REGIONS = {
-    "GRL (S Basin)": ["SE", "SW"],
-    "WAIS": ["F-G", "Ep-F", "J-Jpp", "G-H", "H-Hp"],
-    "Gulf of Mexico": "Gulf of Mexico",
-    "GBM basin": "4030025450",
+    "Southern Greenland": ["SE", "SW"],
+    "West Antarctica": ["F-G", "Ep-F", "J-Jpp", "G-H", "H-Hp"],
+    "Amazon basin": "6030007000",
+    "Ganges-Brahmaputra": "4030025450",
 }
 
 # The region of the ocean experiments' regional decomposition.
@@ -131,7 +144,8 @@ COVARIANCE_CAP_DEGREES = 2.0
 
 OCEAN_COVARIANCE_POINTS = [
     ("Ice", ICE, (-78.0, -110.0), "WAIS"),
-    ("Sterodynamic", ETA, (30.0, -45.0), "North_Atlantic"),
+    ("Steric", STERIC, (30.0, -45.0), "North_Atlantic"),
+    ("Manometric", MANOMETRIC, (30.0, -45.0), "North_Atlantic"),
 ]
 
 
@@ -344,8 +358,9 @@ def add_ocean_arguments(
         "--source-order",
         type=float,
         default=None,
-        help="Sobolev order, below 1/2, of the space of the ice and land-water "
-        "fields. If given, those fields have priors of their own "
+        help="Sobolev order of the space of the ice and land-water fields, no "
+        "higher than --field-order; equal to it, the four fields share one "
+        "space. If given, those fields have priors of their own "
         "(--source-prior-order and the options that follow it); if omitted, "
         "they share the space and the prior order of the other fields.",
     )
@@ -364,6 +379,45 @@ def add_ocean_arguments(
         help="With --source-order: the pointwise std of the ice load, mm EWT.",
     )
     parser.add_argument("--ice-scale-km", type=float, default=180.0)
+    parser.add_argument(
+        "--ice-prior-order",
+        type=float,
+        default=None,
+        help="The order of the ice prior's spectrum, if not --source-prior-order.",
+    )
+    parser.add_argument(
+        "--land-water-prior-order",
+        type=float,
+        default=None,
+        help="The same for the land water.",
+    )
+    parser.add_argument(
+        "--prior-taper-degree",
+        type=float,
+        default=0.0,
+        help="With --source-order: the priors of the ice, the land water and "
+        "the manometric sea level follow their own spectra (1 + s^2 k)^-q, "
+        "with q as fitted to their sources, as far as the sources go, and "
+        "beyond this degree L decay faster, by the further factor (1 + k r^2 / "
+        "L^2)^-(t - q) with t = --prior-taper-order: the decay a source shows "
+        "to its own resolution says nothing of the decay beyond it, and the "
+        "fields' space needs t. Zero for no taper.",
+    )
+    parser.add_argument(
+        "--prior-taper-order",
+        type=float,
+        default=2.5,
+        help="With --prior-taper-degree: the order of the spectra well beyond "
+        "that degree; it must exceed the order of the fields' space by more "
+        "than one.",
+    )
+    parser.add_argument(
+        "--ice-margin-scale-km",
+        type=float,
+        default=None,
+        help="With --ice-modulation margin: the scale at which the nearness to "
+        "the edge of the grounded ice is taken; --ice-scale-km if omitted.",
+    )
     parser.add_argument(
         "--ice-modulation",
         choices=("none", "margin"),
@@ -710,7 +764,11 @@ def configure(args: argparse.Namespace) -> np.random.Generator:
             # The load that the steric height leaves over shallow water is
             # removed as the rest of the ocean's load is.
             args.shelf_load_share = std_mm / args.manometric_std_mm
-            args.manometric_std_mm, args.manometric_scale_km = std_mm, scale_km
+            args.manometric_std_mm = std_mm
+            if scale_km is not None:
+                args.manometric_scale_km = scale_km
+                if prior_taper(args) is not None:
+                    args.manometric_scale_km, args.manometric_order = REMOVED_TAPERED
     if hasattr(args, "load_prior") and args.load_order is None:
         # The masked loads of the fields are rough; a Sobolev load is not.
         args.load_order = 0.25 if args.load_prior == "model" else 2.0
@@ -743,16 +801,33 @@ def jobs(args: argparse.Namespace, tasks: Optional[int] = None) -> Optional[int]
 class GracePhysics:
     """The GRACE experiments' physics: the direct load on `load_space`, the
     fingerprint operator to a Lebesgue response, and `scale_mm`, which takes
-    a load to millimetres of equivalent water thickness."""
+    a load to millimetres of equivalent water thickness.
+
+    With --load-prior model the unknown is not the load but the fields of
+    the ocean experiments, `fields` (an `OceanPhysics`), which the load
+    operator carries to their direct load. The operators below then act on
+    the fields, unless asked for as functions of a load."""
 
     state: EarthState
     load_space: object
     fingerprint: FingerPrintOperator
     scale_mm: float
+    fields: Optional[object] = None
 
     @property
     def response_space(self):
         return self.fingerprint.codomain
+
+    @property
+    def load_operator(self):
+        """The fields' direct load, or None where the load is the unknown."""
+        return None if self.fields is None else self.fields.setup.load_operator
+
+    def of_model(self, operator, of_load: bool = False):
+        """An operator on the load space as one on the model space."""
+        if self.fields is None or of_load:
+            return operator
+        return operator @ self.load_operator
 
 
 def grace_physics(lmax: int, load_order: float, load_scale_km: float) -> GracePhysics:
@@ -915,30 +990,64 @@ def wmb_estimator(
     return filtered_load, matrix, description
 
 
-def grace_forward_operator(physics: GracePhysics, args: argparse.Namespace):
+def grace_forward_operator(
+    physics: GracePhysics, args: argparse.Namespace, /, *, of_load: bool = False
+):
     """GRACE's coefficients of the potential change of the response to the
     direct load. The fingerprint operator's response already includes the
-    ocean load the direct load induces."""
-    return (
+    ocean load the direct load induces. A function of the model (the fields,
+    where they are the unknown), or with `of_load` of a direct load."""
+    return physics.of_model(
         grace_coefficients(
             physics.response_space,
             physics.state.model,
             args.obs_degree,
             args.grace_convention,
         )
-        @ physics.fingerprint
+        @ physics.fingerprint,
+        of_load,
     )
 
 
-def total_load_operator(physics: GracePhysics):
-    """The direct load plus the ocean load it induces, rho_w C xi."""
+def direct_load_operator(physics: GracePhysics):
+    """The direct load of the model: the load operator of the fields, or
+    the identity where the load is the unknown."""
+    return physics.of_model(inf.LinearOperator.identity(physics.load_space))
+
+
+def total_load_operator(physics: GracePhysics, /, *, of_load: bool = False):
+    """The direct load plus the ocean load it induces, rho_w C xi, as a
+    function of the model or, with `of_load`, of a direct load. Its values
+    on the grid are the products with the masks as they stand, so a value
+    at a point is the load there."""
     sea_level = physics.response_space.field_operator("relative_sea_level_change")
     to_load = sea_level_change_to_load_operator(
         physics.state, sea_level.codomain, physics.load_space
     )
-    return inf.LinearOperator.identity(physics.load_space) + (
-        to_load @ sea_level @ physics.fingerprint
+    return physics.of_model(
+        inf.LinearOperator.identity(physics.load_space)
+        + (to_load @ sea_level @ physics.fingerprint),
+        of_load,
     )
+
+
+def load_point_covariance(physics: GracePhysics, measure, component: str, point):
+    """With the fields as the unknown: the covariance under `measure` of
+    the total load everywhere with the total load at `point`, a point of
+    the support of the mass source `component` (the ice or the land water),
+    where the total load is the field's value times its density. The
+    fields have point values, so no averaging about the point is needed.
+
+    Returns (field, variance): the covariance as a load field, and the
+    variance of the total load at the point, in the load's units squared."""
+    setup = physics.fields.setup
+    p = physics.state.model.parameters
+    density = p.ice_density if component == ICE else p.water_density
+    space = setup.component(component).space
+    test = setup.space.inclusion(component)(space.dirac(point).representer)
+    image = measure.covariance(test)
+    variance = density**2 * float(setup.space.inner_product(test, image))
+    return density * total_load_operator(physics)(image), variance
 
 
 def wmb_error_operator(
@@ -946,9 +1055,9 @@ def wmb_error_operator(
 ):
     """
     WMB's estimate of the regional averages less their true values, as a
-    function of the direct load alone: C A - B, with A the forward operator,
-    B = `average` of the total load and C = `wmb_average`, WMB's averaging
-    of the data.
+    function of the model (the fields, or the direct load where that is the
+    unknown): C A - B, with A the forward operator, B = `average` of the
+    total load and C = `wmb_average`, WMB's averaging of the data.
 
     Written as it stands, C A - B solves the sea level equation twice per
     action, once for the data and once for the induced ocean load. Here the
@@ -970,7 +1079,7 @@ def wmb_error_operator(
     read = inf.RowLinearOperator(
         [-1.0 * average, wmb_average @ observe - average @ to_load @ sea_level]
     )
-    return read @ paired
+    return physics.of_model(read @ paired)
 
 
 # The factor taking a field in each unit to metres of equivalent water
@@ -1346,20 +1455,18 @@ def grace_data_noise(physics: GracePhysics, args: argparse.Namespace, noise_load
 
 def grace_experiment(args: argparse.Namespace, rng):
     """
-    The physics, prior and noise of a GRACE experiment, whose unknown is
-    one field, the direct load.
+    The physics, prior and noise of a GRACE experiment.
 
-    With --load-prior sobolev the prior is that of `grace_measures` and the
-    noise that of `grace_data_noise`.
+    With --load-prior sobolev the unknown is one field, the direct load;
+    the prior is that of `grace_measures` and the noise that of
+    `grace_data_noise`.
 
-    With --load-prior model the load is that of the fields of the ocean
-    experiments (`ocean_physics`): its prior is the image of theirs
-    (`ocean_prior`) under the load operator, a Gaussian measure on the load
-    space whose samples are the loads of samples of the fields. GRACE sees
-    the fields through their load alone, so the posterior of the load is
-    the image of the posterior the fields would have, and nothing is lost
-    for any quantity that depends on the load; what is not attempted is its
-    division into the fields. The noise is that of
+    With --load-prior model the unknown is the fields of the ocean
+    experiments (`ocean_physics`) with their prior (`ocean_prior`): one
+    model for every experiment. GRACE sees the fields through their load
+    alone, so the results are read as loads (`direct_load_operator`,
+    `total_load_operator`), and the steric height, which loads nothing, is
+    left as the prior has it. The noise is that of
     `grace_coefficient_noise` and, with --gia-years, the error of the GIA
     correction (`gia_correction_error`), and `info["std_factor"]` the
     best-determined coefficient's error, as the pointwise std of a white
@@ -1388,8 +1495,9 @@ def grace_experiment(args: argparse.Namespace, rng):
         ocean.load_space,
         ocean.fingerprint,
         1000.0 * p.length_scale / p.water_density,
+        fields=ocean,
     )
-    prior = fields_prior.affine_map(ocean.setup.load_operator)
+    prior = fields_prior
     noise, coefficient_info = grace_coefficient_noise(
         physics.state,
         physics.load_space,
@@ -1428,10 +1536,8 @@ def grace_experiment(args: argparse.Namespace, rng):
         "independent": None,
     }
     if calib["independent"] is not None:
-        # The load of the independent fields the prior is built from.
-        info["independent"] = calib["independent"] | {
-            "map": ocean.setup.load_operator @ calib["independent"]["map"]
-        }
+        # The independent fields the prior is built from.
+        info["independent"] = calib["independent"]
     return physics, None, prior, noise, covariance, info
 
 
@@ -1659,10 +1765,39 @@ def fit_spectrum(
     return float(fit.x[2]), float(fit.x[1])
 
 
-def _band_power(order: float, scale: float, radius: float, lmax: int) -> float:
+def tapered_spectrum(k, scale: float, order: float, radius: float, taper=None):
+    """The spectrum (1 + s^2 k)^-q of a prior in the Laplacian's eigenvalue
+    k, and with `taper` = (L, t) the further factor (1 + k r^2 / L^2)^-(t - q)
+    that takes its order to t beyond the degree L (--prior-taper-degree),
+    where q is below t."""
+    values = (1.0 + scale**2 * k) ** (-order)
+    if taper is not None and taper[0] > 0.0 and order < taper[1]:
+        values = values * (1.0 + k * radius**2 / taper[0] ** 2) ** (order - taper[1])
+    return values
+
+
+def prior_taper(args: argparse.Namespace):
+    """(L, t) of --prior-taper-degree and --prior-taper-order, or None."""
+    degree = getattr(args, "prior_taper_degree", 0.0)
+    return (degree, args.prior_taper_order) if degree > 0.0 else None
+
+
+def _source_order(args: argparse.Namespace, name) -> float:
+    """The order of a mass source's own spectrum."""
+    own = args.ice_prior_order if name == ICE else args.land_water_prior_order
+    return args.source_prior_order if own is None else own
+
+
+def _band_power(
+    order: float, scale: float, radius: float, lmax: int, taper=None
+) -> float:
     degrees = np.arange(lmax + 1, dtype=float)
     k = degrees * (degrees + 1.0) / radius**2
-    return float(np.sum((2.0 * degrees + 1.0) * (1.0 + scale**2 * k) ** (-order)))
+    return float(
+        np.sum(
+            (2.0 * degrees + 1.0) * tapered_spectrum(k, scale, order, radius, taper)
+        )
+    )
 
 
 def field_loads(physics: BudgetPhysics, water, ice, ocean, /) -> dict:
@@ -1966,6 +2101,7 @@ class OceanPhysics:
     altimetry: inf.LinearOperator
     field_point_evaluation: inf.LinearOperator
     scale_mm: float
+    stated_sources: bool
 
     @property
     def field_space(self):
@@ -1983,8 +2119,11 @@ class OceanPhysics:
 
     @property
     def rough_sources(self) -> bool:
-        """Whether the mass sources have a space and priors of their own."""
-        return self.source_space != self.field_space
+        """Whether the mass sources have priors of their own, stated by
+        amplitude and scale (--source-order). Their space is then of that
+        order: the fields' own space if the orders agree, as in the paper,
+        or a rougher one."""
+        return self.stated_sources
 
     @property
     def load_space(self):
@@ -1993,41 +2132,106 @@ class OceanPhysics:
     @property
     def display_scales(self) -> dict:
         """The factors taking each field to its display unit: mm for the ice
-        thickness change, the land water and eta, g m^-3 for delta rho."""
+        thickness change, the land water and the heights of the ocean, g
+        m^-3 for delta rho."""
         density = 1.0e3 * self.state.model.parameters.density_scale
         scales = {ICE: self.scale_mm, LAND: self.scale_mm, ETA: self.scale_mm}
+        scales |= {MANOMETRIC: self.scale_mm, BARYSTATIC: self.scale_mm}
         return scales | {RHO: density, STERIC: self.scale_mm}
 
-    def display(self, model) -> dict:
-        """The fields of a model vector on their supports and in display
-        units, by component name. The fields are global, but only their
-        restrictions to the supports are physical, so only those are shown."""
+    @property
+    def shows_manometric(self) -> bool:
+        """Whether the ocean's fields are shown as the steric height and the
+        manometric sea level: where the steric height is a field of the
+        model (--ocean-prior steric), these are the two independent fields
+        of the prior, and the sterodynamic sea level is their sum."""
+        return STERIC in self.setup.names
+
+    @property
+    def outputs(self) -> inf.LinearOperator:
+        """The model as it is shown: with `shows_manometric` the
+        sterodynamic sea level gives up its place to the manometric sea
+        level, eta less the steric height; the identity otherwise. The
+        posterior is the same in either set of fields, so this is applied
+        to what the inversion returns and the model is not re-posed."""
+        space = self.setup.space
+        if not self.shows_manometric:
+            return inf.LinearOperator.identity(space)
+        names = list(self.setup.names)
+        i_eta, i_steric = names.index(ETA), names.index(STERIC)
+        field_space = self.field_space
+
+        def mapping(m):
+            m = list(m)
+            m[i_eta] = field_space.subtract(m[i_eta], m[i_steric])
+            return tuple(m)
+
+        def adjoint(y):
+            y = list(y)
+            y[i_steric] = field_space.subtract(y[i_steric], y[i_eta])
+            return tuple(y)
+
+        return inf.LinearOperator.from_callables(space, space, mapping, adjoint=adjoint)
+
+    @property
+    def output_names(self) -> list:
+        """The names of the fields of `outputs`, in the model's order."""
+        return [
+            MANOMETRIC if name == ETA and self.shows_manometric else name
+            for name in self.setup.names
+        ]
+
+    def display(self, model, /, *, outputs: bool = False) -> dict:
+        """The fields of a model vector as they are shown (`outputs`), on
+        their supports and in display units, by name. The fields are global,
+        but only their restrictions to the supports are physical, so only
+        those are shown. With `outputs` the vector is one of `outputs`
+        already, such as a standard deviation taken there."""
         scales = self.display_scales
+        shown = model if outputs else self.outputs(model)
         return {
             name: field * scales[name]
-            for name, field in zip(self.setup.names, self.setup.support(model))
+            for name, field in zip(self.output_names, self.setup.support(shown))
         }
 
     def point_covariance(self, measure, component: str, point) -> dict:
-        """The covariance under `measure` of each field with `component` at
-        `point` (latitude, longitude): the covariance applied to the
-        model-space representer of that point evaluation. By component name,
-        on the supports and in the product of the two fields' display units.
-        A field whose space is too rough for point values is averaged over a
-        cap of `COVARIANCE_CAP_DEGREES` about the point instead."""
-        space = self.setup.component(component).space
+        """The covariance under `measure`, a measure on the model, of each
+        field shown with the field `component` at `point` (latitude,
+        longitude): the covariance of the outputs applied to the representer
+        of that point evaluation. By name (`output_names`), on the supports
+        and in the product of the two fields' display units. The fields have
+        point values where their space's order exceeds one; a field of a
+        rougher space is averaged over a cap of `COVARIANCE_CAP_DEGREES`
+        about the point instead."""
+        slot = self.setup.names[self.output_names.index(component)]
+        space = self.setup.component(slot).space
         if space.order > 1.0:
             dirac = space.dirac(point).representer
         else:
             dirac = space.spherical_cap_average(
                 point, COVARIANCE_CAP_DEGREES
             ).representer
-        test = self.setup.space.inclusion(component)(dirac)
+        outputs = self.outputs
+        test = outputs.adjoint(self.setup.space.inclusion(slot)(dirac))
         scale = self.display_scales[component]
         return {
             name: field * scale
             for name, field in self.display(measure.covariance(test)).items()
         }
+
+    @property
+    def barystatic_sea_level(self) -> inf.LinearOperator:
+        """The relative sea level change that the sea level equation gives
+        for the loads of the mass sources alone, the ice and the water on
+        the land: their fingerprint, the barystatic part of the manometric
+        sea level. From the model into the response's field space."""
+        space = self.setup.space
+        sources = None
+        for name in self.sources:
+            part = space.inclusion(name) @ space.projection(name)
+            sources = part if sources is None else sources + part
+        sea_level = self.fingerprint.codomain.field_operator("relative_sea_level_change")
+        return sea_level @ self.fingerprint @ self.setup.load_operator @ sources
 
     def regional_decomposition(self, region: str) -> inf.LinearOperator:
         """The `region` mean of the relative sea level change, split into its
@@ -2143,11 +2347,13 @@ def ocean_physics(
     field_space = sobolev_load_space(state.model, args.field_order, scale)
     load_space = fingerprint.domain
     rough = args.source_order is not None
-    if rough and not args.source_order < 0.5:
-        raise ValueError("--source-order must be below 1/2.")
+    if rough and args.source_order > args.field_order:
+        raise ValueError("--source-order must not exceed --field-order.")
+    # With the orders equal the four fields share one space, and the edges
+    # of the loads come from the load operator alone.
     source_space = (
         sobolev_load_space(state.model, args.source_order, scale)
-        if rough
+        if rough and args.source_order != args.field_order
         else field_space
     )
     components = [
@@ -2198,6 +2404,7 @@ def ocean_physics(
         altimetry=point_evaluation @ geocentric,
         field_point_evaluation=field_space.point_evaluation_operator(points),
         scale_mm=1000.0 * p.length_scale,
+        stated_sources=rough,
     )
     if surrogate:
         return SurrogateOceanPhysics(**fields, source_loads=loads)
@@ -2225,9 +2432,15 @@ def _source_std(physics: OceanPhysics, args: argparse.Namespace, name) -> float:
     space = physics.source_space
     scale = _source_scale(physics, args, name)
     continued = np.sqrt(
-        _band_power(args.source_prior_order, scale, space.radius, space.lmax)
+        _band_power(
+            _source_order(args, name), scale, space.radius, space.lmax, prior_taper(args)
+        )
         / _band_power(
-            args.source_prior_order, scale, space.radius, args.source_reference_degree
+            _source_order(args, name),
+            scale,
+            space.radius,
+            args.source_reference_degree,
+            prior_taper(args),
         )
     )
     if name == ICE:
@@ -2260,16 +2473,17 @@ def _steric_measures(physics: OceanPhysics, args: argparse.Namespace):
     space = physics.field_space
     km = 1000.0 / physics.state.model.parameters.length_scale
 
-    def measure(scale_km, std_mm, order):
-        if order - space.order <= 1.0:
+    def measure(scale_km, std_mm, order, taper=None):
+        final = order if taper is None else max(order, taper[1])
+        if final - space.order <= 1.0:
             raise ValueError(
-                "--steric-order and --manometric-order must exceed "
-                "--field-order by more than one."
+                "--steric-order and --manometric-order (or --prior-taper-order) "
+                "must exceed --field-order by more than one."
             )
         scale = scale_km * km
 
         def spectrum(k):
-            return (1.0 + scale**2 * k) ** (-order) * (
+            return tapered_spectrum(k, scale, order, space.radius, taper) * (
                 1.0 + space.length_scale**2 * k
             ) ** (space.order)
 
@@ -2280,7 +2494,10 @@ def _steric_measures(physics: OceanPhysics, args: argparse.Namespace):
     return (
         measure(args.steric_scale_km, args.steric_std_mm, args.steric_order),
         measure(
-            args.manometric_scale_km, args.manometric_std_mm, args.manometric_order
+            args.manometric_scale_km,
+            args.manometric_std_mm,
+            args.manometric_order,
+            prior_taper(args),
         ),
     )
 
@@ -2356,18 +2573,25 @@ def ice_modulation(physics: OceanPhysics, args: argparse.Namespace):
     Antarctica. So over the grounded ice of each sheet the std follows the
     profile 1 + a p, with a = --ice-margin-growth and p the nearness of a
     point to the edge of the grounded ice: the fraction of the surface that
-    is not grounded ice sheet within the ice prior's own scale of the point
-    (the heat kernel at --ice-scale-km applied to the complement), nought
+    is not grounded ice sheet within --ice-margin-scale-km of the point
+    (the heat kernel at that scale applied to the complement; the ice
+    prior's own scale, --ice-scale-km, if it is not given), nought
     deep in the interior and about a half at the edge. The profile is
     scaled so that its root mean square over the sheet's grounded ice is
     the sheet's own std, --ice-greenland-std-mm or --ice-antarctica-std-mm.
-    The floating ice, which loads nothing, takes the interior's value, and
-    w is one off the ice sheets, where the load operator discards the field.
+
+    w is one smooth function over the whole sphere, so that the product
+    stays in the field's space: the profile, which is smooth everywhere,
+    times an amplitude that is Antarctica's constant south of 30 S and
+    Greenland's north of 30 N and passes smoothly from one to the other
+    between. Off the grounded ice the load operator discards the field, so
+    the values of w there have no effect.
 
     The numbers are those of the year-on-year changes of the land ice of the
     ESA Earth System Model, 1995 to 2006: root mean square 156 mm EWT over
-    Greenland's grounded ice and 61 over Antarctica's, and a = 10 from a
-    least-squares fit of the profile to the root mean square at each point.
+    Greenland's grounded ice and 61 over Antarctica's, and the growth a from
+    a least-squares fit of the profile to the root mean square at each
+    point, made with the scale of the prior (`prior_fit.py`).
 
     The product with w is truncated to the degrees of the space, as every
     field is. Returns (w, operator).
@@ -2378,7 +2602,13 @@ def ice_modulation(physics: OceanPhysics, args: argparse.Namespace):
         raise ValueError("--ice-modulation needs --source-order.")
     state, space = physics.state, physics.source_space
     model = state.model
-    smoother = space.heat_measure(_source_scale(physics, args, ICE)).covariance
+    margin_km = getattr(args, "ice_margin_scale_km", None)
+    margin = (
+        _source_scale(physics, args, ICE)
+        if margin_km is None
+        else margin_km * 1000.0 / state.model.parameters.length_scale
+    )
+    smoother = space.heat_measure(margin).covariance
     grounded_all = state.ice_sheet_projection(value=0.0, exclude_ice_shelves=True)
     nearness = np.clip(smoother(1.0 - grounded_all).data, 0.0, 1.0)
     profile = 1.0 + args.ice_margin_growth * nearness
@@ -2387,20 +2617,28 @@ def ice_modulation(physics: OceanPhysics, args: argparse.Namespace):
         "greenland": args.ice_greenland_std_mm,
         "antarctic": args.ice_antarctica_std_mm,
     }
+    factors = {}
     for sheet, std_mm in stds.items():
-        whole = state.ice_sheet_projection(value=0.0, sheets=sheet)
         grounded = state.ice_sheet_projection(
             value=0.0, sheets=sheet, exclude_ice_shelves=True
         )
         inside = grounded.data > 0.5
+        factors[sheet] = 1.0
         if not inside.any():
             continue
         shape = grounded.copy()
         shape.data[:] = np.where(inside, profile, 0.0)
         rms = np.sqrt(model.integrate(shape * shape) / model.integrate(grounded))
-        factor = std_mm / args.ice_std_mm / rms
-        weight.data[whole.data > 0.5] = factor
-        weight.data[inside] = factor * profile[inside]
+        factors[sheet] = std_mm / args.ice_std_mm / rms
+    # The amplitude: a smooth step in latitude, flat beyond 30 degrees.
+    t = np.clip((np.asarray(weight.lats(), dtype=float) + 30.0) / 60.0, 0.0, 1.0)
+    with np.errstate(divide="ignore", over="ignore"):
+        rise, fall = np.exp(-1.0 / t), np.exp(-1.0 / (1.0 - t))
+    step = rise / (rise + fall)
+    amplitude = factors["antarctic"] + (
+        factors["greenland"] - factors["antarctic"]
+    ) * step
+    weight.data[:] = amplitude[:, None] * profile
     flat = underlying_space(space)
 
     def mapping(u):
@@ -2428,15 +2666,17 @@ def _field_measure(physics: OceanPhysics, args: argparse.Namespace, name, std):
     one."""
     if name in (ICE, LAND) and physics.rough_sources:
         space = physics.source_space
-        order = args.source_prior_order
-        if order - space.order <= 1.0:
+        order = _source_order(args, name)
+        taper = prior_taper(args)
+        if (order if taper is None else max(order, taper[1])) - space.order <= 1.0:
             raise ValueError(
-                "--source-prior-order must exceed --source-order by more than one."
+                "--source-prior-order (or --prior-taper-order) must exceed "
+                "--source-order by more than one."
             )
         scale = _source_scale(physics, args, name)
 
         def spectrum(k):
-            return (1.0 + scale**2 * k) ** (-order) * (
+            return tapered_spectrum(k, scale, order, space.radius, taper) * (
                 1.0 + space.length_scale**2 * k
             ) ** (space.order)
 
@@ -2643,13 +2883,21 @@ def ocean_prior(
                     STERIC: "manometric",
                 },
                 spectra={
-                    n: (_source_scale(physics, args, n), args.source_prior_order)
+                    n: (
+                        _source_scale(physics, args, n),
+                        _source_order(args, n),
+                        prior_taper(args),
+                    )
                     for n in names
                     if n in (ICE, LAND)
                 }
                 | {
-                    ETA: (args.steric_scale_km * km, args.steric_order),
-                    STERIC: (args.manometric_scale_km * km, args.manometric_order),
+                    ETA: (args.steric_scale_km * km, args.steric_order, None),
+                    STERIC: (
+                        args.manometric_scale_km * km,
+                        args.manometric_order,
+                        prior_taper(args),
+                    ),
                 },
             )
             return independent.affine_map(mixing)
@@ -2961,7 +3209,14 @@ def model_truth(physics: OceanPhysics, args: argparse.Namespace, years, /):
       (`esm_loads`), as global fields: the load operator confines the ice
       to the ice sheets, and the water with the rest of the ice to the
       other land.
-    - The steric height is that of the EN4 analyses (`en4_steric`).
+    - The steric height is that of the EN4 analyses (`en4_steric`). It is
+      given over the ocean alone, and a field that stops at the coast would
+      ring there when truncated; so it is continued over the land by the
+      average of the ocean's values near each point (the heat kernel at
+      --truth-fill-km, 300 by default, applied to the field over the ocean
+      and divided by the same applied to the ocean function), which meets
+      the ocean's values at the coast and decays inland. The land's values
+      enter nothing.
     - The sterodynamic sea level is the steric height plus the manometric
       sea level, the ocean component of the Earth System Model, less its
       mean over the ocean, as a height of water. The ocean's load is then
@@ -2994,6 +3249,16 @@ def model_truth(physics: OceanPhysics, args: argparse.Namespace, years, /):
     lats, lons = np.meshgrid(template.lats(), template.lons(), indexing="ij")
     steric = template.copy()
     steric.data[:] = en4_steric.changes_at(lats, lons, years)[1][0] / p.length_scale
+    fill_km = getattr(args, "truth_fill_km", 300.0)
+    if fill_km > 0.0:
+        smoother = (
+            underlying_space(physics.field_space)
+            .heat_measure(fill_km * 1000.0 / p.length_scale)
+            .covariance
+        )
+        wet = sea.data > 0.5
+        near = smoother(sea * steric).data / np.maximum(smoother(sea).data, 1.0e-3)
+        steric.data[:] = np.where(wet, steric.data, near)
     fields = {
         ICE: loads["I"] * (1.0 / p.ice_density),
         LAND: (loads["H"] + loads["I"]) * (1.0 / p.water_density),
@@ -3791,6 +4056,29 @@ def sketched_signal(
     return half @ half.T
 
 
+def tabulated_kernel(space, measure):
+    """The covariance of an invariant measure on a sphere as a function of
+    the angle between two points, in radians. It is a sum over degrees; a
+    nearest-neighbour block wants it between each point and its neighbours
+    and between those, many values a point, so it is tabulated once, on two
+    thousand nodes to the shortest wavelength, and interpolated linearly
+    (to a few parts in a billion of its largest value)."""
+    count = 2048 * (space.lmax + 1)
+    step = np.pi / count
+    table = space.covariance_function(
+        measure, space.radius * np.linspace(0.0, np.pi, count + 1)
+    )
+    table = np.append(table, table[-1])
+
+    def kernel(angle):
+        position = np.asarray(angle) / step
+        index = np.minimum(position.astype(np.int64), count)
+        part = position - index
+        return table[index] * (1.0 - part) + table[index + 1] * part
+
+    return kernel
+
+
 def altimetry_block(
     physics: OceanPhysics,
     args: argparse.Namespace,
@@ -3826,7 +4114,7 @@ def altimetry_block(
 
         approximate = VecchiaInverse(
             unit_vectors(points),
-            lambda angle: space.covariance_function(eta, space.radius * angle),
+            tabulated_kernel(space, eta),
             alt_local.covariance.diagonals()[0],
             neighbours=neighbours,
         )
@@ -3963,6 +4251,179 @@ def block_preconditioner(
     if factors:
         preconditioner = low_rank_correction(preconditioner, factors)
     return preconditioner
+
+
+def noise_precision(
+    case: str,
+    space,
+    /,
+    *,
+    alt_local=None,
+    alt_parts: Optional[dict] = None,
+    grace_matrix: Optional[np.ndarray] = None,
+    gia=None,
+    correlated_rank: int = 400,
+    correlated_std: Optional[float] = None,
+    rng=None,
+):
+    """
+    The inverse of the noise covariance of a case of the ocean experiments
+    ("altimetry", "grace" or "joint") as an operator on its data space
+    `space`, with nothing dense formed on the altimetry data.
+
+    The noise is a part that is easily inverted, the local noise of the
+    altimetry (diagonal) and the covariance of GRACE's coefficients (a
+    matrix on a few thousand data, factorised), plus parts of low rank: the
+    common modes of the altimetry, the error of the GIA correction, and the
+    large-scale correlated error of the altimetry. The last is a smooth
+    field at the points and is kept to its `correlated_rank` leading modes
+    (`GaussianMeasure.low_rank_approximation`); the share of its variance
+    that this leaves out is returned (if `correlated_std`, its std at a
+    point, is given), and is a statement about the noise model the
+    precision stands for. The whole is the Woodbury inverse
+    (`low_rank_correction`, exact for an exact base).
+
+    Returns (precision, left_out).
+    """
+    use_alt, use_grace = case != "grace", case != "altimetry"
+    blocks = []
+    if use_alt:
+        diagonal = alt_local.covariance.diagonals()[0]
+        blocks.append(inf.DiagonalLinearOperator(alt_local.domain, 1.0 / diagonal))
+    if use_grace:
+        inverse = cho_solve(
+            cho_factor(grace_matrix, lower=True), np.eye(len(grace_matrix))
+        )
+        grace_space = inf.EuclideanSpace(len(grace_matrix))
+        blocks.append(
+            inf.LinearOperator.from_matrix(
+                grace_space, grace_space, 0.5 * (inverse + inverse.T), form="components"
+            )
+        )
+    base = (
+        blocks[0]
+        if len(blocks) == 1
+        else inf.BlockDiagonalLinearOperator(blocks, domain=space, codomain=space)
+    )
+    factors, left_out = [], 0.0
+    if use_alt:
+        for name, measure in (alt_parts or {}).items():
+            if name == "correlated":
+                rank = min(correlated_rank, measure.domain.dim - 1)
+                measure = measure.low_rank_approximation(rank=rank, rng=rng)
+                factor = measure.covariance_factor
+                kept = sum(
+                    float(np.sum(factor(factor.domain.basis_vector(i)) ** 2))
+                    for i in range(factor.domain.dim)
+                )
+                if correlated_std is not None:
+                    whole = measure.domain.dim * correlated_std**2
+                    left_out = 1.0 - kept / whole
+            factor = measure.covariance_factor
+            if case == "joint":
+                factor = space.inclusion(0) @ factor
+            factors.append(factor)
+    if gia is not None:
+        factors.append(gia.covariance_factor)
+    precision = low_rank_correction(base, factors) if factors else base
+    return definite(precision), left_out
+
+
+def low_rank_posterior(
+    problem,
+    prior,
+    data,
+    rank: int,
+    /,
+    *,
+    n_jobs: Optional[int] = None,
+    oversampling: int = 10,
+    seed: int = 0,
+):
+    """
+    The posterior of a linear problem as the prior corrected in the `rank`
+    directions the data inform most (`inf.LowRankGaussianPosterior`), with
+    no solve of the normal equations.
+
+    The directions are the leading eigenvectors of the prior-preconditioned
+    misfit Hessian H = L* A* R^-1 A L, with L the factor of the prior's
+    covariance, on the factor's own (latent) space; `problem`'s error
+    measure must have a precision (`noise_precision`). They are found by
+    the randomised Nystrom method (Halko et al., 2011; Frangella et al.,
+    2023), as `sketched_signal` finds GRACE's block: H is applied to
+    rank + oversampling white vectors, the images are made orthonormal, and
+    H is applied to those. Two applications a direction, each a forward
+    and an adjoint action of the problem with nothing solved; they are
+    shared among the worker processes a share each, so that the operator is
+    carried to a worker once.
+
+    Returns (posterior, eigenvalues): the eigenvalues kept, largest first.
+    """
+    forward = problem.forward_operator
+    error = problem.error_measure
+    if error.precision is None:
+        raise ValueError("The error measure needs a precision.")
+    factor = prior.covariance_factor
+    latent = factor.domain
+    hessian = factor.adjoint @ forward.adjoint @ error.precision @ forward @ factor
+    # Coordinates in which the latent space's inner product is the dot
+    # product: its components scaled by the root of its diagonal metric.
+    if not latent.has_diagonal_metric:
+        raise NotImplementedError("The latent space's metric is not diagonal.")
+    weight = np.sqrt(np.asarray(latent.gram_diagonal()))
+
+    def images(columns):
+        def apply(indices):
+            return np.array(
+                [
+                    weight
+                    * latent.to_components(
+                        hessian(latent.from_components(columns[:, int(i)] / weight))
+                    )
+                    for i in indices
+                ]
+            )
+
+        count = columns.shape[1]
+        workers = 1 if n_jobs is None else min(n_jobs, count)
+        shares = np.array_split(np.arange(count), workers)
+        return np.vstack(inf.parallel.parallel_map(apply, shares, n_jobs=workers)).T
+
+    count = min(rank + oversampling, latent.dim, forward.codomain.dim)
+    white = np.random.default_rng(seed).standard_normal((latent.dim, count))
+    basis, _ = np.linalg.qr(images(white))
+    sketch = images(basis)
+    shift = np.sqrt(latent.dim) * np.finfo(float).eps * np.linalg.norm(sketch, 2)
+    sketch += shift * basis
+    core = basis.T @ sketch
+    lower = cholesky(0.5 * (core + core.T), lower=True)
+    vectors, singular, _ = np.linalg.svd(
+        solve_triangular(lower, sketch.T, lower=True).T, full_matrices=False
+    )
+    keep = min(rank, count)
+    eigenvalues = np.maximum(singular[:keep] ** 2 - shift, 0.0)
+    vectors = vectors[:, :keep]
+    reduced = inf.EuclideanSpace(keep)
+    directions = inf.LinearOperator.from_callables(
+        reduced,
+        latent,
+        lambda c: latent.from_components((vectors @ c) / weight),
+        adjoint=lambda x: vectors.T @ (weight * latent.to_components(x)),
+    )
+    space, data_space = prior.domain, forward.codomain
+    residual = data_space.subtract(data, forward(prior.expectation))
+    residual = data_space.subtract(residual, error.expectation)
+    pulled = factor.adjoint(forward.adjoint(error.precision(residual)))
+    coefficients = directions.adjoint(pulled) / (1.0 + eigenvalues)
+    mean = space.add(prior.expectation, factor(directions(coefficients)))
+    posterior = inf.LowRankGaussianPosterior(
+        prior,
+        mean,
+        eigenvalues,
+        directions,
+        relative_log_density=-problem.potential(data),
+    )
+    return posterior, eigenvalues
 
 
 def unresolved_altimetry_variance(
@@ -4103,23 +4564,17 @@ def low_rank_correction(preconditioner, factors: Sequence, /):
 def solve_posterior(inversion, data, preconditioner, /, *, rtol, qoi_rtol):
     """
     The posterior of `inversion` for `data`, through conjugate-gradient
-    solves of the data-space normal equations with `preconditioner`, at two
-    tolerances.
+    solves of the data-space normal equations with `preconditioner`.
 
     The posterior expectation, and the randomise-then-optimise samples drawn
-    from `posterior`, use `rtol`. Their errors are then small beside the
-    posterior's own spread, which is all a mean or a sample needs.
-
-    A posterior variance is the prior variance less a correction computed
+    from `posterior`, use `rtol`; `qoi_posterior` has the same expectation
+    and applies its covariance through solves at `qoi_rtol`, with the same
+    preconditioner. The scripts pass one tolerance for both (--qoi-rtol): a
+    posterior variance is the prior variance less a correction computed
     through the solves, so its error relative to itself is about the
-    tolerance divided by the ratio of the posterior variance to the prior.
-    Where the data reduce a variance by 99 per cent, `rtol` leaves it wrong
-    by 10-20 per cent. `qoi_posterior` therefore has the same expectation but
-    applies its covariance through solves at `qoi_rtol`, with the same
-    preconditioner; every push-forward of the posterior covariance (onto the
-    quantities of interest, the prior-sensitivity tables and the covariance
-    maps)
-    goes through it, or through the Kalman operator of `qoi_inversion`.
+    tolerance divided by the ratio of the posterior variance to the prior,
+    and a looser solve also biases the squared misfit printed below, and
+    the sampled variances, low.
 
     Returns (posterior, qoi_posterior, qoi_inversion).
     """
@@ -4172,6 +4627,35 @@ def pointwise_std(measure, samples: int, /, *, rng, n_jobs=None) -> list:
             deviation = sub.subtract(x, m)
             sub.axpy(1.0 / samples, sub.multiply(deviation, deviation), variance)
     return [sub.sqrt(v) for sub, v in zip(space.subspaces, variances)]
+
+
+def pointwise_stds_of(measure, operators: dict, samples: int, /, *, rng, n_jobs=None):
+    """The pointwise standard deviations of several linear images of a
+    measure on the model space, from the same `samples` draws about its
+    expectation: for each name of `operators` the standard deviation of that
+    operator's image, a field, or a tuple of fields for an operator into a
+    direct sum. The draws are the cost (each is a solve for a posterior), so
+    every image wanted is taken from each."""
+
+    def parts(vector):
+        return list(vector) if isinstance(vector, tuple) else [vector]
+
+    means = {name: parts(op(measure.expectation)) for name, op in operators.items()}
+    sums = {name: [np.zeros_like(f.data) for f in fs] for name, fs in means.items()}
+    for sample in measure.samples(samples, rng=rng, n_jobs=n_jobs):
+        for name, operator in operators.items():
+            for total, x, m in zip(sums[name], parts(operator(sample)), means[name]):
+                total += (x.data - m.data) ** 2
+    out = {}
+    for name, operator in operators.items():
+        fields = []
+        for total, m in zip(sums[name], means[name]):
+            field = m.copy()
+            field.data[:] = np.sqrt(total / samples)
+            fields.append(field)
+        image = operator(measure.expectation)
+        out[name] = tuple(fields) if isinstance(image, tuple) else fields[0]
+    return out
 
 
 # ================================================================ #
@@ -4259,18 +4743,48 @@ def sensitivity_table(
     model_space, data_space = independent["map"].codomain, noise.domain
     hs = {n: measures[n].hilbert_schmidt_norm() for n in names}
     top = {n: float(np.max(measures[n].covariance.eigenvalues)) for n in names}
+    # The changes of each field's covariance under the named changes of its
+    # prior (`PRIOR_CHANGES`), as invariant operators: the error variance of
+    # a fixed estimate is linear in the covariance of the truth, so its
+    # change under each is (kappa_f, dQ_f kappa_f) exactly.
+    changes = {}
+    if independent.get("spectra"):
+        for n in names:
+            changed = changed_spectra(independent, n)
+            # The change is not of one sign: its action is that of its
+            # positive part less that of its negative part.
+            changes[n] = {
+                label: (
+                    measures[n].domain.invariant_measure(
+                        np.maximum(changed[label] - changed["prior"], 0.0), unsafe=True
+                    ).covariance,
+                    measures[n].domain.invariant_measure(
+                        np.maximum(changed["prior"] - changed[label], 0.0), unsafe=True
+                    ).covariance,
+                )
+                for label, *_ in PRIOR_CHANGES
+            }
+    exact = []
 
     rows = []
     for i, (kernel, weight) in enumerate(zip(kernels, weights)):
         noise_part = data_space.inner_product(noise.covariance(weight), weight)
         pulled = independent["map"].adjoint(kernel)
-        norms, parts = [], []
+        norms, parts, moved = [], [], []
         for n in names:
             space = measures[n].domain
             kappa = fields.projection(n)(pulled)
             norms.append(space.squared_norm(kappa))
             parts.append(space.inner_product(measures[n].covariance(kappa), kappa))
+            moved.append(
+                {
+                    label: space.inner_product(up(kappa), kappa)
+                    - space.inner_product(down(kappa), kappa)
+                    for label, (up, down) in changes.get(n, {}).items()
+                }
+            )
         variance = sum(parts) + noise_part if stated is None else stated[i]
+        exact.append([{k: v / variance for k, v in m.items()} for m in moved])
         rows.append(
             (
                 variance,
@@ -4318,6 +4832,17 @@ def sensitivity_table(
             lines.append(
                 f"{label[:15]:<16}"
                 + "".join(f"{part[index]:>16.3e}" for part in row[2])
+            )
+    for change, *_ in PRIOR_CHANGES if changes else ():
+        lines += [
+            "",
+            "Exact change of the error variance, as a fraction of the stated "
+            f"variance, if one field's truth has its prior with: {change}",
+            f"{'':<16}" + "".join(f"{name[:15]:>16}" for name in field_labels),
+        ]
+        for label, row in zip(labels, exact):
+            lines.append(
+                f"{label[:15]:<16}" + "".join(f"{m[change]:>+16.3e}" for m in row)
             )
     return "\n".join(lines) + "\n"
 
@@ -4443,6 +4968,42 @@ def ocean_prior_sensitivity(
     return text + (prior_perturbation_sizes(independent) if sizes else "")
 
 
+PRIOR_CHANGES = (
+    ("std x1.25", 1.0, 0.0, 1.25),
+    ("scale x1.5", 1.5, 0.0, 1.0),
+    ("scale /1.5", 1.0 / 1.5, 0.0, 1.0),
+    ("order +0.5", 1.0, 0.5, 1.0),
+)
+
+
+def changed_spectra(independent: dict, name) -> dict:
+    """The covariance eigenvalues of one independent field's prior under
+    each of `PRIOR_CHANGES`, by the change's name, with those of the prior
+    itself under "prior": the pointwise std 25 per cent larger, the scale
+    longer and shorter by a factor 1.5, and the order higher by a half, the
+    last three at the same pointwise std. For a prior whose spectra are
+    stated as (1 + s^2 k)^-t."""
+    measure = independent["measures"][name]
+    space = measure.domain
+    scale, order, taper = independent["spectra"][name]
+    base = measure.covariance.eigenvalues
+    k = space.laplacian_eigenvalues
+    # A covariance's eigenvalues are relative to the space's own inner
+    # product; the pointwise variance sums them with its weight taken out.
+    weight = (1.0 + space.length_scale**2 * k) ** (-space.order)
+
+    def spectrum(scale_, order_, amplitude):
+        raw = tapered_spectrum(k, scale_, order_, space.radius, taper) / weight
+        return raw * amplitude**2 * np.sum(base * weight) / np.sum(raw * weight)
+
+    if not np.allclose(spectrum(scale, order, 1.0), base, rtol=1.0e-8):
+        raise ValueError(f"The stated spectrum of {name} is not its measure's.")
+    return {"prior": base} | {
+        label: spectrum(scale * factor, order + step, amplitude)
+        for label, factor, step, amplitude in PRIOR_CHANGES
+    }
+
+
 def prior_perturbation_sizes(independent: dict) -> str:
     """
     The sizes ||dQ_f|| / ||Q_f||, in the operator and the Hilbert-Schmidt
@@ -4455,12 +5016,7 @@ def prior_perturbation_sizes(independent: dict) -> str:
     spectra = independent.get("spectra")
     if not spectra:
         return ""
-    cases = (
-        ("std x1.25", 1.0, 0.0, 1.25),
-        ("scale x1.5", 1.5, 0.0, 1.0),
-        ("scale /1.5", 1.0 / 1.5, 0.0, 1.0),
-        ("order +0.5", 1.0, 0.5, 1.0),
-    )
+    cases = PRIOR_CHANGES
     lines = [
         "\n\n" + "=" * 110,
         "PRIOR SENSITIVITY: the size ||dQ|| / ||Q|| of changes of one field's "
@@ -4470,26 +5026,11 @@ def prior_perturbation_sizes(independent: dict) -> str:
         "-" * (16 + 20 * len(cases)),
     ]
     for n in independent["names"]:
-        measure = independent["measures"][n]
-        space = measure.domain
-        scale, order = spectra[n]
-        base = measure.covariance.eigenvalues
-        k = space.laplacian_eigenvalues
-        # A covariance's eigenvalues are relative to the space's own inner
-        # product; the pointwise variance sums them with its weight taken out.
-        weight = (1.0 + space.length_scale**2 * k) ** (-space.order)
-
-        def spectrum(scale_, order_, amplitude):
-            raw = (1.0 + scale_**2 * k) ** (-order_) / weight
-            return raw * amplitude**2 * np.sum(base * weight) / np.sum(raw * weight)
-
-        if not np.allclose(spectrum(scale, order, 1.0), base, rtol=1.0e-8):
-            raise ValueError(f"The stated spectrum of {n} is not its measure's.")
+        changed = changed_spectra(independent, n)
+        base = changed["prior"]
         line = f"{independent['labels'][n][:15]:<16}"
-        for _, scale_factor, order_step, amplitude in cases:
-            change = (
-                spectrum(scale * scale_factor, order + order_step, amplitude) - base
-            )
+        for label, *_ in cases:
+            change = changed[label] - base
             line += (
                 f"{np.max(np.abs(change)) / np.max(base):>11.2f}"
                 f"{np.linalg.norm(change) / np.linalg.norm(base):>9.2f}"

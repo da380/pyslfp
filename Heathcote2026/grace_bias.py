@@ -76,7 +76,143 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Plot a prior sample of the direct load and the load it induces.",
     )
+    parser.add_argument(
+        "--wmb-study",
+        action="store_true",
+        help="Tables of WMB's error under the prior (grace_bias_wmb_study.txt): "
+        "for each DDK filter and the Gaussian one; with degree one supplied; "
+        "and split into what remains without the sea level equation and what "
+        "the equation adds.",
+    )
     return parser.parse_args()
+
+
+def wmb_study(physics, prior, noise_matrix, names, args) -> str:
+    """
+    WMB's error in the regional averages of the total load under the
+    prior, in mm EWT, three ways. No solve of the normal equations is
+    needed: an error is a linear function of the model and the noise.
+
+    1. For each filter: the propagated noise, the rest (the error on
+       noise-free data, called leakage here) and the whole.
+    2. With degree one supplied: the same, the targets being the averages
+       of the total load less its degree-one part, as if those three
+       coefficients, which the data do not hold, were known exactly.
+    3. The part of the sea level equation: the error on noise-free data of
+       the same estimator in a world without the equation (the potential of
+       the direct load through the load Love numbers, the target the
+       average of the direct load), and the remainder, which is what the
+       induced ocean load and the rest of the response add; with the
+       correlation of that remainder with the true average.
+    """
+    state, load_space, scale_mm = physics.state, physics.load_space, physics.scale_mm
+    masks = common.grace_region_masks(state)
+    average = scale_mm * common.averaging_operator(state, load_space, masks)
+    data_space = common.grace_forward_operator(physics, args).codomain
+    total_load = common.total_load_operator(physics)
+    direct_load = common.direct_load_operator(physics)
+    jobs = common.jobs(args, len(names))
+
+    # The masks less their degree-one parts: the average of a field less its
+    # degree-one part is the L2 product with these.
+    flat = common.underlying_space(load_space)
+
+    def less_degree_one(mask):
+        components = flat.to_components(mask)
+        low = np.zeros_like(components)
+        low[1:4] = components[1:4]
+        return mask - flat.from_components(low)
+
+    areas = [state.model.integrate(mask) for mask in masks]
+    less_one = scale_mm * inf.LinearOperator.from_matrix(
+        inf.EuclideanSpace(len(masks)),
+        inf.EuclideanSpace(len(masks)),
+        np.diag(1.0 / np.array(areas)),
+        form="components",
+    ) @ load_space.l2_products_operator([less_degree_one(m) for m in masks])
+
+    def estimator(filter_name, level=5):
+        options = argparse.Namespace(**vars(args))
+        options.wmb_filter, options.wmb_ddk_level = filter_name, level
+        options.wmb_degree = None
+        _, matrix, _ = common.wmb_estimator(
+            state, load_space, options, average=average, sharp_masks=masks,
+            scale=scale_mm,
+        )
+        return matrix, inf.LinearOperator.from_matrix(
+            data_space, average.codomain, matrix, form="components"
+        )
+
+    def stds(target, wmb_average, matrix):
+        leakage = common.variances(
+            common.dense(
+                prior,
+                common.wmb_error_operator(physics, target, wmb_average, args),
+                n_jobs=jobs,
+            )
+        )
+        noise = np.einsum("ij,jk,ik->i", matrix, noise_matrix, matrix)
+        return np.sqrt(noise), np.sqrt(leakage), np.sqrt(noise + leakage)
+
+    width = 28 + 3 * 12 * len(names)
+    head = f"{'':<28}" + "".join(f"{n[:34]:>36}" for n in names) + "\n"
+    head += f"{'':<28}" + "".join(
+        f"{'noise':>12}{'leakage':>12}{'whole':>12}" for _ in names
+    )
+    text = (
+        "WMB's error in the regional averages of the total load under the prior "
+        "(mm EWT)\n" + "=" * width + "\n"
+    )
+    variants = [("gaussian", 5, f"Gaussian, {args.wmb_radius_km:.0f} km, to 60")]
+    variants += [("ddk", level, f"DDK{level}") for level in range(1, 9)]
+    for title, target in (
+        ("1. By filter", average),
+        ("2. By filter, degree one supplied", less_one),
+    ):
+        text += f"\n{title}\n{head}\n" + "-" * width + "\n"
+        for filter_name, level, label in variants:
+            try:
+                matrix, wmb_average = estimator(filter_name, level)
+            except (FileNotFoundError, OSError, ValueError) as problem:
+                text += f"{label:<28} not available ({problem})\n"
+                continue
+            row = np.column_stack(stds(target, wmb_average, matrix)).ravel()
+            text += f"{label:<28}" + "".join(f"{v:>12.3f}" for v in row) + "\n"
+
+    # The part of the sea level equation, for the filter of the run.
+    matrix, wmb_average = estimator(args.wmb_filter, args.wmb_ddk_level)
+    whole = common.wmb_error_operator(physics, average, wmb_average, args)
+    to_data = common.wmb_method(state, args).load_to_potential_coefficient_operator(
+        load_space
+    )
+    without = (wmb_average @ to_data - average) @ direct_load
+    truth = average @ total_load
+    count = len(names)
+    covariance = common.covariance_matrix(
+        common.dense(
+            prior, inf.ColumnLinearOperator([whole, without, truth]), n_jobs=jobs
+        )
+    )
+    blocks = covariance.reshape(3, count, 3, count)
+    text += (
+        f"\n3. The part of the sea level equation in the leakage "
+        f"({args.wmb_filter.upper()}"
+        + (f"{args.wmb_ddk_level}" if args.wmb_filter == "ddk" else "")
+        + ")\n"
+        f"{'':<28}{'whole':>12}{'without':>12}{'remainder':>12}"
+        f"{'true std':>12}{'corr. of remainder with truth':>34}\n" + "-" * 110 + "\n"
+    )
+    for i, name in enumerate(names):
+        var_whole, var_without = blocks[0, i, 0, i], blocks[1, i, 1, i]
+        var_rest = var_whole + var_without - 2.0 * blocks[0, i, 1, i]
+        var_truth = blocks[2, i, 2, i]
+        cov = blocks[0, i, 2, i] - blocks[1, i, 2, i]
+        text += (
+            f"{name:<28}{np.sqrt(var_whole):>12.3f}{np.sqrt(var_without):>12.3f}"
+            f"{np.sqrt(var_rest):>12.3f}{np.sqrt(var_truth):>12.3f}"
+            f"{cov / np.sqrt(var_rest * var_truth):>34.3f}\n"
+        )
+    return text
 
 
 def plot_error_densities(
@@ -100,7 +236,9 @@ def plot_error_densities(
             samples=None if samples is None else samples[:, i],
         )
         ax.set_title(name, fontsize=14)
-        ax.set_xlabel("Error (mm)", fontsize=12)
+        ax.set_xlabel("Error (mm EWT)", fontsize=12)
+        if i % 2 == 0:
+            ax.set_ylabel("Probability density", fontsize=12)
         if i == 1:
             ax.legend(loc="best", fontsize=9)
     for ax in axes[len(names) :]:
@@ -113,7 +251,7 @@ def main():
     rng = common.configure(args)
     common.start_run(OUTPUT_DIR, args)
 
-    physics, _, prior, noise, _, _ = common.grace_experiment(args, rng)
+    physics, _, prior, noise, noise_matrix, _ = common.grace_experiment(args, rng)
     state, load_space, scale_mm = physics.state, physics.load_space, physics.scale_mm
     names, average = common.regional_averaging(physics, args)
 
@@ -134,8 +272,9 @@ def main():
     figures = {}
     if args.plot_maps:
         print("Plotting a prior sample of the direct load and the load it induces...")
-        direct = prior.sample(rng=rng)
-        induced = total_load(direct) - direct
+        sample = prior.sample(rng=rng)
+        direct = common.direct_load_operator(physics)(sample)
+        induced = total_load(sample) - direct
         modulation = (
             common.ice_modulation(common.ocean_physics(args), args)
             if args.load_prior == "model"
@@ -219,6 +358,13 @@ def main():
         if error_samples is not None:
             line += f"; Monte Carlo error std {np.std(error_samples[:, i]):6.3f}"
         print(line)
+
+    if args.wmb_study and noise_matrix is not None:
+        print("WMB's error under the prior, by filter and by cause...")
+        text = wmb_study(physics, prior, noise_matrix, names, args)
+        with open(f"{OUTPUT_DIR}/grace_bias_wmb_study.txt", "w") as file:
+            file.write(text)
+        print(text)
 
     figures["grace_bias_pdfs.png"] = plot_error_densities(
         names, error_means, error_stds, nominal_stds, true_stds, samples=error_samples

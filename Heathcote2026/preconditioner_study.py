@@ -877,7 +877,7 @@ class Problem:
                 # nearest neighbours among those before it (`vecchia.py`).
                 approximate = VecchiaInverse(
                     unit_vectors(points),
-                    lambda angle: space.covariance_function(high, space.radius * angle),
+                    common.tabulated_kernel(space, high),
                     self.alt_local.covariance.diagonals()[0],
                     neighbours=vecchia,
                 )

@@ -101,6 +101,13 @@ DEFAULT_GROUPS = [
     "AR6 (IPCC Climate Regions)",
 ]
 CLASSES = ("ice sheets", "land", "ocean")
+# The classes of the table and the figures. A model of the ocean is removed
+# from gravity data, so an average over the ocean is of what the removal
+# left, not of a signal; the ocean parts are written to the metrics file
+# for the record and scored in the joint experiments.
+SCORED = ("ice sheets", "land")
+# The climate regions that the basins of the ice sheets cover.
+COVERED_BY_BASINS = ("Greenland/Iceland", "E.Antarctica", "W.Antarctica")
 ESTIMATORS = ("WMB", "Bayesian")
 COLOURS = {"WMB": "tab:red", "Bayesian": "tab:blue"}
 
@@ -117,6 +124,20 @@ def parse_arguments() -> argparse.Namespace:
     )
     common.add_wmb_arguments(parser)
     parser.add_argument("--region-groups", nargs="+", default=DEFAULT_GROUPS)
+    parser.add_argument(
+        "--min-area-km2",
+        type=float,
+        default=2.0e5,
+        help="The land part and the ocean part of a climate region are each "
+        "scored if larger than this.",
+    )
+    parser.add_argument(
+        "--resamples",
+        type=int,
+        default=2000,
+        help="Resamplings of the true loads, with replacement, for the range "
+        "of each ratio.",
+    )
     parser.add_argument(
         "--truth-years",
         nargs="+",
@@ -151,6 +172,14 @@ def parse_arguments() -> argparse.Namespace:
         type=int,
         default=50,
         help="Draws of the noise for each true load.",
+    )
+    parser.add_argument(
+        "--targets-less-degree-one",
+        action="store_true",
+        help="A diagnostic: the targets are the regional averages of the total "
+        "load less its degree-one part, which the data do not hold. Errors "
+        "that every average inherits from a wrong estimate of degree one "
+        "then drop out.",
     )
     parser.add_argument(
         "--plot-maps",
@@ -263,28 +292,57 @@ def truth_maps(state, label, truth, wmb, mean, std=None):
     return fig
 
 
-def regions_of(state, groups) -> tuple[list, list, list]:
-    """The names, masks and classes of the regions of the named groups. A
-    region of Greenland's or Antarctica's basins is of the ice sheets; any
-    other is ocean or land by which covers more of it."""
+def regions_of(state, groups, min_area_km2: float) -> tuple[list, list, list, list]:
+    """The names, masks, classes and areas (km²) of the regions of the named
+    groups. A basin of Greenland or Antarctica is of the ice sheets, whole.
+    Any other region is split by the masks into its land part (the land
+    outside the two ice sheets) and its ocean part, each a region of its own
+    class if larger than `min_area_km2`; those that the basins of the ice
+    sheets cover (`COVERED_BY_BASINS`) are left out."""
     known = state.list_all_regions()
     model = state.model
-    ocean = state.ocean_projection(value=0.0)
-    names, masks, classes = [], [], []
+    p = model.parameters
+    km2 = (p.length_scale / 1000.0) ** 2
+    parts = {
+        "land": common._land_without_ice_sheets(state),
+        "ocean": state.ocean_function,
+    }
+    names, masks, classes, areas = [], [], [], []
     for group in groups:
         if group not in known:
             raise ValueError(f"'{group}' is not one of {sorted(known)}.")
         on_ice = "Greenland" in group or "Antarctica" in group
         for name in known[group]:
             mask = state.get_projection(name, value=0.0)
-            area = model.integrate(mask)
-            if area <= 0.0:
+            if on_ice:
+                pieces = [(name, mask, "ice sheets")]
+            elif name in COVERED_BY_BASINS:
                 continue
-            wet = model.integrate(mask * ocean) / area
-            names.append(name)
-            masks.append(mask)
-            classes.append("ice sheets" if on_ice else "ocean" if wet > 0.5 else "land")
-    return names, masks, classes
+            else:
+                pieces = [
+                    (f"{name} ({kind})", mask * part, kind)
+                    for kind, part in parts.items()
+                ]
+            for label, piece, kind in pieces:
+                area = model.integrate(piece) * km2
+                if area <= 0.0 or (not on_ice and area < min_area_km2):
+                    continue
+                names.append(label)
+                masks.append(piece)
+                classes.append(kind)
+                areas.append(area)
+    return names, masks, classes, areas
+
+
+def resampled_range(ratios, chosen, resamples: int, rng) -> tuple[float, float]:
+    """The 5th and 95th percentiles of the root mean square ratio of the
+    regions `chosen` when the true loads are resampled with replacement,
+    each keeping its draws of the noise. `ratios` is (loads, draws,
+    regions)."""
+    squares = np.mean(ratios[:, :, chosen] ** 2, axis=(1, 2))
+    picks = rng.integers(0, len(squares), size=(resamples, len(squares)))
+    values = np.sqrt(squares[picks].mean(axis=1))
+    return float(np.percentile(values, 5.0)), float(np.percentile(values, 95.0))
 
 
 def statistics(ratios, errors, stds) -> list[float]:
@@ -307,15 +365,15 @@ def histogram_figure(ratios: dict, classes: np.ndarray):
     by class of region, against the standard normal density."""
     fig, axes = plt.subplots(
         len(ESTIMATORS),
-        len(CLASSES),
-        figsize=(5.5 * len(CLASSES), 4.2 * len(ESTIMATORS)),
+        len(SCORED),
+        figsize=(5.5 * len(SCORED), 4.2 * len(ESTIMATORS)),
         layout="constrained",
         squeeze=False,
     )
     x = np.linspace(-6.0, 6.0, 400)
     bins = np.linspace(-6.0, 6.0, 49)
     for i, estimator in enumerate(ESTIMATORS):
-        for j, name in enumerate(CLASSES):
+        for j, name in enumerate(SCORED):
             ax = axes[i, j]
             values = ratios[estimator][:, classes == name].ravel()
             if values.size:
@@ -349,9 +407,9 @@ def region_figure(errors: dict, stds: dict, classes: np.ndarray):
     """Region by region, the root mean square error of each estimator
     against the standard deviation it states."""
     fig, axes = plt.subplots(
-        1, len(CLASSES), figsize=(5.5 * len(CLASSES), 5.0), layout="constrained"
+        1, len(SCORED), figsize=(5.5 * len(SCORED), 5.0), layout="constrained"
     )
-    for ax, name in zip(axes, CLASSES):
+    for ax, name in zip(axes, SCORED):
         chosen = classes == name
         low, high = np.inf, 0.0
         for estimator in ESTIMATORS:
@@ -393,13 +451,18 @@ def main():
     state, model = physics.state, physics.state.model
     load_space, scale_mm = physics.load_space, physics.scale_mm
     km = 1000.0 / model.parameters.length_scale
+    # The estimators act on the model, the fields; a true load is a direct
+    # load, whatever fields might have made it.
     forward = common.grace_forward_operator(physics, args)
     total_load = common.total_load_operator(physics)
+    forward_of_load = common.grace_forward_operator(physics, args, of_load=True)
+    total_of_load = common.total_load_operator(physics, of_load=True)
+    direct_load = common.direct_load_operator(physics)
 
     if args.prior_truths > 0:
         print(f"Drawing {args.prior_truths} loads from the prior...")
         labels = [f"draw {i + 1}" for i in range(args.prior_truths)]
-        loads = [prior.sample(rng=rng) for _ in labels]
+        loads = [direct_load(prior.sample(rng=rng)) for _ in labels]
     else:
         print("Reading the loads of the ESA Earth System Model, version 3.0...")
         _, _, ocean, share = common.OCEAN_CASES[args.ocean_case]
@@ -409,10 +472,12 @@ def main():
             )
         )
         labels, loads = true_loads(state, years, ocean, share, args.truth_mean)
-    totals = [total_load(zeta) for zeta in loads]
-    clean_data = [forward(zeta) for zeta in loads]
+    totals = [total_of_load(zeta) for zeta in loads]
+    clean_data = [forward_of_load(zeta) for zeta in loads]
 
-    names, masks, classes = regions_of(state, args.region_groups)
+    names, masks, classes, areas = regions_of(
+        state, args.region_groups, args.min_area_km2
+    )
     classes = np.array(classes)
     print(
         f"  {len(labels)} loads ({labels[0]} to {labels[-1]}) and {len(names)} "
@@ -422,6 +487,19 @@ def main():
     if args.smoothing_scale_km > 0.0:
         smoother = load_space.heat_measure(args.smoothing_scale_km * km).covariance
         masks = [smoother(mask) for mask in masks]
+    if args.targets_less_degree_one:
+        # The average of a field less its degree-one part is the L2 product
+        # with the mask less its own, over the mask's area, which the part
+        # taken off does not change.
+        flat = common.underlying_space(load_space)
+
+        def less_degree_one(mask):
+            components = flat.to_components(mask)
+            low = np.zeros_like(components)
+            low[1:4] = components[1:4]
+            return mask - flat.from_components(low)
+
+        masks = [less_degree_one(mask) for mask in masks]
     average = scale_mm * averaging_operator(state, load_space, masks)
 
     # WMB's estimator as it is made in practice (`common.wmb_estimator`).
@@ -484,9 +562,12 @@ def main():
         with_noise = load_errors[estimator][:, None, :] + draws @ matrix.T
         errors[estimator] = with_noise.reshape(-1, len(names))
         ratios[estimator] = errors[estimator] / stds[estimator]
+    by_load = (len(labels), args.noise_draws, len(names))
+    # A generator of its own, so that the ranges do not move the draws.
+    resample_rng = np.random.default_rng(0 if args.seed is None else args.seed + 2)
 
     columns = ["rms ratio", "within 1", "within 2", "median std", "median rms"]
-    width = 30 + 12 * len(columns)
+    width = 30 + 12 * len(columns) + 18
     text = (
         "The GRACE estimators' errors against their stated standard deviations\n"
         + (
@@ -520,44 +601,72 @@ def main():
         "A ratio is an error over the standard deviation its estimator states; "
         "for a standard normal the\nroot mean square is 1 and the fractions "
         "within 1 and 2 are 0.683 and 0.954. Stds and errors in mm EWT.\n"
+        "The range of the rms ratio is its 5th to 95th percentile when the "
+        f"loads are resampled with\nreplacement ({args.resamples} times), each "
+        "keeping its draws of the noise.\n"
+        "A climate region is split into its land part and its ocean part, "
+        f"each scored if larger than {args.min_area_km2:.0f} km²;\nthe ocean "
+        "parts are listed after the table.\n"
         "WMB's stated standard deviation is that of its whole error under the "
         "prior, noise and leakage; the\nrows 'WMB, noise alone' set the same "
         "errors against the noise it propagates.\n\n"
     )
-    text += (
-        f"{'':<30}" + "".join(f"{c:>12}" for c in columns) + "\n" + "-" * width + "\n"
+    heading = (
+        f"{'':<30}"
+        + "".join(f"{c:>12}" for c in columns)
+        + f"{'range of rms ratio':>20}\n"
+        + "-" * width
+        + "\n"
     )
-    for label in CLASSES + ("all",):
-        chosen = np.ones(len(names), bool) if label == "all" else classes == label
-        if not chosen.any():
-            continue
+
+    def rows(label, chosen):
+        out = ""
         for estimator in ESTIMATORS:
-            row = statistics(
-                ratios[estimator][:, chosen],
-                errors[estimator][:, chosen],
-                stds[estimator][chosen],
-            )
-            text += f"{label + ', ' + estimator:<30}" + "".join(
-                f"{v:>12.3f}" for v in row
-            )
-            text += "\n"
+            sets = [(estimator, ratios[estimator], stds[estimator])]
             if estimator == "WMB":
-                row = statistics(
-                    (errors["WMB"] / noise_alone)[:, chosen],
-                    errors["WMB"][:, chosen],
-                    noise_alone[chosen],
+                sets.append(
+                    ("WMB, noise alone", errors["WMB"] / noise_alone, noise_alone)
                 )
-                text += f"{label + ', WMB, noise alone':<30}" + "".join(
+            for name, ratio, std in sets:
+                row = statistics(
+                    ratio[:, chosen], errors[estimator][:, chosen], std[chosen]
+                )
+                low, high = resampled_range(
+                    ratio.reshape(by_load), chosen, args.resamples, resample_rng
+                )
+                out += f"{label + ', ' + name:<30}" + "".join(
                     f"{v:>12.3f}" for v in row
                 )
-                text += "\n"
+                out += f"{low:>12.2f} to {high:<5.2f}\n"
+        return out
+
+    scored = np.isin(classes, SCORED)
+    text += heading
+    for label in SCORED + ("all",):
+        chosen = scored if label == "all" else classes == label
+        if chosen.any():
+            text += rows(label, chosen)
+    for label in CLASSES:
+        chosen = classes == label
+        if label not in SCORED and chosen.any():
+            text += (
+                f"\nNot scored above: the {label} parts, whose averages are of "
+                "what the removal of an ocean model leaves\n" + heading
+            )
+            text += rows(label, chosen)
     text += "\n\nRegion by region: stated std, rms error, and rms error without noise\n"
-    text += f"{'region':<26}{'class':<12}{'WMB noise std':>16}" + "".join(
-        f"{e + ' ' + c:>16}" for e in ESTIMATORS for c in ("std", "rms", "load")
+    text += (
+        f"{'region':<34}{'class':<12}{'area, 10^3 km2':>15}{'WMB noise std':>16}"
+        + "".join(
+            f"{e + ' ' + c:>16}" for e in ESTIMATORS for c in ("std", "rms", "load")
+        )
     )
     text += "\n"
     for i, name in enumerate(names):
-        text += f"{name[:25]:<26}{classes[i]:<12}{noise_alone[i]:>16.3f}"
+        text += (
+            f"{name[:33]:<34}{classes[i]:<12}{areas[i] / 1000.0:>15.0f}"
+            f"{noise_alone[i]:>16.3f}"
+        )
         for estimator in ESTIMATORS:
             values = (
                 stds[estimator][i],
@@ -566,8 +675,41 @@ def main():
             )
             text += "".join(f"{v:>16.3f}" for v in values)
         text += "\n"
+    # The degree-one coefficients of the direct load, which the data do not
+    # hold: the truth, the Bayesian estimate's error and what it states.
+    one = (
+        (scale_mm / load_space.radius)
+        * load_space.coefficient_operator(lmax=1, lmin=1)
+    )
+    one_target = one @ direct_load
+    one_matrix = (one_target @ inversion.kalman_operator).matrix(
+        form="components", by="rows"
+    )
+    one_stds = common.standard_deviations(common.dense(posterior, one_target))
+    one_truth = np.array([one(zeta) for zeta in loads])
+    one_clean = clean @ one_matrix.T - one_truth
+    one_errors = one_clean[:, None, :] + draws @ one_matrix.T
+    one_ratios = one_errors / one_stds
+    text += (
+        "\n\nDegree-one coefficients of the direct load (mm EWT), Bayesian "
+        "estimate\n"
+        f"{'':<10}{'true rms':>12}{'stated std':>12}{'rms error':>12}"
+        f"{'no noise':>12}{'rms ratio':>12}{'range':>16}\n"
+    )
+    for i, label in enumerate(("(1,0)", "(1,1)", "(1,-1)")):
+        low, high = resampled_range(
+            one_ratios, np.arange(3) == i, args.resamples, resample_rng
+        )
+        text += (
+            f"{label:<10}{np.sqrt(np.mean(one_truth[:, i] ** 2)):>12.3f}"
+            f"{one_stds[i]:>12.3f}{np.sqrt(np.mean(one_errors[:, :, i] ** 2)):>12.3f}"
+            f"{np.sqrt(np.mean(one_clean[:, i] ** 2)):>12.3f}"
+            f"{np.sqrt(np.mean(one_ratios[:, :, i] ** 2)):>12.2f}"
+            f"{low:>9.2f} to {high:<4.2f}\n"
+        )
     common.write_metrics(METRICS_FILE, text)
     print(text[: text.index("Region by region")])
+    print(text[text.index("Degree-one coefficients") :])
     print(f"saved {METRICS_FILE}")
 
     output = {

@@ -66,7 +66,7 @@ data() {
     "$PYTHON" grace_covariance.py build --years 2007 2008
     "$PYTHON" esm_loads.py fetch
     "$PYTHON" en4_steric.py fetch
-    "$PYTHON" ddk_filter.py fetch --levels 3 5
+    "$PYTHON" ddk_filter.py fetch --levels 1 2 3 4 5 6 7 8
     "$PYTHON" ddk_filter.py check
     "$PYTHON" gia_statistics.py build
     "$PYTHON" gia_statistics.py check
@@ -110,6 +110,11 @@ cases() {
         keep coverage-ocean-partly-prior-truths grace_coverage
     OCEAN_CASE=removed keep inversion-ocean-removed grace_inversion
     OCEAN_CASE=full keep inversion-ocean-full grace_inversion
+    # How much of the errors with the ocean in full is a wrong degree one.
+    OCEAN_CASE=full LESS_DEGREE_ONE=1 \
+        keep coverage-ocean-full-less-degree-one grace_coverage
+    OCEAN_CASE=full PRIOR_TRUTHS=100 \
+        keep coverage-ocean-full-prior-truths grace_coverage
 }
 
 # The options of the joint experiment as run_all.sh passes them, for
@@ -130,6 +135,10 @@ probe)
     grep -n ">>> [a-z]\|iterations\.\|Squared misfit\|^real" "logs/probe-$stamp.log"
     ;;
 production)
+    # With the joint experiment's test against truths not drawn from the
+    # prior and its low-rank posteriors, unless set otherwise.
+    export MISMATCH_YEARS="${MISMATCH_YEARS-2007 2020}"
+    export LOW_RANK="${LOW_RANK-3000 10000}"
     stage production keep main all
     ;;
 cases)

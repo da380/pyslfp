@@ -168,27 +168,55 @@ def main():
         f"true GMSL std = {true_std:.4f} mm"
     )
 
+    # The part of the error that is not noise, by cause: the points do not
+    # cover the ocean (the average over the points of the relative sea level
+    # change less its mean over the ocean), and the altimeter measures the
+    # geocentric and not the relative sea level change (the average over
+    # the points of their difference, the motion of the solid surface).
+    relative = setup.relative_sea_level_change(physics.fingerprint)
+    at_points = physics.fingerprint.field_space.point_evaluation_operator(
+        physics.points
+    )
+    causes = common.covariance_matrix(
+        common.dense(
+            prior,
+            mm
+            * inf.ColumnLinearOperator(
+                [
+                    averaging @ at_points @ relative - true_gmsl,
+                    averaging @ (physics.altimetry - at_points @ relative),
+                ]
+            ),
+        )
+    )
+    cause_stds = np.sqrt(np.diag(causes))
+    print(
+        f"  the part that is not noise, std = {np.sqrt(causes.sum()):.4f} mm: "
+        f"incomplete coverage {cause_stds[0]:.4f} mm, geocentric against "
+        f"relative sea level {cause_stds[1]:.4f} mm, correlation "
+        f"{causes[0, 1] / (cause_stds[0] * cause_stds[1]):+.3f}"
+    )
+
     if args.plot_maps:
         print("Drawing a sample to show the fields...")
         model = prior.sample(rng=rng)
         shown = physics.display(model)
-        second = (
-            ("bias_steric_height.png", STERIC)
-            if STERIC in shown
-            else ("bias_density.png", RHO)
+        # The ocean's two fields as they are shown: the steric height and
+        # the manometric sea level, or the sterodynamic sea level and the
+        # density where the density is the second field.
+        ocean = (
+            [
+                ("bias_steric_height.png", STERIC, "(a)"),
+                ("bias_manometric.png", common.MANOMETRIC, "(b)"),
+            ]
+            if physics.shows_manometric
+            else [
+                ("bias_sterodynamic.png", ETA, "(a)"),
+                ("bias_density.png", RHO, "(b)"),
+            ]
         )
-        for file, name, panel in [
-            ("bias_ice_thickness.png", ICE, "(c)"),
-            ("bias_sterodynamic.png", ETA, "(a)"),
-            (*second, "(b)"),
-        ]:
+        for file, name, panel in [("bias_ice_thickness.png", ICE, "(c)"), *ocean]:
             figures[file] = field_map(shown[name], field_label(name), panel)
-        if STERIC in shown:
-            # The manometric part: what of the sea level change is not the
-            # steric height, and so loads the ocean.
-            figures["bias_manometric.png"] = field_map(
-                shown[ETA] - shown[STERIC], "Manometric SL Change (mm)", ""
-            )
         data_mm = mm * (physics.altimetry(model) + noise.sample(rng=rng))
         (
             figures["bias_geocentric_sl_map.png"],

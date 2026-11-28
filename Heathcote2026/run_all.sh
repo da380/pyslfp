@@ -24,8 +24,9 @@
 #   OCEAN_CASE=removed ./run_all.sh grace_inversion grace_coverage
 #                                             the GRACE experiments with the
 #                                             ocean removed (or: partly, full)
-#   STERIC_DEPTH_SCALE_M=0 ./run_all.sh       the steric height independent of
-#                                             the water's depth (default: 500)
+#   STERIC_DEPTH_SCALE_M=500 ./run_all.sh     the steric height falling away
+#                                             over shallow water (default: 0,
+#                                             independent of the depth)
 #   PROBE=1 ./run_all.sh grace_inversion joint_inversion
 #                                             the posterior expectations alone,
 #                                             for iteration counts and timings
@@ -190,21 +191,28 @@ SURROGATE=(--surrogate-degree 32 --preconditioner blocks
     --altimetry-neighbours "${ALT_NEIGHBOURS:-40}"
     --grace-block-rank "${GRACE_RANK:-0}")
 
-# Tolerance of the solves that push the posterior covariance onto the
-# quantities of interest, the prior-sensitivity tables and the covariance maps:
-# grace_inversion, altimetry_inversion, joint_inversion. The posterior
-# expectation and samples keep the scripts' own tolerance.
+# Tolerance of every solve: the posterior expectation, the samples, and the
+# solves that push the posterior covariance onto the quantities of interest,
+# the prior-sensitivity tables and the covariance maps (grace_inversion,
+# altimetry_inversion, joint_inversion).
 QOI=(--qoi-rtol 1e-6)
 
 # Ocean model and prior: altimetry_bias, altimetry_inversion,
 # joint_inversion, and the GRACE scripts, whose load takes its prior from
-# these fields (identical names and defaults in all). The loads,
-# discontinuous at the supports' edges, lie in H^(1/4).
+# these fields (identical names and defaults in all). The four fields lie
+# in H^(5/4), which has point values; the loads, discontinuous at the
+# supports' edges, lie in H^(1/4), and their edges come from the load
+# operator alone.
 #
-# The ice and the water stored on the other land are fields of H^(1/4) with
-# priors of order 1.5 on L^2, their amplitudes and scales stated in mm EWT
-# and km (from the year-on-year changes of the ESA Earth System Model,
-# 1995 to 2006).
+# The priors of the ice, the water stored on the other land and the
+# manometric sea level have the spectrum (1 + s^2 k)^-q on L^2 as far as
+# their sources go, degree 180, and beyond it decay with the order 2.5 that
+# the space needs (--prior-taper-degree, --prior-taper-order): what a source
+# shows to its own resolution says nothing of the decay beyond it. The
+# amplitudes are stated in mm (the root mean square over the support of the
+# year-on-year changes of the ESA Earth System Model, 1995 to 2006), and q
+# and s are fitted to the degree variances of the same changes through the
+# masks, degrees 2 to 180 (prior_fit.py).
 #
 # The ice's std varies over the ice sheets: an amplitude for each sheet (155
 # and 60 mm EWT over the grounded ice of Greenland and Antarctica), growing
@@ -212,17 +220,17 @@ QOI=(--qoi-rtol 1e-6)
 # then a positive function times the invariant one, on the same space.
 # ICE_MODULATION=none gives the invariant field alone, at --ice-std-mm.
 #
-# The ocean's fields are the sterodynamic sea level and the steric height,
-# in H^(5/4), the space of the response. Their prior is stated on two
-# independent fields: the steric height (EN4's year-on-year changes: 46 mm,
-# 280 km, order 3) and the manometric sea level, the ocean's load as a
-# height of water (the Earth System Model's ocean component: 8 mm, at the
-# lowest order the space allows, 2.5, and the scale fitted at that order,
-# 330 km). The sterodynamic sea level is their sum. The steric height of a
-# column of depth D is 1 - exp(-D / 500 m) of that of deep water, as EN4's
-# changes fall away over shallow water, and the load takes up the
-# difference (--steric-depth-scale-m; 0 leaves the steric height
-# independent of the depth, as in the runs of 23 November).
+# The ocean's fields are the sterodynamic sea level and the steric height.
+# Their prior is stated on two independent fields: the steric height (EN4's
+# year-on-year changes: 46 mm, 302 km, order 3, with no taper) and the
+# manometric sea level, the ocean's load as a height of water (the Earth
+# System Model's ocean component: 8 mm, fitted as the mass sources are; its
+# scale comes out at the fit's upper bound, so that its spectrum is a power
+# law up to the taper). The sterodynamic sea level
+# is their sum. The steric height is independent of the depth of the water;
+# STERIC_DEPTH_SCALE_M=500 makes that of a column of depth D the share
+# 1 - exp(-D / 500 m) of deep water's, the load taking up the difference
+# (--steric-depth-scale-m), which the paper's runs do not use.
 #
 # The submitted paper had the ice alone, in H^2 with the other fields, and
 # the density as the ocean's second field, coupled to the sea level: for
@@ -234,22 +242,28 @@ OCEAN_PRIOR=(
     --load-order 0.25
     --spacing "$SPACING"
     --land-water
-    --source-order 0.25
-    --source-prior-order 1.5
+    --source-order 1.25
+    --prior-taper-degree "${PRIOR_TAPER_DEGREE:-180}"
+    --prior-taper-order 2.5
+    --source-reference-degree 255
     --ice-std-mm 80.0
-    --ice-scale-km 180.0
+    --ice-scale-km "${ICE_SCALE_KM:-548.0}"
+    --ice-prior-order "${ICE_ORDER:-0.79}"
     --ice-modulation "${ICE_MODULATION:-margin}"
+    --ice-margin-scale-km 180.0
+    --ice-margin-growth "${ICE_MARGIN_GROWTH:-10.2}"
     --land-water-std-mm 65.0
-    --land-water-scale-km 340.0
+    --land-water-scale-km "${LAND_WATER_SCALE_KM:-1670.0}"
+    --land-water-prior-order "${LAND_WATER_ORDER:-0.76}"
     --ocean-prior steric
     --field-order 1.25
     --steric-std-mm 46.0
-    --steric-scale-km 280.0
+    --steric-scale-km "${STERIC_SCALE_KM:-302.0}"
     --steric-order 3.0
-    --steric-depth-scale-m "${STERIC_DEPTH_SCALE_M:-500.0}"
+    --steric-depth-scale-m "${STERIC_DEPTH_SCALE_M:-0.0}"
     --manometric-std-mm 8.0
-    --manometric-scale-km 330.0
-    --manometric-order 2.5
+    --manometric-scale-km "${MANOMETRIC_SCALE_KM:-5996.0}"
+    --manometric-order "${MANOMETRIC_ORDER:-0.83}"
 )
 
 # Altimetry noise: the same numbers, but joint_inversion prefixes the flags
@@ -322,7 +336,7 @@ JOINT_GRACE_NOISE=(--grace-coefficient-errors 2007 2008)
 # OCEAN_CASE brackets it: removed (next to none), partly (a quarter, about
 # 2 mm; the default) or full (nothing removed, as in the altimetry and
 # joint experiments, which are not affected). See common.OCEAN_CASES.
-OCEAN_CASE="${OCEAN_CASE:-partly}"
+OCEAN_CASE="${OCEAN_CASE:-removed}"
 GRACE_PRIOR=(
     --load-prior model
     --spacing 8.0
@@ -333,7 +347,7 @@ GRACE_PRIOR=(
 # The ${arr[@]+...} expansion below keeps `set -u` happy if you empty one
 # of these arrays (needed on bash < 4.4, e.g. macOS /bin/bash).
 ALTIMETRY_BIAS_EXTRA=(--plot-maps)  # e.g. --samples 1000
-GRACE_BIAS_EXTRA=(--plot-maps)      # e.g. --samples 1000
+GRACE_BIAS_EXTRA=(--plot-maps --wmb-study) # e.g. --samples 1000
 ALTIMETRY_INV_EXTRA=(--all)         # e.g. --std-samples 100
 GRACE_INV_EXTRA=(--all --paper-bound --std-samples 100) # e.g. --plot-maps
 JOINT_INV_EXTRA=(--all --std-samples 100) # e.g. --map-all-cases
@@ -368,6 +382,26 @@ read -r -a MAP_TRUTHS <<<"${MAP_TRUTH:-12}"
 GRACE_COVERAGE_EXTRA=(--truth-mean "${TRUTH_MEAN:-kept}"
     --prior-truths "${PRIOR_TRUTHS:-0}"
     --plot-maps --map-truth "${MAP_TRUTHS[@]}" --std-samples 50)
+# LESS_DEGREE_ONE=1: the targets are the averages less their degree-one
+# parts, a diagnostic of how much of an error is a wrong degree one.
+if [ "${LESS_DEGREE_ONE:-0}" -ne 0 ]; then
+    GRACE_COVERAGE_EXTRA+=(--targets-less-degree-one)
+fi
+# The joint experiment's further parts. MISMATCH_YEARS="2007 2020": the test
+# against truths not drawn from the prior (--mismatch-years). LOW_RANK="3000
+# 10000": the posteriors of the GRACE-only and joint cases as low-rank
+# updates of the prior with those ranks (--low-rank-posterior), beside the
+# solves.
+if [ -n "${MISMATCH_YEARS:-}" ]; then
+    read -r -a _years <<<"$MISMATCH_YEARS"
+    JOINT_INV_EXTRA+=(--mismatch-years "${_years[@]}"
+        --mismatch-truth-mean "${MISMATCH_TRUTH_MEAN:-kept}"
+        --mismatch-prior-truths "${MISMATCH_PRIOR_TRUTHS:-0}")
+fi
+if [ -n "${LOW_RANK:-}" ]; then
+    read -r -a _ranks <<<"$LOW_RANK"
+    JOINT_INV_EXTRA+=(--low-rank-posterior "${_ranks[@]}" --low-rank-cases grace joint)
+fi
 
 # ---------------------------------------------------------------------------
 # 5. Run

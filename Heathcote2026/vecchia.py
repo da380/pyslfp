@@ -41,7 +41,7 @@ from typing import Callable
 
 import numpy as np
 from scipy import sparse
-from scipy.sparse.linalg import spsolve_triangular
+from scipy.sparse.linalg import spilu, spsolve_triangular
 
 
 def unit_vectors(points) -> np.ndarray:
@@ -188,6 +188,7 @@ class VecchiaInverse:
         *,
         neighbours: int = 30,
         batch: int = 2048,
+        workers: int | None = None,
     ):
         count = len(xyz)
         self.order = maximin_order(xyz)
@@ -210,21 +211,40 @@ class VecchiaInverse:
                 (size, group[start : start + batch])
                 for start in range(0, len(group), batch)
             ]
-        for size, members in groups:
+
+        # The batches are independent, and their work is in compiled code
+        # that releases the interpreter, so they are shared among threads.
+        def regress(group):
+            size, members = group
             index = sets[members, :size]
             near = ordered[index]
-            among = self._kernel(kernel, np.einsum("nik,njk->nij", near, near))
+            among = self._kernel(kernel, near @ near.transpose(0, 2, 1))
             among[:, np.arange(size), np.arange(size)] += nugget[index]
             cross = self._kernel(
                 kernel, np.einsum("nik,nk->ni", near, ordered[members])
             )
             weights = np.linalg.solve(among, cross[:, :, None])[:, :, 0]
-            conditional[members] = (
-                variance + nugget[members] - np.einsum("ni,ni->n", cross, weights)
+            return (
+                members,
+                variance + nugget[members] - np.einsum("ni,ni->n", cross, weights),
+                np.repeat(members, size),
+                index.ravel(),
+                weights.ravel(),
             )
-            rows.append(np.repeat(members, size))
-            columns.append(index.ravel())
-            values.append(weights.ravel())
+
+        import os
+        from concurrent.futures import ThreadPoolExecutor
+
+        if workers is None:
+            workers = int(os.environ.get("VECCHIA_WORKERS", "0")) or min(
+                16, os.cpu_count() or 1
+            )
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+            for members, variances_, row, column, value in pool.map(regress, groups):
+                conditional[members] = variances_
+                rows.append(row)
+                columns.append(column)
+                values.append(value)
         if np.any(conditional <= 0.0):
             raise ValueError("A conditional variance is not positive.")
         regression = sparse.csr_matrix(
@@ -257,12 +277,102 @@ class VecchiaInverse:
         return result
 
 
+class NoiseFreeVecchiaInverse:
+    """The approximate inverse of T = K + D with the nearest-neighbour
+    approximation applied to K alone (Schafer, Katzfuss and Owhadi, 2021,
+    section 4.1).
+
+    With the noise on the diagonal a point is screened less well by its
+    nearest neighbours: what the others add once the nearest are known does
+    not fall away with distance as it does for K, and `VecchiaInverse` on T
+    needs more neighbours the denser the points. So the sparse factor is
+    made for K, whose inverse is then U^T U with U = F^-1/2 (1 - B), and
+    the noise is put back exactly:
+
+        T^-1 = U^T (1 + U D U^T)^-1 U .
+
+    The matrix in the middle is sparse and positive definite, and equal to
+    one where the prior's conditional variance far exceeds the noise. An
+    incomplete factorisation of it in the maximin order
+    (`scipy.sparse.linalg.spilu`, values below `drop_tol` of a column's
+    largest dropped, the factors held to `fill_factor` times the matrix)
+    stands for its inverse; the mean of its action and its transpose's keeps
+    the result symmetric.
+
+    K alone can be too smooth for the small solves to be stable, so a part
+    `jitter` of the smallest noise variance is left with K and taken from D.
+
+    Args as for `VecchiaInverse`.
+    """
+
+    def __init__(
+        self,
+        xyz: np.ndarray,
+        kernel: Callable[[np.ndarray], np.ndarray],
+        nugget,
+        /,
+        *,
+        neighbours: int = 30,
+        jitter: float = 1.0e-2,
+        drop_tol: float = 1.0e-4,
+        fill_factor: float = 3.0,
+    ):
+        count = len(xyz)
+        nugget = np.broadcast_to(np.asarray(nugget, dtype=float), (count,))
+        kept = jitter * float(nugget.min())
+        smooth = VecchiaInverse(xyz, kernel, kept, neighbours=neighbours)
+        self.order = smooth.order
+        # In the maximin order K^-1 = U^T U with U = F^-1/2 (1 - B), lower
+        # triangular, so that T = U^-1 (1 + U D U^T) U^-T and
+        # T^-1 = U^T (1 + U D U^T)^-1 U: a congruence, which any positive
+        # definite stand-in for the middle inverse keeps positive definite,
+        # and which loses nothing to cancellation where K far exceeds D.
+        self._whiten = (
+            sparse.diags(1.0 / np.sqrt(smooth._conditional)) @ smooth._residual
+        ).tocsr()
+        self._whiten_t = self._whiten.T.tocsr()
+        noise = sparse.diags(nugget[self.order] - kept)
+        matrix = (
+            sparse.identity(count, format="csc")
+            + (self._whiten @ noise @ self._whiten_t)
+        ).tocsc()
+        self._factor = spilu(
+            matrix,
+            drop_tol=drop_tol,
+            fill_factor=fill_factor,
+            permc_spec="NATURAL",
+            diag_pivot_thresh=0.0,
+            options={"SymmetricMode": True},
+        )
+        self.entries_per_point = smooth.entries_per_point
+        self.matrix_entries_per_point = matrix.nnz / count
+        self.factor_entries_per_point = (
+            self._factor.L.nnz + self._factor.U.nnz
+        ) / count
+
+    def inverse(self, vector: np.ndarray) -> np.ndarray:
+        """The approximate T^-1 applied to a vector on the points."""
+        white = self._whiten @ vector[self.order]
+        solved = 0.5 * (self._factor.solve(white) + self._factor.solve(white, trans="T"))
+        result = np.empty_like(white)
+        result[self.order] = self._whiten_t @ solved
+        return result
+
+
 def _self_test() -> None:
     """Conjugate gradients on K + D for random points and a smooth kernel,
     with and without the approximate inverse."""
+    import sys
+    import time
+
     rng = np.random.default_rng(2)
-    count = 4000
+    # Points in a cap, dense beside the kernel's scale if asked for: it is
+    # there that the noise weakens the screening.
+    dense = "dense" in sys.argv
+    count = 12000 if dense else 4000
     xyz = rng.standard_normal((count, 3))
+    if dense:
+        xyz[:, 2] = np.abs(xyz[:, 2]) + 5.0
     xyz /= np.linalg.norm(xyz, axis=1)[:, None]
     scale = 0.05  # radians: about 300 km on the Earth
 
@@ -301,6 +411,16 @@ def _self_test() -> None:
         print(
             f"{neighbours:>3} neighbours: {solve(approximate.inverse):>4} iterations "
             f"(round trip {round_trip:.1e})"
+        )
+    for neighbours in (10, 20, 40):
+        start = time.perf_counter()
+        approximate = NoiseFreeVecchiaInverse(xyz, kernel, nugget, neighbours=neighbours)
+        seconds = time.perf_counter() - start
+        print(
+            f"{neighbours:>3} neighbours, noise-free form: "
+            f"{solve(approximate.inverse):>4} iterations (build {seconds:.1f} s; "
+            f"entries a point: matrix {approximate.matrix_entries_per_point:.0f}, "
+            f"factors {approximate.factor_entries_per_point:.0f})"
         )
 
 

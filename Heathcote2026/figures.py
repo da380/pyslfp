@@ -15,7 +15,7 @@ from matplotlib.patches import Ellipse
 import pygeoinf as inf
 import pyslfp as sl
 
-from common import ETA, ICE, LAND, RHO, STERIC
+from common import BARYSTATIC, ETA, ICE, LAND, MANOMETRIC, RHO, STERIC
 
 # The fonts of the inversion scripts' figures; see `set_inversion_style`.
 INVERSION_STYLE = {
@@ -33,13 +33,18 @@ COLORBAR = {"orientation": "horizontal", "shrink": 0.8, "pad": 0.05}
 # The fields of the ocean experiments, in the rows of their map grids: the
 # row title and the display unit (see `common.OceanPhysics.display`). A map
 # grid has a row for each of these that the model holds.
-FIELDS = (ICE, LAND, ETA, RHO, STERIC)
+FIELDS = (ICE, LAND, ETA, RHO, STERIC, MANOMETRIC, BARYSTATIC)
+# The rows as they are ordered when the ocean is shown as its steric and
+# manometric parts: the two parts side by side, then the barystatic part of
+# the second.
 ROW_TITLES = {
     ICE: "Ice Thickness Change",
     LAND: "Land Water Change",
     ETA: "Sterodynamic SL Change",
     RHO: "Averaged Density Change",
     STERIC: "Steric Height Change",
+    MANOMETRIC: "Manometric SL Change",
+    BARYSTATIC: "Barystatic SL Change",
 }
 UNIT_LABELS = {
     ICE: "mm",
@@ -47,6 +52,8 @@ UNIT_LABELS = {
     ETA: "mm",
     RHO: r"g m$^{-3}$",
     STERIC: "mm",
+    MANOMETRIC: "mm",
+    BARYSTATIC: "mm",
 }
 
 
@@ -69,7 +76,7 @@ def field_label(name: str) -> str:
 def covariance_label(row: str, perturbed: str) -> str:
     """The colour bar label of the covariance of field `row` with field
     `perturbed`, in the product of their units."""
-    heights = {ICE, LAND, ETA, STERIC}
+    heights = {ICE, LAND, ETA, STERIC, MANOMETRIC, BARYSTATIC}
     if row in heights and perturbed in heights:
         return "Covariance (mm²)"
     if row not in heights and perturbed not in heights:
@@ -142,20 +149,29 @@ def draw_boundaries(state, axes, names) -> None:
         state.plot_boundaries(ax, names)
 
 
-def draw_region_boundaries(state, ax, regions_dict, **kwargs):
+REGION_COLOURS = ("black", "darkorange", "limegreen", "magenta", "cyan", "gold")
+
+
+def draw_region_boundaries(state, ax, regions_dict, /, *, legend=True, **kwargs):
     """The boundaries of every region of a regions dictionary, whose values
-    are a region name or a list of names that make up one region."""
-    kwargs.setdefault("edgecolor", "black")
+    are a region name or a list of names that make up one region: each
+    region in a colour of its own, named in a legend on the axes unless
+    `legend` is false."""
     kwargs.setdefault("linewidth", 2.0)
-
-    raw_regions = []
-    for val in regions_dict.values():
-        if isinstance(val, str):
-            raw_regions.append(val)
-        else:
-            raw_regions.extend(val)
-
-    state.plot_boundaries(ax, raw_regions, **kwargs)
+    handles = []
+    for (name, value), colour in zip(regions_dict.items(), REGION_COLOURS * 4):
+        parts = [value] if isinstance(value, str) else list(value)
+        state.plot_boundaries(ax, parts, **({"edgecolor": colour} | kwargs))
+        handles.append(Line2D([], [], color=colour, linewidth=2.0, label=name))
+    if legend:
+        ax.legend(
+            handles=handles,
+            loc="lower left",
+            fontsize=8,
+            framealpha=0.9,
+            title="Regions",
+            title_fontsize=8,
+        )
 
 
 # ================================================================ #
@@ -350,9 +366,9 @@ def covariance_maps(
 ):
     """
     Maps of the covariance of every field with the field `perturbed` at
-    `point`, one column per measure and one row per field, each map on its
-    own symmetric colour scale; a map that vanishes takes the largest scale
-    of its row. `columns` is a list of (title, fields), the fields by name
+    `point`, one column per measure and one row per field, the maps of a
+    row on one symmetric colour scale, that of the largest of them, so that
+    the columns can be compared. `columns` is a list of (title, fields), the fields by name
     on their supports in display units (`common.OceanPhysics.point_covariance`).
     The point is starred in the first column (`marker="star"`) or dotted in
     every one (`marker="dot"`). `wspace` sets the gap between the columns;
@@ -372,8 +388,7 @@ def covariance_maps(
     for row, name in enumerate(names):
         fields = [fields[name] for _, fields in columns]
         limits = [peak(field) for field in fields]
-        fallback = max(limits) if max(limits) > 0 else 1.0
-        limits = [limit if limit != 0 else fallback for limit in limits]
+        limits = [max(limits) if max(limits) > 0 else 1.0] * len(fields)
         for col, (field, limit) in enumerate(zip(fields, limits)):
             ax = axes[row, col]
             sl.plot(
@@ -445,7 +460,7 @@ def plot_gmsl_split_ellipses(
     """Single-panel covariance-ellipse overlay for the (barystatic, steric) GMSLR split."""
     cases = [
         ("Prior", prior_split, dict(edgecolor=_C_PRIOR, lw=1.4, ls="-")),
-        ("GRACE only", grace_split, dict(edgecolor=_C_GRACE, lw=1.8, ls="-")),
+        ("Gravity only", grace_split, dict(edgecolor=_C_GRACE, lw=1.8, ls="-")),
         ("Altimetry only", alt_split, dict(edgecolor=_C_ALT, lw=1.8, ls="--")),
         ("Joint", joint_split, dict(edgecolor=_C_JOINT, lw=1.8, ls="-")),
     ]
@@ -558,7 +573,7 @@ def plot_component_variance_dots(
         ("Prior", prior_vars, dict(marker="o", color=_C_PRIOR, mfc="white"), 0.24),
         ("Altimetry only", alt_vars, dict(marker="^", color=_C_ALT, mfc=_C_ALT), 0.08),
         (
-            "GRACE only",
+            "Gravity only",
             grace_vars,
             dict(marker="s", color=_C_GRACE, mfc=_C_GRACE),
             -0.08,
